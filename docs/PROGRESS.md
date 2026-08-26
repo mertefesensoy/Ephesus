@@ -14,8 +14,13 @@ evidence note. The next session resumes at the first unchecked box.
       renderer→electron import provably rejected by `no-restricted-imports`;
       `npm run dev` boots Electron 37, renderer shows the skeleton shell with zero
       console errors (verified in browser against the vite dev URL).*
-- [ ] **M0.2 Preload bridge** — typed `window.eph` skeleton with `config:get`
+- [x] **M0.2 Preload bridge** — typed `window.eph` skeleton with `config:get`
       round-trip; validator pattern in `src/shared/`.
+      *Evidence: table-driven zod validator tests (10/10 green incl. strict-schema
+      reject of secret-shaped extra keys); live Electron run logged
+      `bridge ready, config schemaVersion=1` from the renderer via
+      preload→ipcMain round-trip; bare-browser degradation shows a visible
+      "bridge unavailable" state, never silent.*
 - [ ] **M0.3 PTY vertical** — `PtyManager` spawns one hardcoded shell; bytes over
       per-id IPC to xterm.js panel; write/resize/kill.
 - [ ] **M0.4 Floor vertical** — Pixi canvas, one terrace room (UI-DESIGN §5 tokens),

@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
+import { registerIpc } from './ipc'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -31,6 +32,7 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  registerIpc()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
