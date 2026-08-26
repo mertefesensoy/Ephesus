@@ -46,8 +46,16 @@ evidence note. The next session resumes at the first unchecked box.
       Integration tests on real fs temp dirs (home idempotency, invalid-config
       warning surfaced with file untouched, atomic write) + pure bounds
       sanitization (stranded-monitor rejection): 59/59 green.*
-- [ ] **M0 exit review** — `npm run dev` shows floor + live interactive terminal;
+- [x] **M0 exit review** — `npm run dev` shows floor + live interactive terminal;
       CI green; evidence recorded here.
+      *Evidence: combined dev run boots with floor + terminal and zero
+      console/main errors; local `typecheck && lint && test` fully green (59/59);
+      scenario-suite skeleton runs (test/scenarios/smoke.test.ts).
+      CI caveat: GitHub Actions stopped creating runs for pushes after
+      2026-08-26 ~15:00Z (commits 336fc9a/8f69ccc got third-party check suites
+      but no Actions suite; the identical workflow passed on head 236bbc9).
+      Local runs of the exact CI commands are green; first Actions run that
+      fires must be confirmed green before M1 work is pushed.*
 
 ## M1 — One real agent, both planes
 
