@@ -12,9 +12,12 @@
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "postinstall": "node scripts/patch-node-pty.cjs && electron-rebuild -f"
+    "postinstall": "node scripts/patch-node-pty.cjs && node scripts/sync-fonts.cjs && electron-rebuild -f"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/pixelify-sans": "^5.3.0",
+    "@fontsource/press-start-2p": "^5.3.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^13.0.3",

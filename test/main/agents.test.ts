@@ -307,6 +307,15 @@ describe('AgentManager — missing binary (FR-1.6)', () => {
       '-g',
       '@anthropic-ai/claude-code'
     ])
+    // The installer must inherit the base allowlist or it cannot start at all
+    // (PATH resolution + npm's own needs); no EPH_* vars, it is not an agent yet.
+    const installEnv = spawner.spawns[0]?.plan.env ?? {}
+    expect(Object.keys(installEnv).length).toBeGreaterThan(0)
+    for (const key of Object.keys(installEnv)) {
+      expect(key.startsWith('EPH_')).toBe(false)
+    }
+    const envNames = Object.keys(installEnv).map((k) => k.toUpperCase())
+    expect(envNames).toContain('PATH')
     // Nothing is written into the repo until there is a binary to run.
     expect(fs.existsSync(path.join(repo, '.claude'))).toBe(false)
 

@@ -235,6 +235,30 @@ describe('interruptions return to the prior state', () => {
     expect(reduceAvatar(blocked, { kind: 'gate-verdict' }, T0).phase).toBe(phase)
   })
 
+  it('the verdict restores the prior STATION, not just the phase (M1 audit regression)', () => {
+    // working at the shelf → gate → blocked at the watch post → verdict:
+    // walk back to the shelf and resume working there — never teleport to desk.
+    const workingAtShelf = run([
+      { kind: 'prompt-submitted' },
+      { kind: 'pre-tool', toolClass: 'file' },
+      { kind: 'arrive' }
+    ])
+    expect(workingAtShelf).toMatchObject({ phase: 'working', station: 'shelf' })
+
+    const blocked = reduceAvatar(workingAtShelf, { kind: 'gate-opened' }, T0)
+    expect(blocked).toMatchObject({ station: 'watch-post', resumeStation: 'shelf' })
+
+    const restored = reduceAvatar(blocked, { kind: 'gate-verdict' }, T0)
+    expect(restored).toMatchObject({
+      phase: 'working',
+      station: 'shelf',
+      origin: 'watch-post',
+      walking: true,
+      resume: null,
+      resumeStation: null
+    })
+  })
+
   it.each(interruptible)('compaction interrupts %s and finishing restores it', (phase) => {
     const before = inPhase(phase)
     const compacting = reduceAvatar(before, { kind: 'compact-start' }, T0)

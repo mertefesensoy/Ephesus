@@ -190,7 +190,7 @@ describe('claude adapter — base environment (ADR-0010 least privilege)', () =>
   it('drops anything not on the list, whatever it is called', () => {
     expect(
       baseAgentEnv({
-        ANTHROPIC_API_KEY: 'sk-not-a-real-key',
+        ANTHROPIC_API_KEY: 'test-grant-value-not-secret',
         AWS_SECRET_ACCESS_KEY: 'nope',
         MY_TEAM_TOKEN: 'nope',
         PATH: '/usr/bin'

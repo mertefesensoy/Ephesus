@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
 import type { EngineRegistry } from './engines'
+import { baseAgentEnv } from './engines/spawn-env'
 import type { HookServer } from './hooks'
 import type { PromptStore } from './prompts'
 import { writeFileAtomic } from './fsx'
@@ -143,7 +144,9 @@ export class AgentManager {
       this.options.spawner.spawnAgent(request.agentId, {
         argv: [spec.install.command, ...spec.install.args],
         cwd: request.cwd,
-        env: {},
+        // The installer needs the base allowlist (PATH, SYSTEMROOT, APPDATA…)
+        // to even start; no EPH_* vars and no grants — it is not an agent yet.
+        env: baseAgentEnv(),
         settings: []
       })
       return this.card(request.agentId)

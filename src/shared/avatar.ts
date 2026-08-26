@@ -124,6 +124,12 @@ export interface AvatarSnapshot {
    * "prior state": a gate verdict, compaction finishing, breaker recovery.
    */
   readonly resume: AvatarPhase | null
+  /**
+   * The station to walk back to when the interruption ends. Only a gate sets
+   * it (the gate walk physically moves the avatar to the watch post; compaction
+   * and the breaker happen in place, so `station` itself is still right there).
+   */
+  readonly resumeStation: Station | null
   /** Who the agent is waiting on, when `phase === 'waiting'`. */
   readonly waitingOn: string | null
   /** Timestamp (ms) the current phase began — the two timers read from here. */
@@ -137,6 +143,7 @@ export function initialAvatar(nowMs: number): AvatarSnapshot {
     origin: 'desk',
     walking: false,
     resume: null,
+    resumeStation: null,
     waitingOn: null,
     sinceMs: nowMs
   }
@@ -189,17 +196,23 @@ export function reduceAvatar(
             origin: snapshot.station,
             station: 'watch-post',
             walking: true,
-            resume: resumableFrom(snapshot)
+            resume: resumableFrom(snapshot),
+            // Remember where the walk started so the verdict returns the avatar
+            // to its prior state — station included, not just phase (SDD §6).
+            resumeStation: snapshot.resumeStation ?? snapshot.station
           })
 
-    case 'gate-verdict':
+    case 'gate-verdict': {
       if (snapshot.phase !== 'blocked') return snapshot
+      const back = snapshot.resumeStation ?? 'desk'
       return enter(snapshot, snapshot.resume ?? 'idle', nowMs, {
-        origin: 'desk',
-        station: 'desk',
-        walking: false,
-        resume: null
+        origin: snapshot.station,
+        station: back,
+        walking: snapshot.station !== back,
+        resume: null,
+        resumeStation: null
       })
+    }
 
     // ── `any ──waiting-on(agent|artemis)──► waiting`
     case 'waiting-on':

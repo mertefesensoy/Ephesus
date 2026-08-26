@@ -122,14 +122,23 @@ milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-26):** M0 is COMPLETE — all five packages landed with
-> evidence, CI green (run 32986762165), milestone audited at close. **Resume at M1.1.**
-> The detailed M1 package plan (docs per package, tests owed, risks) is written into
-> `docs/PROGRESS.md` — read it before starting. Minor toolchain choices already made
-> are in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
-> Architect directives at M0 close, already folded into the docs: **MemPalace** is the
-> Library's recall/archive backend (ADR-0016; lands in M4), and the floor must reach
-> the **UI-DESIGN §7 art quality bar** (package M1.5b in PROGRESS.md).
+> **Build state (updated 2026-08-26, M1 close):** M0 and M1 are COMPLETE — every
+> package landed with live-run evidence, CI green on every commit, both milestones
+> audited at close by execution + design-conformance review (verdicts in
+> `docs/PROGRESS.md`). **Resume at M2.1.** The detailed M2 package plan (docs per
+> package, tests owed, risks, and where the fault-injection seams belong) is in
+> `docs/PROGRESS.md` — read it before coding. Minor choices already made are in
+> `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> Standing Architect directives already folded into the docs: **MemPalace** is the
+> Library's recall/archive backend (ADR-0016; lands in M4); the floor must reach the
+> **UI-DESIGN §7 art quality bar** (licensed tileset intake path is built — the
+> sheet itself is a pending Architect purchase); pixel fonts are npm-sourced from
+> `@fontsource/*` and synced by `scripts/sync-fonts.cjs` — never hand-edit
+> `src/renderer/public/fonts/`.
+> Items M1 explicitly carried into M2 (recorded in PROGRESS's M1 exit review):
+> settings.local.json startup reconcile after a force-kill (ride M2.1's reconcile);
+> `stop.pending` wiring (M2.5); the engine's Notification-hook/permission-dialog
+> visibility waits for M3's gate choke point.
 
 ### M0 packages (do these first)
 

@@ -373,9 +373,78 @@ groups and the new push channels.
 
 ## M2 — The Agora + Hermes
 
-- [ ] Package list derived at milestone start (BUILD-PROMPT §5)
-- [ ] M2 exit — scripted two-agent collaboration unattended; S-BLACKOUT, S-LIVELOCK,
-      S-BOUNCE, S-WAKE, S-STOPLOOP pass
+Plan drafted 2026-08-26 at M1 close (derived per BUILD-PROMPT §5 from
+IMPLEMENTATION M2 + ADR-0003/0004/0013 + SDD §2/§4/§7.1 + TEST-STRATEGY §3).
+Execute in order; every package tests against the fake engine per-PR.
+
+- [ ] **M2.1 Agora repo + single committer** — turn `~/.ephesus/agora/` into a git
+      repo (init at home creation; `PROTOCOL.md` seeded from prompts); the single
+      committer in `agora.ts`: commit queue with batching, retry+backoff, and
+      **startup reconcile** (uncommitted files committed, stale `index.lock` from
+      crashes cleaned — ADR-0004). Fold in the M1 carried item: startup reconcile
+      also sweeps orphaned `<cwd>/.claude/settings.local.json` backups from
+      force-killed spawns (registry of installed settings kept in app state).
+      *Docs: ADR-0004, SDD §1.1 agora.ts, §2. Tests: integration on real git in
+      temp dirs — queue batching, backoff on injected lock contention, reconcile
+      after simulated crash; settings-backup sweep. Risk: only main ever runs git
+      (invariant §4) — no git calls anywhere else, enforced by review + grep.*
+- [ ] **M2.2 Registry, task ledger, event log** — `registry.json` (SDD §4.1) and
+      `tasks.json` (§4.2) schemas + validators in `src/shared/` (schemaVersion 1,
+      strict); `log.jsonl` appender (§4.3: seq, kinds, refs) — append-only, atomic
+      line appends; accessors in `agora.ts`; spawn/exit events flow into the log.
+      *Docs: SDD §4.1–4.3. Tests: table-driven validators; appender ordering +
+      crash-truncation tolerance (partial last line ignored, never rewritten);
+      ledger status-transition guards (`done` refused with open obligations —
+      shape only, Odeon gates land M5). Risk: append-only means append-only
+      (invariant §5) — no compaction, no rewrite, asserted by test.*
+- [ ] **M2.3 Hermes delivery core** — outbox watchers (fs-watch, 50 ms debounce +
+      periodic sweep fallback — SDD §11); message schema §4.4 validated at pickup;
+      atomic delivery temp+rename into recipient `inbox/`; per-agent
+      `cursor.json` + `inbox/.done/` idempotency; delivery + log events before
+      commit (delivery is rename, durability is commit).
+      *Docs: ADR-0003, SDD §4.4, §11. Tests: integration with two fake agents on
+      real fs — delivery p95 budget smoke, duplicate-pickup idempotency, malformed
+      message → visible reject, watcher-miss caught by sweep. Risk: don't
+      "simplify" outbox/inbox into direct writes (BUILD-PROMPT §7).*
+- [ ] **M2.4 Hermes routing rules** — hop-cap diversion to Artemis-designate at
+      exactly the cap (recipient constant until Artemis exists — route to a
+      `human` queue per §4.4 `to` domain), bounce (`refuse`) for archived/missing
+      recipients with sender notification, broadcast fan-out, `requires_reply`
+      derivation, `needs_human` flag honored.
+      *Docs: ADR-0003, SDD §4.4, FR-3. Tests: unit message rules (hop caps,
+      obligation table) + integration bounce/broadcast with fakes. Risk: rules are
+      pure functions in `src/shared/` so S-LIVELOCK/S-BOUNCE assert at the module
+      boundary, not through the UI.*
+- [ ] **M2.5 Stop-hook autonomy + wake watchdog** — the ADR-0013 loop: Stop-hook
+      decisioning in `hermes.ts` (drain inbox on stop; `stop.pending` finally
+      wired — closes the M1 carried item), triple guard (`stop_hook_active`
+      respected, hard block-cap, breaker signal stub for M3), inbox wake watchdog
+      (nudge exactly once when mail lands on an idle agent; cursor idempotency on
+      replay).
+      *Docs: ADR-0013, SDD §1.1 hermes.ts, §6 autonomy branch. Tests: S-WAKE and
+      S-STOPLOOP become implementable here (fake engine Stop scripts). Risk:
+      R2 — loop pathology; the guards are the package, not an afterthought.*
+- [ ] **M2.6 Identity/protocol injection at spawn + Activity tab** — spawn-time
+      injection grows the Agora context (agent's registry row + PROTOCOL.md
+      already materialized in M1 — extend to registry-backed roster); Activity
+      tab: virtualized `log.jsonl` feed with batched appends (SDD §11), every row
+      carrying its refs; `agora:` IPC group (`registry() tasks() log(afterSeq,
+      limit)`) per SDD §5.
+      *Docs: SDD §5, §11, UI-DESIGN §4 tabs. Tests: log pagination cursoring;
+      renderer stays a projection (no filtering logic in renderer beyond view).
+      Risk: UI values from tokens only; the feed is a pointer to the log, never a
+      second record.*
+- [ ] **M2.7 Scenario suites + exit demo** — implement S-BLACKOUT (kill main at
+      injected fault points mid-delivery/mid-commit; restart; zero loss, zero
+      double-processing), S-LIVELOCK (ping-pong fakes → diversion at exactly the
+      cap), S-BOUNCE, S-WAKE, S-STOPLOOP (TEST-STRATEGY §3 specs) as automated
+      integration tests with fault-injection seams built where M2.1/M2.3 need
+      them; then the M2 exit demo: two real agents complete a scripted
+      collaboration (A `request`s data from B, B `inform`s back) unattended.
+      *Docs: TEST-STRATEGY §3. Risk: fault points are designed in (M2.1/M2.3
+      accept an injectable failure hook), not monkey-patched.*
+- [ ] **M2 exit review** — the five S-suites green in CI; two-real-agent
+      collaboration demo evidence; PROGRESS + docs synced.
 
 ## M3 — Artemis + the Watch
 

@@ -18,11 +18,13 @@ is not shipped.**
 
 ## Installed assets
 
-_None yet._ The floor currently renders its own tiles and citizens.
-
 | Asset | Version | Author | Licence | Redistributable | Where used |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| Press Start 2P (`@fontsource/press-start-2p`, latin-400) | npm-pinned | CodeMan38 | SIL OFL 1.1 | yes | Display face — panel titles (UI-DESIGN §3) |
+| Pixelify Sans (`@fontsource/pixelify-sans`, latin-400) | npm-pinned | Stefie Justprince | SIL OFL 1.1 | yes | UI body & labels (UI-DESIGN §3) |
+| IBM Plex Mono (`@fontsource/ibm-plex-mono`, latin-400) | npm-pinned | IBM / Bold Monday | SIL OFL 1.1 | yes | Data, logs, Odeon artifacts (UI-DESIGN §3) |
+
+The floor's tiles and citizens remain procedural (no tileset installed yet).
 
 ## Tileset drop (gitignored)
 
@@ -49,8 +51,10 @@ src/renderer/public/fonts/*.woff2
 
 The three faces of UI-DESIGN §3 — Press Start 2P, Pixelify Sans and IBM Plex
 Mono — are all published under the SIL Open Font License, which does permit
-redistribution in an application. They are loaded at runtime by
-`src/renderer/src/fonts.ts`; with the files absent the app falls back to the
-generic stacks in `tokens.css` and says `fonts: N of 3 pixel faces missing` in
-the status strip. See `src/renderer/public/fonts/README.md` for the exact
-filenames.
+redistribution in an application. **Source of truth is npm** (Architect decision
+2026-08-26): the `@fontsource/*` packages listed above are copied into this drop
+by `scripts/sync-fonts.cjs` on every `npm install` — the woff2 files stay out of
+git. They are loaded at runtime by `src/renderer/src/fonts.ts`; with the files
+absent the app falls back to the generic stacks in `tokens.css` and says
+`fonts: N of 3 pixel faces missing` in the status strip. See
+`src/renderer/public/fonts/README.md` for the exact filenames.

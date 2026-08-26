@@ -10,7 +10,11 @@ depend on a font CDN. Drop the files here, exactly under these names:
 | `IBMPlexMono-Regular.woff2` | IBM Plex Mono — data, terminals, logs | SIL OFL 1.1 |
 
 All three are Open Font License, which permits redistribution inside an
-application; record each one in `../../src/assets/ATTRIBUTION.md` when it lands.
+application; each is recorded in `../../src/assets/ATTRIBUTION.md`.
+
+These files are synced from the `@fontsource/*` packages by
+`scripts/sync-fonts.cjs` on every `npm install` — do not edit them by hand;
+they are gitignored and npm is their source of truth.
 
 `src/renderer/src/fonts.ts` loads whatever is present at startup and reports
 what is missing in the status strip — the app never silently renders in the

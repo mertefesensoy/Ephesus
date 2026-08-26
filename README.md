@@ -128,11 +128,24 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
-**This is the design phase.** No Ephesus code exists yet; this suite is the contract for
-building it. The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
-starts at M0 (skeleton shell) and reaches feature parity with the inspiration at M4,
-with the differentiating subsystems (Odeon, Herald, mission profiles, org layer)
-landing in M3–M7.
+**M1 complete — one real agent, both planes.** A real Claude Code runs as an
+Ephesus agent: spawned from an engine adapter's plan, observed through a
+token-gated hook event plane, its avatar walking the Terraces on real events,
+with mid-run typing queued until the agent is idle (SRS UC-03, verified live —
+see [`docs/PROGRESS.md`](./docs/PROGRESS.md) for the evidence trail and
+[the M1 record](./docs/implementations/2026-08-26-m1-agent-vertical.md)).
+
+![A real Claude Code editing a file while its avatar works at the shelf](./docs/demo/m1-uc03-working.png)
+
+*Live UC-03: the engine's authentic TUI streams into the agent terminal
+(right) as it edits a file; the same hook events drive its avatar's walk to
+the shelf station on the floor (left). Fonts and floor art are at their
+M1 interim state — the licensed tileset intake lands next.*
+
+The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
+reaches feature parity with the inspiration at M4, with the differentiating
+subsystems (Odeon, Herald, mission profiles, org layer) landing in M3–M7.
+Next: **M2 — the Agora + Hermes** (a company of two).
 
 ## License & lineage
 
