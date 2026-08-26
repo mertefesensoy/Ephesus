@@ -1,14 +1,22 @@
 import path from 'node:path'
 import { app, BrowserWindow, screen, shell } from 'electron'
+import type { AgentCard } from '../shared/agents'
+import { AGENTS_STATE_CHANNEL } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
+import { AgentManager } from './agents'
 import { initHome } from './config'
 import { AppDb } from './db'
+import { ClaudeAdapter } from './engines/claude'
+import { engines } from './engines'
 import { HookServer } from './hooks'
 import { registerIpc } from './ipc'
+import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
 
 const ptyManager = new PtyManager()
 let db: AppDb | null = null
+let agentManager: AgentManager | null = null
+let mainWindow: BrowserWindow | null = null
 
 /**
  * The event plane's front door (ADR-0002). Until the Agora's `log.jsonl` lands
@@ -59,6 +67,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  mainWindow = win
   ptyManager.attachSink(win.webContents)
 
   const rendererUrl = process.env['ELECTRON_RENDERER_URL']
@@ -75,7 +84,24 @@ void app.whenReady().then(async () => {
   // Bound before any agent can spawn, so no spawn ever races its own hooks.
   const endpoint = await hookServer.start(home.root)
   console.info(`hook endpoint listening on ${endpoint}`)
-  registerIpc(ptyManager)
+
+  // `prompts/` and `shims/` ship beside the app; the harness home holds the
+  // Architect-editable copies (invariant §8).
+  const appRoot = app.getAppPath()
+  const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
+  engines.register(
+    new ClaudeAdapter({ prompts, hookShimPath: path.join(appRoot, 'shims', 'eph-hook.mjs') })
+  )
+  agentManager = new AgentManager({
+    engines,
+    hookServer,
+    spawner: ptyManager,
+    prompts,
+    agoraRoot: path.join(home.root, 'agora'),
+    onChange: (card: AgentCard) => mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
+  })
+
+  registerIpc(ptyManager, agentManager)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -83,8 +109,21 @@ void app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  ptyManager.killAll()
-  void hookServer.stop()
-  db?.close()
-  if (process.platform !== 'darwin') app.quit()
+  // Unwind spawns before the ptys die, so every settings file the harness wrote
+  // into a repo is restored (ADR-0009) rather than left behind.
+  void agentManager
+    ?.shutdown()
+    .catch((err: unknown) => console.warn(`agents: shutdown failed: ${String(err)}`))
+    .finally(() => {
+      ptyManager.killAll()
+      void hookServer.stop()
+      db?.close()
+      if (process.platform !== 'darwin') app.quit()
+    })
+  if (!agentManager) {
+    ptyManager.killAll()
+    void hookServer.stop()
+    db?.close()
+    if (process.platform !== 'darwin') app.quit()
+  }
 })

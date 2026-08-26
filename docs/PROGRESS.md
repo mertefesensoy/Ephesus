@@ -173,6 +173,22 @@ in order, one package per session-commit; tests are part of each package).
       answered `agent.mason` — it knew only from the injected appendix. That is
       the declared `native` grade demonstrated rather than asserted (the M1.7
       hook-grade-honesty case), and the tool-use half of the UC-03 demo.*
+      *Evidence (M1.4b — spawn lifecycle, `agents:` IPC): `typecheck && lint && test`
+      green — 210 passed / 3 skipped (25 new). LIVE RUN THROUGH THE APP: a real
+      `claude` spawned via `window.eph.agents.spawn` in a temp `EPH_HOME`; the card
+      pushed `starting`(version null) → `starting`(2.1.195) → `running` on
+      `state:agents`, `agora/agents/agent.mason/identity.md` + `agora/PROTOCOL.md`
+      were materialized, `settings.local.json` was installed in the agent cwd, and the
+      real Claude TUI streamed over `pty:data:agent.mason` (terminal title
+      `✳ Provide agent identification` visible in the byte stream). Architect text
+      sent through `agents.send` reached the agent's input line. **Zero hook
+      rejections and zero drift warnings** across the session — the endpoint only
+      accepts envelopes whose token matches the minted per-spawn token, so silence
+      there is proof the token round-tripped. On graceful close the harness unwound
+      the spawn and `.claude/` was gone from the agent cwd: the repo was left exactly
+      as found. Two real bugs were caught by this run and fixed with named regression
+      tests — Windows PATH resolution for a PTY spawn, and a check-then-act race that
+      let a second spawn orphan the first agent's hook token (see DECISIONS-LOG).*
 - [ ] **M1.5 Avatar state machine** — implement SDD §6 verbatim as a pure reducer in
       `src/shared/avatar.ts` (states, transitions, station map incl. 250 ms
       success→idle) driven ONLY by event-plane data; floor consumes poses from it;

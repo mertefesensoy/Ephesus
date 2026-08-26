@@ -1,3 +1,4 @@
+import type { AgentCard, SpawnRequest } from './agents'
 import type { EphConfig } from './config'
 
 /**
@@ -10,7 +11,13 @@ export const IpcChannels = {
   ptyEnsureDevShell: 'pty:ensure-dev-shell',
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
-  ptyKill: 'pty:kill'
+  ptyKill: 'pty:kill',
+  agentsList: 'agents:list',
+  agentsSpawn: 'agents:spawn',
+  agentsCard: 'agents:card',
+  agentsKill: 'agents:kill',
+  agentsInterrupt: 'agents:interrupt',
+  agentsSend: 'agents:send'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -33,9 +40,25 @@ export interface ConfigSnapshot {
   warning: string | null
 }
 
+/** Push channel carrying agent-card changes to the renderer (SDD §5 `state:agents`). */
+export const AGENTS_STATE_CHANNEL = 'state:agents'
+
 export interface EphApi {
   config: {
     get: () => Promise<ConfigSnapshot>
+  }
+  agents: {
+    list: () => Promise<readonly AgentCard[]>
+    /** Spawns one agent through its engine adapter; resolves with its card. */
+    spawn: (request: SpawnRequest) => Promise<AgentCard>
+    card: (agentId: string) => Promise<AgentCard>
+    kill: (agentId: string) => Promise<void>
+    /** Writes the engine's cancel key into the agent's PTY (ADR-0009). */
+    interrupt: (agentId: string) => Promise<void>
+    /** Sends Architect text to the agent's PTY verbatim (FR-1.3). */
+    send: (agentId: string, text: string) => Promise<void>
+    /** Subscribe to agent-card changes. Returns an unsubscribe function. */
+    onChange: (cb: (card: AgentCard) => void) => () => void
   }
   pty: {
     /** Spawns the M0.3 hardcoded dev shell if needed; resolves with its pty id. */

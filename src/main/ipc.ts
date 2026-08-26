@@ -1,15 +1,21 @@
 import { ipcMain } from 'electron'
+import { z } from 'zod'
+import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { DEV_SHELL_ID, IpcChannels, type ConfigSnapshot } from '../shared/ipc'
 import { ptyKillSchema, ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
+import type { AgentManager } from './agents'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
+
+/** Architect keystrokes bound for an agent's PTY (FR-1.3). */
+const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(65536) }).strict()
 
 /**
  * Registers every handler behind the typed preload surface (SDD §1.1).
  * Invariant: main validates all renderer input; handlers taking arguments
  * parse them with a src/shared/ validator before acting (BUILD-PROMPT §3.2).
  */
-export function registerIpc(ptyManager: PtyManager): void {
+export function registerIpc(ptyManager: PtyManager, agents: AgentManager): void {
   ipcMain.handle(IpcChannels.configGet, (): ConfigSnapshot => {
     const home = getHome()
     return { config: home.config, warning: home.configWarning }
@@ -20,6 +26,29 @@ export function registerIpc(ptyManager: PtyManager): void {
   ipcMain.handle(IpcChannels.ptyEnsureDevShell, () => {
     ptyManager.spawnShell(DEV_SHELL_ID)
     return DEV_SHELL_ID
+  })
+
+  ipcMain.handle(IpcChannels.agentsList, () => agents.list())
+
+  ipcMain.handle(IpcChannels.agentsSpawn, async (_ev, raw: unknown) => {
+    return agents.spawn(spawnRequestSchema.parse(raw))
+  })
+
+  ipcMain.handle(IpcChannels.agentsCard, (_ev, raw: unknown) => {
+    return agents.card(agentIdPayloadSchema.parse(raw).agentId)
+  })
+
+  ipcMain.handle(IpcChannels.agentsKill, (_ev, raw: unknown) => {
+    agents.kill(agentIdPayloadSchema.parse(raw).agentId)
+  })
+
+  ipcMain.handle(IpcChannels.agentsInterrupt, (_ev, raw: unknown) => {
+    agents.interrupt(agentIdPayloadSchema.parse(raw).agentId)
+  })
+
+  ipcMain.handle(IpcChannels.agentsSend, (_ev, raw: unknown) => {
+    const { agentId, text } = agentSendSchema.parse(raw)
+    agents.send(agentId, text)
   })
 
   ipcMain.handle(IpcChannels.ptyWrite, (_ev, raw: unknown) => {
