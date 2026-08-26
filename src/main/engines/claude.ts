@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { HookEvent } from '../../shared/hooks'
-import { writeFileAtomic } from '../fsx'
 import type { PromptStore } from '../prompts'
+import type { SettingsRegistry } from '../settings-registry'
+import { InstalledSettingsPlan } from './settings-install'
 import { baseAgentEnv } from './spawn-env'
 import type {
   AgentSpawnConfig,
@@ -25,7 +26,8 @@ import type {
 /** `<cwd>/.claude/settings.local.json` — the local, gitignored variant only. */
 export const CLAUDE_SETTINGS_REL = path.join('.claude', 'settings.local.json')
 /** Where the pre-existing settings file is preserved while an agent runs. */
-export const CLAUDE_SETTINGS_BACKUP_REL = `${CLAUDE_SETTINGS_REL}.eph-backup`
+export const CLAUDE_SETTINGS_BACKUP_SUFFIX = '.eph-backup'
+export const CLAUDE_SETTINGS_BACKUP_REL = `${CLAUDE_SETTINGS_REL}${CLAUDE_SETTINGS_BACKUP_SUFFIX}`
 /** The prompt template that carries identity + protocol into the session. */
 export const IDENTITY_PROMPT = path.join('engines', 'identity-appendix.md')
 
@@ -92,6 +94,8 @@ interface ClaudeAdapterDeps {
   readonly hookShimPath: string
   /** Interpreter used to run the shim; `node`, resolved on the agent's PATH. */
   readonly nodeCommand?: string
+  /** Durable record of installed settings, so a killed harness can undo them. */
+  readonly settingsRegistry?: SettingsRegistry
 }
 
 /** Quotes a path for a shell command line; engines run hook commands via a shell. */
@@ -198,47 +202,6 @@ export function mergeClaudeSettings(existing: string | null, deps: ClaudeAdapter
   return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
 }
 
-class ClaudeHookPlan implements HookPlan {
-  private installed = false
-  private hadSettings = false
-  private createdDir = false
-
-  constructor(
-    readonly injections: readonly SettingsInjection[],
-    private readonly settingsPath: string,
-    private readonly backupPath: string
-  ) {}
-
-  async install(): Promise<void> {
-    if (this.installed) return
-    const dir = path.dirname(this.settingsPath)
-    this.createdDir = !fs.existsSync(dir)
-    fs.mkdirSync(dir, { recursive: true })
-
-    this.hadSettings = fs.existsSync(this.settingsPath)
-    // Byte-for-byte, so restoring cannot re-encode the Architect's file.
-    if (this.hadSettings) writeFileAtomic(this.backupPath, fs.readFileSync(this.settingsPath))
-
-    for (const injection of this.injections) writeFileAtomic(injection.path, injection.contents)
-    this.installed = true
-  }
-
-  async uninstall(): Promise<void> {
-    if (!this.installed) return
-    if (this.hadSettings && fs.existsSync(this.backupPath)) {
-      writeFileAtomic(this.settingsPath, fs.readFileSync(this.backupPath))
-      fs.rmSync(this.backupPath, { force: true })
-    } else {
-      fs.rmSync(this.settingsPath, { force: true })
-      const dir = path.dirname(this.settingsPath)
-      if (this.createdDir && fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
-        fs.rmdirSync(dir)
-      }
-    }
-    this.installed = false
-  }
-}
-
 export class ClaudeAdapter implements EngineAdapter {
   readonly id = 'claude' as const
   /**
@@ -276,10 +239,11 @@ export class ClaudeAdapter implements EngineAdapter {
   }
 
   wireHooks(cfg: AgentSpawnConfig): HookPlan {
-    return new ClaudeHookPlan(
+    return new InstalledSettingsPlan(
       this.settingsInjections(cfg),
-      path.join(cfg.cwd, CLAUDE_SETTINGS_REL),
-      path.join(cfg.cwd, CLAUDE_SETTINGS_BACKUP_REL)
+      cfg.agentId,
+      CLAUDE_SETTINGS_BACKUP_SUFFIX,
+      this.deps.settingsRegistry
     )
   }
 

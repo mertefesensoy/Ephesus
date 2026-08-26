@@ -2,8 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HOOK_EVENTS } from '../../src/shared/hooks'
-import { writeFileAtomic } from '../../src/main/fsx'
+import { InstalledSettingsPlan } from '../../src/main/engines/settings-install'
 import { baseAgentEnv } from '../../src/main/engines/spawn-env'
+import type { SettingsRegistry } from '../../src/main/settings-registry'
 import type {
   AgentSpawnConfig,
   BinarySpec,
@@ -37,7 +38,7 @@ export const FAKE_ENGINE_CLI = fileURLToPath(
 
 /** The fake's settings file — a local variant, like every engine's (ADR-0009). */
 export const FAKE_SETTINGS_REL = path.join('.fake-engine', 'settings.local.json')
-const FAKE_BACKUP_REL = `${FAKE_SETTINGS_REL}.eph-backup`
+const FAKE_BACKUP_SUFFIX = '.eph-backup'
 
 const ESCAPE_KEY = String.fromCharCode(0x1b)
 
@@ -48,44 +49,7 @@ export interface FakeAdapterOptions {
   readonly hooks?: EngineAdapter['hooks']
   /** Pretend the binary is absent, for the FR-1.6 path. */
   readonly missingBinary?: boolean
-}
-
-class FakeHookPlan implements HookPlan {
-  private installed = false
-  private hadSettings = false
-  private createdDir = false
-
-  constructor(
-    readonly injections: readonly SettingsInjection[],
-    private readonly settingsPath: string,
-    private readonly backupPath: string
-  ) {}
-
-  async install(): Promise<void> {
-    if (this.installed) return
-    const dir = path.dirname(this.settingsPath)
-    this.createdDir = !fs.existsSync(dir)
-    fs.mkdirSync(dir, { recursive: true })
-    this.hadSettings = fs.existsSync(this.settingsPath)
-    if (this.hadSettings) writeFileAtomic(this.backupPath, fs.readFileSync(this.settingsPath))
-    for (const injection of this.injections) writeFileAtomic(injection.path, injection.contents)
-    this.installed = true
-  }
-
-  async uninstall(): Promise<void> {
-    if (!this.installed) return
-    if (this.hadSettings && fs.existsSync(this.backupPath)) {
-      writeFileAtomic(this.settingsPath, fs.readFileSync(this.backupPath))
-      fs.rmSync(this.backupPath, { force: true })
-    } else {
-      fs.rmSync(this.settingsPath, { force: true })
-      const dir = path.dirname(this.settingsPath)
-      if (this.createdDir && fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
-        fs.rmdirSync(dir)
-      }
-    }
-    this.installed = false
-  }
+  readonly settingsRegistry?: SettingsRegistry
 }
 
 /** Reads the fake's transcript format: one JSON usage fact per line. */
@@ -175,10 +139,11 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
     },
 
     wireHooks(cfg: AgentSpawnConfig): HookPlan {
-      return new FakeHookPlan(
+      return new InstalledSettingsPlan(
         injections(cfg),
-        path.join(cfg.cwd, FAKE_SETTINGS_REL),
-        path.join(cfg.cwd, FAKE_BACKUP_REL)
+        cfg.agentId,
+        FAKE_BACKUP_SUFFIX,
+        options.settingsRegistry
       )
     },
 

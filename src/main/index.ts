@@ -11,6 +11,7 @@ import {
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
+import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
 import { initHome } from './config'
@@ -21,10 +22,12 @@ import { HookServer } from './hooks'
 import { registerIpc } from './ipc'
 import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
+import { sweepInstalledSettings } from './settings-registry'
 
 const ptyManager = new PtyManager()
 let db: AppDb | null = null
 let agentManager: AgentManager | null = null
+let agora: Agora | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
@@ -128,15 +131,40 @@ void app.whenReady().then(async () => {
   // Architect-editable copies (invariant §8).
   const appRoot = app.getAppPath()
   const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
+
+  // Undo anything a force-killed run left in somebody else's repository. No
+  // agent is live in a process that has just booted, so a recorded file can
+  // only be a leftover (M1 carried item).
+  const sweep = sweepInstalledSettings(db)
+  if (sweep.restored.length > 0 || sweep.removed.length > 0) {
+    console.info(
+      `settings sweep: restored ${sweep.restored.length}, removed ${sweep.removed.length}`
+    )
+  }
+  for (const failure of sweep.failed) {
+    console.warn(`settings sweep: could not restore ${failure.path}: ${failure.reason}`)
+  }
+
+  // The Agora is a git repo committed only by this process (ADR-0004). It is
+  // reconciled before anything can write to it.
+  agora = new Agora({ root: path.join(home.root, 'agora'), prompts })
+  await agora.ensureRepo()
+  const reconciled = await agora.reconcile()
+  if (reconciled.sha) console.info(`agora reconciled at ${reconciled.sha.slice(0, 8)}`)
+
   engines.register(
-    new ClaudeAdapter({ prompts, hookShimPath: path.join(appRoot, 'shims', 'eph-hook.mjs') })
+    new ClaudeAdapter({
+      prompts,
+      hookShimPath: path.join(appRoot, 'shims', 'eph-hook.mjs'),
+      settingsRegistry: db
+    })
   )
   agentManager = new AgentManager({
     engines,
     hookServer,
     spawner: ptyManager,
     prompts,
-    agoraRoot: path.join(home.root, 'agora'),
+    agoraRoot: agora.root,
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
@@ -175,7 +203,7 @@ app.on('window-all-closed', () => {
       avatarDirector.stop()
       ptyManager.killAll()
       void hookServer.stop()
-      db?.close()
+      void agora?.drained().finally(() => db?.close())
       if (process.platform !== 'darwin') app.quit()
     })
   if (!agentManager) {

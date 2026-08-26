@@ -63,6 +63,9 @@ jobs:
       - name: Lint
         if: steps.scaffold.outputs.present == 'true'
         run: npm run lint
+      - name: Invariant tripwires (single committer, append-only)
+        if: steps.scaffold.outputs.present == 'true'
+        run: node scripts/check-invariants.cjs
       - name: Test
         if: steps.scaffold.outputs.present == 'true'
         run: npm test

@@ -377,7 +377,7 @@ Plan drafted 2026-08-26 at M1 close (derived per BUILD-PROMPT §5 from
 IMPLEMENTATION M2 + ADR-0003/0004/0013 + SDD §2/§4/§7.1 + TEST-STRATEGY §3).
 Execute in order; every package tests against the fake engine per-PR.
 
-- [ ] **M2.1 Agora repo + single committer** — turn `~/.ephesus/agora/` into a git
+- [x] **M2.1 Agora repo + single committer** — turn `~/.ephesus/agora/` into a git
       repo (init at home creation; `PROTOCOL.md` seeded from prompts); the single
       committer in `agora.ts`: commit queue with batching, retry+backoff, and
       **startup reconcile** (uncommitted files committed, stale `index.lock` from
@@ -388,6 +388,26 @@ Execute in order; every package tests against the fake engine per-PR.
       temp dirs — queue batching, backoff on injected lock contention, reconcile
       after simulated crash; settings-backup sweep. Risk: only main ever runs git
       (invariant §4) — no git calls anywhere else, enforced by review + grep.*
+      *Evidence: `typecheck && lint && test` green — 401 passed / 3 skipped (26 new),
+      all against **real git in temp dirs**. Queue: 8 concurrent commits observed at
+      `maxConcurrent === 1`; batching coalesces in-flight work; retry succeeds on
+      attempt 3 after two injected `index.lock` failures; exhaustion throws naming the
+      subjects it could not land; the queue keeps taking work after a failed batch.
+      Invariant §4 is now *enforced*, not reviewed: `scripts/check-invariants.cjs`
+      fails on any `git` call outside `src/main/git.ts` (proven by planting a probe
+      file, which it caught) and runs as its own CI step.
+      LIVE BLACKOUT CYCLE against the real app — both carried recoveries in one run:
+      the Architect's `settings.local.json` (md5 `25fbde76…`) was displaced by a
+      spawned agent (md5 `fa919013…`), the harness was **SIGKILLed** with no graceful
+      shutdown, and the restart logged `settings sweep: restored 1, removed 0` and
+      `agora reconciled at cb32e0b4` — settings back to md5 `25fbde76…` byte-for-byte
+      with the backup gone, and the in-flight delivery
+      `agents/agent.b/inbox/m-inflight.json` (left `?? agents/` by the kill) committed
+      with a clean tree. **Closes the M1 carried item.** The run also caught a real
+      defect: `ensureRepo()` committed unconditionally, so a post-crash reconcile
+      landed under the subject "seed the Agora" — the work survived but the history
+      misnamed why. Fixed, with a regression test; the history now reads
+      `cb32e0b reconcile uncommitted work after restart` / `da71bf0 seed the Agora`.*
 - [ ] **M2.2 Registry, task ledger, event log** — `registry.json` (SDD §4.1) and
       `tasks.json` (§4.2) schemas + validators in `src/shared/` (schemaVersion 1,
       strict); `log.jsonl` appender (§4.3: seq, kinds, refs) — append-only, atomic
