@@ -26,13 +26,24 @@ working code, one small verified step at a time.
   it.
 - If you catch yourself writing code not called for by the current work package: stop,
   delete it, return to the package.
+- This repository carries Claude Code automation to make your job easier — read
+  `CLAUDE.md` and `docs/AUTOMATION.md` once. Use the `/build-package` skill as your
+  session entry point, let `doc-guardian` review your diff before committing, and let
+  `spec-verifier` confirm claims before ticking `docs/PROGRESS.md`. The hooks
+  (auto-format on edit, typecheck check on stop) are active — don't fight them.
+- The company's primary standing mission is self-improvement (ADR-0015), and during
+  the build phase *you generate its evidence*: record friction honestly in
+  `docs/PROGRESS.md` and `docs/DECISIONS-LOG.md`. When you notice recurring friction,
+  do NOT fix the process ad hoc — file a proposal via the `/improve` skill and let the
+  Architect decide. Process changes without an approved Gymnasium proposal are a
+  defect.
 
 ## 2. Source of truth — read in this order, every session
 
 At the start of EVERY session, read these files before writing any code:
 
 1. `README.md` — the system map and subsystem names (Artemis, Hermes, Agora, Library,
-   Odeon, Herald, Harbor, Watch, Terraces).
+   Odeon, Herald, Harbor, Watch, Terraces, Gymnasium).
 2. `docs/IMPLEMENTATION.md` — find the current milestone (see §5) and read its section.
 3. `docs/ENGINEERING-STANDARDS.md` — the rules your code must obey. Binding.
 4. The design sections relevant to the current work package ONLY:
@@ -44,7 +55,7 @@ At the start of EVERY session, read these files before writing any code:
      `ADR-0010`, `ADR-0011`.
    - Building memory → `ADR-0006`; briefings/reviews/memos/meetings → `ADR-0008` +
      SDD §7.2–7.3; voice → `ADR-0007` + SDD §8 + `docs/design/VOICE-DESIGN.md`;
-     profiles → `ADR-0012`.
+     profiles → `ADR-0012`; self-improvement (Gymnasium) → `ADR-0015` + SDD §7.6.
 5. `docs/TEST-STRATEGY.md` §2–§3 — to know which tests the package owes.
 
 Precedence when documents seem to disagree: **SDD > ADR > SRS > README** for *how*;

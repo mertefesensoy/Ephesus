@@ -30,6 +30,10 @@ Ephesus SHALL:
 - Provide safety controls: human gates, budgets, a circuit breaker, and a secret broker
   (**the Watch**).
 - Support remote command: chat bridge + push briefings + remote approvals (**the Harbor**).
+- Pursue **self-improvement as the company's primary standing mission** (**the
+  Gymnasium**): the system SHALL continuously look for ways to improve itself — its
+  playbooks, prompts, tooling, docs, tests, and code — through a governed
+  observe → propose → gate → land → measure loop (ADR-0015).
 
 Ephesus SHALL NOT (v1):
 - Replace the underlying agent CLIs (they remain the runtime).
@@ -54,6 +58,8 @@ Ephesus SHALL NOT (v1):
 | **Mission profile** | A pre-wired company configuration (roles + triggers + playbooks) for a recurring mission. |
 | **Decision memo** | A structured mini-ADR filed by an agent for a non-trivial choice, requiring Architect review. |
 | **Hire** | A role template (name, engine, system prompt, skills, budget) that can be spawned as an agent. |
+| **Gymnasium** | The self-improvement subsystem: the governed loop and permanent ledger through which the company improves itself (ADR-0015). |
+| **Improvement proposal** | A single scoped, evidence-backed change to the company itself, carrying a measurable success metric and a rollback; filed to the Gymnasium ledger. |
 
 ### 1.4 References
 - Munder Difflin `HIVE.md`, `SPEC.md`, `DESIGN.md` (upstream inspiration; patterns credited in ADRs).
@@ -194,6 +200,18 @@ non-orchestrator agent), **Harbor peer** (GitHub/Slack/webhook counterparty),
 2. Artemis proposes actions: adjust a system prompt, change a role's model, retire or split a role.
 3. Architect reviews in the org panel; accepted changes update hire templates (versioned).
 
+### UC-13 — Gymnasium self-improvement cycle
+**Actor:** Scheduler/Artemis → Worker → Architect. **Goal:** the company gets measurably better at its job.
+1. On the Gymnasium cadence (or when a review/retro/breaker report surfaces recurring friction), Artemis mines the company's records — org metrics, `log.jsonl`, breaker trips, memo-rejection patterns, budget burn, drift audits — for improvement candidates.
+2. Artemis (or an assigned worker) files **one** improvement proposal: evidence with refs, the concrete change, cost/risk, a measurable success metric with a measurement window, and a rollback.
+3. The proposal is gated per the ADR-0015 authority table — every class requires Architect approval; Artemis may pre-screen and rank but never approve (nothing self-approves).
+4. On approval, the change lands through the normal task/memo machinery; the ledger row flips to `landed`; the Scheduler books the metric check.
+5. At the window's end, the metric is measured against its declared target: `validated` (kept) or `regressed` (rolled back per the proposal). The outcome is recorded permanently and reported in the next standup.
+
+**Postcondition:** the Gymnasium ledger holds a complete proposed→measured record; rejected and regressed entries are retained as inputs to future proposals.
+**Alternate 2a:** during the build phase, the same loop runs through the repository (`/improve` skill, `docs/gymnasium/`) with the build's friction records as evidence.
+**Alternate 5a:** metric unmeasurable at window end → treated as `regressed` (an unmeasurable improvement is not an improvement); rollback and a ledger note on why measurement failed.
+
 ---
 
 ## 4. Functional requirements
@@ -277,6 +295,14 @@ stable and referenced by the SDD, test strategy, and implementation plan.
 - **FR-11.5 Org layer.** The system SHALL maintain an explicit org model: departments, roles, hire templates (versioned), per-agent metrics (tasks done, rework, escalation rate, budget efficiency), and scheduled review/retro reports (UC-12).
 - **FR-11.6 Telemetry.** Local OTel-style spans and a tool waterfall per agent SHALL be available. Any *outbound* anonymous telemetry SHALL be opt-in, documented, and absent entirely in source builds.
 
+### FR-12 — The Gymnasium (self-improvement) — *primary standing mission*
+- **FR-12.1** The system SHALL implement the Gymnasium loop (ADR-0015): observe → propose → gate → land → measure, with every step recorded; improvement candidates SHALL derive only from recorded evidence (org metrics, event log, breaker/budget data, memo patterns, drift audits), never from unreferenced speculation.
+- **FR-12.2** Improvement proposals SHALL be single-scoped and SHALL carry: evidence refs, the concrete change, cost/risk, a falsifiable success metric with a measurement window, and a rollback. A proposal missing any of these SHALL be rejected by the harness before reaching a human.
+- **FR-12.3** Gating SHALL follow the ADR-0015 authority table: the Architect approves every Gymnasium class; Artemis MAY pre-screen and rank but SHALL NOT approve; no agent approves its own proposal; the Gymnasium SHALL NOT be able to widen its own authority, alter its own gating, or modify accepted ADRs.
+- **FR-12.4** The Gymnasium ledger SHALL be permanent and total: every proposal, verdict, and measured outcome (validated/regressed/rejected) is an immutable row; landed changes whose metric regresses or cannot be measured SHALL be rolled back per their proposal.
+- **FR-12.5** Gymnasium work SHALL run inside an explicit budget slice (configurable share of time/tokens) reported in standup briefings, so self-improvement can never starve the mission profiles.
+- **FR-12.6** The loop SHALL exist in the repository during the build phase (`/improve` skill, `docs/gymnasium/`) and carry into the running system with the same artifact shapes, so the improvement archive is continuous from first commit onward.
+
 ---
 
 ## 5. Non-functional requirements
@@ -312,3 +338,4 @@ The build is *accepted* when, on a clean machine with Claude Code installed:
 4. **The memo test.** An agent adding a new npm dependency is blocked at the policy trigger until a memo exists; Artemis-approved memos show its countersignature; Architect rejection reverses the change.
 5. **The failover test.** Pulling the ElevenLabs key mid-conversation continues the session on OpenAI Realtime within 3 s.
 6. **The blackout test.** Kill the harness mid-delivery; on restart nothing is lost, no message is double-processed, and no agent is orphaned.
+7. **The gymnasium test.** After two weeks of operation, the company has filed ≥ 1 evidence-backed improvement proposal on its own initiative; an approved one landed, was measured against its declared metric, and its outcome is in the ledger; a proposal attempting to change gating rules or an accepted ADR was mechanically refused; and no improvement landed without an Architect verdict.

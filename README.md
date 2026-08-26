@@ -42,6 +42,7 @@ in this harness is named for the part of the city that does the same job:
 | **The Herald** | Town crier | The voice interface — a Jarvis-style spoken assistant. Provider-agnostic seam; ElevenLabs first, OpenAI Realtime fallback, local engines optional. |
 | **The Terraces** | Terrace houses | The 2D office floor — every agent is an avatar at a desk; stations, walking, flying envelopes. Watchability as observability. |
 | **The Watch** | City walls | Safety — human gates, budgets, the circuit breaker (steer → constrain → stop), the secret broker, telemetry. |
+| **The Gymnasium** | Training grounds | The self-improvement loop — the company's **primary standing mission**: observe → propose → gate → land → measure, every step Architect-gated and recorded in a permanent ledger. |
 
 ## What it is
 
@@ -67,6 +68,13 @@ What makes it different from its inspiration:
    spoken presence: wake word, barge-in, briefings on demand, approvals by voice.
 4. **A real org.** Departments, roles, hiring templates, agent performance reviews, and
    retros — the "little company" made explicit rather than emergent.
+5. **It improves itself — under governance.** The company's primary standing mission is
+   its own improvement (ADR-0015): improvement proposals rise from the company's own
+   operating records, pass through the same memo/gate machinery as any other change,
+   land with a declared success metric, and are measured — with every outcome, including
+   rejections and rollbacks, kept in the [Gymnasium ledger](./docs/gymnasium/LEDGER.md).
+   The loop starts *now*, during the build phase, and carries into the running system
+   unchanged in shape.
 
 ## Documentation map
 
@@ -75,7 +83,7 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | Document | What it answers |
 |---|---|
 | [`docs/srs/SRS.md`](./docs/srs/SRS.md) | **Software Requirements Specification** — actors, use cases, functional requirements (FR-1…FR-11), non-functional requirements, acceptance criteria. *What must the system do?* |
-| [`docs/adr/`](./docs/adr/README.md) | **Architecture Decision Records** — 14 ADRs covering every load-bearing decision, each with context, options considered, and consequences. *Why is it built this way?* |
+| [`docs/adr/`](./docs/adr/README.md) | **Architecture Decision Records** — 15 ADRs covering every load-bearing decision, each with context, options considered, and consequences. *Why is it built this way?* |
 | [`docs/sdd/SDD.md`](./docs/sdd/SDD.md) | **Software Design Description** — component architecture, data models, on-disk formats, message schema, IPC contracts, sequence flows. *How is it built?* |
 | [`docs/design/UI-DESIGN.md`](./docs/design/UI-DESIGN.md) | **Visual & interaction design** — design tokens, the floor, panels, typography, motion rules. |
 | [`docs/design/VOICE-DESIGN.md`](./docs/design/VOICE-DESIGN.md) | **Voice & conversation design** — the Herald's persona, wake word, barge-in, briefing scripts, error behavior. |
@@ -83,6 +91,8 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | [`docs/TEST-STRATEGY.md`](./docs/TEST-STRATEGY.md) | Test pyramid, what gets unit/integration/E2E coverage, agent-behavior evals, CI gates. |
 | [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md) | Phased implementation plan (M0–M7) with exit criteria, risk register, and build order. |
 | [`BUILD-PROMPT.md`](./BUILD-PROMPT.md) | Ready-to-paste prompt that directs a coding agent to implement this design milestone by milestone, doc-grounded and verification-gated. |
+| [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
+| [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
 
 ## How it works (one screen)
 

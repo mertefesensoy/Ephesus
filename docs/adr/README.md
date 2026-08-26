@@ -20,3 +20,4 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0012](./ADR-0012-mission-profiles.md) | Mission profiles as declarative, versioned bundles | accepted |
 | [ADR-0013](./ADR-0013-stop-hook-autonomy.md) | Autonomy loop via the engine's Stop hook | accepted |
 | [ADR-0014](./ADR-0014-owned-spawn-and-floor.md) | Own the process lifecycle (spawn, not attach); the floor as observability | accepted |
+| [ADR-0015](./ADR-0015-gymnasium-self-improvement.md) | The Gymnasium: self-improvement as the company's primary standing mission, governed | accepted |

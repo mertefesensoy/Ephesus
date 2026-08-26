@@ -15,6 +15,10 @@ the Architect plus agent labor; they are sequencing estimates, not promises.
 3. **Vertical slices.** Every milestone ends with something the Architect actually
    uses that week.
 4. **Docs move with code.** A milestone isn't done if the SDD lies about the code.
+5. **The Gymnasium runs from day one** (ADR-0015, FR-12.6). During the build phase the
+   self-improvement loop lives in the repository: friction observed while building
+   becomes `/improve` proposals in `docs/gymnasium/`, gated by the Architect, measured,
+   and ledgered. The build process itself is the first thing the company improves.
 
 ## M0 — Skeleton (≈ 1 week)
 
@@ -79,8 +83,15 @@ verdict routing + immutable archive. Meeting driver (turn order, minutes, action
 items) + Odeon room on the floor. Org layer v1: org chart, hire templates
 (versioned), per-agent metrics from the log.
 
+Gymnasium v1 lands here on top of the Odeon/org primitives it reuses: `gymnasium.ts`
+(proposal validation, ledger, gate classification, metric scheduling, rollback driver —
+SDD §7.6), the `gym` IPC surface, the ledger seeded from the repo's build-phase
+`docs/gymnasium/` archive, and the standup brief's gym-slice section.
+
 **Exit:** SRS acceptance §6.3 (deck) and §6.4 (memo) pass as S-DECKGATE / S-MEMO;
-S-BRIEF and S-MEETING pass; a real weekly retro report generates.
+S-BRIEF and S-MEETING pass; a real weekly retro report generates; S-GYM passes
+(proposal shape enforcement, architect-only verdicts, mechanical refusal of
+authority-widening proposals, rollback on regressed metric).
 
 ## M6 — The Herald: the spoken company (≈ 2–3 weeks) — *differentiator*
 
@@ -103,7 +114,9 @@ Shareable hires/profiles (export/import, human-confirmed). Packaging: signed bui
 for macOS/Windows/Linux, one-click update check.
 
 **Exit:** **The one-hour company test (SRS §6.1) passes on a real repo.** S-PROFILE
-passes; a real overnight run produces a truthful morning brief on the phone.
+passes; a real overnight run produces a truthful morning brief on the phone. The
+Gymnasium cadence trigger is live, and the two-week gymnasium acceptance test
+(SRS §6.7) is booked as the final v1 acceptance gate.
 
 ## Post-v1 horizon (recorded, not planned)
 
@@ -127,6 +140,7 @@ bridges · multi-machine crews.
 | R8 | Scope: three differentiator subsystems after parity | High | High | M5–M7 are strictly sequenced vertical slices; each independently shippable; parity at M4 means the project is useful even if paused there |
 | R9 | Solo-maintainer bus factor | Certain | Medium | This documentation suite + dogfooding from M3 (the company maintains itself under supervision) |
 | R10 | Secret leakage via agent output | Low | Critical | Broker + env-grant least privilege + redaction filter + S-SECRETS; security memo path for new grants |
+| R11 | Gymnasium drift: self-improvement gamed (metric gaming, authority creep) or degenerating into busywork | Medium | High | ADR-0015 hard rules (nothing self-approves; ledger is total; budget slice); mechanical refusal of authority-widening proposals (FR-12.3); unmeasurable ⇒ regressed ⇒ rollback; the Gymnasium's own health metric is its validated-vs-regressed ratio, reviewed in retros (UC-12) |
 
 ## Dependency order (what blocks what)
 

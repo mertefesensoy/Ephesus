@@ -78,6 +78,11 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   composition.
 - **S-CRASH**: SIGKILL a fake agent mid-task; ghost → archive, task back to `todo`,
   respawn offer; resume path where adapter supports it.
+- **S-GYM** (SRS 6.7, FR-12): proposal missing a metric or rollback is rejected before
+  reaching a human; a non-architect verdict on `gym.verdict` is refused; a proposal
+  altering gym gating / an accepted ADR / Watch maxima is mechanically refused
+  regardless of approver; a landed fixture proposal whose metric misses its window is
+  rolled back and ledgered `regressed`; ledger rows are append-only.
 
 ## 4. E2E specifics (Electron + Playwright)
 
@@ -119,6 +124,12 @@ spot-check), non-gating but tracked as trend lines in the org panel:
   rate must be zero (any unref'd claim fails the run; this one *does* gate release).
 - **E-PLAYBOOK**: incident drill on the fixture repo — time-to-triage and
   playbook adherence.
+- **E-GYM**: seeded operating records (metrics, log, breaker/budget fixtures with
+  planted friction) → does Artemis surface the *planted* improvement opportunities,
+  and are its proposals valid per FR-12.2 (evidence-ref'd, single-scoped, falsifiable
+  metric, honest rollback)? Precision matters more than recall — speculative
+  unreferenced proposals fail the run. Tracked alongside the live Gymnasium health
+  ratio (validated vs regressed) from the ledger.
 
 ## 7. Performance & soak
 

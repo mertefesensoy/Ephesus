@@ -1,7 +1,7 @@
 # Ephesus — Software Design Description (SDD)
 
 **Version:** 1.0 · **Status:** Approved for implementation
-**Satisfies:** [SRS](../srs/SRS.md) FR-1…FR-11, NFR-1…NFR-16 · **Justified by:** [ADR-0001…0014](../adr/README.md)
+**Satisfies:** [SRS](../srs/SRS.md) FR-1…FR-12, NFR-1…NFR-16 · **Justified by:** [ADR-0001…0015](../adr/README.md)
 
 This document describes *how* Ephesus is built: process architecture, module map, data
 models, on-disk formats, IPC contracts, state machines, and the key runtime sequences.
@@ -56,6 +56,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `watch/` | `gates.ts` (approval queue + policy), `budgets.ts` + `ledger.ts` (durable cost), `breaker.ts` (ladder), `telemetry.ts` (OTel spans, waterfall) | 0011 |
 | `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning | 0012 |
 | `org.ts` | Departments, hire-template versioning, per-agent metrics, review/retro reports | — |
+| `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |
 | `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) | — |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
 | `config.ts` | Harness home setup, config persistence, prompt/persona/template text assets | — |
@@ -85,6 +86,9 @@ The hook socket is `0600` with a per-spawn token in each payload.
       decks/<taskId>-<ts>.html
       memos/<memoId>/memo.md + verdict.json
       minutes/<meetingId>.md
+    gymnasium/
+      LEDGER.md              # permanent self-improvement ledger (seeded from the
+      proposals/GYM-*.md     #  repo's docs/gymnasium/ at first run — FR-12.6)
     agents/<agentId>/
       identity.md            # role, capabilities, env grants (mirrors hire template)
       memory.md              # long-term memory (Library layer 1)
@@ -178,7 +182,7 @@ or `gates` is non-empty.
   "subject": "checkout test green", "msgId": "…", "conversation": "conv-7f3" }
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
-brief, deck, meeting, breaker, budget, remote, secret-rotated, profile, error }`.
+brief, deck, meeting, breaker, budget, remote, secret-rotated, profile, gym, error }`.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
 briefing compiler, metrics, and forensics consume only this file + git history.
 
@@ -233,6 +237,7 @@ watch:    approvals() approve(gateId, v) budgets() waterfall(id) breakerState()
 harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
 profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
 org:      chart() metrics(agentId) reviews() applyReview(changeSet)
+gym:      ledger() proposal(id) verdict(id, v) metricResult(id, r)   // verdicts: architect-only (FR-12.3)
 secrets:  set(name, value) status(name) test(name) delete(name)   // write-only (ADR-0010)
 config:   get() set(patch) prompts.get(name) prompts.set(name, text)
 ```
@@ -316,6 +321,24 @@ agent follows playbooks/incident.md: triage → reproduce → playbook fix
   needs gated action ─► §7.3 path with incident context; severity-1 → Herald announces now
 ```
 
+### 7.6 Gymnasium improvement cycle (UC-13, ADR-0015)
+```
+scheduler (gym cadence) ─or─ retro/breaker/memo-pattern signal
+  ─► Artemis mines records (org metrics, log.jsonl, breaker/budget, drift audits)
+  ─► ONE proposal drafted (evidence refs · change · cost/risk · metric+window · rollback)
+  ─► gymnasium.ts validates shape — missing metric or rollback ⇒ rejected pre-human (FR-12.2)
+  ─► gate classification (ADR-0015 authority table) ─► Architect queue
+       (Artemis may rank/pre-screen; may NOT verdict — enforced in gym.verdict handler)
+verdict approve ─► ledger row `approved` ─► lands via normal task/memo machinery (§7.1/§7.3,
+  inside the gym budget slice, FR-12.5) ─► row `landed` ─► scheduler books metric check
+metric check ─► measured vs declared target
+  ─ met ──► row `validated`
+  ─ missed/unmeasurable ──► row `regressed` ─► rollback per proposal ─► log kind:gym
+every transition ─► log.jsonl kind:gym ─► next standup brief (§7.2) reports gym slice + outcomes
+Mechanically refused regardless of verdict: proposals altering gym gating, accepted ADRs,
+or the Watch's global maxima (FR-12.3 — the Gymnasium cannot widen its own authority).
+```
+
 ---
 
 ## 8. The Herald — component design (ADR-0007)
@@ -397,3 +420,4 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | FR-9 | ADR-0012, §7.5 (profiles.ts) |
 | FR-10 | §1 (harbor/) |
 | FR-11 | §9 (watch/), §4.6, org.ts |
+| FR-12 | §2, §7.6 (gymnasium.ts), ADR-0015 |

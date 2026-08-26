@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docs:
+    name: Docs integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative markdown links resolve
+        run: |
+          set -e
+          fail=0
+          while IFS=: read -r file link; do
+            target="${link%%#*}"
+            [ -z "$target" ] && continue
+            resolved="$(dirname "$file")/$target"
+            if [ ! -e "$resolved" ]; then
+              echo "BROKEN: $file -> $link"
+              fail=1
+            fi
+          done < <(grep -RhoE --include='*.md' -e '\]\((\./|\.\./)[^)]+\)' . \
+                   | sed 's/.*](\(.*\))/\1/' > /tmp/links.txt; \
+                   grep -RnoE --include='*.md' -e '\]\((\./|\.\./)[^)]+\)' . \
+                   | sed 's/\(^[^:]*\):[0-9]*:.*](\(.*\))/\1:\2/')
+          exit $fail
+      - name: ADRs are append-only (accepted ADRs unchanged on PRs)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- 'docs/adr/ADR-*.md' || true)
+          if [ -n "$changed" ]; then
+            echo "Accepted ADRs modified (ADRs are append-only; supersede instead):"
+            echo "$changed"
+            exit 1
+          fi
+
+  code:
+    name: Typecheck · lint · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect scaffold
+        id: scaffold
+        run: |
+          if [ -f package.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"; \
+          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "No package.json yet (pre-M0.1) — skipping code checks."; fi
+      - uses: actions/setup-node@v4
+        if: steps.scaffold.outputs.present == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install
+        if: steps.scaffold.outputs.present == 'true'
+        run: npm ci
+      - name: Typecheck
+        if: steps.scaffold.outputs.present == 'true'
+        run: npm run typecheck
+      - name: Lint
+        if: steps.scaffold.outputs.present == 'true'
+        run: npm run lint
+      - name: Test
+        if: steps.scaffold.outputs.present == 'true'
+        run: npm test

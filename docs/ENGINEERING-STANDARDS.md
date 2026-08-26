@@ -54,6 +54,12 @@ ephesus/docs/                                             # this suite; ADRs app
   `schemaVersion`, a validator in `src/shared/`, and a migration when bumped. No
   unversioned schema ever ships.
 
+- **Process changes go through the Gymnasium.** The build process, this standards
+  document included, improves only via approved `/improve` proposals with a measurable
+  success metric, recorded in `docs/gymnasium/LEDGER.md` (ADR-0015). Ad-hoc process
+  tweaks — new conventions, changed workflows, altered CI gates — without a ledger
+  entry are defects, whoever makes them.
+
 ## 4. Code rules (the ones that bite)
 
 - **Prompt text is config.** No LLM-facing prose (system prompts, block reasons,
