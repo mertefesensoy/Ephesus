@@ -340,7 +340,10 @@ Zero hook rejections and zero drift warnings across the run.
 `npx vitest run test/conformance` → 32 passed (32), covering both adapters.
 
 **Gate:** `npm run typecheck` PASS · `npm run lint` PASS (zero warnings) ·
-`npm test` 374 passed / 3 skipped. CI green on every M1 commit.
+`npm test` 374 passed / 3 skipped. CI green on every M1 commit — runs
+32997376748 (M1.1) · 32998336217 (M1.2) · 32999020176 (M1.3) · 33000278492
+(M1.4a) · 33001856848 (M1.4b) · 33004480740 (M1.5) · 33005273426 (M1.5b) ·
+33006041694 (M1.6) · 33006471952 (M1.7) · 33008183972 (close-out), all SUCCESS.
 
 **S-suites owed by M1:** none. IMPLEMENTATION names S-BLACKOUT, S-LIVELOCK,
 S-BOUNCE, S-WAKE and S-STOPLOOP against M2, not M1.
