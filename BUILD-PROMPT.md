@@ -127,6 +127,9 @@ it is how the next session knows where to resume).
 > The detailed M1 package plan (docs per package, tests owed, risks) is written into
 > `docs/PROGRESS.md` — read it before starting. Minor toolchain choices already made
 > are in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> Architect directives at M0 close, already folded into the docs: **MemPalace** is the
+> Library's recall/archive backend (ADR-0016; lands in M4), and the floor must reach
+> the **UI-DESIGN §7 art quality bar** (package M1.5b in PROGRESS.md).
 
 ### M0 packages (do these first)
 
@@ -164,6 +167,9 @@ checks green in CI; `docs/PROGRESS.md` records evidence for each package.
   visible terminal.
 - **M1.5 Avatar state machine**: implement SDD §6 exactly — states, transitions,
   station map; driven only by event-plane data.
+- **M1.5b Floor art v1**: the UI-DESIGN §7 quality bar — licensed tileset intake
+  (2× integer scale, ATTRIBUTION.md, license-compliant repo handling), walk-cycle
+  citizens replacing the M0 placeholder, pixel fonts bundled.
 - **M1.6 Command bar**: free prompt, queue-until-idle when mid-tool, interrupt.
 - **M1.7 Conformance suite v1** (TEST-STRATEGY §5): lifecycle, settings hygiene, hook
   grade honesty — passing for fake + claude adapters.
@@ -249,6 +255,10 @@ Next session starts at: M<x>.<n>
   `electron-vite`, `react`, `react-dom`, `typescript`, `pixi.js`, `@xterm/xterm`,
   `node-pty`, `better-sqlite3`, `zustand`, `zod` (validators), `vitest`,
   `@playwright/test`, `eslint`, `prettier`, `electron-builder`.
+- Also pre-approved by Architect directive (2026-08-26): **MemPalace** as an
+  *optional external* Python 3.9+ tool for the Library (ADR-0016 — M4; every
+  milestone must still run degraded without it), and **licensed floor-art assets**
+  per UI-DESIGN §7 (attribution + license-compliant repo handling mandatory).
 - Scripts to keep working at all times: `dev`, `build`, `typecheck`, `lint`, `test`.
 
 **Working constraints learned in M0 (binding until the environment changes —

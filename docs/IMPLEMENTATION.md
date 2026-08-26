@@ -36,7 +36,9 @@ Claude Code engine adapter (spawn plan, settings.local.json hook wiring with bac
 uninstall, interrupt, version probe). `eph-hook` shim + UDS server (+ Windows named
 pipe) with per-spawn token. Avatar state machine driven by real hook events; station
 walks for tool classes. Command bar with queue-until-idle + interrupt semantics.
-Fake-engine binary v1 and the adapter conformance suite.
+Fake-engine binary v1 and the adapter conformance suite. Floor art v1 to the
+UI-DESIGN §7 quality bar (licensed tileset intake + ATTRIBUTION.md + walk-cycle
+citizens replacing the M0 placeholder) lands with the avatar work.
 
 **Exit:** SRS UC-03 demo — spawn a real `claude`, ask it to edit a file, watch shelf
 walk → desk → idle; type into it mid-run; conformance suite passes for claude + fake.
@@ -67,7 +69,8 @@ this milestone on, Ephesus agents help build Ephesus** (dogfood start).
 ## M4 — The Library + engine breadth (≈ 2 weeks)
 
 Memory read/write protocol live (agents demonstrably recall across respawn), recall
-index (CPU embeddings, mtime-gated) + FTS/grep degrade, Memory panel, reflection job
++ company archive via MemPalace (ADR-0016: wings/rooms/drawers mapping, mtime-gated
+mining, visible install path) + FTS/grep degrade, Memory panel, reflection job
 + archive, knowledge shelf. Second and third engine adapters (pick two: codex,
 gemini, opencode) at honest hook grades. Worktree isolation option.
 

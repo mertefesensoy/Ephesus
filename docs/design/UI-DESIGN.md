@@ -137,9 +137,31 @@ multiples; no faux bold/italic.
 
 ## 7. Iconography & sprites
 
-Original pixel sprites (no licensed-asset dependency in v1): citizens differentiated
-by tunic/hair/skin recipes rendered procedurally where feasible; stations drawn as
-8-color tiles. Icon set: 12×12 px, 1px ink-900 outline, filled with accent colors.
+**Quality bar (Architect directive, 2026-08-26): the floor must read at the visual
+quality of the original Munder Difflin.** That quality came from a professional
+licensed tileset plus procedural characters — Ephesus takes the same path:
+
+- **Environment: licensed tileset permitted.** A professional 16×16 tileset (the
+  reference is LimeZu's *Modern Interiors* line, as used by Munder Difflin; a
+  Mediterranean/antiquity-compatible set is preferred if available) renders at 2×
+  onto the 32×32 world grid — integer scaling only, pixel-snap preserved. License
+  terms and credits are mandatory: every third-party asset is recorded in
+  `src/renderer/src/assets/ATTRIBUTION.md` (file created with the first asset), and
+  only licenses permitting redistribution in a shipped app are acceptable. Purchased
+  asset files that may not be redistributed in source form stay out of the public
+  repo (gitignored asset drop + documented restore path).
+- **Citizens: procedural recipes at portrait quality.** Avatars remain procedurally
+  drawn (tunic/hair/skin recipes — no likenesses of real people or of other IP's
+  characters), but at Munder Difflin portrait fidelity: real 8-direction walk cycles
+  (4+ frames per direction), distinct silhouettes per role, ≤ 5 colors per sprite
+  from the §2 palette. The M0 placeholder rectangle-citizen does not meet this bar
+  and is replaced by the M1 floor-art package.
+- **Stations & icons:** stations composed from the tileset where it fits, drawn as
+  8-color tiles where it doesn't. Icon set: 12×12 px, 1px ink-900 outline, filled
+  with accent colors.
+
+The §1 principles still govern: ≤ 8 colors per screen reads over any tileset via the
+palette-mapping pass; anything decorative-only is still cut in review.
 
 ## 8. Accessibility (NFR-15)
 

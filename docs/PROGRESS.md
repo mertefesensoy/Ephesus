@@ -124,6 +124,17 @@ in order, one package per session-commit; tests are part of each package).
       *Docs: SDD §6, ADR-0002, UI-DESIGN §5 stations. Tests: table-driven transition
       coverage — every documented edge, illegal transitions rejected/inert; station
       mapping per tool class. Risk: inventing transitions the SDD doesn't have.*
+- [ ] **M1.5b Floor art v1** — UI-DESIGN §7 quality bar (Architect directive
+      2026-08-26): licensed 16×16 tileset intake at 2× integer scale (reference:
+      LimeZu Modern Interiors lineage) with `src/renderer/src/assets/ATTRIBUTION.md`
+      and license-compliant repo handling; procedural citizens upgraded to real
+      8-direction walk cycles (4+ frames/direction, ≤5 palette colors, distinct
+      role silhouettes), replacing the M0 placeholder; pixel-font bundling debt
+      (Press Start 2P, Pixelify Sans, IBM Plex Mono via @font-face) cleared here.
+      *Docs: UI-DESIGN §2, §5–§7. Tests: token/contrast checks stay green;
+      scene-state assertions unchanged (art is presentation, state model is truth).
+      Risk: asset license must permit app redistribution — verify before purchase;
+      no real-person/other-IP likenesses in recipes.*
 - [ ] **M1.6 Command bar** — bottom bar (UI-DESIGN §4): free prompt to the selected
       agent; queue-until-idle when the agent is mid-tool (FR-1.3) — queued text
       visibly held (status-typing token semantics), flushed on idle; interrupt button

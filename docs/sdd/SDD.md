@@ -49,7 +49,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `hermes.ts` | Outbox watchers, delivery (temp+rename), hop-cap diversion, bounce, broadcast fan-out, wake watchdog, Stop-hook decisioning | 0003, 0013 |
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
 | `artemis.ts` | Orchestrator lifecycle: auto-spawn, reserved seat, respawn-with-memory, prompt/config assembly, delegated-authority table | 0005 |
-| `library.ts` | Memory read/write helpers, recall index driver (`eph recall`), FTS fallback, reflection scheduler, knowledge shelf | 0006 |
+| `library.ts` | Memory read/write helpers, MemPalace driver (`eph recall`, archive ingestion), FTS/grep fallback, reflection scheduler, knowledge shelf | 0006, 0016 |
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
 | `herald/` | `seam.ts` (STT/TTS/Duplex interfaces), `policy.ts` (wake word, barge-in, repeat-back, failover), `elevenlabs.ts`, `openai-realtime.ts` | 0007 |
 | `harbor/` | `github.ts` (issues/PRs/CI via `gh`), `bridge.ts` (chat bridge), `webhooks.ts`, `hires.ts` (export/import) | — |
@@ -96,7 +96,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
       inbox/  inbox/.done/   # Hermes delivery targets
       outbox/                # agent-written, router-drained
       cursor.json            # { lastProcessed }
-  index/                     # recall index data (Library layer 2; disposable/rebuildable)
+  index/                     # MemPalace store root (Library layer 2 + company archive,
+                             #  ADR-0016; derived state — disposable/rebuildable)
 ```
 
 Rules: agents write only inside their own `agents/<id>/` and their assigned worktrees;
@@ -414,7 +415,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | FR-3 | §4.4, §7.1 (hermes.ts) |
 | FR-4 | §2, §4.1–4.3 (agora.ts) |
 | FR-5 | §1, §7.1–7.3 (artemis.ts) |
-| FR-6 | §2, §4, ADR-0006 (library.ts) |
+| FR-6 | §2, §4, ADR-0006, ADR-0016 (library.ts) |
 | FR-7 | §4.2, §4.5, §7.2–7.3 (odeon.ts) |
 | FR-8 | §8 (herald/) |
 | FR-9 | ADR-0012, §7.5 (profiles.ts) |
