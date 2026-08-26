@@ -4,6 +4,7 @@ import {
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
   IpcChannels,
+  LOG_APPEND_CHANNEL,
   ptyDataChannel,
   ptyExitChannel,
   type AvatarUpdate,
@@ -13,6 +14,9 @@ import {
 } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
+import type { LogEntry } from '../shared/log'
+import type { Registry } from '../shared/registry'
+import type { TaskLedger } from '../shared/tasks'
 
 // The single door between renderer and main (SDD §1, §5). Every method is a
 // thin, typed forward to an ipcMain handler that validates in main.
@@ -47,6 +51,17 @@ const eph: EphApi = {
   },
   hooks: {
     state: () => ipcRenderer.invoke(IpcChannels.hooksState) as Promise<HooksState>
+  },
+  agora: {
+    registry: () => ipcRenderer.invoke(IpcChannels.agoraRegistry) as Promise<Registry>,
+    tasks: () => ipcRenderer.invoke(IpcChannels.agoraTasks) as Promise<TaskLedger>,
+    log: (afterSeq, limit) =>
+      ipcRenderer.invoke(IpcChannels.agoraLog, { afterSeq, limit }) as Promise<readonly LogEntry[]>,
+    onAppend: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(LOG_APPEND_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(LOG_APPEND_CHANNEL, listener)
+    }
   },
   commands: {
     list: () => ipcRenderer.invoke(IpcChannels.commandsList) as Promise<readonly CommandState[]>,

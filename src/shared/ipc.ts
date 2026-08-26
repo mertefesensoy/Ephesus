@@ -1,6 +1,9 @@
 import type { AgentCard, SpawnRequest } from './agents'
 import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
+import type { LogEntry } from './log'
+import type { Registry } from './registry'
+import type { TaskLedger } from './tasks'
 import type { EphConfig } from './config'
 
 /**
@@ -21,7 +24,10 @@ export const IpcChannels = {
   avatarsList: 'avatars:list',
   hooksState: 'hooks:state',
   commandsList: 'commands:list',
-  commandsSubmit: 'commands:submit'
+  commandsSubmit: 'commands:submit',
+  agoraRegistry: 'agora:registry',
+  agoraTasks: 'agora:tasks',
+  agoraLog: 'agora:log'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -49,6 +55,9 @@ export const AVATARS_STATE_CHANNEL = 'state:avatars'
 
 /** Push channel carrying one agent's held command text (FR-1.3). */
 export const COMMANDS_STATE_CHANNEL = 'state:commands'
+
+/** Push channel signalling that `log.jsonl` has grown (SDD §5 `log:append`). */
+export const LOG_APPEND_CHANNEL = 'log:append'
 
 /** One agent's avatar snapshot, addressed. */
 export interface AvatarUpdate {
@@ -96,6 +105,16 @@ export interface EphApi {
   hooks: {
     /** Event-plane health, including drift warnings that must be shown. */
     state: () => Promise<HooksState>
+  }
+  agora: {
+    /** The roster (SDD §4.1). */
+    registry: () => Promise<Registry>
+    /** The task ledger (SDD §4.2). */
+    tasks: () => Promise<TaskLedger>
+    /** Events after `afterSeq` — the Activity feed pages with this (SDD §4.3). */
+    log: (afterSeq: number, limit: number) => Promise<readonly LogEntry[]>
+    /** Subscribe to "the log grew"; the feed then pages from its own cursor. */
+    onAppend: (cb: () => void) => () => void
   }
   commands: {
     /** Agents currently holding unsent Architect text. */

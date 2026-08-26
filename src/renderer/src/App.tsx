@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
+import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
@@ -23,6 +24,12 @@ export function App(): ReactElement {
   const [fonts, setFonts] = useState<FontStatus | null>(null)
   /** The agent the terminal and the command bar both act on (UC-03 step 2). */
   const [selected, setSelected] = useState<string | null>(null)
+  /**
+   * Command Center tabs (UI-DESIGN §4). Only the two that exist are shown —
+   * offering a tab for a subsystem that has not been built would be inventing
+   * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
+   */
+  const [tab, setTab] = useState<'floor' | 'activity'>('floor')
   // A newly spawned agent is selected only when nothing is: an agent appearing
   // must never yank the Architect's attention off the one they are watching.
   const onAgentSeen = useCallback((agentId: string) => {
@@ -143,9 +150,28 @@ export function App(): ReactElement {
           )}
         </span>
       </header>
+      <nav style={{ display: 'flex', gap: '4px' }}>
+        {(['floor', 'activity'] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTab(name)}
+            aria-current={tab === name}
+            style={{
+              fontFamily: 'var(--eph-face-display)',
+              fontSize: '8px',
+              padding: '4px 8px',
+              border: '2px solid var(--eph-ink-900)',
+              background: tab === name ? 'var(--eph-marble-50)' : 'var(--eph-marble-200)'
+            }}
+          >
+            {name.toUpperCase()}
+          </button>
+        ))}
+      </nav>
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: '8px' }}>
         {/* App shell (UI-DESIGN §4): floor left (dominant), context stack right. */}
-        <FloorCanvas />
+        {tab === 'floor' ? <FloorCanvas /> : <ActivityPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
       </div>
       {/* UI-DESIGN §4 app shell: bottom = command bar. */}

@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
+import type { AgentStatus, RegistryEntry } from '../shared/registry'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
 import type { EngineRegistry } from './engines'
 import { baseAgentEnv } from './engines/spawn-env'
@@ -74,6 +75,12 @@ export interface AgentManagerOptions {
    * and so every `spawn`/`exit`/`ghost` goes through one place (NFR-13).
    */
   onLogEvent?(draft: { kind: 'spawn' | 'exit' | 'ghost' } & Record<string, unknown>): void
+  /**
+   * Records the hire in the roster (`registry.json`, SDD §4.1). Injected for
+   * the same reason the log sink is: the lifecycle stays testable without an
+   * Agora, and one place owns the write.
+   */
+  onRosterChange?(agentId: string, entry: RegistryEntry | null): void
 }
 
 interface LiveAgent {
@@ -144,6 +151,21 @@ export class AgentManager {
     this.update(request.agentId, { engineVersion: version })
     // Every refs the forensic reader needs: who, on what engine, where, and
     // whether the binary was even there (NFR-13).
+    this.options.onRosterChange?.(request.agentId, {
+      name: request.name,
+      role: request.role,
+      engine: adapter.id,
+      capabilities: [...request.capabilities],
+      // Seats are assigned by the floor in M3 with Artemis's temple seat; until
+      // then every hire sits on the terraces.
+      seat: 'terrace',
+      envGrants: [...request.envGrants],
+      profile: null,
+      target: request.cwd,
+      status: 'idle',
+      hookFidelity: adapter.hooks,
+      spawnedAt: new Date().toISOString()
+    })
     this.options.onLogEvent?.({
       kind: 'spawn',
       agentId: request.agentId,
@@ -193,6 +215,26 @@ export class AgentManager {
   /** Unwinds every live spawn — settings restored, tokens revoked. */
   async shutdown(): Promise<void> {
     for (const agentId of [...this.agents.keys()]) await this.unwind(agentId)
+  }
+
+  /** Mirrors a coarse lifecycle change into the roster (SDD §4.1 `status`). */
+  private setRosterStatus(agentId: string, status: AgentStatus): void {
+    const agent = this.agents.get(agentId)
+    if (!agent) return
+    this.options.onRosterChange?.(agentId, {
+      name: agent.card.name,
+      role: agent.card.role,
+      engine: agent.card.engine,
+      capabilities: [...agent.card.capabilities],
+      seat: 'terrace',
+      envGrants: [...agent.card.envGrants],
+      profile: null,
+      target: agent.card.cwd,
+      status,
+      hookFidelity: agent.card.hookFidelity,
+      spawnedAt: agent.card.spawnedAt,
+      lastSeen: new Date().toISOString()
+    })
   }
 
   private require(agentId: string): LiveAgent {
@@ -332,6 +374,7 @@ export class AgentManager {
       agent.hookPlan = null
     }
     this.options.hookServer.unregisterSpawn(agentId)
+    this.setRosterStatus(agentId, 'ghost')
     this.options.onLogEvent?.({
       kind: 'exit',
       agentId,

@@ -5,10 +5,19 @@ import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import { IpcChannels, type AvatarUpdate, type ConfigSnapshot, type HooksState } from '../shared/ipc'
 import { ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
 import type { AgentManager } from './agents'
+import type { Agora } from './agora'
 import type { AvatarDirector } from './avatars'
 import type { CommandQueue } from './commands'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
+
+/** Cursor paging over the event log (SDD §5 `agora.log(afterSeq, limit)`). */
+const agoraLogSchema = z
+  .object({
+    afterSeq: z.number().int().nonnegative(),
+    limit: z.number().int().min(1).max(2000)
+  })
+  .strict()
 
 /** Architect keystrokes bound for an agent's PTY (FR-1.3). */
 const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(65536) }).strict()
@@ -23,12 +32,20 @@ export interface IpcDeps {
   readonly agents: AgentManager
   readonly avatars: AvatarDirector
   readonly commands: CommandQueue
+  readonly agora: Agora
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { ptyManager, agents, avatars, commands } = deps
+  const { ptyManager, agents, avatars, commands, agora } = deps
+
+  ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
+  ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())
+  ipcMain.handle(IpcChannels.agoraLog, (_ev, raw: unknown) => {
+    const { afterSeq, limit } = agoraLogSchema.parse(raw)
+    return agora.readLog(afterSeq, limit)
+  })
 
   ipcMain.handle(IpcChannels.commandsList, (): readonly CommandState[] => commands.list())
 

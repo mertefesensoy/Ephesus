@@ -513,7 +513,7 @@ Execute in order; every package tests against the fake engine per-PR.
       The run also caught a real defect: the shim relay had silently failed to be
       wired, so the harness decided to block and the engine never heard it — fixed,
       with regression tests for both the relay and the stay-silent property.*
-- [ ] **M2.6 Identity/protocol injection at spawn + Activity tab** — spawn-time
+- [x] **M2.6 Identity/protocol injection at spawn + Activity tab** — spawn-time
       injection grows the Agora context (agent's registry row + PROTOCOL.md
       already materialized in M1 — extend to registry-backed roster); Activity
       tab: virtualized `log.jsonl` feed with batched appends (SDD §11), every row
@@ -523,6 +523,20 @@ Execute in order; every package tests against the fake engine per-PR.
       renderer stays a projection (no filtering logic in renderer beyond view).
       Risk: UI values from tokens only; the feed is a pointer to the log, never a
       second record.*
+      *Evidence: `typecheck && lint && test` green — 551 passed / 3 skipped (6 new:
+      roster round-trip, corrupt-roster and corrupt-ledger degradation with the file
+      left byte-identical, cursor paging in three pages plus an empty tail, and refs
+      preserved on the row).
+      The feed is a projection by construction: `log:append` carries no payload — only
+      "the log grew" — so the panel pages from its own cursor and can never hold a
+      second copy that disagrees with `log.jsonl`. Bursts coalesce into one pull per
+      120 ms (SDD §11).
+      LIVE RUN against the real app: spawning a real `claude` wrote a schema-valid
+      roster row — `{"name":"Mason","role":"ci-babysitter","engine":"claude",
+      "capabilities":["ci","git"],"seat":"terrace","status":"idle",
+      "hookFidelity":"native","spawnedAt":"2026-08-26T21:30:51.075Z"}` — which the
+      single committer landed as `roster: agent.mason (+1 more)`, and the Activity
+      feed read `#1 spawn` back through the `agora:log` IPC.*
 - [ ] **M2.7 Scenario suites + exit demo** — implement S-BLACKOUT (kill main at
       injected fault points mid-delivery/mid-commit; restart; zero loss, zero
       double-processing), S-LIVELOCK (ping-pong fakes → diversion at exactly the

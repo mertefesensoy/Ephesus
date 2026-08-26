@@ -7,6 +7,7 @@ import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
+  LOG_APPEND_CHANNEL,
   type HooksState
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
@@ -194,8 +195,18 @@ void app.whenReady().then(async () => {
     spawner: ptyManager,
     prompts,
     agoraRoot: agora.root,
+    onRosterChange: (agentId, entry) => {
+      if (!agora) return
+      const registry = agora.registry()
+      const agents = { ...registry.agents }
+      if (entry) agents[agentId] = entry
+      else delete agents[agentId]
+      agora.writeRegistry({ ...registry, agents })
+      void agora.commit(`roster: ${agentId}`)
+    },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
       // Durability is a commit, and it is queued rather than awaited: delivery
       // latency must never wait on git (ADR-0004).
       void agora?.commit(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
@@ -220,6 +231,7 @@ void app.whenReady().then(async () => {
     agents: agentManager,
     avatars: avatarDirector,
     commands: commandQueue,
+    agora,
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),
