@@ -408,7 +408,7 @@ Execute in order; every package tests against the fake engine per-PR.
       landed under the subject "seed the Agora" — the work survived but the history
       misnamed why. Fixed, with a regression test; the history now reads
       `cb32e0b reconcile uncommitted work after restart` / `da71bf0 seed the Agora`.*
-- [ ] **M2.2 Registry, task ledger, event log** — `registry.json` (SDD §4.1) and
+- [x] **M2.2 Registry, task ledger, event log** — `registry.json` (SDD §4.1) and
       `tasks.json` (§4.2) schemas + validators in `src/shared/` (schemaVersion 1,
       strict); `log.jsonl` appender (§4.3: seq, kinds, refs) — append-only, atomic
       line appends; accessors in `agora.ts`; spawn/exit events flow into the log.
@@ -417,6 +417,19 @@ Execute in order; every package tests against the fake engine per-PR.
       ledger status-transition guards (`done` refused with open obligations —
       shape only, Odeon gates land M5). Risk: append-only means append-only
       (invariant §5) — no compaction, no rewrite, asserted by test.*
+      *Evidence: `typecheck && lint && test` green — 448 passed / 3 skipped (47 new:
+      table-driven registry/ledger validators incl. the SDD's own worked examples,
+      close guards listing every reason at once, log envelope + torn-tail tolerance,
+      cursor paging).
+      LIVE RUN against the real app — a spawned and killed `claude`, with the whole
+      book of record on disk:
+      `{"kind":"spawn","agentId":"agent.mason","engine":"claude","engineVersion":"2.1.195","role":"ci-babysitter","cwd":"…","hookFidelity":"native","ts":…,"seq":1}`
+      `{"kind":"exit","agentId":"agent.mason","exitCode":1,"engine":"claude","settingsRestored":1,"ts":…,"seq":2}`
+      — every ref a forensic reader needs (NFR-13). The committer landed each as its
+      own commit (`log exit for agent.mason` / `log spawn for agent.mason` /
+      `seed the Agora`), with `registry.json`, `tasks.json` and `log.jsonl` tracked.
+      **Append-only proven across a restart:** seq continued 1,2 → 3,4 and the first
+      421 bytes stayed byte-identical (md5 `aadfa8f1…` before and after new appends).*
 - [ ] **M2.3 Hermes delivery core** — outbox watchers (fs-watch, 50 ms debounce +
       periodic sweep fallback — SDD §11); message schema §4.4 validated at pickup;
       atomic delivery temp+rename into recipient `inbox/`; per-agent

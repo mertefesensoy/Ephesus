@@ -68,6 +68,12 @@ export interface AgentManagerOptions {
   readonly probe?: VersionProber
   /** Notified whenever a card changes, for pushing `state:agents` to the renderer. */
   onChange?(card: AgentCard): void
+  /**
+   * Appends a lifecycle event to the book of record (SDD §4.3). Injected rather
+   * than imported so the lifecycle stays testable without an Agora on disk —
+   * and so every `spawn`/`exit`/`ghost` goes through one place (NFR-13).
+   */
+  onLogEvent?(draft: { kind: 'spawn' | 'exit' | 'ghost' } & Record<string, unknown>): void
 }
 
 interface LiveAgent {
@@ -136,6 +142,17 @@ export class AgentManager {
     const spec = adapter.binary()
     const version = await this.probe(spec)
     this.update(request.agentId, { engineVersion: version })
+    // Every refs the forensic reader needs: who, on what engine, where, and
+    // whether the binary was even there (NFR-13).
+    this.options.onLogEvent?.({
+      kind: 'spawn',
+      agentId: request.agentId,
+      engine: adapter.id,
+      engineVersion: version,
+      role: request.role,
+      cwd: request.cwd,
+      hookFidelity: adapter.hooks
+    })
 
     if (version === null) {
       // FR-1.6: the offer runs in the agent's OWN visible terminal, so the
@@ -315,6 +332,13 @@ export class AgentManager {
       agent.hookPlan = null
     }
     this.options.hookServer.unregisterSpawn(agentId)
+    this.options.onLogEvent?.({
+      kind: 'exit',
+      agentId,
+      exitCode,
+      engine: agent.card.engine,
+      settingsRestored: agent.card.settingsWritten.length
+    })
     this.update(agentId, { lifecycle: 'exited', exitCode, settingsWritten: [] })
   }
 }

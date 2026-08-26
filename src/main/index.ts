@@ -165,6 +165,12 @@ void app.whenReady().then(async () => {
     spawner: ptyManager,
     prompts,
     agoraRoot: agora.root,
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      // Durability is a commit, and it is queued rather than awaited: delivery
+      // latency must never wait on git (ADR-0004).
+      void agora?.commit(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
+    },
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {

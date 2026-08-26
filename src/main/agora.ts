@@ -1,5 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { emptyRegistry, parseRegistry, type Registry } from '../shared/registry'
+import { emptyLedger, parseTaskLedger, type TaskLedger } from '../shared/tasks'
+import type { LogEntry, LogEntryDraft } from '../shared/log'
+import { EventLog } from './eventlog'
+import { writeFileAtomic } from './fsx'
 import { ExecGitRunner, type GitRunner } from './git'
 import type { PromptStore } from './prompts'
 
@@ -65,6 +70,19 @@ interface Pending {
 
 /** The agent-facing contract file, seeded from `prompts/` (SDD §2). */
 export const PROTOCOL_REL = 'PROTOCOL.md'
+export const REGISTRY_REL = 'registry.json'
+export const TASKS_REL = 'tasks.json'
+export const LOG_REL = 'log.jsonl'
+
+/**
+ * A schema'd Agora file that failed to parse. Surfaced, never repaired: the
+ * file is left exactly as found and the company runs on the empty default with
+ * this warning visible (invariant §7).
+ */
+export interface AgoraWarning {
+  readonly file: string
+  readonly reason: string
+}
 
 export class Agora {
   private readonly git: GitRunner
@@ -72,11 +90,84 @@ export class Agora {
   private readonly backoffMs: number
   private chain: Promise<unknown> = Promise.resolve()
   private pending: Pending[] = []
+  private readonly log: EventLog
+  private readonly warnings: AgoraWarning[] = []
 
   constructor(private readonly options: AgoraOptions) {
     this.git = options.git ?? new ExecGitRunner()
     this.maxAttempts = options.maxAttempts ?? 5
     this.backoffMs = options.backoffMs ?? 25
+    this.log = new EventLog(this.pathOf(LOG_REL))
+  }
+
+  /** Files that failed to parse this run — a visible state, not a silent default. */
+  fileWarnings(): readonly AgoraWarning[] {
+    return this.warnings
+  }
+
+  /**
+   * Appends one event to the book of record (SDD §4.3). Contract: the entry is
+   * on disk when this returns; the *commit* that makes it durable in git is
+   * queued separately, because delivery latency must not wait on git (ADR-0004).
+   */
+  appendLog(draft: LogEntryDraft): LogEntry {
+    return this.log.append(draft)
+  }
+
+  /** Events after `afterSeq` (SDD §5 `agora.log(afterSeq, limit)`). */
+  readLog(afterSeq = 0, limit = 500): readonly LogEntry[] {
+    return this.log.read(afterSeq, limit)
+  }
+
+  /** The roster (SDD §4.1). A corrupt file yields the empty roster + a warning. */
+  registry(): Registry {
+    return this.readSchemaFile(REGISTRY_REL, emptyRegistry, (raw) => {
+      const parsed = parseRegistry(raw)
+      return parsed.ok ? { ok: true, value: parsed.registry } : { ok: false, reason: parsed.reason }
+    })
+  }
+
+  /** The task ledger (SDD §4.2). Same degradation as the roster. */
+  tasks(): TaskLedger {
+    return this.readSchemaFile(TASKS_REL, emptyLedger, (raw) => {
+      const parsed = parseTaskLedger(raw)
+      return parsed.ok ? { ok: true, value: parsed.ledger } : { ok: false, reason: parsed.reason }
+    })
+  }
+
+  /** Writes the roster atomically — agents read it live (invariant §3). */
+  writeRegistry(registry: Registry): void {
+    writeFileAtomic(this.pathOf(REGISTRY_REL), `${JSON.stringify(registry, null, 2)}\n`)
+  }
+
+  writeTasks(ledger: TaskLedger): void {
+    writeFileAtomic(this.pathOf(TASKS_REL), `${JSON.stringify(ledger, null, 2)}\n`)
+  }
+
+  private readSchemaFile<T>(
+    rel: string,
+    fallback: T,
+    parse: (raw: unknown) => { ok: true; value: T } | { ok: false; reason: string }
+  ): T {
+    const file = this.pathOf(rel)
+    if (!fs.existsSync(file)) return fallback
+    let raw: unknown
+    try {
+      raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch (err) {
+      this.warn(rel, firstLine(err))
+      return fallback
+    }
+    const parsed = parse(raw)
+    if (parsed.ok) return parsed.value
+    this.warn(rel, parsed.reason)
+    return fallback
+  }
+
+  private warn(file: string, reason: string): void {
+    if (!this.warnings.some((w) => w.file === file && w.reason === reason)) {
+      this.warnings.push({ file, reason })
+    }
   }
 
   get root(): string {
@@ -113,6 +204,16 @@ export class Agora {
       fs.writeFileSync(protocolPath, this.options.prompts.read(path.join('agora', 'PROTOCOL.md')))
       seeded = true
     }
+
+    if (!fs.existsSync(this.pathOf(REGISTRY_REL))) {
+      this.writeRegistry(emptyRegistry)
+      seeded = true
+    }
+    if (!fs.existsSync(this.pathOf(TASKS_REL))) {
+      this.writeTasks(emptyLedger)
+      seeded = true
+    }
+    this.log.open()
 
     // Commit ONLY when this call actually seeded something. Committing
     // unconditionally would sweep up whatever a crashed run left behind and
@@ -240,6 +341,12 @@ export function commitMessage(subjects: readonly string[]): string {
   const first = subjects[0] ?? 'agora update'
   if (subjects.length === 1) return first
   return `${first} (+${subjects.length - 1} more)\n\n${subjects.map((s) => `- ${s}`).join('\n')}`
+}
+
+/** First line of an error, for a warning a human will read in a status strip. */
+function firstLine(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.split('\n')[0] ?? 'unreadable'
 }
 
 function delay(ms: number): Promise<void> {
