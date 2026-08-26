@@ -625,7 +625,9 @@ company down. Three regression tests, each with a `process.on(
 [2026-08-27-m2-company-planes.md](implementations/2026-08-27-m2-company-planes.md)
 § Close-out fix.
 
-The milestone is closed on the fixed tree, not the red one.
+The milestone is closed on the fixed tree, not the red one. **CI green on
+`3505a46`** (run 33019889138); the five suites and the full 586 also run green
+on Linux there, which is where the rejection surfaced and Windows did not.
 
 **Debt swept at close:** zero TODO/FIXME/HACK markers in
 `src|shims|scripts|test|prompts`; every M2 package ticked with evidence. Doc
