@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { EphConfig } from '../../shared/config'
+import { TerminalPanel } from './TerminalPanel'
 
 type BridgeState =
   | { kind: 'loading' }
@@ -27,25 +28,26 @@ export function App(): ReactElement {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
         height: '100%',
-        gap: '8px'
+        gap: '8px',
+        padding: '8px',
+        boxSizing: 'border-box'
       }}
     >
-      <h1 style={{ fontFamily: 'var(--eph-face-display)', fontSize: '16px', margin: 0 }}>
-        Ephesus
-      </h1>
-      <p style={{ color: 'var(--eph-ink-700)', margin: 0 }}>
-        Skeleton shell — M0 in progress. The Terraces floor and terminal land next.
-      </p>
-      <p style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px', margin: 0 }}>
-        {bridge.kind === 'loading' && 'bridge: connecting…'}
-        {bridge.kind === 'ready' && `bridge: ready · config schema v${bridge.config.schemaVersion}`}
-        {bridge.kind === 'unavailable' && (
-          <span style={{ color: 'var(--eph-status-blocked)' }}>bridge: {bridge.reason}</span>
-        )}
-      </p>
+      <header style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+        <h1 style={{ fontFamily: 'var(--eph-face-display)', fontSize: '16px', margin: 0 }}>
+          Ephesus
+        </h1>
+        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+          {bridge.kind === 'loading' && 'bridge: connecting…'}
+          {bridge.kind === 'ready' &&
+            `bridge: ready · config schema v${bridge.config.schemaVersion}`}
+          {bridge.kind === 'unavailable' && (
+            <span style={{ color: 'var(--eph-status-blocked)' }}>bridge: {bridge.reason}</span>
+          )}
+        </span>
+      </header>
+      {bridge.kind === 'ready' && <TerminalPanel />}
     </main>
   )
 }

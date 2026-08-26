@@ -52,6 +52,23 @@ export default tseslint.config(
     }
   },
   {
+    // Build/maintenance scripts are plain CommonJS Node programs.
+    files: ['scripts/**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        require: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+        console: 'readonly',
+        module: 'readonly'
+      }
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off'
+    }
+  },
+  {
     files: ['src/renderer/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [

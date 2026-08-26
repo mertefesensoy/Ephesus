@@ -21,8 +21,15 @@ evidence note. The next session resumes at the first unchecked box.
       `bridge ready, config schemaVersion=1` from the renderer via
       preload→ipcMain round-trip; bare-browser degradation shows a visible
       "bridge unavailable" state, never silent.*
-- [ ] **M0.3 PTY vertical** — `PtyManager` spawns one hardcoded shell; bytes over
+- [x] **M0.3 PTY vertical** — `PtyManager` spawns one hardcoded shell; bytes over
       per-id IPC to xterm.js panel; write/resize/kill.
+      *Evidence: live Electron run over real conpty PowerShell logged
+      `pty echo round-trip observed: eph-proof-ok` (write→pty→data),
+      `resize(120,30) accepted`, and `kill → exit` via per-id channels
+      `pty:data:shell-0`/`pty:exit:shell-0`; validator suite 31/31 green.
+      node-pty required two Windows build patches (scripts/patch-node-pty.cjs,
+      see DECISIONS-LOG); preload kept zod-free (sandboxed preloads cannot
+      require external modules).*
 - [ ] **M0.4 Floor vertical** — Pixi canvas, one terrace room (UI-DESIGN §5 tokens),
       one avatar walking between two points at §6 timings; pauses when hidden.
 - [ ] **M0.5 App state** — better-sqlite3 store for window bounds; harness home at

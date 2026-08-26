@@ -1,6 +1,9 @@
 import path from 'node:path'
 import { app, BrowserWindow, shell } from 'electron'
 import { registerIpc } from './ipc'
+import { PtyManager } from './pty'
+
+const ptyManager = new PtyManager()
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -23,6 +26,8 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  ptyManager.attachSink(win.webContents)
+
   const rendererUrl = process.env['ELECTRON_RENDERER_URL']
   if (rendererUrl) {
     void win.loadURL(rendererUrl)
@@ -32,7 +37,7 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
-  registerIpc()
+  registerIpc(ptyManager)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -40,5 +45,6 @@ void app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  ptyManager.killAll()
   if (process.platform !== 'darwin') app.quit()
 })
