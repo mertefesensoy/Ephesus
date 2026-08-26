@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022"]
+  },
+  "include": [
+    "src/main/**/*",
+    "src/shared/**/*",
+    "test/**/*",
+    "electron.vite.config.ts",
+    "vitest.config.mts"
+  ]
+}

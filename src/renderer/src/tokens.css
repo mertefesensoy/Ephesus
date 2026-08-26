@@ -1,0 +1,77 @@
+/*
+ * Ephesus design tokens — the ONLY place hex values may appear in the renderer.
+ * Source of truth: docs/design/UI-DESIGN.md §2–§3. Parallel numeric copy: tokens.ts.
+ */
+:root {
+  /* 2.1 Marble (surfaces) */
+  --eph-marble-50: #fbf7ef;
+  --eph-marble-100: #f4ede0;
+  --eph-marble-200: #e7dcc6;
+  --eph-marble-300: #d3c4a5;
+  --eph-parchment-100: #f7f2e4;
+
+  /* 2.2 Ink (text, borders) */
+  --eph-ink-900: #221a14;
+  --eph-ink-700: #4a3b2c;
+  --eph-ink-500: #7a6a55;
+  --eph-ink-300: #b3a68e;
+
+  /* 2.3 Civic accents */
+  --eph-aegean: #2e6f8e;
+  --eph-aegean-light: #9cc4d4;
+  --eph-terracotta: #c4552d;
+  --eph-terracotta-light: #e8a987;
+  --eph-olive: #7a8b3d;
+  --eph-olive-light: #c2cd97;
+  --eph-gold: #d9a441;
+  --eph-gold-light: #f0d49b;
+  --eph-laurel: #4e9b6f;
+  --eph-wine: #8e3b4a;
+
+  /* citizen accents */
+  --eph-iris: #7b6bc4;
+  --eph-poppy: #d65a5a;
+  --eph-sand: #c9a05c;
+  --eph-cypress: #3d7a6e;
+
+  /* 2.4 Status colors */
+  --eph-status-idle: #b3a68e;
+  --eph-status-thinking: #2e6f8e;
+  --eph-status-working: #d9a441;
+  --eph-status-waiting: #6c8ef5;
+  --eph-status-blocked: #c4552d;
+  --eph-status-success: #7a8b3d;
+  --eph-status-ghost: #d3c4a5;
+  --eph-status-looping: #e07b39;
+  --eph-status-compacting: #8e6fb8;
+  --eph-status-typing: #c9a05c;
+
+  /* 2.5 World (the Terraces floor) */
+  --eph-world-path: #d8cbaf;
+  --eph-world-terrace-a: #c9a05c;
+  --eph-world-terrace-b: #b08a4c;
+  --eph-world-wall: #8a6b4a;
+  --eph-world-sea-a: #2e6f8e;
+  --eph-world-sea-b: #5a93ac;
+  --eph-world-canopy: #7a8b3d;
+
+  /* §3 Typography faces (bundling of pixel fonts owed by M0.4 — see DECISIONS-LOG) */
+  --eph-face-display: 'Press Start 2P', monospace;
+  --eph-face-ui: 'Pixelify Sans', sans-serif;
+  --eph-face-data: 'IBM Plex Mono', monospace;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--eph-marble-100);
+  color: var(--eph-ink-900);
+  font-family: var(--eph-face-ui);
+  font-size: 14px;
+  image-rendering: pixelated;
+}

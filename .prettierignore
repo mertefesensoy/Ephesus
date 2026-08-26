@@ -1,0 +1,10 @@
+# Prettier owns code formatting; prose and generated artifacts are out of scope.
+node_modules/
+out/
+dist/
+package-lock.json
+docs/
+*.md
+LICENSE
+.claude/
+.github/
