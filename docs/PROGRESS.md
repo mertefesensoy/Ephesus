@@ -51,11 +51,10 @@ evidence note. The next session resumes at the first unchecked box.
       *Evidence: combined dev run boots with floor + terminal and zero
       console/main errors; local `typecheck && lint && test` fully green (59/59);
       scenario-suite skeleton runs (test/scenarios/smoke.test.ts).
-      CI caveat: GitHub Actions stopped creating runs for pushes after
-      2026-08-26 ~15:00Z (commits 336fc9a/8f69ccc got third-party check suites
-      but no Actions suite; the identical workflow passed on head 236bbc9).
-      Local runs of the exact CI commands are green; first Actions run that
-      fires must be confirmed green before M1 work is pushed.*
+      CI: GitHub Actions run 32986762165 on the M0 code (336fc9a) completed
+      SUCCESS — docs integrity + typecheck/lint/test on ubuntu. (Actions run
+      creation was delayed ~1 h platform-side that afternoon; the run landed
+      and passed.)*
 
 ## M1 — One real agent, both planes
 
