@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { EphConfig } from '../../shared/config'
 import { TerminalPanel } from './TerminalPanel'
+import { FloorCanvas } from './floor/FloorCanvas'
 
 type BridgeState =
   | { kind: 'loading' }
@@ -47,7 +48,11 @@ export function App(): ReactElement {
           )}
         </span>
       </header>
-      {bridge.kind === 'ready' && <TerminalPanel />}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: '8px' }}>
+        {/* App shell (UI-DESIGN §4): floor left (dominant), context stack right. */}
+        <FloorCanvas />
+        {bridge.kind === 'ready' && <TerminalPanel />}
+      </div>
     </main>
   )
 }

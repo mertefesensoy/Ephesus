@@ -30,8 +30,13 @@ evidence note. The next session resumes at the first unchecked box.
       node-pty required two Windows build patches (scripts/patch-node-pty.cjs,
       see DECISIONS-LOG); preload kept zod-free (sandboxed preloads cannot
       require external modules).*
-- [ ] **M0.4 Floor vertical** — Pixi canvas, one terrace room (UI-DESIGN §5 tokens),
+- [x] **M0.4 Floor vertical** — Pixi canvas, one terrace room (UI-DESIGN §5 tokens),
       one avatar walking between two points at §6 timings; pauses when hidden.
+      *Evidence: pure walk math (250 ms/tile, 5-step quantized easing, gait frames,
+      patrol reversal) unit-tested 42/42 green; live Electron run logged canvas
+      mounted 448×256, citizen advancing then reversing at the waypoint, and
+      `floor ticker paused`/`resumed` across a main-driven hide/show cycle.
+      Pixi runs eval-free (`pixi.js/unsafe-eval`) under the strict CSP.*
 - [ ] **M0.5 App state** — better-sqlite3 store for window bounds; harness home at
       `~/.ephesus/` per SDD §2 (directories + `config.json`).
 - [ ] **M0 exit review** — `npm run dev` shows floor + live interactive terminal;
