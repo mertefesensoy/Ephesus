@@ -123,14 +123,21 @@ async function runAdapterLive(
       stdio: ['pipe', 'pipe', 'pipe']
     })
     let stdout = ''
+    let interrupted = false
     child.stdout.setEncoding('utf8')
     child.stderr.resume()
+    // A late stdout chunk can arrive after the child is gone, and writing to a
+    // dead child's stdin throws EPIPE asynchronously — which fails the whole
+    // run rather than the assertion. Send the key exactly once, and treat a
+    // pipe that has already closed as the success it is.
+    child.stdin.on('error', () => {})
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk
-      if (opts.interrupt && stdout.includes('ready-for-input')) {
-        child.stdin.write(adapter.interrupt().bytes)
+      if (opts.interrupt && !interrupted && stdout.includes('ready-for-input')) {
+        interrupted = true
+        if (child.stdin.writable) child.stdin.write(adapter.interrupt().bytes)
       }
-      if (stdout.includes('interrupt-observed')) child.kill()
+      if (stdout.includes('interrupt-observed') && !child.killed) child.kill()
     })
     child.on('error', reject)
     child.on('close', (code) => resolve({ stdout, code: code ?? -1 }))
