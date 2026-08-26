@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 // CSP forbids eval (ENGINEERING-STANDARDS §5); this swaps Pixi's codegen for eval-free paths.
 import 'pixi.js/unsafe-eval'
 import { Application, Container, Graphics } from 'pixi.js'
@@ -53,6 +53,7 @@ function drawCitizen(g: Graphics, frame: 0 | 1): void {
 
 export function FloorCanvas(): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
+  const [initError, setInitError] = useState<string | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -117,6 +118,10 @@ export function FloorCanvas(): ReactElement {
           app.destroy(true)
         }
       })
+      .catch((err: unknown) => {
+        // Degradations are visible, never silent (BUILD-PROMPT §3.7).
+        if (!cancelled) setInitError(String(err))
+      })
 
     return () => {
       cancelled = true
@@ -129,16 +134,31 @@ export function FloorCanvas(): ReactElement {
       style={{
         display: 'flex',
         flexDirection: 'column',
+        // Panel anatomy (UI-DESIGN §4): ink-900 2px → marble-50 seam → ink-700 1px
         border: '2px solid var(--eph-ink-900)',
-        outline: '1px solid var(--eph-ink-700)',
-        boxShadow: '2px 2px 0 var(--eph-ink-900)',
+        boxShadow:
+          'inset 0 0 0 1px var(--eph-marble-50), inset 0 0 0 2px var(--eph-ink-700), 2px 2px 0 var(--eph-ink-900)',
         background: 'var(--eph-marble-100)'
       }}
     >
       <header style={{ padding: '4px 8px', borderBottom: '1px solid var(--eph-ink-700)' }}>
         <span style={{ fontFamily: 'var(--eph-face-display)', fontSize: '8px' }}>THE TERRACES</span>
       </header>
-      <div ref={hostRef} style={{ padding: '8px', imageRendering: 'pixelated' }} />
+      {initError ? (
+        <p
+          style={{
+            fontFamily: 'var(--eph-face-data)',
+            fontSize: '12px',
+            color: 'var(--eph-status-blocked)',
+            padding: '8px',
+            margin: 0
+          }}
+        >
+          floor unavailable: {initError}
+        </p>
+      ) : (
+        <div ref={hostRef} style={{ padding: '8px', imageRendering: 'pixelated' }} />
+      )}
     </section>
   )
 }

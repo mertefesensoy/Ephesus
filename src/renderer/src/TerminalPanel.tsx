@@ -63,9 +63,10 @@ export function TerminalPanel(): ReactElement {
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
+        // Panel anatomy (UI-DESIGN §4): ink-900 2px → marble-50 seam → ink-700 1px
         border: '2px solid var(--eph-ink-900)',
-        outline: '1px solid var(--eph-ink-700)',
-        boxShadow: '2px 2px 0 var(--eph-ink-900)',
+        boxShadow:
+          'inset 0 0 0 1px var(--eph-marble-50), inset 0 0 0 2px var(--eph-ink-700), 2px 2px 0 var(--eph-ink-900)',
         background: 'var(--eph-marble-100)'
       }}
     >

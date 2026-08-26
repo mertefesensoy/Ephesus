@@ -56,16 +56,90 @@ evidence note. The next session resumes at the first unchecked box.
       creation was delayed ~1 h platform-side that afternoon; the run landed
       and passed.)*
 
+### M0 close-out audit (2026-08-26) — verdict: DONE
+
+Independent two-agent audit at milestone close:
+- **spec-verifier** (verification by execution): 10/10 checks PASS — typecheck,
+  zero-warning lint, 59/59 tests incl. the scenario-suite anchor, boundary lint
+  provably fires, live boot with the renderer→preload→main→node-pty vertical
+  observed as a real conpty child process, harness home + persisted
+  `window_state` decoded from db.sqlite, CI jobs genuinely executed
+  (run 32988280472: Install/Typecheck/Lint/Test all success), zero
+  TODO/FIXME/HACK in src|scripts|test.
+- **doc-guardian** (design conformance): M0 conforms — tokens byte-identical to
+  UI-DESIGN §2 (all 36), motion constants and stepped easing per §6, all three
+  import boundaries encoded, atomic writes, strict TS with zero `any`, secrets
+  clean. Findings fixed at close: Pixi init failure now surfaces a visible
+  "floor unavailable" state (was silent); panel chrome corrected to the §4
+  3-layer anatomy; M0 IPC additions (`pty:ensure-dev-shell`, `pty.kill`
+  placement, `pty:exit:<id>`) logged in DECISIONS-LOG with their M1 fold-in
+  plan. Open for the Architect: ratify the logged toolchain sub-dependencies;
+  acknowledge the pixel-font bundling debt re-scoped to M1.
+
 ## M1 — One real agent, both planes
 
-- [ ] M1.1 Engine adapter interface (ADR-0009)
-- [ ] M1.2 Fake engine (`test/fakes/fake-engine`)
-- [ ] M1.3 Hook server (UDS / named pipe, per-spawn token)
-- [ ] M1.4 Claude Code adapter
-- [ ] M1.5 Avatar state machine (SDD §6)
-- [ ] M1.6 Command bar
-- [ ] M1.7 Conformance suite v1
-- [ ] M1 exit review — UC-03 demo with real `claude`; conformance green
+Plan drafted 2026-08-26 at M0 close (docs per package = BUILD-PROMPT §2 map; execute
+in order, one package per session-commit; tests are part of each package).
+
+- [ ] **M1.1 Engine adapter interface** — exactly ADR-0009's surface: `EngineAdapter`,
+      `EngineId`, `BinarySpec`, `AgentSpawnConfig`, `SpawnPlan`, `HookSupport`
+      (`native|wrapper|pty-heuristic`), `HookPlan`, `KeySequence`, `ResumeSupport`,
+      `TranscriptReader`; registry keyed by `EngineId` in `src/main/engines/index.ts`.
+      Types shared where the renderer needs them (agent card shows hook grade).
+      *Docs: ADR-0009 (normative), SDD §3, §1.1. Tests: registry lookup/unknown-id;
+      type-level conformance via a dummy in-test adapter. Risk: over-inventing —
+      transcribe the ADR interface, don't extend it.*
+- [ ] **M1.2 Fake engine** — `test/fakes/fake-engine/`: a real spawnable Node CLI
+      (plain JS or pre-built TS, runnable under system Node, NOT Electron-ABI)
+      that reads a JSON script file: emits scripted hook POSTs to the hook endpoint
+      (token from `EPH_HOOK_TOKEN`), reads inbox files, writes outbox files, echoes
+      PTY output, exits on cue. Built BEFORE the real adapter's tests
+      (TEST-STRATEGY §1.2) — it is the test double for every later milestone.
+      *Docs: TEST-STRATEGY §1.2, §5. Tests: script-driven smoke (spawn fake, assert
+      scripted stdout + hook posts against a stub server). Risk: Windows named-pipe
+      client code diverging from UDS — abstract the client once, here.*
+- [ ] **M1.3 Hook server** — `src/main/hooks.ts`: UDS at `~/.ephesus/events.sock`
+      (Windows: named pipe `\\.\pipe\ephesus-events-<uid>`), fs mode 0600 where
+      applicable; per-spawn token validated on every payload; zod payload schemas in
+      `src/shared/hooks.ts`; schema-drift path = accept-with-visible-warning event
+      (FR-2.3), never silent drop; malformed/unauthenticated payloads rejected + logged.
+      *Docs: SDD §1.1 hooks.ts, FR-2.1–2.3, ENGINEERING-STANDARDS §5. Tests:
+      integration over a real socket/pipe in temp home (EPH_HOME): valid payload
+      accepted, bad token rejected, drifted schema → warning event, socket down →
+      fail-open for the agent. Risk: Windows pipe security descriptors differ from
+      0600 — document the equivalent and test it.*
+- [ ] **M1.4 Claude Code adapter** — `src/main/engines/claude.ts`: spawn plan
+      (argv/cwd/env incl. `EPH_AGENT_ID`/`EPH_HOOK_TOKEN`); hook shim `shims/eph-hook`
+      wired via `<cwd>/.claude/settings.local.json` (backup first, uninstall function,
+      local-variant only per ADR-0009); interrupt = Escape; version probe; missing
+      binary → install offer runs in the agent's own visible terminal (FR-1.6).
+      *Docs: ADR-0009, SDD §3, FR-1.2/1.6. Tests: settings hygiene on a temp cwd
+      (backup created, uninstall restores byte-for-byte); spawn-plan snapshot; probe
+      parsing. Live spawn is nightly territory, not per-PR. Risk: do not touch the
+      user's real ~/.claude — everything through temp cwds.*
+- [ ] **M1.5 Avatar state machine** — implement SDD §6 verbatim as a pure reducer in
+      `src/shared/avatar.ts` (states, transitions, station map incl. 250 ms
+      success→idle) driven ONLY by event-plane data; floor consumes poses from it;
+      per-agent avatar rendering replaces the M0 hardcoded patrol.
+      *Docs: SDD §6, ADR-0002, UI-DESIGN §5 stations. Tests: table-driven transition
+      coverage — every documented edge, illegal transitions rejected/inert; station
+      mapping per tool class. Risk: inventing transitions the SDD doesn't have.*
+- [ ] **M1.6 Command bar** — bottom bar (UI-DESIGN §4): free prompt to the selected
+      agent; queue-until-idle when the agent is mid-tool (FR-1.3) — queued text
+      visibly held (status-typing token semantics), flushed on idle; interrupt button
+      (adapter's KeySequence). *Docs: FR-1.3, UC-03, UI-DESIGN §2.4/§4. Tests:
+      pure queue-decision logic (mid-tool → hold, idle → send, interrupt clears);
+      E2E smoke later. Risk: keep the queue decision in main, renderer stays a
+      projection.*
+- [ ] **M1.7 Conformance suite v1** — table-driven suite every adapter must pass
+      (TEST-STRATEGY §5): spawn/interrupt/kill lifecycle, identity injection
+      observable in-session, hook grade honesty (declared grade matches demonstrated
+      events), settings-file hygiene, transcript reader vs fixtures — green for
+      fake + claude adapters. *Docs: TEST-STRATEGY §5. Risk: suite must run per-PR
+      against the FAKE engine; claude live checks are nightly-only.*
+- [ ] **M1 exit review** — UC-03 demo with a real `claude`: file edit → shelf walk →
+      desk → idle; typing mid-run queues then flushes; conformance suite green for
+      fake + claude. Evidence recorded here.
 
 ## M2 — The Agora + Hermes
 

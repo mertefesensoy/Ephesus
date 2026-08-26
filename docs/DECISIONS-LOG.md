@@ -24,3 +24,7 @@ through the must-ask protocol (§8.3) or a Gymnasium proposal.
 - 2026-08-26 · `postinstall` now `electron-rebuild -f` (all native deps) · better-sqlite3 joined node-pty; rebuilding everything is simpler than maintaining a module whitelist.
 - 2026-08-26 · `@types/better-sqlite3` added (type-only) · better-sqlite3 ships no types.
 - 2026-08-26 · `EPH_HOME` env override for the harness home root · lets tests/E2E boot against a temp home (TEST-STRATEGY §4) without touching the real `~/.ephesus/`.
+- 2026-08-26 · (M0 audit) `pty:ensure-dev-shell` is a temporary M0 channel · replaced by `agents.spawn` in M1; retire it when the claude adapter lands.
+- 2026-08-26 · (M0 audit) `pty.kill` lives in the `pty:` group for M0 · SDD §5 homes `kill(id)` under `agents:`; folds into the agents group in M1 with the adapter lifecycle.
+- 2026-08-26 · (M0 audit) `pty:exit:<id>` push event added beside `pty:data:<id>` · needed to make kill/exit outcomes visible; SDD §5 calls its event list abridged.
+- 2026-08-26 · (M0 audit) Pixel-font bundling debt re-scoped: not delivered in M0.4 as originally logged · owed by the first M1 package that touches renderer chrome (M1.6 command bar) or earlier; awaiting Architect acknowledgment.

@@ -122,6 +122,12 @@ milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
+> **Build state (updated 2026-08-26):** M0 is COMPLETE — all five packages landed with
+> evidence, CI green (run 32986762165), milestone audited at close. **Resume at M1.1.**
+> The detailed M1 package plan (docs per package, tests owed, risks) is written into
+> `docs/PROGRESS.md` — read it before starting. Minor toolchain choices already made
+> are in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+
 ### M0 packages (do these first)
 
 - **M0.1 Scaffold**: electron-vite + React + TS project; three tsconfig projects
@@ -244,6 +250,30 @@ Next session starts at: M<x>.<n>
   `node-pty`, `better-sqlite3`, `zustand`, `zod` (validators), `vitest`,
   `@playwright/test`, `eslint`, `prettier`, `electron-builder`.
 - Scripts to keep working at all times: `dev`, `build`, `typecheck`, `lint`, `test`.
+
+**Working constraints learned in M0 (binding until the environment changes —
+rationale in `docs/DECISIONS-LOG.md`):**
+
+1. `electron` is pinned `^37` (Electron ≥38 requires Node ≥22.12 at install; the
+   toolchain runs Node 20). `vite` is pinned `^7` (electron-vite@5 peer range).
+   Do not bump either without a §8 must-ask.
+2. `postinstall` = `node scripts/patch-node-pty.cjs && electron-rebuild -f`. The
+   patch script fixes two node-pty Windows build defects (bare-name `.bat`
+   resolution on current Win11; Spectre-lib MSB8040). Never delete it; it is
+   idempotent and no-ops off-Windows.
+3. After `electron-rebuild`, native modules (`node-pty`, `better-sqlite3`) are
+   Electron-ABI and CANNOT be imported by vitest under Node. Keep test suites off
+   native imports — pure logic goes in `src/shared/` or plain modules; native
+   behavior is covered by the fake-engine rig and E2E.
+4. The sandboxed preload cannot `require` external modules at runtime.
+   `src/shared/ipc.ts` (channel names, helpers, API types) must stay free of
+   runtime dependencies; zod schemas live in sibling modules imported only by main.
+5. `EPH_HOME` overrides the harness-home root — every integration/E2E test boots
+   against a temp home, never the real `~/.ephesus/`.
+6. Pixi must import `pixi.js/unsafe-eval` (strict CSP forbids eval); keep the CSP
+   strict rather than loosening `script-src`.
+7. Evidence capture pattern for live runs: `ELECTRON_ENABLE_LOGGING=1` + temporary
+   `EVIDENCE`-prefixed console logs, removed before commit.
 
 Begin now: read the files in §2, open `docs/PROGRESS.md` (create it if missing, seeded
 with the M0–M7 checklist), find the first unchecked package, and execute §4 on it.
