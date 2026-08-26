@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
+import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import {
   DEV_SHELL_ID,
   IpcChannels,
@@ -11,6 +12,7 @@ import {
 import { ptyKillSchema, ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
 import type { AgentManager } from './agents'
 import type { AvatarDirector } from './avatars'
+import type { CommandQueue } from './commands'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
 
@@ -26,12 +28,20 @@ export interface IpcDeps {
   readonly ptyManager: PtyManager
   readonly agents: AgentManager
   readonly avatars: AvatarDirector
+  readonly commands: CommandQueue
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { ptyManager, agents, avatars } = deps
+  const { ptyManager, agents, avatars, commands } = deps
+
+  ipcMain.handle(IpcChannels.commandsList, (): readonly CommandState[] => commands.list())
+
+  ipcMain.handle(IpcChannels.commandsSubmit, (_ev, raw: unknown): CommandState => {
+    const { agentId, text } = commandSubmitSchema.parse(raw)
+    return commands.submit(agentId, text)
+  })
 
   ipcMain.handle(IpcChannels.avatarsList, (): readonly AvatarUpdate[] =>
     [...avatars.list()].map(([agentId, snapshot]) => ({ agentId, snapshot }))
@@ -66,7 +76,11 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle(IpcChannels.agentsInterrupt, (_ev, raw: unknown) => {
-    agents.interrupt(agentIdPayloadSchema.parse(raw).agentId)
+    const { agentId } = agentIdPayloadSchema.parse(raw)
+    // Interrupting drops queued text: stopping the agent did not mean "and then
+    // say this anyway" (FR-1.3).
+    commands.clear(agentId)
+    agents.interrupt(agentId)
   })
 
   ipcMain.handle(IpcChannels.agentsSend, (_ev, raw: unknown) => {

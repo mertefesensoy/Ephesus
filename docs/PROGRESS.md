@@ -254,13 +254,26 @@ in order, one package per session-commit; tests are part of each package).
       pixel-font files (either three new `@fontsource` dependencies or a file drop —
       a new dependency is a must-ask by BUILD-PROMPT §8.3). Both land with zero code
       change once the files exist; that is what the intake paths are for.*
-- [ ] **M1.6 Command bar** — bottom bar (UI-DESIGN §4): free prompt to the selected
+- [x] **M1.6 Command bar** — bottom bar (UI-DESIGN §4): free prompt to the selected
       agent; queue-until-idle when the agent is mid-tool (FR-1.3) — queued text
       visibly held (status-typing token semantics), flushed on idle; interrupt button
       (adapter's KeySequence). *Docs: FR-1.3, UC-03, UI-DESIGN §2.4/§4. Tests:
       pure queue-decision logic (mid-tool → hold, idle → send, interrupt clears);
       E2E smoke later. Risk: keep the queue decision in main, renderer stays a
       projection.*
+      *Evidence: `typecheck && lint && test` green — 342 passed / 3 skipped (33 new:
+      a decision table covering every phase the avatar machine can reach, the
+      separate-writes submit, accumulate-don't-replace, flush-exactly-once,
+      interrupt-clears, and refusal when the process is gone).
+      LIVE UC-03 with a real `claude`, driven entirely through
+      `window.eph.commands`:
+      `first SENT` → `alert at desk` → `thinking at shelf` →
+      `queue HELD "Also mention how many words the file has." (agent is mid-turn)` →
+      `interjection QUEUED agent is mid-turn` → `thinking at desk` →
+      `success at desk` → `queue FLUSHED` → `idle at desk` → `alert at desk`.
+      Text typed mid-run was visibly held with a reason the Architect can act on,
+      flushed the moment the agent finished, and the agent then actually took a new
+      turn on it. Zero hook rejections and zero drift warnings across the run.*
 - [ ] **M1.7 Conformance suite v1** — table-driven suite every adapter must pass
       (TEST-STRATEGY §5): spawn/interrupt/kill lifecycle, identity injection
       observable in-session, hook grade honesty (declared grade matches demonstrated

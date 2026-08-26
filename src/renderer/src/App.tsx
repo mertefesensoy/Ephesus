@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
+import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
 
@@ -140,6 +141,8 @@ export function App(): ReactElement {
         <FloorCanvas />
         {bridge.kind === 'ready' && <TerminalPanel />}
       </div>
+      {/* UI-DESIGN §4 app shell: bottom = command bar. */}
+      {bridge.kind === 'ready' && <CommandBar />}
     </main>
   )
 }

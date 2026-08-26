@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
+  COMMANDS_STATE_CHANNEL,
   IpcChannels,
   ptyDataChannel,
   ptyExitChannel,
@@ -11,6 +12,7 @@ import {
   type HooksState
 } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
+import type { CommandState } from '../shared/commands'
 
 // The single door between renderer and main (SDD §1, §5). Every method is a
 // thin, typed forward to an ipcMain handler that validates in main.
@@ -45,6 +47,16 @@ const eph: EphApi = {
   },
   hooks: {
     state: () => ipcRenderer.invoke(IpcChannels.hooksState) as Promise<HooksState>
+  },
+  commands: {
+    list: () => ipcRenderer.invoke(IpcChannels.commandsList) as Promise<readonly CommandState[]>,
+    submit: (agentId, text) =>
+      ipcRenderer.invoke(IpcChannels.commandsSubmit, { agentId, text }) as Promise<CommandState>,
+    onChange: (cb) => {
+      const listener = (_ev: IpcRendererEvent, state: CommandState): void => cb(state)
+      ipcRenderer.on(COMMANDS_STATE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(COMMANDS_STATE_CHANNEL, listener)
+    }
   },
   pty: {
     ensureDevShell: () => ipcRenderer.invoke(IpcChannels.ptyEnsureDevShell) as Promise<string>,

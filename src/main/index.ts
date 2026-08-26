@@ -2,10 +2,17 @@ import path from 'node:path'
 import { app, BrowserWindow, screen, shell } from 'electron'
 import type { AgentCard } from '../shared/agents'
 import type { AvatarSnapshot } from '../shared/avatar'
-import { AGENTS_STATE_CHANNEL, AVATARS_STATE_CHANNEL, type HooksState } from '../shared/ipc'
+import type { CommandState } from '../shared/commands'
+import {
+  AGENTS_STATE_CHANNEL,
+  AVATARS_STATE_CHANNEL,
+  COMMANDS_STATE_CHANNEL,
+  type HooksState
+} from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { AvatarDirector } from './avatars'
+import { CommandQueue } from './commands'
 import { initHome } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
@@ -27,9 +34,18 @@ let hookFailure: string | null = null
  * hook server has a chance to deliver anything, so no event can arrive with
  * nowhere to go.
  */
+const commandQueue = new CommandQueue({
+  sink: { write: (agentId, data) => ptyManager.write(agentId, data) },
+  onChange: (state: CommandState) => mainWindow?.webContents.send(COMMANDS_STATE_CHANNEL, state)
+})
+
 const avatarDirector = new AvatarDirector({
-  onChange: (agentId: string, snapshot: AvatarSnapshot) =>
+  onChange: (agentId: string, snapshot: AvatarSnapshot) => {
     mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, { agentId, snapshot })
+    // The queue flushes off the same snapshots the floor draws, so held text
+    // goes out exactly when the avatar says the agent is free (FR-1.3).
+    commandQueue.observe(agentId, snapshot)
+  }
 })
 
 /**
@@ -136,6 +152,7 @@ void app.whenReady().then(async () => {
     ptyManager,
     agents: agentManager,
     avatars: avatarDirector,
+    commands: commandQueue,
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),

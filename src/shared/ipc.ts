@@ -1,5 +1,6 @@
 import type { AgentCard, SpawnRequest } from './agents'
 import type { AvatarSnapshot } from './avatar'
+import type { CommandState } from './commands'
 import type { EphConfig } from './config'
 
 /**
@@ -20,7 +21,9 @@ export const IpcChannels = {
   agentsInterrupt: 'agents:interrupt',
   agentsSend: 'agents:send',
   avatarsList: 'avatars:list',
-  hooksState: 'hooks:state'
+  hooksState: 'hooks:state',
+  commandsList: 'commands:list',
+  commandsSubmit: 'commands:submit'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -48,6 +51,9 @@ export const AGENTS_STATE_CHANNEL = 'state:agents'
 
 /** Push channel carrying one agent's avatar snapshot (SDD §6, ADR-0002). */
 export const AVATARS_STATE_CHANNEL = 'state:avatars'
+
+/** Push channel carrying one agent's held command text (FR-1.3). */
+export const COMMANDS_STATE_CHANNEL = 'state:commands'
 
 /** One agent's avatar snapshot, addressed. */
 export interface AvatarUpdate {
@@ -95,6 +101,17 @@ export interface EphApi {
   hooks: {
     /** Event-plane health, including drift warnings that must be shown. */
     state: () => Promise<HooksState>
+  }
+  commands: {
+    /** Agents currently holding unsent Architect text. */
+    list: () => Promise<readonly CommandState[]>
+    /**
+     * Sends a free prompt to an agent, or holds it until the agent is idle
+     * (FR-1.3). Resolves with what the harness did with it.
+     */
+    submit: (agentId: string, text: string) => Promise<CommandState>
+    /** Subscribe to held-text changes. Returns an unsubscribe function. */
+    onChange: (cb: (state: CommandState) => void) => () => void
   }
   pty: {
     /** Spawns the M0.3 hardcoded dev shell if needed; resolves with its pty id. */
