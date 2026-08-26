@@ -1,0 +1,5 @@
+#!/bin/sh
+# Attribution tripwire (ENGINEERING-STANDARDS §2) — the identity half. A commit
+# authored as Claude lands on GitHub's contributor graph, and a later rewrite does
+# not take it back off. Armed by `postinstall` via core.hooksPath.
+exec node "$(git rev-parse --show-toplevel)/scripts/check-attribution.cjs" --pending

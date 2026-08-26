@@ -1,0 +1,3 @@
+#!/bin/sh
+# Attribution tripwire (ENGINEERING-STANDARDS §2) — the trailer half.
+exec node "$(git rev-parse --show-toplevel)/scripts/check-attribution.cjs" --pending "$1"

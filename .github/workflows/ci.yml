@@ -69,3 +69,13 @@ jobs:
       - name: Test
         if: steps.scaffold.outputs.present == 'true'
         run: npm test
+
+  attribution:
+    name: Commit attribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No commit is authored, committed or co-authored as Claude
+        run: node scripts/check-attribution.cjs

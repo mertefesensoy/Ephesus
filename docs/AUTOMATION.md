@@ -25,6 +25,11 @@ no-ops cleanly until the M0.1 scaffold lands, then activates automatically.
 |---|---|---|
 | `post-edit.sh` | PostToolUse on Edit/Write | Auto-runs Prettier (+ ESLint `--fix` for TS) on the edited file. No-ops without `package.json`/`node_modules`. Removes an entire class of lint-fix commits. |
 | `on-stop-check.sh` | Stop | If the session modified `.ts/.tsx` files and `npm run typecheck` is red, blocks the stop once with the failure log path — enforcing the standards' "green typecheck at every commit" at the *session* boundary. Respects `stop_hook_active`. |
+| `.githooks/pre-commit` + `commit-msg` | Every `git commit` (via `core.hooksPath`, armed by `postinstall`) | Refuses a commit whose author, committer or trailers carry a Claude/Anthropic identity — ENGINEERING-STANDARDS §2. Not a Claude Code hook: it binds any client, including a human typing `git commit`. |
+
+Also in `.claude/settings.json`: `"includeCoAuthoredBy": false` — Claude Code adds no
+`Co-Authored-By: Claude` byline to commits or PRs. The trailer half of
+ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 
 ### Skills (`.claude/skills/` — invoke as slash commands)
 | Skill | Purpose |
@@ -46,6 +51,9 @@ no-ops cleanly until the M0.1 scaffold lands, then activates automatically.
 - **Code checks** (self-arming): typecheck · lint · test run automatically the moment
   `package.json` exists — the pipeline is green-by-absence before M0.1, never skipped
   after.
+- **Commit attribution**: `scripts/check-attribution.cjs` over the full history — no
+  commit is authored, committed or co-authored as Claude (ENGINEERING-STANDARDS §2).
+  The backstop for the local hooks, which `--no-verify` or an unarmed clone can miss.
 
 ## How this maps to the build process
 
