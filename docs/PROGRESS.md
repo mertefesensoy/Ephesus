@@ -81,7 +81,7 @@ Independent two-agent audit at milestone close:
 Plan drafted 2026-08-26 at M0 close (docs per package = BUILD-PROMPT §2 map; execute
 in order, one package per session-commit; tests are part of each package).
 
-- [ ] **M1.1 Engine adapter interface** — exactly ADR-0009's surface: `EngineAdapter`,
+- [x] **M1.1 Engine adapter interface** — exactly ADR-0009's surface: `EngineAdapter`,
       `EngineId`, `BinarySpec`, `AgentSpawnConfig`, `SpawnPlan`, `HookSupport`
       (`native|wrapper|pty-heuristic`), `HookPlan`, `KeySequence`, `ResumeSupport`,
       `TranscriptReader`; registry keyed by `EngineId` in `src/main/engines/index.ts`.
@@ -89,6 +89,14 @@ in order, one package per session-commit; tests are part of each package).
       *Docs: ADR-0009 (normative), SDD §3, §1.1. Tests: registry lookup/unknown-id;
       type-level conformance via a dummy in-test adapter. Risk: over-inventing —
       transcribe the ADR interface, don't extend it.*
+      *Evidence: `typecheck && lint && test` green — 90/90 (31 new: engine-vocabulary
+      table tests asserting the roster and the grade list are byte-identical to
+      ADR-0009, registry lookup/unknown-id/duplicate-refusal/ordering, and a dummy
+      in-test adapter that compiles against the full `EngineAdapter` surface incl.
+      optional `resume`/`transcripts`). Live boundary proof: a renderer file importing
+      `../../main/engines` and a `src/main/` file importing `@anthropic-ai/sdk` are
+      both rejected by `no-restricted-imports` (probe files run through eslint, then
+      removed) — NFR-12 containment holds for the new `engines/` directory.*
 - [ ] **M1.2 Fake engine** — `test/fakes/fake-engine/`: a real spawnable Node CLI
       (plain JS or pre-built TS, runnable under system Node, NOT Electron-ABI)
       that reads a JSON script file: emits scripted hook POSTs to the hook endpoint
