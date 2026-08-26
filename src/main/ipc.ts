@@ -2,14 +2,8 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
-import {
-  DEV_SHELL_ID,
-  IpcChannels,
-  type AvatarUpdate,
-  type ConfigSnapshot,
-  type HooksState
-} from '../shared/ipc'
-import { ptyKillSchema, ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
+import { IpcChannels, type AvatarUpdate, type ConfigSnapshot, type HooksState } from '../shared/ipc'
+import { ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
 import type { AgentManager } from './agents'
 import type { AvatarDirector } from './avatars'
 import type { CommandQueue } from './commands'
@@ -54,13 +48,6 @@ export function registerIpc(deps: IpcDeps): void {
     return { config: home.config, warning: home.configWarning }
   })
 
-  // Renderer asks for the dev shell AFTER subscribing to its data channel,
-  // so the first prompt bytes are never lost to a subscribe race.
-  ipcMain.handle(IpcChannels.ptyEnsureDevShell, () => {
-    ptyManager.spawnShell(DEV_SHELL_ID)
-    return DEV_SHELL_ID
-  })
-
   ipcMain.handle(IpcChannels.agentsList, () => agents.list())
 
   ipcMain.handle(IpcChannels.agentsSpawn, async (_ev, raw: unknown) => {
@@ -96,10 +83,5 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ptyResize, (_ev, raw: unknown) => {
     const { id, cols, rows } = ptyResizeSchema.parse(raw)
     ptyManager.resize(id, cols, rows)
-  })
-
-  ipcMain.handle(IpcChannels.ptyKill, (_ev, raw: unknown) => {
-    const { id } = ptyKillSchema.parse(raw)
-    ptyManager.kill(id)
   })
 }

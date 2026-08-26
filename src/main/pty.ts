@@ -1,4 +1,3 @@
-import os from 'node:os'
 import * as pty from 'node-pty'
 import type { WebContents } from 'electron'
 import { ptyDataChannel, ptyExitChannel } from '../shared/ipc'
@@ -25,21 +24,6 @@ export class PtyManager implements AgentSpawner {
 
   has(id: string): boolean {
     return this.ptys.has(id)
-  }
-
-  /** Spawns the platform's default interactive shell under the given id (M0.3: hardcoded). */
-  spawnShell(id: string): void {
-    if (this.ptys.has(id)) return
-    const shell =
-      process.platform === 'win32' ? 'powershell.exe' : (process.env['SHELL'] ?? '/bin/bash')
-    const proc = pty.spawn(shell, [], {
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd: os.homedir(),
-      env: process.env as Record<string, string>
-    })
-    this.track(id, proc)
   }
 
   private track(id: string, proc: pty.IPty): void {

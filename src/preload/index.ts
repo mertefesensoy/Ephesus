@@ -59,11 +59,9 @@ const eph: EphApi = {
     }
   },
   pty: {
-    ensureDevShell: () => ipcRenderer.invoke(IpcChannels.ptyEnsureDevShell) as Promise<string>,
     write: (id, data) => ipcRenderer.invoke(IpcChannels.ptyWrite, { id, data }) as Promise<void>,
     resize: (id, cols, rows) =>
       ipcRenderer.invoke(IpcChannels.ptyResize, { id, cols, rows }) as Promise<void>,
-    kill: (id) => ipcRenderer.invoke(IpcChannels.ptyKill, { id }) as Promise<void>,
     onData: (id, cb) => {
       const channel = ptyDataChannel(id)
       const listener = (_ev: IpcRendererEvent, data: string): void => cb(data)

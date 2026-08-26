@@ -4,11 +4,17 @@ import { z } from 'zod'
  * PTY IPC payload validators (SDD §5 `pty:` group). Main validates every
  * renderer-supplied payload with these before touching a PTY (BUILD-PROMPT §3.2).
  */
+/**
+ * A PTY id is the id of the agent that owns it (`AgentCard.ptyId`), so the
+ * pattern has to admit the dot in `agent.mason`. Widening this was not
+ * cosmetic: with the terminal panel attached to a real agent instead of the M0
+ * dev shell, the old dash-only pattern rejected every resize.
+ */
 export const ptyIdSchema = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9][a-z0-9-]*$/, 'pty id: lowercase alphanumerics and dashes')
+  .regex(/^[a-z0-9][a-z0-9.-]*$/, 'pty id: lowercase alphanumerics, dots and dashes')
 
 export const ptyWriteSchema = z
   .object({
@@ -25,8 +31,5 @@ export const ptyResizeSchema = z
   })
   .strict()
 
-export const ptyKillSchema = z.object({ id: ptyIdSchema }).strict()
-
 export type PtyWrite = z.infer<typeof ptyWriteSchema>
 export type PtyResize = z.infer<typeof ptyResizeSchema>
-export type PtyKill = z.infer<typeof ptyKillSchema>

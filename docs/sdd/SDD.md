@@ -44,7 +44,11 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | Module | Owns | Key ADR |
 |---|---|---|
 | `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts` | 0009 |
-| `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; redaction filter on outbound streams | 0014, 0010 |
+| `agents.ts` | `AgentManager`: spawn ordering (probe → token → identity → settings → process), FR-1.6 install offer, exit unwind (settings restored, token revoked) | 0009, 0010 |
+| `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; PATH resolution for spawn plans (`which.ts`); redaction filter on outbound streams | 0014, 0010 |
+| `avatars.ts` | `AvatarDirector`: hook events → §6 avatar snapshots, the walk clock (`arrive`) and the §6 timers | 0002 |
+| `commands.ts` | `CommandQueue`: FR-1.3 queue-until-idle, held text, two-write submit | — |
+| `prompts.ts` | `PromptStore`: harness-home-first prompt/template loading, seeded from the bundled copies | — |
 | `hooks.ts` | UDS/named-pipe server; payload validation; schema-drift warnings; PTY-heuristic fallback registration | 0002 |
 | `hermes.ts` | Outbox watchers, delivery (temp+rename), hop-cap diversion, bounce, broadcast fan-out, wake watchdog, Stop-hook decisioning | 0003, 0013 |
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
@@ -59,7 +63,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |
 | `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) | — |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
-| `config.ts` | Harness home setup, config persistence, prompt/persona/template text assets | — |
+| `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
 
 ---
@@ -228,8 +232,11 @@ Typed, promise-based, all validated in main. Grouped surface (abridged — the `
 generated from `ipc.ts` is normative once code exists):
 
 ```
-agents:   list() spawn(cfg) kill(id) interrupt(id) resume(id) card(id)
-pty:      write(id, data) resize(id, cols, rows) onData(id, cb)
+agents:   list() spawn(cfg) kill(id) interrupt(id) resume(id) card(id) send(id, text)
+pty:      write(id, data) resize(id, cols, rows) onData(id, cb) onExit(id, cb)
+avatars:  list()                                     // §6 snapshots; push on state:avatars
+commands: list() submit(id, text)                    // FR-1.3 queue-until-idle
+hooks:    state()                                    // event-plane health + drift warnings
 agora:    registry() tasks() board() log(afterSeq, limit) memory(id)
 hermes:   threads(filter) compose(msgDraft)          // human-authored mail goes via Artemis
 odeon:    briefs() decks() memos(queue) verdict(memoId, v) convene(meeting) meetingSay(text)
@@ -243,8 +250,9 @@ secrets:  set(name, value) status(name) test(name) delete(name)   // write-only 
 config:   get() set(patch) prompts.get(name) prompts.set(name, text)
 ```
 
-Events pushed to the renderer: `pty:data:<id>`, `state:agents`, `state:tasks`,
-`log:append`, `odeon:queue`, `gate:open`, `breaker:trip`, `herald:transcript`.
+Events pushed to the renderer: `pty:data:<id>`, `pty:exit:<id>`, `state:agents`,
+`state:avatars`, `state:commands`, `state:tasks`, `log:append`, `odeon:queue`,
+`gate:open`, `breaker:trip`, `herald:transcript`.
 
 ---
 

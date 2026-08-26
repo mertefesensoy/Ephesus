@@ -13,9 +13,18 @@ import type { CommandState } from '../../shared/commands'
  * unsent text the UI has swallowed is exactly the silent state this codebase
  * forbids (ENGINEERING-STANDARDS §4).
  */
-export function CommandBar(): ReactElement {
+export function CommandBar({
+  selected,
+  onSelect,
+  onAgentSeen
+}: {
+  selected: string | null
+  /** The Architect chose an agent. */
+  onSelect: (agentId: string | null) => void
+  /** An agent appeared; App decides whether it becomes the selection. */
+  onAgentSeen: (agentId: string) => void
+}): ReactElement {
   const [agents, setAgents] = useState<readonly AgentCard[]>([])
-  const [selected, setSelected] = useState<string | null>(null)
   const [text, setText] = useState('')
   const [held, setHeld] = useState<Map<string, CommandState>>(new Map())
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +35,7 @@ export function CommandBar(): ReactElement {
 
     void eph.agents.list().then((cards) => {
       setAgents(cards)
-      setSelected((current) => current ?? cards[0]?.agentId ?? null)
+      if (cards[0]) onAgentSeen(cards[0].agentId)
     })
     void eph.commands.list().then((states) => {
       setHeld(new Map(states.map((state) => [state.agentId, state])))
@@ -37,7 +46,7 @@ export function CommandBar(): ReactElement {
         const next = current.filter((c) => c.agentId !== card.agentId)
         return [...next, card].sort((a, b) => a.agentId.localeCompare(b.agentId))
       })
-      setSelected((current) => current ?? card.agentId)
+      onAgentSeen(card.agentId)
     })
     const offCommands = eph.commands.onChange((state) => {
       setHeld((current) => {
@@ -51,7 +60,9 @@ export function CommandBar(): ReactElement {
       offAgents()
       offCommands()
     }
-  }, [])
+    // Subscribed once: the callbacks are stable in App, and re-subscribing on
+    // every render would leak listeners.
+  }, [onAgentSeen])
 
   const submit = (event: FormEvent): void => {
     event.preventDefault()
@@ -92,7 +103,7 @@ export function CommandBar(): ReactElement {
         <select
           aria-label="Selected agent"
           value={selected ?? ''}
-          onChange={(e) => setSelected(e.target.value || null)}
+          onChange={(e) => onSelect(e.target.value || null)}
           style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '12px' }}
         >
           {agents.length === 0 && <option value="">no agents</option>}

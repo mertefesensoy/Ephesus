@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { CommandBar } from './CommandBar'
@@ -21,6 +21,13 @@ export function App(): ReactElement {
   const [bridge, setBridge] = useState<BridgeState>({ kind: 'loading' })
   const [hooks, setHooks] = useState<HooksState | null>(null)
   const [fonts, setFonts] = useState<FontStatus | null>(null)
+  /** The agent the terminal and the command bar both act on (UC-03 step 2). */
+  const [selected, setSelected] = useState<string | null>(null)
+  // A newly spawned agent is selected only when nothing is: an agent appearing
+  // must never yank the Architect's attention off the one they are watching.
+  const onAgentSeen = useCallback((agentId: string) => {
+    setSelected((current) => current ?? agentId)
+  }, [])
 
   // UI-DESIGN §3 requires the pixel faces bundled. A face that is not installed
   // is shown, never silently swapped for a fallback (invariant §7).
@@ -139,10 +146,12 @@ export function App(): ReactElement {
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: '8px' }}>
         {/* App shell (UI-DESIGN §4): floor left (dominant), context stack right. */}
         <FloorCanvas />
-        {bridge.kind === 'ready' && <TerminalPanel />}
+        {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
       </div>
       {/* UI-DESIGN §4 app shell: bottom = command bar. */}
-      {bridge.kind === 'ready' && <CommandBar />}
+      {bridge.kind === 'ready' && (
+        <CommandBar selected={selected} onSelect={setSelected} onAgentSeen={onAgentSeen} />
+      )}
     </main>
   )
 }

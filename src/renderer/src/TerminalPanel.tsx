@@ -3,22 +3,30 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-type ShellState = { kind: 'running'; id: string } | { kind: 'exited'; code: number }
+type PtyState = { kind: 'running' } | { kind: 'exited'; code: number }
 
 /**
- * Live terminal for the M0.3 dev shell. The terminal is sacred (UI-DESIGN §1.6):
- * xterm keeps its authentic default colors and fonts inside the panel frame;
- * only the frame uses Ephesus tokens.
+ * The selected agent's live terminal (UC-03 step 2). The terminal is sacred
+ * (UI-DESIGN §1.6): xterm keeps its authentic default colors and fonts inside
+ * the panel frame, and only the frame uses Ephesus tokens.
+ *
+ * Typing here writes straight to the PTY, bypassing the command queue on
+ * purpose: this is the Architect operating the engine's own interface —
+ * answering its permission dialog, cycling its modes — and none of that is a
+ * prompt to be held until the agent is idle (FR-1.3 governs prompts, not
+ * keystrokes).
  */
-export function TerminalPanel(): ReactElement {
+export function TerminalPanel({ agentId }: { agentId: string | null }): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
-  const [shell, setShell] = useState<ShellState | null>(null)
-  const shellIdRef = useRef<string | null>(null)
+  const [state, setState] = useState<PtyState | null>(null)
 
   useEffect(() => {
     const eph = window.eph
     const host = hostRef.current
-    if (!eph || !host) return
+    if (!eph || !host || !agentId) {
+      setState(null)
+      return
+    }
 
     const term = new Terminal({ scrollback: 5000 })
     const fit = new FitAddon()
@@ -27,34 +35,24 @@ export function TerminalPanel(): ReactElement {
     fit.fit()
 
     const cleanups: Array<() => void> = [() => term.dispose()]
-    let cancelled = false
-
-    void (async () => {
-      // Subscribe before spawning so the first prompt bytes are never lost.
-      const id = await eph.pty.ensureDevShell()
-      if (cancelled) return
-      shellIdRef.current = id
-      cleanups.push(eph.pty.onData(id, (data) => term.write(data)))
-      cleanups.push(eph.pty.onExit(id, (code) => setShell({ kind: 'exited', code })))
-      cleanups.push(term.onData((data) => void eph.pty.write(id, data)).dispose)
-      setShell({ kind: 'running', id })
-      await eph.pty.resize(id, term.cols, term.rows)
-    })()
+    cleanups.push(eph.pty.onData(agentId, (data) => term.write(data)))
+    cleanups.push(eph.pty.onExit(agentId, (code) => setState({ kind: 'exited', code })))
+    cleanups.push(term.onData((data) => void eph.agents.send(agentId, data)).dispose)
+    setState({ kind: 'running' })
+    void eph.pty.resize(agentId, term.cols, term.rows)
 
     const onResize = (): void => {
       fit.fit()
-      const id = shellIdRef.current
-      if (id) void eph.pty.resize(id, term.cols, term.rows)
+      void eph.pty.resize(agentId, term.cols, term.rows)
     }
     const observer = new ResizeObserver(onResize)
     observer.observe(host)
     cleanups.push(() => observer.disconnect())
 
     return () => {
-      cancelled = true
       for (const cleanup of cleanups.reverse()) cleanup()
     }
-  }, [])
+  }, [agentId])
 
   return (
     <section
@@ -62,12 +60,10 @@ export function TerminalPanel(): ReactElement {
         display: 'flex',
         flexDirection: 'column',
         flex: 1,
-        minHeight: 0,
-        // Panel anatomy (UI-DESIGN §4): ink-900 2px → marble-50 seam → ink-700 1px
+        minWidth: 0,
         border: '2px solid var(--eph-ink-900)',
-        boxShadow:
-          'inset 0 0 0 1px var(--eph-marble-50), inset 0 0 0 2px var(--eph-ink-700), 2px 2px 0 var(--eph-ink-900)',
-        background: 'var(--eph-marble-100)'
+        boxShadow: '2px 2px 0 var(--eph-ink-900)',
+        background: 'var(--eph-marble-50)'
       }}
     >
       <header
@@ -75,37 +71,31 @@ export function TerminalPanel(): ReactElement {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: '8px',
+          borderBottom: '1px solid var(--eph-ink-700)',
           padding: '4px 8px',
-          borderBottom: '1px solid var(--eph-ink-700)'
+          fontFamily: 'var(--eph-face-display)',
+          fontSize: '8px'
         }}
       >
-        <span style={{ fontFamily: 'var(--eph-face-display)', fontSize: '8px' }}>
-          TERMINAL BENCH
-        </span>
+        <span>{agentId ?? 'TERMINAL'}</span>
         <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
-          {shell === null && 'starting…'}
-          {shell?.kind === 'running' && (
-            <>
-              {shell.id}{' '}
-              <button
-                onClick={() => void window.eph?.pty.kill(shell.id)}
-                style={{
-                  fontFamily: 'var(--eph-face-ui)',
-                  fontSize: '12px',
-                  color: 'var(--eph-marble-50)',
-                  background: 'var(--eph-wine)',
-                  border: '1px solid var(--eph-ink-900)',
-                  cursor: 'pointer'
-                }}
-              >
-                kill
-              </button>
-            </>
-          )}
-          {shell?.kind === 'exited' && (
-            <span style={{ color: 'var(--eph-status-blocked)' }}>exited (code {shell.code})</span>
+          {agentId === null && 'no agent selected'}
+          {state?.kind === 'running' && 'live'}
+          {state?.kind === 'exited' && (
+            <span style={{ color: 'var(--eph-status-ghost)' }}>exited ({state.code})</span>
           )}
         </span>
+        <button
+          type="button"
+          disabled={agentId === null}
+          onClick={() => {
+            if (agentId) void window.eph?.agents.kill(agentId)
+          }}
+          style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '12px' }}
+        >
+          Kill
+        </button>
       </header>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, padding: '4px' }} />
     </section>

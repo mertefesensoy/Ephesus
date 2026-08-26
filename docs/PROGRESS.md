@@ -147,7 +147,7 @@ in order, one package per session-commit; tests are part of each package).
       app). Accept/drift paths are covered over the identical transport by the
       integration suite; the accepted path gets its live proof with the spawn wiring
       in M1.4.*
-- [ ] **M1.4 Claude Code adapter** — `src/main/engines/claude.ts`: spawn plan
+- [x] **M1.4 Claude Code adapter** — `src/main/engines/claude.ts`: spawn plan
       (argv/cwd/env incl. `EPH_AGENT_ID`/`EPH_HOOK_TOKEN`); hook shim `shims/eph-hook`
       wired via `<cwd>/.claude/settings.local.json` (backup first, uninstall function,
       local-variant only per ADR-0009); interrupt = Escape; version probe; missing
@@ -297,9 +297,76 @@ in order, one package per session-commit; tests are part of each package).
       exactly as found. The risk note is honoured: the per-PR run uses the fake
       engine, and claude's live demonstration is the M1.4 real-`claude` run recorded
       above.*
-- [ ] **M1 exit review** — UC-03 demo with a real `claude`: file edit → shelf walk →
+- [x] **M1 exit review** — UC-03 demo with a real `claude`: file edit → shelf walk →
       desk → idle; typing mid-run queues then flushes; conformance suite green for
       fake + claude. Evidence recorded here.
+
+### M1 exit review (2026-08-26) — verdict: DONE
+
+Both exit criteria were verified **by running them**, not by reading code.
+
+**Criterion 1 — "SRS UC-03 demo: spawn a real `claude`, ask it to edit a file,
+watch shelf walk → desk → idle; type into it mid-run."** MET. One unattended run
+against `claude 2.1.195`, driven entirely through `window.eph`:
+
+```
+UC03 spawned agent.mason claude 2.1.195 native
+UC03 avatar alert at desk
+UC03 avatar thinking at shelf walking          ← file tool → shelf
+UC03 queue HELD:Also append a second line saying: reviewed by Mason. agent is mid-turn
+UC03 mid-run typing QUEUED                     ← typed mid-run, held visibly
+UC03 avatar thinking at desk walking
+UC03 avatar thinking at shelf walking
+UC03 avatar working at shelf                   ← arrived, tool in use
+UC03 avatar thinking at desk walking
+UC03 avatar success at desk
+UC03 queue FLUSHED                             ← released the moment it was free
+UC03 avatar idle at desk
+UC03 avatar alert at desk                      ← took the queued instruction
+UC03 avatar thinking at shelf walking → working at shelf → success at desk → idle at desk
+```
+
+And the file on disk proves both instructions actually landed:
+
+```
+checkout total is wrong when cart is empty
+triaged                   ← the first prompt
+reviewed by Mason         ← the instruction typed mid-run and queued
+```
+
+Zero hook rejections and zero drift warnings across the run.
+
+**Criterion 2 — "conformance suite passes for claude + fake."** MET.
+`npx vitest run test/conformance` → 32 passed (32), covering both adapters.
+
+**Gate:** `npm run typecheck` PASS · `npm run lint` PASS (zero warnings) ·
+`npm test` 374 passed / 3 skipped. CI green on every M1 commit.
+
+**S-suites owed by M1:** none. IMPLEMENTATION names S-BLACKOUT, S-LIVELOCK,
+S-BOUNCE, S-WAKE and S-STOPLOOP against M2, not M1.
+
+**Debt swept at close:** zero TODO/FIXME/HACK markers in `src|shims|scripts|test|prompts`.
+Three gaps were found by the review and fixed before the verdict:
+1. M1.4's checkbox had never been ticked though its evidence was recorded.
+2. The two M0-audit deferrals (`pty:ensure-dev-shell`, `pty:kill`) were still
+   live. Both are now retired: the terminal panel attaches to the selected
+   agent's PTY (UC-03 step 2) and killing goes through `agents:kill`.
+3. `ptyIdSchema` rejected dots, so every `resize` for `agent.mason` would have
+   failed once the terminal moved onto a real agent. Widened, with a test.
+Docs re-synced in the same pass: SDD §1.1 now names `agents.ts`, `avatars.ts`,
+`commands.ts` and `prompts.ts`, and §5 names the `avatars`/`commands`/`hooks`
+groups and the new push channels.
+
+**Carried into M2 (not M1 blockers), recorded so they are not lost:**
+- A *force-killed* harness leaves `settings.local.json` in the agent's cwd —
+  graceful close restores it (proven), but there is no startup reconcile. SDD
+  §10 gives crash reconcile to M2; this belongs with it.
+- Claude Code's own tool-permission dialog and first-run folder-trust prompt
+  stall an agent with no harness-visible signal, because the engine's
+  `Notification` hook is deliberately unmapped until M3 wires the native gate
+  choke point (SDD §9). Observed live during the review.
+- `stop.pending` is always false until Hermes lands (M2), so the ADR-0013
+  autonomy branch of SDD §6 is reachable but never taken yet.
 
 ## M2 — The Agora + Hermes
 
