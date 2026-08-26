@@ -24,7 +24,10 @@ is not shipped.**
 | Pixelify Sans (`@fontsource/pixelify-sans`, latin-400) | npm-pinned | Stefie Justprince | SIL OFL 1.1 | yes | UI body & labels (UI-DESIGN §3) |
 | IBM Plex Mono (`@fontsource/ibm-plex-mono`, latin-400) | npm-pinned | IBM / Bold Monday | SIL OFL 1.1 | yes | Data, logs, Odeon artifacts (UI-DESIGN §3) |
 
-The floor's tiles and citizens remain procedural (no tileset installed yet).
+| Kenney *Roguelike/RPG pack* (`kenney-roguelike-rpg.png`) | 2023 pack | Kenney (kenney.nl) | CC0 1.0 (license file in pack) | yes (public domain) | Staged in the tileset drop — interim floor sheets pending Architect review; LimeZu *Modern Interiors* replaces them after purchase |
+| Kenney *Roguelike Indoors* (`kenney-roguelike-indoors.png`) | 2023 pack | Kenney (kenney.nl) | CC0 1.0 (license file in pack) | yes (public domain) | Same as above |
+
+Citizens remain procedural (never third-party — rule 3).
 
 ## Tileset drop (gitignored)
 
