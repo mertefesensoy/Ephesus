@@ -43,6 +43,7 @@ import { buildEnvelope, postHookEvent } from '../../../shims/hook-client.mjs'
  *   { "kind": "wait",         "ms": 25 }
  *   { "kind": "read-inbox",   "consume": false }       echo inbox message ids
  *   { "kind": "write-outbox", "message": {...} }       atomic temp+rename write
+ *   { "kind": "echo-env",     "name": "EPH_IDENTITY" }  prints an env var
  *   { "kind": "exit",         "code": 0 }
  *
  * Machine-readable lines are prefixed `[fake-engine]`; `stdout` steps are
@@ -54,11 +55,12 @@ const MARKER = '[fake-engine]'
 /** The interrupt key every engine in the roster uses (ADR-0009 `interrupt()`). */
 const ESCAPE = String.fromCharCode(0x1b)
 
-const STEP_KINDS = ['stdout', 'hook', 'wait', 'read-inbox', 'write-outbox', 'exit']
+const STEP_KINDS = ['stdout', 'hook', 'wait', 'read-inbox', 'write-outbox', 'echo-env', 'exit']
 
 /**
  * @typedef {{ kind: string, text?: unknown, event?: unknown, payload?: unknown,
- *             ms?: unknown, consume?: unknown, message?: unknown, code?: unknown }} Step
+ *             ms?: unknown, consume?: unknown, message?: unknown, name?: unknown,
+ *             code?: unknown }} Step
  * @typedef {{ steps: Step[], onPrompt: Step[], onInterrupt: Step[] }} Script
  */
 
@@ -208,6 +210,15 @@ async function runStep(step) {
       const file = path.join(outbox, `${id}.json`)
       writeFileAtomic(file, `${JSON.stringify(message, null, 2)}\n`)
       say(`outbox-wrote ${id}.json`)
+      return
+    }
+
+    case 'echo-env': {
+      // How the conformance suite observes identity injection *in session*: the
+      // agent itself reports what the harness put in its environment.
+      const name = String(step.name ?? '')
+      const value = process.env[name]
+      say(value === undefined ? `env-missing ${name}` : `env ${name}=${value}`)
       return
     }
 

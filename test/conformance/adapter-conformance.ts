@@ -1,0 +1,267 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { ENGINE_IDS, HOOK_SUPPORTS, HOOK_SUPPORT_RANK } from '../../src/shared/engines'
+import { HOOK_EVENTS } from '../../src/shared/hooks'
+import type { AgentSpawnConfig, EngineAdapter } from '../../src/main/engines'
+
+/**
+ * The engine-adapter conformance suite (TEST-STRATEGY §5, NFR-12).
+ *
+ * This is the containment wall ADR-0009 describes: Ephesus inherits every
+ * engine's quirks, so the price of adding an engine is passing this table. It
+ * runs per-PR against the fake adapter and the claude adapter; the claude
+ * adapter's *live* half (spawning a real binary) is nightly territory and is
+ * not run here.
+ *
+ * Cases are written against the surface, never a mechanism. "Identity injection
+ * observable" does not care whether an adapter uses argv, env or a context
+ * file — only that the identity is demonstrably in the plan the agent will run
+ * under, which is what SDD §3 means by "conformance-tested for effect, not
+ * mechanism".
+ */
+
+export interface ConformanceSubject {
+  /** Name in the test output. */
+  readonly name: string
+  /** Built fresh per case, so no case can leak state into another. */
+  make(): EngineAdapter
+  /**
+   * Files this adapter is expected to write into the agent's cwd, relative to
+   * it. Every one must be a local/gitignored variant (ADR-0009).
+   */
+  readonly settingsRel: readonly string[]
+  /** True when the adapter is expected to wire every harness hook event. */
+  readonly wiresEveryEvent: boolean
+}
+
+const temps: string[] = []
+
+afterEach(() => {
+  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+export interface ConformanceRig {
+  readonly cfg: AgentSpawnConfig
+  readonly cwd: string
+  readonly root: string
+}
+
+/** A temp agent cwd plus a materialized identity — never a real repo. */
+export function conformanceRig(): ConformanceRig {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-conf-'))
+  temps.push(root)
+  const cwd = path.join(root, 'repo')
+  const agentDir = path.join(root, 'agora', 'agents', 'agent.subject')
+  fs.mkdirSync(cwd, { recursive: true })
+  fs.mkdirSync(agentDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(agentDir, 'identity.md'),
+    '# Subject\n\nRole: conformance-subject.\nSecret handshake: pomegranate-42.\n',
+    'utf8'
+  )
+  fs.writeFileSync(
+    path.join(root, 'agora', 'PROTOCOL.md'),
+    '# Company protocol\n\nWrite only inside your own agent directory.\n',
+    'utf8'
+  )
+  return {
+    root,
+    cwd,
+    cfg: {
+      agentId: 'agent.subject',
+      hookToken: 'conformance-token',
+      hookEndpoint: path.join(root, 'events.sock'),
+      cwd,
+      envGrants: {},
+      identityPath: path.join(agentDir, 'identity.md'),
+      protocolPath: path.join(root, 'agora', 'PROTOCOL.md')
+    }
+  }
+}
+
+/** Everything in a spawn plan an injected identity could plausibly reach. */
+function planHaystack(adapter: EngineAdapter, cfg: AgentSpawnConfig): string {
+  const plan = adapter.spawnArgs(cfg)
+  return [
+    ...plan.argv,
+    ...Object.values(plan.env),
+    ...plan.settings.map((injection) => injection.contents)
+  ].join('\n')
+}
+
+export function runAdapterConformance(subject: ConformanceSubject): void {
+  describe(`conformance: ${subject.name}`, () => {
+    describe('declared surface (ADR-0009)', () => {
+      it('declares a known engine id and a known hook grade', () => {
+        const adapter = subject.make()
+        expect(ENGINE_IDS).toContain(adapter.id)
+        expect(HOOK_SUPPORTS).toContain(adapter.hooks)
+        expect(HOOK_SUPPORT_RANK[adapter.hooks]).toBeTypeOf('number')
+      })
+
+      it('describes a binary with an install command and a version probe', () => {
+        const spec = subject.make().binary()
+        expect(spec.name.length).toBeGreaterThan(0)
+        expect(spec.install.command.length).toBeGreaterThan(0)
+        expect(spec.versionProbe.command.length).toBeGreaterThan(0)
+        expect(spec.parseVersion('')).toBeNull()
+      })
+
+      it('offers an interrupt key with real bytes and a label to show', () => {
+        const key = subject.make().interrupt()
+        expect(key.bytes.length).toBeGreaterThan(0)
+        expect(key.label.length).toBeGreaterThan(0)
+      })
+
+      it('reads transcripts without inventing facts, when it declares them', async () => {
+        const adapter = subject.make()
+        if (!adapter.transcripts) {
+          // ADR-0009 makes this optional; a missing reader is a visible product
+          // tier, not a hidden failure. Nothing to assert but the absence.
+          expect(adapter.transcripts).toBeUndefined()
+          return
+        }
+        const rig = conformanceRig()
+        const dir = adapter.transcripts.transcriptDir(rig.cfg)
+        expect(path.isAbsolute(dir)).toBe(true)
+
+        expect(await adapter.transcripts.read(path.join(rig.root, 'nope.jsonl'))).toEqual([])
+
+        const file = path.join(rig.root, 'transcript.jsonl')
+        fs.writeFileSync(
+          file,
+          [
+            JSON.stringify({
+              sessionId: 's-1',
+              model: 'test-model',
+              inTokens: 10,
+              outTokens: 20,
+              costUsd: 0.5
+            }),
+            'not json at all',
+            JSON.stringify({ sessionId: 's-2', model: 'test-model' }),
+            ''
+          ].join('\n'),
+          'utf8'
+        )
+        const facts = await adapter.transcripts.read(file)
+        // The malformed line and the incomplete row yield nothing; the good row
+        // yields exactly what it said.
+        expect(facts).toEqual([
+          { sessionId: 's-1', model: 'test-model', inTokens: 10, outTokens: 20, costUsd: 0.5 }
+        ])
+      })
+    })
+
+    describe('spawn plan (SDD §3)', () => {
+      it('carries the two harness variables and the agent cwd', () => {
+        const rig = conformanceRig()
+        const plan = subject.make().spawnArgs(rig.cfg)
+
+        expect(plan.cwd).toBe(rig.cwd)
+        expect(plan.argv.length).toBeGreaterThan(0)
+        expect(plan.env['EPH_AGENT_ID']).toBe('agent.subject')
+        expect(plan.env['EPH_HOOK_TOKEN']).toBe('conformance-token')
+      })
+
+      it('passes declared grants through and nothing undeclared', () => {
+        const rig = conformanceRig()
+        const cfg = { ...rig.cfg, envGrants: { GRANTED_TOKEN: 'granted-value' } }
+        const plan = subject.make().spawnArgs(cfg)
+
+        expect(plan.env['GRANTED_TOKEN']).toBe('granted-value')
+        // A secret that was never granted must not appear anywhere in the plan.
+        expect(JSON.stringify(plan)).not.toContain('UNGRANTED')
+      })
+
+      it('makes identity injection observable in the plan (effect, not mechanism)', () => {
+        const rig = conformanceRig()
+        const haystack = planHaystack(subject.make(), rig.cfg)
+
+        expect(haystack).toContain('pomegranate-42')
+        expect(haystack).toContain('Write only inside your own agent directory')
+      })
+
+      it('refuses to build a plan when the identity source is missing', () => {
+        const rig = conformanceRig()
+        fs.rmSync(rig.cfg.identityPath, { force: true })
+
+        expect(() => subject.make().injectIdentity(rig.cfg)).toThrow()
+        expect(() => subject.make().spawnArgs(rig.cfg)).toThrow()
+      })
+    })
+
+    describe('settings-file hygiene (TEST-STRATEGY §5)', () => {
+      it('writes only local variants, and only inside the agent cwd', () => {
+        const rig = conformanceRig()
+        const plan = subject.make().wireHooks(rig.cfg)
+
+        expect(plan.injections.map((i) => path.relative(rig.cwd, i.path))).toEqual([
+          ...subject.settingsRel
+        ])
+        for (const injection of plan.injections) {
+          const relative = path.relative(rig.cwd, injection.path)
+          expect(relative.startsWith('..')).toBe(false)
+          expect(path.basename(injection.path)).toContain('.local.')
+        }
+      })
+
+      it('backs up a pre-existing file and restores it byte-for-byte', async () => {
+        const rig = conformanceRig()
+        const target = path.join(rig.cwd, subject.settingsRel[0] ?? '')
+        const original = '{\r\n  "mine": true\r\n}\r\n'
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, original, 'utf8')
+        const before = fs.readFileSync(target)
+
+        const plan = subject.make().wireHooks(rig.cfg)
+        await plan.install()
+        expect(fs.readFileSync(target).equals(before)).toBe(false)
+
+        await plan.uninstall()
+        expect(fs.readFileSync(target).equals(before)).toBe(true)
+      })
+
+      it('leaves nothing behind when there was nothing before', async () => {
+        const rig = conformanceRig()
+        const plan = subject.make().wireHooks(rig.cfg)
+        const before = fs.readdirSync(rig.cwd)
+
+        await plan.install()
+        expect(fs.readdirSync(rig.cwd)).not.toEqual(before)
+
+        await plan.uninstall()
+        expect(fs.readdirSync(rig.cwd)).toEqual(before)
+      })
+
+      it('is safe to uninstall twice, or without installing', async () => {
+        const rig = conformanceRig()
+        const plan = subject.make().wireHooks(rig.cfg)
+        await expect(plan.uninstall()).resolves.toBeUndefined()
+        await plan.install()
+        await plan.uninstall()
+        await expect(plan.uninstall()).resolves.toBeUndefined()
+      })
+    })
+
+    describe('hook grade honesty (FR-2.3)', () => {
+      it('wires enough events to back the grade it declares', () => {
+        const adapter = subject.make()
+        if (!subject.wiresEveryEvent) return
+
+        const rig = conformanceRig()
+        const wiring = adapter
+          .wireHooks(rig.cfg)
+          .injections.map((injection) => injection.contents)
+          .join('\n')
+
+        // A `native` grade claims the engine reports the whole lifecycle. If an
+        // event is not wired, the grade is a lie the agent card would repeat.
+        for (const event of HOOK_EVENTS) expect(wiring).toContain(event)
+        expect(adapter.hooks).toBe('native')
+      })
+    })
+  })
+}

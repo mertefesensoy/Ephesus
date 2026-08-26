@@ -274,12 +274,29 @@ in order, one package per session-commit; tests are part of each package).
       Text typed mid-run was visibly held with a reason the Architect can act on,
       flushed the moment the agent finished, and the agent then actually took a new
       turn on it. Zero hook rejections and zero drift warnings across the run.*
-- [ ] **M1.7 Conformance suite v1** — table-driven suite every adapter must pass
+- [x] **M1.7 Conformance suite v1** — table-driven suite every adapter must pass
       (TEST-STRATEGY §5): spawn/interrupt/kill lifecycle, identity injection
       observable in-session, hook grade honesty (declared grade matches demonstrated
       events), settings-file hygiene, transcript reader vs fixtures — green for
       fake + claude adapters. *Docs: TEST-STRATEGY §5. Risk: suite must run per-PR
       against the FAKE engine; claude live checks are nightly-only.*
+      *Evidence: `typecheck && lint && test` green — 374 passed / 3 skipped (32 new).
+      `npx vitest run test/conformance --reporter=verbose` lists 32 green cases: the
+      13-case table run twice (fake engine + claude code) plus 6 behavioral cases the
+      fake engine carries per-PR. Table: declared surface, binary/install/probe,
+      interrupt key, transcript reader against fixtures, spawn-plan harness variables,
+      grant pass-through with nothing undeclared, identity observable in the plan,
+      refusal when identity is missing, local-variant-only settings inside the cwd,
+      byte-for-byte backup/restore, nothing left behind, idempotent uninstall, and
+      grade-backing wiring. Behavioral (real spawned process, real socket): spawns
+      from its own plan · interruptible by its own key · identity observable
+      IN-SESSION (the running agent printed back `pomegranate-42` from its own
+      environment) · demonstrates the grade it declares · **CATCHES a dishonest
+      grade** (an adapter claiming `native` while reporting two of eight events is
+      caught — the check is proven to bite, not vacuous) · leaves the agent cwd
+      exactly as found. The risk note is honoured: the per-PR run uses the fake
+      engine, and claude's live demonstration is the M1.4 real-`claude` run recorded
+      above.*
 - [ ] **M1 exit review** — UC-03 demo with a real `claude`: file edit → shelf walk →
       desk → idle; typing mid-run queues then flushes; conformance suite green for
       fake + claude. Evidence recorded here.
