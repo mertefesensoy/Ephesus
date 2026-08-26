@@ -85,6 +85,12 @@ export interface HermesOptions {
   isIdle?(agentId: string): boolean
   /** Raised when a session's block count looks pathological (ADR-0011, M3). */
   onPathology?(agentId: string, blocks: number): void
+  /**
+   * Raised when a sweep the *watcher* started failed. Callers who await `sweep()`
+   * get the rejection; nobody awaits the watcher's, so without this the error
+   * would be an `unhandledRejection` and take the main process down.
+   */
+  onSweepError?(err: unknown): void
 }
 
 /** What the harness tells the engine to do when a turn ends (ADR-0013). */
@@ -223,7 +229,9 @@ export class Hermes {
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
       this.debounces.delete('sweep')
-      void this.sweep()
+      // Nobody is awaiting this one, so it must absorb its own failure: a
+      // delivery error is a reported degradation, never a dead harness.
+      this.sweep().catch((err: unknown) => this.options.onSweepError?.(err))
     }, WATCH_DEBOUNCE_MS)
     timer.unref?.()
     this.debounces.set('sweep', timer)
@@ -263,7 +271,7 @@ export class Hermes {
 
     if (delivered.length > 0 || rejected.length > 0) {
       // Durability is queued, not awaited: delivery has already happened.
-      void this.agora.commit(`hermes: deliver ${delivered.length}, reject ${rejected.length}`)
+      this.agora.commitSoon(`hermes: deliver ${delivered.length}, reject ${rejected.length}`)
     }
     return { delivered, rejected }
   }
@@ -562,7 +570,7 @@ export class Hermes {
         this.cursorPath(agentId),
         `${JSON.stringify({ schemaVersion: 1, lastProcessed }, null, 2)}\n`
       )
-      void this.agora.commit(`hermes: ${agentId} consumed ${consumed.length} message(s)`)
+      this.agora.commitSoon(`hermes: ${agentId} consumed ${consumed.length} message(s)`)
     }
 
     await this.options.faults?.('after-consume')

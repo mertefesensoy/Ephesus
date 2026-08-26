@@ -605,7 +605,27 @@ was derived correctly by the sender, and the reply carried `in_reply_to` back to
 the request.
 
 **Gate:** `npm run typecheck` PASS · `npm run lint` PASS (zero warnings) ·
-`node scripts/check-invariants.cjs` PASS · `npm test` 581 passed / 3 skipped.
+`node scripts/check-invariants.cjs` PASS · `npm test` 586 passed / 3 skipped
+(run twice — see below for why).
+
+**The review's own finding — CI was red when this verdict was first written.**
+The run went red on a build where *all 581 tests passed*: one unhandled
+rejection escaping S-BLACKOUT failed the whole run. It was not a test artifact.
+Four call sites queued durability as `void agora.commit(...)`, which attaches no
+rejection handler, so a commit that exhausted its retry budget crashed the
+process — in Electron, the whole harness — over exactly the fault ADR-0004's
+queue exists to absorb. Two more instances of the same defect sat in
+fault-reachable paths: the Hermes watcher's `void this.sweep()` (and `sweep()`
+provably rejects) and the pty exit handler's `void this.handleExit(...)`.
+
+Fixed by `Agora.commitSoon()`, `onSweepError` and `onExitError` — the failure is
+recorded and reported to the existing degradation surface instead of taking the
+company down. Three regression tests, each with a `process.on(
+'unhandledRejection')` probe. Full write-up:
+[2026-08-27-m2-company-planes.md](implementations/2026-08-27-m2-company-planes.md)
+§ Close-out fix.
+
+The milestone is closed on the fixed tree, not the red one.
 
 **Debt swept at close:** zero TODO/FIXME/HACK markers in
 `src|shims|scripts|test|prompts`; every M2 package ticked with evidence. Doc

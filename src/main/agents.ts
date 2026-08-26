@@ -81,6 +81,12 @@ export interface AgentManagerOptions {
    * Agora, and one place owns the write.
    */
   onRosterChange?(agentId: string, entry: RegistryEntry | null): void
+  /**
+   * Raised when tearing an exited agent down failed. The exit event is
+   * fire-and-forget by nature, so this path has no caller to reject to — and an
+   * unhandled rejection here would kill the harness over one stuck file handle.
+   */
+  onExitError?(agentId: string, err: unknown): void
 }
 
 interface LiveAgent {
@@ -97,7 +103,9 @@ export class AgentManager {
   constructor(private readonly options: AgentManagerOptions) {
     this.probe = options.probe ?? probeVersion
     options.spawner.onExit((id, exitCode) => {
-      void this.handleExit(id, exitCode)
+      this.handleExit(id, exitCode).catch((err: unknown) => {
+        this.options.onExitError?.(id, err)
+      })
     })
   }
 

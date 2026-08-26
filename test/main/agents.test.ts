@@ -76,7 +76,10 @@ interface Rig {
   readonly changes: string[]
 }
 
-async function rig(probe: VersionProber = async () => '2.1.195'): Promise<Rig> {
+async function rig(
+  probe: VersionProber = async () => '2.1.195',
+  onExitError?: (agentId: string, err: unknown) => void
+): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agents-'))
   temps.push(home)
   const repo = path.join(home, 'repo')
@@ -101,6 +104,7 @@ async function rig(probe: VersionProber = async () => '2.1.195'): Promise<Rig> {
     prompts,
     agoraRoot: path.join(home, 'agora'),
     probe,
+    onExitError,
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -122,6 +126,43 @@ async function rig(probe: VersionProber = async () => '2.1.195'): Promise<Rig> {
     })
   }
 }
+
+describe('AgentManager — an exit nobody awaits', () => {
+  it('reports a failed teardown instead of killing the harness', async () => {
+    // The pty exit event is fire-and-forget: there is no caller for handleExit
+    // to reject to. Before the guard this was an unhandledRejection, so one
+    // stuck file handle at teardown could take the whole harness down.
+    const seen: { agentId: string; err: unknown }[] = []
+    let probes = 0
+    const { manager, spawner, request } = await rig(
+      async () => {
+        probes += 1
+        if (probes === 1) return null // no binary yet: the agent goes to `installing`
+        throw new Error('probe blew up during teardown')
+      },
+      (agentId, err) => seen.push({ agentId, err })
+    )
+    expect((await manager.spawn(request)).lifecycle).toBe('installing')
+
+    const unhandled: unknown[] = []
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', capture)
+    try {
+      await spawner.exit('agent.mason', 0)
+      await new Promise((resolve) => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      process.off('unhandledRejection', capture)
+    }
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.agentId).toBe('agent.mason')
+    expect((seen[0]?.err as Error).message).toMatch(/probe blew up/)
+    expect(unhandled).toEqual([])
+  })
+})
 
 describe('AgentManager — spawn (FR-1.1, SDD §3)', () => {
   it('materializes identity and protocol, installs settings, and starts the process', async () => {

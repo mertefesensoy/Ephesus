@@ -48,6 +48,7 @@ async function rig(
     isIdle?: (agentId: string) => boolean
     nudge?: (agentId: string, text: string) => void
     onPathology?: (agentId: string, blocks: number) => void
+    onSweepError?: (err: unknown) => void
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-hermes-'))
@@ -321,6 +322,43 @@ describe('Hermes — crash safety (S-BLACKOUT primitives)', () => {
     await r.hermes.sweep()
     expect(r.inbox('agent.b')).toEqual([`${sent.id}.json`])
     expect(await r.hermes.consumeInbox('agent.b')).toHaveLength(1)
+  })
+})
+
+describe('Hermes — a sweep nobody awaits', () => {
+  it('reports a watcher-triggered failure instead of killing the harness', async () => {
+    // The watcher fires this sweep, so there is no caller to reject to. Before
+    // the guard, a failing delivery here was an unhandledRejection — fatal to
+    // the Electron main process, over a fault the design says to absorb.
+    const seen: unknown[] = []
+    const r = await rig({
+      faults: (point) => {
+        if (point === 'before-deliver') throw new Error('watcher-time blackout')
+      },
+      onSweepError: (err) => seen.push(err)
+    })
+    r.hermes.watch('agent.a')
+    r.hermes.start()
+
+    const unhandled: unknown[] = []
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', capture)
+    try {
+      r.send('agent.a', message())
+      for (let i = 0; i < 100 && seen.length === 0; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      await new Promise((resolve) => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      process.off('unhandledRejection', capture)
+    }
+
+    expect(seen).toHaveLength(1)
+    expect((seen[0] as Error).message).toMatch(/watcher-time blackout/)
+    expect(unhandled).toEqual([])
   })
 })
 

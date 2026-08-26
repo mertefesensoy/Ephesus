@@ -3,7 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { Agora, PROTOCOL_REL, commitMessage, type FaultPoint } from '../../src/main/agora'
+import {
+  Agora,
+  PROTOCOL_REL,
+  commitMessage,
+  type CommitFailure,
+  type FaultPoint
+} from '../../src/main/agora'
 import { ExecGitRunner, type GitResult, type GitRunner } from '../../src/main/git'
 import { PromptStore } from '../../src/main/prompts'
 
@@ -49,6 +55,7 @@ function makeAgora(
     faults?: (point: FaultPoint) => void | Promise<void>
     maxAttempts?: number
     backoffMs?: number
+    onCommitError?: (failure: CommitFailure) => void
   } = {}
 ): Agora {
   return new Agora({
@@ -218,6 +225,100 @@ describe('Agora — the single committer queue', () => {
 
     breakIt = false
     await expect(agora.commit('succeeds')).resolves.toMatchObject({ attempts: 1 })
+  })
+})
+
+describe('Agora — a commit nobody awaits', () => {
+  /**
+   * This is a CI regression. Every caller that queues durability without
+   * awaiting it used to write `void agora.commit(...)`. `void` does not attach a
+   * rejection handler, so when the retry budget ran out the rejection became an
+   * `unhandledRejection` — which fails a vitest run and, in the Electron main
+   * process, terminates the harness. A git failure is exactly the fault ADR-0004
+   * says to absorb, so it must never be the thing that kills the company.
+   */
+  /** A rig whose `commit` starts working and breaks on demand. */
+  function failingRig(onCommitError?: (failure: CommitFailure) => void): Rig & {
+    arm(): void
+  } {
+    const inner = new ExecGitRunner()
+    let armed = false
+    const broken: GitRunner = {
+      run: async (cwd, args) => {
+        if (args[0] === 'commit' && armed) {
+          return { ok: false, stdout: '', stderr: 'fatal: cannot commit', code: 128 }
+        }
+        return inner.run(cwd, args)
+      }
+    }
+    return {
+      ...rig({ git: broken, maxAttempts: 1, onCommitError }),
+      arm: () => {
+        armed = true
+      }
+    }
+  }
+
+  async function settle(): Promise<void> {
+    // Two turns of the macrotask queue: Node reports an unhandled rejection
+    // after the microtask checkpoint, so anything unreported by now is handled.
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+
+  it('records the give-up instead of crashing the process', async () => {
+    const seen: CommitFailure[] = []
+    const built = failingRig((failure) => seen.push(failure))
+    await built.agora.ensureRepo()
+    built.arm()
+    fs.writeFileSync(path.join(built.root, 'f.txt'), 'f', 'utf8')
+
+    const unhandled: unknown[] = []
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', capture)
+    try {
+      built.agora.commitSoon('deliver f')
+      await built.agora.drained()
+      await settle()
+    } finally {
+      process.off('unhandledRejection', capture)
+    }
+
+    // It really did fail — so the absence of an unhandled rejection is the fix
+    // working, not the failure path going unexercised.
+    expect(built.agora.commitFailures()).toEqual([
+      { subject: 'deliver f', reason: expect.stringMatching(/cannot commit/) }
+    ])
+    expect(seen).toEqual(built.agora.commitFailures())
+    expect(unhandled).toEqual([])
+  })
+
+  it('still lands the commit on the happy path, and records nothing', async () => {
+    const { agora, root } = rig()
+    await agora.ensureRepo()
+    fs.writeFileSync(path.join(root, 'g.txt'), 'g', 'utf8')
+
+    agora.commitSoon('deliver g')
+    await agora.drained()
+
+    expect(agora.commitFailures()).toEqual([])
+    expect(await agora.isDirty()).toBe(false)
+  })
+
+  it('keeps committing after one queued commit gave up', async () => {
+    const built = failingRig()
+    await built.agora.ensureRepo()
+    built.arm()
+    fs.writeFileSync(path.join(built.root, 'h.txt'), 'h', 'utf8')
+
+    built.agora.commitSoon('gives up')
+    await built.agora.drained()
+    await settle()
+
+    expect(built.agora.commitFailures()).toHaveLength(1)
+    await expect(built.agora.commit('awaited after a give-up')).rejects.toThrow(/cannot commit/)
   })
 })
 

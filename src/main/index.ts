@@ -160,7 +160,12 @@ void app.whenReady().then(async () => {
 
   // The Agora is a git repo committed only by this process (ADR-0004). It is
   // reconciled before anything can write to it.
-  agora = new Agora({ root: path.join(home.root, 'agora'), prompts })
+  agora = new Agora({
+    root: path.join(home.root, 'agora'),
+    prompts,
+    onCommitError: (failure) =>
+      console.warn(`agora: gave up committing "${failure.subject}": ${failure.reason}`)
+  })
   await agora.ensureRepo()
   const reconciled = await agora.reconcile()
   if (reconciled.sha) console.info(`agora reconciled at ${reconciled.sha.slice(0, 8)}`)
@@ -185,6 +190,8 @@ void app.whenReady().then(async () => {
     },
     onBounced: ({ original, reason }) =>
       console.warn(`hermes bounce [${original.id}] to "${original.to}": ${reason}`),
+    onSweepError: (err: unknown) =>
+      console.warn(`hermes sweep failed: ${err instanceof Error ? err.message : String(err)}`),
     onRejected: ({ file, reason }) => console.warn(`hermes rejected ${file}: ${reason}`)
   })
   hermes.start()
@@ -195,6 +202,10 @@ void app.whenReady().then(async () => {
     spawner: ptyManager,
     prompts,
     agoraRoot: agora.root,
+    onExitError: (agentId, err) =>
+      console.warn(
+        `agent teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
+      ),
     onRosterChange: (agentId, entry) => {
       if (!agora) return
       const registry = agora.registry()
@@ -202,14 +213,14 @@ void app.whenReady().then(async () => {
       if (entry) agents[agentId] = entry
       else delete agents[agentId]
       agora.writeRegistry({ ...registry, agents })
-      void agora.commit(`roster: ${agentId}`)
+      agora.commitSoon(`roster: ${agentId}`)
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
       // Durability is a commit, and it is queued rather than awaited: delivery
       // latency must never wait on git (ADR-0004).
-      void agora?.commit(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
+      agora?.commitSoon(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
     },
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)

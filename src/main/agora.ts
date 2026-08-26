@@ -52,6 +52,22 @@ export interface AgoraOptions {
   readonly backoffMs?: number
   /** Called for every commit the queue lands, for the event log (M2.2). */
   onCommit?(result: CommitOutcome): void
+  /**
+   * Called when a *queued* commit finally gave up. Contract: this must not
+   * append to the log or queue more work — the failing path is git itself, and
+   * a handler that commits would recurse. Report it and move on.
+   */
+  onCommitError?(failure: CommitFailure): void
+}
+
+/**
+ * A fire-and-forget commit that failed after every retry. Recorded rather than
+ * thrown: losing durability is a degradation the Architect must see, not a
+ * reason to take the harness down (invariant §7).
+ */
+export interface CommitFailure {
+  readonly subject: string
+  readonly reason: string
 }
 
 export interface CommitOutcome {
@@ -74,6 +90,9 @@ export const REGISTRY_REL = 'registry.json'
 export const TASKS_REL = 'tasks.json'
 export const LOG_REL = 'log.jsonl'
 
+/** How many give-up failures to keep for the UI before dropping the oldest. */
+const MAX_RECORDED_FAILURES = 50
+
 /**
  * A schema'd Agora file that failed to parse. Surfaced, never repaired: the
  * file is left exactly as found and the company runs on the empty default with
@@ -92,6 +111,7 @@ export class Agora {
   private pending: Pending[] = []
   private readonly log: EventLog
   private readonly warnings: AgoraWarning[] = []
+  private readonly failures: CommitFailure[] = []
 
   constructor(private readonly options: AgoraOptions) {
     this.git = options.git ?? new ExecGitRunner()
@@ -259,6 +279,33 @@ export class Agora {
         () => this.drain()
       )
     })
+  }
+
+  /**
+   * Queues a commit nobody is going to await. Use this, never `void commit(...)`:
+   * an unawaited rejected promise is an `unhandledRejection`, which takes the
+   * whole main process down — so a git failure, the one thing ADR-0004's retry
+   * queue exists to absorb, would kill the harness instead of degrading it.
+   * Here the failure is recorded and reported, and the company keeps running on
+   * files that are correct on disk but not yet durable in history.
+   */
+  commitSoon(subject: string): void {
+    this.commit(subject).catch((err: unknown) => {
+      const failure: CommitFailure = {
+        subject,
+        reason: err instanceof Error ? err.message : String(err)
+      }
+      // Bounded: a harness that has been failing to commit for hours must not
+      // also leak memory. The oldest failure is the least interesting one.
+      this.failures.push(failure)
+      if (this.failures.length > MAX_RECORDED_FAILURES) this.failures.shift()
+      this.options.onCommitError?.(failure)
+    })
+  }
+
+  /** Queued commits that gave up this run — a visible state, like `fileWarnings`. */
+  commitFailures(): readonly CommitFailure[] {
+    return this.failures
   }
 
   /** Resolves when the queue is idle — for shutdown and for tests. */
