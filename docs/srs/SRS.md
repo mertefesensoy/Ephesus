@@ -1,0 +1,314 @@
+# Ephesus — Software Requirements Specification (SRS)
+
+**Version:** 1.0 · **Status:** Approved for implementation · **Owner:** the Architect (project owner)
+**Conforms loosely to:** IEEE 29148, trimmed to what a one-architect project actually needs.
+
+---
+
+## 1. Introduction
+
+### 1.1 Purpose
+This SRS defines the requirements for **Ephesus**, a desktop multi-agent harness that
+wraps terminal coding-agent CLIs into a coordinated "company" of agents, governed by a
+single human acting as software architect. It is the contract between the Architect and
+any implementing engineer (human or agent). The companion SDD describes *how* these
+requirements are met; ADRs record *why* the load-bearing choices were made.
+
+### 1.2 Scope
+Ephesus SHALL:
+- Spawn, attach, visualize, and control multiple terminal-agent CLI sessions
+  (Claude Code first; Codex, Gemini CLI, Grok, OpenCode, and custom commands after).
+- Coordinate agents through a file-based messaging layer (**Hermes**) over a shared
+  on-disk coordination space (**the Agora**) with persistent per-agent memory
+  (**the Library**).
+- Provide a single orchestrator agent (**Artemis**) as the human's primary interface,
+  with a voice front-end (**the Herald**).
+- Make the company *accountable*: standup briefings, milestone slide reviews, decision
+  memos with human sign-off, and live meetings (**the Odeon**).
+- Ship two pre-wired mission profiles: **Skeleton Crew** (keep the Architect's apps
+  alive) and **Front Office** (run a project's outward-facing operations).
+- Provide safety controls: human gates, budgets, a circuit breaker, and a secret broker
+  (**the Watch**).
+- Support remote command: chat bridge + push briefings + remote approvals (**the Harbor**).
+
+Ephesus SHALL NOT (v1):
+- Replace the underlying agent CLIs (they remain the runtime).
+- Run agents on remote machines over SSH.
+- Provide multi-user/team access; it is a single-operator system.
+- Train or fine-tune models.
+
+### 1.3 Definitions
+| Term | Meaning |
+|---|---|
+| **Architect** | The human owner-operator of the system. The only human actor. |
+| **Agent** | A real CLI process (e.g. `claude`) in a PTY, with identity, memory, mailbox, and an avatar. |
+| **Artemis** | The privileged orchestrator agent; the Architect's proxy and the company's chief of staff. |
+| **Hermes** | The message routing subsystem: outbox → router → inbox delivery with speech-act messages. |
+| **Agora** | The on-disk shared coordination space (git repo, single committer): registry, blackboard, task ledger, event log. |
+| **Library** | The memory subsystem: per-agent `memory.md` + shared semantic index + reflection. |
+| **Odeon** | The accountability subsystem: briefings, slide reviews, decision memos, live meetings. |
+| **Herald** | The voice interface: STT + TTS + conversation policy, provider-pluggable. |
+| **Harbor** | External integrations: GitHub, chat bridges, webhooks, remote command. |
+| **Watch** | Safety subsystem: gates, budgets, circuit breaker, secret broker, telemetry. |
+| **Terraces** | The 2D Pixi.js office-floor visualization. |
+| **Mission profile** | A pre-wired company configuration (roles + triggers + playbooks) for a recurring mission. |
+| **Decision memo** | A structured mini-ADR filed by an agent for a non-trivial choice, requiring Architect review. |
+| **Hire** | A role template (name, engine, system prompt, skills, budget) that can be spawned as an agent. |
+
+### 1.4 References
+- Munder Difflin `HIVE.md`, `SPEC.md`, `DESIGN.md` (upstream inspiration; patterns credited in ADRs).
+- Claude Code hooks reference (`Stop`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `stop_hook_active`).
+- Stanford *Generative Agents* (Park et al., 2023); Hearsay-II blackboard; FIPA-ACL speech acts.
+
+---
+
+## 2. Overall description
+
+### 2.1 Product perspective
+Ephesus is a new, self-contained Electron application. It sits *above* agent CLIs the
+Architect already licenses, and *below* the Architect's judgment: it never takes
+critical actions (spend, destruction, scope) without an explicit gate. Two data planes
+feed one renderer (ADR-0002): a **terminal plane** (node-pty byte streams) and an
+**event plane** (CLI lifecycle hooks → local socket → router/state).
+
+### 2.2 User class
+One user class: the Architect — an expert software engineer who wants leverage, not a
+toy. Implications: keyboard-first UX, no dumbed-down abstractions, raw terminals always
+one click away, every automation inspectable and reversible.
+
+### 2.3 Operating environment
+- macOS (primary), Windows and Linux (supported). Node 18+, C/C++ toolchain for node-pty.
+- At least one supported agent CLI on `PATH`.
+- Optional: ElevenLabs and/or OpenAI API keys (voice), local LLM endpoints, GitHub CLI.
+
+### 2.4 Constraints
+- **C-1** Agents communicate only via files they own; only the main process commits to git (ADR-0004).
+- **C-2** No cloud backend of our own: all state is local; external calls are only to providers the Architect configured.
+- **C-3** Secrets never transit the renderer and are never readable back out of the broker (write-only) (ADR-0010).
+- **C-4** The harness must degrade gracefully: no voice keys → text-only; no semantic index → markdown memory; no GitHub CLI → Harbor features off, floor still works.
+
+### 2.5 Assumptions
+- The Architect's CLI subscriptions impose their own rate/usage limits; Ephesus schedules around them but cannot lift them.
+- Agent CLIs expose a hook or wrapper mechanism sufficient to detect lifecycle events; where they don't, PTY-output heuristics are an accepted fallback with reduced fidelity.
+
+---
+
+## 3. Use cases
+
+Actors: **Architect** (human), **Artemis** (orchestrator agent), **Worker** (any
+non-orchestrator agent), **Harbor peer** (GitHub/Slack/webhook counterparty),
+**Scheduler** (internal clock/trigger service).
+
+### UC-01 — Spawn an agent from a hire template
+**Actor:** Architect. **Goal:** a new worker exists on the floor.
+1. Architect opens *Hire* and picks a role template (or imports a shared hire link; import only pre-fills — a human always confirms the spawn).
+2. Architect confirms engine, working directory, budget, and permission mode.
+3. System creates the agent's Agora home (`identity.md`, `memory.md`, mailboxes), spawns the CLI in a PTY with hooks wired, registers it in the roster, seats its avatar.
+4. Artemis is informed (`inform` message) and updates the org chart.
+
+**Postcondition:** agent is `idle` on the floor, hive-aware, visible in the roster.
+**Alternate 3a:** CLI binary missing → system offers to run the installer in the visible terminal and continues on success.
+**Alternate 2a:** worktree isolation requested → agent gets its own git worktree of the target repo.
+
+### UC-02 — Delegate a goal through Artemis
+**Actor:** Architect. **Goal:** work happens without micromanagement.
+1. Architect tells Artemis (voice or text): "Get the flaky checkout test fixed and ship 1.4.2."
+2. Artemis decomposes into tasks in the ledger, selects assignees by capability from the roster, and sends each a `request` with a self-contained spec.
+3. Workers execute; inter-agent questions flow through Hermes; Artemis adjudicates routine ones itself.
+4. On completion Artemis verifies results against the ledger, updates the blackboard, and reports (Odeon debrief).
+
+**Postcondition:** ledger tasks `done` with result refs; a debrief exists.
+**Alternate 3a:** a task requires a critical action → UC-08.
+**Alternate 3b:** two agents ping-pong past the hop cap → Hermes escalates to Artemis, who resolves or splits the task.
+
+### UC-03 — Watch the floor and inspect an agent
+**Actor:** Architect.
+1. Architect watches avatars: walking = tool in use at a station; envelope = message in flight; wave = blocked on human.
+2. Architect clicks an avatar → side panel with live terminal (xterm.js), files, git history, memory, and message threads.
+3. Architect types directly into the agent's terminal (subject to the message-queue rule: unsent Architect text holds Hermes deliveries to that agent).
+
+### UC-04 — Morning standup briefing (voice)
+**Actor:** Scheduler → Artemis → Architect.
+1. At the configured time, the Scheduler wakes Artemis with the standup trigger.
+2. Artemis compiles the brief from the event log, ledger, budgets, and overnight Harbor traffic: what finished, what's blocked, what needs a decision, spend vs budget.
+3. The Herald speaks the brief; the same content renders as a card in the Odeon tab.
+4. Architect interrupts at any point (barge-in) to drill in or issue directives; directives become ledger tasks.
+
+**Alternate 3a:** Architect away → brief is delivered as a push message via the Harbor with a link/summary; voice replay available later.
+
+### UC-05 — Milestone slide review
+**Actor:** Worker → Architect.
+1. A worker completes a ledger task flagged `review:deck`.
+2. The worker generates a short HTML slide deck from the review template: goal, what was built, decisions made, trade-offs, evidence (diffs/screenshots/test output), open questions.
+3. The deck is archived in the Odeon; Artemis queues it for the Architect with a spoken one-line summary.
+4. Architect opens the deck in-app; approves, or files comments that become follow-up tasks.
+
+### UC-06 — Decision memo review (architect sign-off)
+**Actor:** Worker → Architect.
+1. Mid-task, a worker faces a non-trivial choice matching memo policy (new dependency, schema change, public API change, security posture change).
+2. The worker files a decision memo (structured mini-ADR: context, options, recommendation, blast radius) into the Odeon queue and continues on non-dependent work, or parks if blocked.
+3. Artemis triages: memos within its delegated authority it decides itself and countersigns; the rest surface to the Architect (badge + optional voice note).
+4. Architect approves / rejects / amends. The verdict is delivered back as a Hermes message; the memo is archived as an immutable record.
+
+**Postcondition:** an auditable decision trail exists; agent proceeds accordingly.
+
+### UC-07 — Live meeting in the Odeon
+**Actor:** Architect + selected agents.
+1. Architect convenes a meeting: picks attendees, states an agenda line.
+2. The floor visualizes attendees walking to the Odeon room; a meeting panel opens.
+3. Architect asks questions (voice/text); Artemis chairs — it routes each question to the right attendee, enforces turn order, and keeps minutes.
+4. Attendees answer in turn (their replies stream into the meeting panel; the Herald can read them aloud).
+5. On close, minutes + action items are written to the blackboard and the ledger.
+
+### UC-08 — Critical-action escalation (human gate)
+**Actor:** Worker → Artemis → Architect.
+1. A worker needs a gated action (spend above threshold, destructive op, scope change, prod deploy).
+2. The request routes to Artemis (`needs_human` flip). Artemis packages context: what, why, blast radius, rollback.
+3. The gate surfaces natively in Artemis's session and in the approvals UI; remotely it is pushed via the Harbor.
+4. Architect approves/denies (click, keyboard, voice confirmation with explicit repeat-back for destructive ops).
+
+**Postcondition:** the action proceeds or is refused; either way the event log records the full chain.
+
+### UC-09 — Skeleton Crew: incident response
+**Actor:** Harbor peer (monitor/webhook) → agents → Architect.
+1. A health check or CI webhook signals a failure in one of the Architect's apps.
+2. The Skeleton Crew profile's on-call agent picks it up: triages, reproduces, attempts the playbook fix (restart, rollback, patch + PR).
+3. If the playbook resolves it: `inform` to Artemis; the incident is logged and appears in the next standup.
+4. If not, or the fix requires a gated action: UC-08 escalation with an incident summary; the Herald can announce a severity-1 aloud immediately.
+
+### UC-10 — Front Office: issue and PR triage
+**Actor:** Harbor peer (GitHub) → agents.
+1. New issues/PRs flow into the Front Office queue.
+2. The triage agent labels, deduplicates, drafts replies, and routes real bugs to the ledger; a docs agent keeps changelog/docs in sync with merged work.
+3. Outbound comments above a configured autonomy level require Architect approval (batched into the standup by default).
+
+### UC-11 — Remote command
+**Actor:** Architect (away from desk).
+1. Architect messages the bridge (chat) or triggers a briefing.
+2. Artemis answers with status, accepts directives, and forwards gate requests as approvable messages.
+3. All remote directives are echoed in the desktop activity log with a `remote` source tag.
+
+### UC-12 — Agent performance review & retro
+**Actor:** Scheduler → Artemis → Architect.
+1. On a cadence (e.g. weekly), Artemis compiles per-agent metrics: tasks completed, rework rate, memo quality, budget efficiency, escalation rate.
+2. Artemis proposes actions: adjust a system prompt, change a role's model, retire or split a role.
+3. Architect reviews in the org panel; accepted changes update hire templates (versioned).
+
+---
+
+## 4. Functional requirements
+
+Requirements use SHALL (mandatory), SHOULD (strong default), MAY (optional). IDs are
+stable and referenced by the SDD, test strategy, and implementation plan.
+
+### FR-1 — Agent lifecycle & terminal plane
+- **FR-1.1** The system SHALL spawn each agent as a real CLI process in a dedicated PTY (node-pty), streaming output to an xterm.js view byte-for-byte.
+- **FR-1.2** The system SHALL support Claude Code as the reference engine, and SHALL define an engine adapter interface such that additional CLIs (Codex, Gemini CLI, Grok, OpenCode, custom command) are added without core changes (ADR-0009 prior-art seam).
+- **FR-1.3** The system SHALL let the Architect type into any agent's terminal, with interrupt (Escape) and queue-until-idle semantics when the agent is mid-tool.
+- **FR-1.4** The system SHALL detect a dead/exited process, mark the avatar `ghost`, and archive it after a grace period; session resume SHOULD be offered where the engine supports it.
+- **FR-1.5** The system SHALL support optional per-agent git worktree isolation.
+- **FR-1.6** The system SHALL offer to install a missing engine CLI in the agent's own terminal and continue into the new binary on success.
+
+### FR-2 — Event plane (hooks)
+- **FR-2.1** The system SHALL run a local hook endpoint (Unix domain socket; named pipe on Windows) receiving lifecycle events from engine hook shims.
+- **FR-2.2** The system SHALL map hook events to avatar states (idle/alert/thinking/working/waiting/blocked/success/ghost/compacting/looping) exactly as specified in SDD §6.
+- **FR-2.3** Hook payload schema drift SHALL be surfaced as a visible warning, with degraded PTY-heuristic fallback rather than silent failure.
+
+### FR-3 — Hermes (messaging)
+- **FR-3.1** Messages SHALL be single JSON files using the speech-act schema (SDD §5.3): `id, conversation, in_reply_to, from, to, act, subject, body, hops, requires_reply, needs_human, created_at`.
+- **FR-3.2** Agents SHALL write only inside their own `agents/<id>/` directory; the router (main process) SHALL deliver outbox → inbox atomically (temp file + rename).
+- **FR-3.3** Only `request`/`query`/`propose` obligate replies; `hops` SHALL increment per reply; past the hop cap Hermes SHALL escalate to Artemis instead of delivering.
+- **FR-3.4** Delivery to a missing/archived inbox SHALL bounce with a logged `refuse`, never drop silently.
+- **FR-3.5** An idle agent holding unread inbox mail SHALL be woken (inbox wake watchdog); the `Stop`-hook loop SHALL drain inboxes with `stop_hook_active` and a block-cap guard against infinite loops.
+- **FR-3.6** Processed messages SHALL move to `inbox/.done/` and be idempotent via a per-agent cursor.
+- **FR-3.7** `broadcast` and `to:"human"` addressing SHALL be supported; `to:"human"` routes to Artemis as the Architect's proxy.
+
+### FR-4 — The Agora (coordination space)
+- **FR-4.1** The Agora SHALL be a local git repo committed **only** by the main process, with retry/backoff and stale-lock cleanup.
+- **FR-4.2** It SHALL contain: `registry.json` (roster), `board.md` (blackboard, single scribe = Artemis), `tasks.json` (ledger), `log.jsonl` (append-only event feed), and per-agent homes.
+- **FR-4.3** The task ledger SHALL support dependencies, assignee, status, priority, result refs, and review flags (`review:deck`, `review:memo`), and SHALL drive the kanban UI.
+- **FR-4.4** Every Hermes delivery, gate verdict, memo verdict, and lifecycle event SHALL append to `log.jsonl`; the activity UI and briefings SHALL be derived from it (single source of truth).
+
+### FR-5 — Artemis (orchestrator)
+- **FR-5.1** Artemis SHALL be an ordinary engine process (intelligence) coordinated by harness mechanism (routing, git, sockets) — never a hardcoded rules engine.
+- **FR-5.2** Artemis SHALL own: roster & routing, adjudication of routine inter-agent requests, blackboard scribing, the task ledger, and packaging of escalations.
+- **FR-5.3** Artemis's escalation policy (what is "critical") SHALL live in its system prompt and be editable by the Architect from the UI (the primary control surface).
+- **FR-5.4** Artemis SHALL auto-spawn at startup into its reserved seat and re-spawn on crash with its memory intact.
+- **FR-5.5** Artemis SHALL hold *delegated authority* levels configurable per domain (e.g. may approve memos touching test code; may not approve spend), and SHALL countersign everything it decides.
+
+### FR-6 — The Library (memory)
+- **FR-6.1** Each agent SHALL read its `identity.md` + `memory.md` at task start and append learnings; memory survives process death and respawn.
+- **FR-6.2** A semantic recall index over all memory SHOULD be maintained (local embeddings), searchable by agents and by the Architect from the UI; absence of the index SHALL degrade to markdown + FTS, never break.
+- **FR-6.3** A reflection job SHALL periodically condense `memory.md` files to bound growth, preserving a dated archive of what was condensed.
+- **FR-6.4** The Architect MAY register reference documents (policies, style guides, runbooks) into a shared knowledge shelf queryable by any agent.
+
+### FR-7 — The Odeon (accountability) — *differentiator*
+- **FR-7.1 Briefings.** Artemis SHALL deliver standup briefings on schedule and on demand ("what's the status?"), compiled strictly from Agora data (ledger, log, budgets, Harbor queue) — never from free recollection. Briefings SHALL be available as speech (Herald), as an in-app card, and as remote push.
+- **FR-7.2 Slide reviews.** A ledger task flagged `review:deck` SHALL require the assignee to produce an HTML slide deck from the standard template (goal, built, decisions, trade-offs, evidence, open questions) before the task can close; decks archive immutably in the Odeon with the task ref.
+- **FR-7.3 Decision memos.** The system SHALL enforce memo policy: choices matching configured triggers (new dependency, public API/schema change, security posture, spend) SHALL be filed as structured memos before the change lands. Memos flow: agent → Artemis triage (within delegated authority: decide + countersign) → Architect queue. Verdicts (approve/reject/amend) SHALL return as Hermes messages and archive immutably.
+- **FR-7.4 Live meetings.** The Architect SHALL be able to convene a meeting with selected agents: Artemis chairs, enforces turn order, routes questions, and files minutes + action items to the blackboard and ledger. Attendee avatars SHALL visibly gather in the Odeon room.
+- **FR-7.5** Every Odeon artifact (brief, deck, memo, minutes) SHALL be linkable from the task it concerns and discoverable chronologically.
+
+### FR-8 — The Herald (voice) — *differentiator*
+- **FR-8.1** The voice layer SHALL be a provider-agnostic seam (STT, TTS, and optional duplex realtime) with: **ElevenLabs** as the reference TTS/conversation implementation, **OpenAI Realtime** as the automatic fallback, and room for local engines (Piper/Kokoro) with no code change outside the seam (ADR-0007).
+- **FR-8.2** Failover SHALL be automatic on provider error/latency breach, mid-session, with a one-line spoken/visible notice ("switching voice provider").
+- **FR-8.3** The Herald SHALL support: push-to-talk always; an optional local wake word; barge-in (Architect speech immediately stops TTS playback and is captured).
+- **FR-8.4** Voice SHALL reach: Artemis conversation, briefings, meeting narration, and approvals. Destructive/spend approvals by voice SHALL require an explicit repeat-back confirmation ("Confirm: delete branch X — say confirm delete").
+- **FR-8.5** The persona is a composed, understated, dryly-witty British-styled assistant — an *homage style*, not a clone of any actor or character; persona text lives in config, not code.
+- **FR-8.6** Without configured voice keys the entire system SHALL function fully in text.
+
+### FR-9 — Mission profiles — *differentiator*
+- **FR-9.1** A mission profile SHALL be a declarative bundle: roles (hires), schedules/triggers, playbooks (markdown runbooks agents follow), Harbor wiring, budgets, and autonomy levels — versioned files, shareable, and inspectable before activation.
+- **FR-9.2 Skeleton Crew profile.** SHALL ship built-in with: health-check watcher, CI babysitter (watch runs, retry/triage failures, open fix PRs), dependency-update agent (batched PRs), and incident-response playbooks with severity-based escalation (UC-09).
+- **FR-9.3 Front Office profile.** SHALL ship built-in with: issue/PR triage, reply drafting with configurable autonomy (draft-only → auto-post), docs/changelog sync, and release-prep checklists (UC-10).
+- **FR-9.4** Profiles SHALL be per-target (per app/repo) instantiable, and multiple profiles SHALL coexist on one floor.
+
+### FR-10 — The Harbor (in/out)
+- **FR-10.1** GitHub: ingest issues, PRs, and CI runs for registered repos; act via the `gh` CLI under the agent's own auth.
+- **FR-10.2** Chat bridge: at least one chat integration (Slack-compatible webhook/bot) through which the Architect can converse with Artemis remotely, receive briefings, and approve gates (UC-11); inbound webhooks MAY spawn ephemeral workers that are torn down after replying.
+- **FR-10.3** Every remote-originated directive SHALL be tagged `remote` in the event log.
+- **FR-10.4** Shareable hires: export/import a role template via link/file; import only pre-fills the spawn form — a human always confirms.
+
+### FR-11 — The Watch (safety, budgets, org)
+- **FR-11.1 Gates.** Spend above threshold, destructive ops, scope changes, and prod-facing actions SHALL require Architect approval (native tool-permission prompts + the approvals UI + remote push). Defaults are conservative; autonomy is opt-in per profile.
+- **FR-11.2 Budgets.** Per-agent token/cost budgets SHALL be enforced; real cost SHALL be folded from engine transcripts into a durable ledger (never reset by app restart); the UI SHALL show session and cumulative figures separately.
+- **FR-11.3 Circuit breaker.** A steer → constrain → stop ladder SHALL trip on runaway loops, error storms, or budget blowout; trips are logged and surfaced in the next briefing.
+- **FR-11.4 Secret broker.** Provider keys SHALL be stored write-only (set/rotate/delete; never read back to UI or agents); agents receive credentials only via environment injection at spawn, scoped to what their role declares.
+- **FR-11.5 Org layer.** The system SHALL maintain an explicit org model: departments, roles, hire templates (versioned), per-agent metrics (tasks done, rework, escalation rate, budget efficiency), and scheduled review/retro reports (UC-12).
+- **FR-11.6 Telemetry.** Local OTel-style spans and a tool waterfall per agent SHALL be available. Any *outbound* anonymous telemetry SHALL be opt-in, documented, and absent entirely in source builds.
+
+---
+
+## 5. Non-functional requirements
+
+| ID | Category | Requirement |
+|---|---|---|
+| NFR-1 | Performance | Floor animation ≥ 60 fps with 15 avatars on a 2020-era laptop; terminal latency (keystroke → echo) ≤ 50 ms added over raw PTY. |
+| NFR-2 | Performance | Hermes delivery (outbox write → inbox visible) ≤ 500 ms p95; hook event → avatar state change ≤ 200 ms p95. |
+| NFR-3 | Performance | Voice: barge-in stop ≤ 250 ms; briefing first-audio ≤ 2 s after data compile; provider failover ≤ 3 s. |
+| NFR-4 | Scale | 15 concurrent agents supported; 30 tolerated with graceful degradation (reduced animation, batched log rendering). Memory index to 100k chunks. |
+| NFR-5 | Reliability | No single agent crash may take down the harness; harness crash SHALL lose no Agora data (all state is committed files); on restart, roster/ledger/memory restore exactly. |
+| NFR-6 | Reliability | At-least-once Hermes delivery with idempotent consumption (cursor); zero silent message loss (bounce + log on failure). |
+| NFR-7 | Durability | Cost ledger, event log, memos, decks, and minutes are append-only/immutable once written; git history of the Agora is never rewritten. |
+| NFR-8 | Security | No secrets in renderer, logs, Agora files, or telemetry. Renderer runs sandboxed with contextIsolation; all fs/git access brokered through typed IPC. |
+| NFR-9 | Security | Gated actions are deny-by-default; remote approvals require the bridge's authenticated channel; voice approval of destructive ops requires repeat-back. |
+| NFR-10 | Privacy | No prompts, code, file paths, or agent output ever leave the machine except to providers the Architect explicitly configured. |
+| NFR-11 | Portability | macOS/Windows/Linux from one codebase; platform-specific code isolated behind seams (PTY, sockets, packaging). |
+| NFR-12 | Extensibility | Adding an engine, a voice provider, or a mission profile requires no changes outside its adapter/bundle (measured in the test strategy as a conformance suite). |
+| NFR-13 | Observability | Every autonomous action is reconstructible from `log.jsonl` alone ("the log is the company's book of record"). |
+| NFR-14 | Usability | Any agent's raw terminal is ≤ 1 click away from anywhere; every automated artifact (brief, memo verdict, triage label) links to its evidence. |
+| NFR-15 | Accessibility | Full functionality without voice; UI meets WCAG AA contrast within the pixel-art design language; all panels keyboard-navigable. |
+| NFR-16 | Maintainability | Typecheck-clean TypeScript throughout; the standards doc's Definition of Done gates every merge. |
+
+---
+
+## 6. Acceptance criteria (system level)
+
+The build is *accepted* when, on a clean machine with Claude Code installed:
+
+1. **The one-hour company test.** The Architect activates Skeleton Crew on a real repo, breaks a test on a branch, and walks away. Within the hour: the crew has detected the failure, fixed it or opened a fix PR, filed the required memo if the fix crossed policy, and the next briefing narrates the incident accurately from the log — with zero un-gated destructive actions.
+2. **The standup test.** With ≥ 3 agents having worked overnight, "Artemis, what's the status?" produces a spoken brief whose every claim is traceable to a ledger/log entry, in under 90 seconds of audio.
+3. **The review test.** A task flagged `review:deck` cannot close without its deck; the deck renders in-app; a comment becomes a follow-up task.
+4. **The memo test.** An agent adding a new npm dependency is blocked at the policy trigger until a memo exists; Artemis-approved memos show its countersignature; Architect rejection reverses the change.
+5. **The failover test.** Pulling the ElevenLabs key mid-conversation continues the session on OpenAI Realtime within 3 s.
+6. **The blackout test.** Kill the harness mid-delivery; on restart nothing is lost, no message is double-processed, and no agent is orphaned.
