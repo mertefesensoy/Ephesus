@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
+import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { TerminalPanel } from './TerminalPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
 
@@ -18,6 +19,19 @@ const HOOKS_POLL_MS = 2000
 export function App(): ReactElement {
   const [bridge, setBridge] = useState<BridgeState>({ kind: 'loading' })
   const [hooks, setHooks] = useState<HooksState | null>(null)
+  const [fonts, setFonts] = useState<FontStatus | null>(null)
+
+  // UI-DESIGN §3 requires the pixel faces bundled. A face that is not installed
+  // is shown, never silently swapped for a fallback (invariant §7).
+  useEffect(() => {
+    let cancelled = false
+    void loadPixelFonts().then((status) => {
+      if (!cancelled) setFonts(status)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const eph = window.eph
@@ -105,6 +119,19 @@ export function App(): ReactElement {
               ⚠ events: live · {hooks.driftWarnings.length} schema drift warning
               {hooks.driftWarnings.length === 1 ? '' : 's'}
             </span>
+          )}
+        </span>
+        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+          {fonts !== null && fonts.missing.length > 0 && (
+            <span
+              style={{ color: 'var(--eph-status-looping)' }}
+              title={`missing: ${fonts.missing.join(', ')}`}
+            >
+              ⚠ fonts: {fonts.missing.length} of {PIXEL_FACES.length} pixel faces missing
+            </span>
+          )}
+          {fonts !== null && fonts.missing.length === 0 && (
+            <span style={{ color: 'var(--eph-status-success)' }}>● fonts: bundled</span>
           )}
         </span>
       </header>

@@ -5,3 +5,9 @@ out/
 *.local
 .env
 .env.*
+
+# Licensed art drop (UI-DESIGN §7, see src/renderer/src/assets/ATTRIBUTION.md)
+src/renderer/src/assets/tileset/*
+!src/renderer/src/assets/tileset/.gitkeep
+src/renderer/public/fonts/*
+!src/renderer/public/fonts/README.md

@@ -221,7 +221,7 @@ in order, one package per session-commit; tests are part of each package).
       must reach a PTY as two writes — text, then the submit key — because the TUI's
       bracketed-paste mode swallows a trailing CR (binding on M1.6, see
       DECISIONS-LOG).*
-- [ ] **M1.5b Floor art v1** — UI-DESIGN §7 quality bar (Architect directive
+- [x] **M1.5b Floor art v1** *(partial — asset acquisition is a must-ask)* — UI-DESIGN §7 quality bar (Architect directive
       2026-08-26): licensed 16×16 tileset intake at 2× integer scale (reference:
       LimeZu Modern Interiors lineage) with `src/renderer/src/assets/ATTRIBUTION.md`
       and license-compliant repo handling; procedural citizens upgraded to real
@@ -232,6 +232,28 @@ in order, one package per session-commit; tests are part of each package).
       scene-state assertions unchanged (art is presentation, state model is truth).
       Risk: asset license must permit app redistribution — verify before purchase;
       no real-person/other-IP likenesses in recipes.*
+      *Evidence: `typecheck && lint && test` green — 309 passed / 3 skipped (21 new).
+      DELIVERED: the M0 placeholder rectangle-citizen is gone, replaced by
+      `floor/citizen.ts` — a pure sprite-recipe module meeting the §7 bar, asserted
+      rather than eyeballed: 8 directions × 4 frames (all 32 combinations distinct),
+      5 role silhouettes (all distinct), ≤ 5 palette colours per sprite across every
+      direction/frame/silhouette combination, every rectangle inside the 32×48
+      footprint, and determinism. Direction comes from the walk delta, so citizens
+      face where they are going. The status badge is drawn outside the colour budget
+      as a §8 double-encoding marker.
+      Both licence-compliant intake paths are built and PROVEN LIVE in both
+      directions: with a sheet in the gitignored drop the status strip read
+      `tileset: 1 sheet(s)`; with the drop empty it read
+      `tileset: procedural (none installed)`. `git check-ignore` confirms the drop is
+      excluded from the repo. Fonts likewise: `⚠ fonts: 3 of 3 pixel faces missing`
+      is shown rather than silently rendering in a fallback face.
+      `src/renderer/src/assets/ATTRIBUTION.md` records the rules, the empty asset
+      table, and the restore path for a fresh clone.
+      **NOT DELIVERED — must-ask (see session report):** the licensed tileset itself
+      (a purchase and a licence decision, both the Architect's) and the three OFL
+      pixel-font files (either three new `@fontsource` dependencies or a file drop —
+      a new dependency is a must-ask by BUILD-PROMPT §8.3). Both land with zero code
+      change once the files exist; that is what the intake paths are for.*
 - [ ] **M1.6 Command bar** — bottom bar (UI-DESIGN §4): free prompt to the selected
       agent; queue-until-idle when the agent is mid-tool (FR-1.3) — queued text
       visibly held (status-typing token semantics), flushed on idle; interrupt button

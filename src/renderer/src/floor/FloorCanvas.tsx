@@ -14,6 +14,15 @@ import {
 } from '../../../shared/floor'
 import type { AvatarUpdate } from '../../../shared/ipc'
 import { tokens } from '../tokens'
+import {
+  citizenSprite,
+  directionFor,
+  silhouetteFor,
+  walkFrame,
+  type CitizenPalette,
+  type Silhouette
+} from './citizen'
+import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
 
 /**
@@ -72,23 +81,37 @@ function drawRoom(g: Graphics): void {
   g.rect(w - WALL_PX, 0, WALL_PX, h).fill(tokens.worldWall)
 }
 
-/** 32×48 pixel citizen: ≤5 colors per sprite (§1.3), ink-900 outline (§7). */
-function drawCitizen(g: Graphics, frame: 0 | 1, accent: number, phase: string): void {
-  g.clear()
-  g.rect(8, 0, 16, 4).fill(tokens.ink700)
-  g.rect(8, 4, 16, 10).fill(tokens.sand)
-  g.rect(6, 14, 20, 20).fill(accent)
-  if (frame === 0) {
-    g.rect(9, 34, 5, 12).fill(tokens.ink700)
-    g.rect(18, 34, 5, 12).fill(tokens.ink700)
-  } else {
-    g.rect(6, 34, 5, 12).fill(tokens.ink700)
-    g.rect(21, 34, 5, 12).fill(tokens.ink700)
+/**
+ * Draws one citizen from the §7 sprite recipes. This function only paints
+ * rectangles the pure module produced; the walk cycle, the silhouette and the
+ * colour budget are decided (and tested) there.
+ */
+function drawCitizen(
+  g: Graphics,
+  opts: {
+    dx: number
+    dy: number
+    frame: 0 | 1 | 2 | 3
+    walking: boolean
+    silhouette: Silhouette
+    palette: CitizenPalette
+    phase: string
   }
-  g.rect(6, 14, 20, 1).fill(tokens.ink900)
-  // Status is double-encoded: a badge over the head, never color alone (§8).
-  g.rect(10, -8, 12, 6).fill(PHASE_COLOR[phase] ?? tokens.statusIdle)
-  g.rect(10, -8, 12, 1).fill(tokens.ink900)
+): void {
+  g.clear()
+  for (const rect of citizenSprite({
+    direction: directionFor(opts.dx, opts.dy),
+    frame: opts.frame,
+    silhouette: opts.silhouette,
+    palette: opts.palette,
+    walking: opts.walking
+  })) {
+    g.rect(rect.x, rect.y, rect.w, rect.h).fill(rect.color)
+  }
+  // Status badge, drawn OUTSIDE the sprite's five-colour budget: it is a UI
+  // marker, and §8 requires status to be double-encoded rather than colour-only.
+  g.rect(10, -14, 12, 6).fill(PHASE_COLOR[opts.phase] ?? tokens.statusIdle)
+  g.rect(10, -14, 12, 1).fill(tokens.ink900)
 }
 
 /** What the last frame drew, so an interrupted walk resumes from where it is. */
@@ -118,7 +141,7 @@ function positionFor(
   deskIndex: number,
   nowMs: number,
   drawn: DrawState | undefined
-): DrawState & { frame: 0 | 1 } {
+): DrawState & { frame: 0 | 1 | 2 | 3 } {
   const tileOf = (station: string): { col: number; row: number } =>
     station === 'desk'
       ? deskTileFor(deskIndex)
@@ -147,7 +170,7 @@ function positionFor(
     walkSince: snapshot.sinceMs,
     fromX,
     fromY,
-    frame: (stepIndex % 2) as 0 | 1
+    frame: walkFrame(stepIndex)
   }
 }
 
@@ -168,6 +191,20 @@ export function FloorCanvas(): ReactElement {
   const [initError, setInitError] = useState<string | null>(null)
   const [population, setPopulation] = useState(0)
   const avatarsRef = useRef<Map<string, AvatarSnapshot>>(new Map())
+  const rolesRef = useRef<Map<string, string>>(new Map())
+  const tileset = tilesetState()
+
+  // Roles decide silhouettes (§7); the cards are the only place they live.
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    void eph.agents.list().then((cards) => {
+      for (const card of cards) rolesRef.current.set(card.agentId, card.role)
+    })
+    return eph.agents.onChange((card) => {
+      rolesRef.current.set(card.agentId, card.role)
+    })
+  }, [])
 
   // The floor's only input: snapshots from main (ADR-0002).
   useEffect(() => {
@@ -225,10 +262,25 @@ export function FloorCanvas(): ReactElement {
               sprites.set(agentId, sprite)
               citizens.addChild(sprite)
             }
+            const previous = drawStates.get(agentId)
             const accent = ACCENTS[index % ACCENTS.length] ?? tokens.aegean
-            const pose = positionFor(snapshot, index, now, drawStates.get(agentId))
+            const pose = positionFor(snapshot, index, now, previous)
             drawStates.set(agentId, pose)
-            drawCitizen(sprite, pose.frame, accent, snapshot.phase)
+            drawCitizen(sprite, {
+              dx: pose.x - (previous?.x ?? pose.x),
+              dy: pose.y - (previous?.y ?? pose.y),
+              frame: pose.frame,
+              walking: snapshot.walking,
+              silhouette: silhouetteFor(rolesRef.current.get(agentId) ?? ''),
+              palette: {
+                outline: tokens.ink900,
+                hair: tokens.ink700,
+                skin: tokens.sand,
+                accent,
+                detail: tokens.marble50
+              },
+              phase: snapshot.phase
+            })
             sprite.x = Math.round(pose.x)
             sprite.y = Math.round(pose.y) - 16
             sprite.alpha = snapshot.phase === 'ghost' ? 0.45 : 1
@@ -278,7 +330,9 @@ export function FloorCanvas(): ReactElement {
           color: initError ? 'var(--eph-status-blocked)' : 'var(--eph-ink-700)'
         }}
       >
-        {initError ? `floor unavailable: ${initError}` : `floor: ${population} on the terraces`}
+        {initError
+          ? `floor unavailable: ${initError}`
+          : `floor: ${population} on the terraces · ${tileset.note}`}
       </span>
     </div>
   )
