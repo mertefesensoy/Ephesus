@@ -570,8 +570,71 @@ Execute in order; every package tests against the fake engine per-PR.
       directory (the adapter now grants exactly that directory), and two agents
       sharing a repository clobbered each other's settings — the first to exit
       deleted the file the second was running under.*
-- [ ] **M2 exit review** — the five S-suites green in CI; two-real-agent
+- [x] **M2 exit review** — the five S-suites green in CI; two-real-agent
       collaboration demo evidence; PROGRESS + docs synced.
+
+### M2 exit review (2026-08-27) — verdict: DONE
+
+Both exit criteria were verified **by running them**, against the committed tree.
+
+**Criterion 1 — "S-BLACKOUT, S-LIVELOCK, S-BOUNCE, S-WAKE, S-STOPLOOP pass."**
+MET. `npx vitest run test/scenarios` → 26 passed (26): S-BLACKOUT 7 ·
+S-LIVELOCK 3 · S-BOUNCE 4 · S-WAKE 4 · S-STOPLOOP 7, plus the harness anchor.
+All five run REAL spawned `fake-engine` processes over real git, a real socket
+and real files, and S-STOPLOOP drives the REAL `eph-hook.mjs` shim as a
+subprocess. Run repeatedly clean.
+
+**Criterion 2 — "two real agents complete a scripted collaboration (A `request`s
+data from B, B `inform`s back) unattended."** MET. Re-run at review time against
+the committed tree with two real `claude` agents:
+
+```
+VERIFY A REQUESTED B after 21s
+VERIFY request act: request | requires_reply: true
+VERIFY watchdog woke: agent.b
+VERIFY B INFORMED BACK after 35s
+VERIFY reply act: inform | in_reply_to: 2026-08-27T09-50-00-000Z-c7d2
+VERIFY reply body: Week 34 checkout totals from checkout-totals.txt: 1281 orders,
+                   3 failures.
+VERIFY log: 1:spawn 2:delivery 3:hook 4:spawn 5:hook 6:exit 7:delivery
+```
+
+One Architect instruction started it; after that nobody typed anything — the
+wake watchdog decided agent.b needed waking and supplied the text. `requires_reply`
+was derived correctly by the sender, and the reply carried `in_reply_to` back to
+the request.
+
+**Gate:** `npm run typecheck` PASS · `npm run lint` PASS (zero warnings) ·
+`node scripts/check-invariants.cjs` PASS · `npm test` 581 passed / 3 skipped.
+
+**Debt swept at close:** zero TODO/FIXME/HACK markers in
+`src|shims|scripts|test|prompts`; every M2 package ticked with evidence. Doc
+drift: the `agora:` IPC group matches SDD §5 (`board()`/`memory()` land with
+their milestones); SDD §1.1 gained `git.ts`, `eventlog.ts` and
+`settings-registry.ts` in this pass. `fsx.ts`/`home.ts`/`index.ts` stay
+unlisted — the map is a subsystem map, not a file listing.
+
+**Both M1 carried items are CLOSED**: the `settings.local.json` startup
+reconcile in M2.1 (proven by a live SIGKILL/restart cycle restoring the
+Architect's file byte-for-byte) and `stop.pending` in M2.5.
+
+**Raised for the Architect (see the session report):** the claude adapter now
+writes a `permissions` grant into `settings.local.json` giving each agent file
+access to its own `agora/agents/<id>/` directory. Without it an agent cannot
+write its own outbox and FR-3.2 is unimplementable — found by a real agent
+answering "the write was blocked by permissions". The grant is the narrowest
+thing that makes the documented design work, but it is a permission default and
+deserves ratification.
+
+**Carried into M3, recorded so they are not lost:**
+- `pendingTasksFor` is wired but always returns 0: the ledger has no assignment
+  flow until Artemis (M3), so the ADR-0013 branch fires on mail alone today.
+- The breaker pathology signal is emitted and logged but nothing consumes it
+  until ADR-0011 lands in M3.
+- Seats are `terrace` for every hire; the floor layout and Artemis's reserved
+  temple seat arrive with M3.
+- The Architect's `human` queue at `agora/human/` accumulates diverted mail with
+  no UI to read it; the approvals surface lands in M3.
 
 ## M3 — Artemis + the Watch
 
