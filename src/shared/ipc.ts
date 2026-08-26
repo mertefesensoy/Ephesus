@@ -27,9 +27,15 @@ export const DEV_SHELL_ID = 'shell-0'
 export const ptyDataChannel = (id: string): string => `pty:data:${id}`
 export const ptyExitChannel = (id: string): string => `pty:exit:${id}`
 
+export interface ConfigSnapshot {
+  config: EphConfig
+  /** Non-null when config.json failed validation — shown in the UI, never silent. */
+  warning: string | null
+}
+
 export interface EphApi {
   config: {
-    get: () => Promise<EphConfig>
+    get: () => Promise<ConfigSnapshot>
   }
   pty: {
     /** Spawns the M0.3 hardcoded dev shell if needed; resolves with its pty id. */

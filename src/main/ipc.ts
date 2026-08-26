@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
-import { DEV_SHELL_ID, IpcChannels } from '../shared/ipc'
+import { DEV_SHELL_ID, IpcChannels, type ConfigSnapshot } from '../shared/ipc'
 import { ptyKillSchema, ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
-import { getConfig } from './config'
+import { getHome } from './config'
 import type { PtyManager } from './pty'
 
 /**
@@ -10,7 +10,10 @@ import type { PtyManager } from './pty'
  * parse them with a src/shared/ validator before acting (BUILD-PROMPT §3.2).
  */
 export function registerIpc(ptyManager: PtyManager): void {
-  ipcMain.handle(IpcChannels.configGet, () => getConfig())
+  ipcMain.handle(IpcChannels.configGet, (): ConfigSnapshot => {
+    const home = getHome()
+    return { config: home.config, warning: home.configWarning }
+  })
 
   // Renderer asks for the dev shell AFTER subscribing to its data channel,
   // so the first prompt bytes are never lost to a subscribe race.

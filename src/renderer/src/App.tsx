@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { EphConfig } from '../../shared/config'
+import type { ConfigSnapshot } from '../../shared/ipc'
 import { TerminalPanel } from './TerminalPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
 
 type BridgeState =
   | { kind: 'loading' }
-  | { kind: 'ready'; config: EphConfig }
+  | { kind: 'ready'; snapshot: ConfigSnapshot }
   | { kind: 'unavailable'; reason: string }
 
 export function App(): ReactElement {
@@ -20,7 +20,7 @@ export function App(): ReactElement {
     }
     eph.config
       .get()
-      .then((config) => setBridge({ kind: 'ready', config }))
+      .then((snapshot) => setBridge({ kind: 'ready', snapshot }))
       .catch((err: unknown) => setBridge({ kind: 'unavailable', reason: String(err) }))
   }, [])
 
@@ -41,8 +41,17 @@ export function App(): ReactElement {
         </h1>
         <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
           {bridge.kind === 'loading' && 'bridge: connecting…'}
-          {bridge.kind === 'ready' &&
-            `bridge: ready · config schema v${bridge.config.schemaVersion}`}
+          {bridge.kind === 'ready' && (
+            <>
+              {`bridge: ready · config schema v${bridge.snapshot.config.schemaVersion}`}
+              {bridge.snapshot.warning && (
+                <span style={{ color: 'var(--eph-status-blocked)' }}>
+                  {' '}
+                  · {bridge.snapshot.warning}
+                </span>
+              )}
+            </>
+          )}
           {bridge.kind === 'unavailable' && (
             <span style={{ color: 'var(--eph-status-blocked)' }}>bridge: {bridge.reason}</span>
           )}

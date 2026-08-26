@@ -1,12 +1,17 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { EphConfig } from '../shared/config'
-import { IpcChannels, ptyDataChannel, ptyExitChannel, type EphApi } from '../shared/ipc'
+import {
+  IpcChannels,
+  ptyDataChannel,
+  ptyExitChannel,
+  type ConfigSnapshot,
+  type EphApi
+} from '../shared/ipc'
 
 // The single door between renderer and main (SDD §1, §5). Every method is a
 // thin, typed forward to an ipcMain handler that validates in main.
 const eph: EphApi = {
   config: {
-    get: () => ipcRenderer.invoke(IpcChannels.configGet) as Promise<EphConfig>
+    get: () => ipcRenderer.invoke(IpcChannels.configGet) as Promise<ConfigSnapshot>
   },
   pty: {
     ensureDevShell: () => ipcRenderer.invoke(IpcChannels.ptyEnsureDevShell) as Promise<string>,

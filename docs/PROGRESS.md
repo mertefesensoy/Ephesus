@@ -37,8 +37,15 @@ evidence note. The next session resumes at the first unchecked box.
       mounted 448×256, citizen advancing then reversing at the waypoint, and
       `floor ticker paused`/`resumed` across a main-driven hide/show cycle.
       Pixi runs eval-free (`pixi.js/unsafe-eval`) under the strict CSP.*
-- [ ] **M0.5 App state** — better-sqlite3 store for window bounds; harness home at
+- [x] **M0.5 App state** — better-sqlite3 store for window bounds; harness home at
       `~/.ephesus/` per SDD §2 (directories + `config.json`).
+      *Evidence: live two-run cycle — first run created `~/.ephesus/` with
+      agora/index/profiles/prompts + atomic `config.json` + `db.sqlite`, saved
+      bounds on graceful close; second run logged
+      `restored bounds: {"x":60,"y":60,"width":1112,"height":778}` from SQLite.
+      Integration tests on real fs temp dirs (home idempotency, invalid-config
+      warning surfaced with file untouched, atomic write) + pure bounds
+      sanitization (stranded-monitor rejection): 59/59 green.*
 - [ ] **M0 exit review** — `npm run dev` shows floor + live interactive terminal;
       CI green; evidence recorded here.
 
