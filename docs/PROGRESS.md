@@ -120,7 +120,7 @@ in order, one package per session-commit; tests are part of each package).
       … ENOENT` and the agent keeps working; a 503 answer → `hook-failed stop harness
       answered 503`, exit 0. Script drift refused loudly (bad `schemaVersion` and
       unknown step kind both exit 2 with a `fatal:` line, never a guess).*
-- [ ] **M1.3 Hook server** — `src/main/hooks.ts`: UDS at `~/.ephesus/events.sock`
+- [x] **M1.3 Hook server** — `src/main/hooks.ts`: UDS at `~/.ephesus/events.sock`
       (Windows: named pipe `\\.\pipe\ephesus-events-<uid>`), fs mode 0600 where
       applicable; per-spawn token validated on every payload; zod payload schemas in
       `src/shared/hooks.ts`; schema-drift path = accept-with-visible-warning event
@@ -130,6 +130,23 @@ in order, one package per session-commit; tests are part of each package).
       accepted, bad token rejected, drifted schema → warning event, socket down →
       fail-open for the agent. Risk: Windows pipe security descriptors differ from
       0600 — document the equivalent and test it.*
+      *Evidence: `typecheck && lint && test` green — 141 passed / 2 skipped (21 new).
+      The two skips are the POSIX-only socket-mode and stale-socket cases; they run on
+      CI (ubuntu) and are `runIf`-gated rather than deleted, with the Windows branch
+      asserted by its own case. Windows pipe-security risk closed and documented: no
+      `chmod` exists for a pipe, so the equivalents are the machine-local `\\.\pipe\`
+      namespace (libuv rejects remote clients) plus the per-payload token — and the
+      pipe name is discriminated by a hash of the resolved harness home, so two homes
+      (or two parallel tests) never collide in that machine-wide namespace.
+      Live run against the REAL app: `EPH_HOME=<temp> npm run dev` logged
+      `hook endpoint listening on \\.\pipe\ephesus-events-0de82caecf1f7a7b`; the real
+      fake-engine binary then posted `pre-tool` over that pipe and the app answered
+      `401` and logged `hook rejected [agent.mason] 401: no live spawn registered for
+      agent "agent.mason"` — while the agent printed `agent kept working after the
+      hook post` and exited 0 (fail-open, SDD §10, end to end against the shipped
+      app). Accept/drift paths are covered over the identical transport by the
+      integration suite; the accepted path gets its live proof with the spawn wiring
+      in M1.4.*
 - [ ] **M1.4 Claude Code adapter** — `src/main/engines/claude.ts`: spawn plan
       (argv/cwd/env incl. `EPH_AGENT_ID`/`EPH_HOOK_TOKEN`); hook shim `shims/eph-hook`
       wired via `<cwd>/.claude/settings.local.json` (backup first, uninstall function,
@@ -146,6 +163,10 @@ in order, one package per session-commit; tests are part of each package).
       *Docs: SDD §6, ADR-0002, UI-DESIGN §5 stations. Tests: table-driven transition
       coverage — every documented edge, illegal transitions rejected/inert; station
       mapping per tool class. Risk: inventing transitions the SDD doesn't have.*
+      *Carried obligation from M1.3: this is the first package where hook events reach
+      the renderer, so it owes the visible surface for `HookServer.driftWarnings()` —
+      FR-2.3 warnings and an "events stale" state must be shown, not merely recorded
+      (invariant §7).*
 - [ ] **M1.5b Floor art v1** — UI-DESIGN §7 quality bar (Architect directive
       2026-08-26): licensed 16×16 tileset intake at 2× integer scale (reference:
       LimeZu Modern Interiors lineage) with `src/renderer/src/assets/ATTRIBUTION.md`

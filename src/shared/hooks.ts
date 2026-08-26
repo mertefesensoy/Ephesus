@@ -105,3 +105,69 @@ export function parseHookEnvelope(
   const where = first && first.path.length > 0 ? first.path.join('.') : 'envelope'
   return { ok: false, reason: `${where}: ${first?.message ?? 'invalid hook envelope'}` }
 }
+
+/**
+ * Per-event payload shapes. Deliberately *loose*: an engine that adds a field to
+ * a payload has not broken anything, and rejecting it would violate FR-2.3's
+ * "never silent failure, never brittle failure" stance. Only the fields the
+ * harness actually reads are required.
+ *
+ * `pre-tool`/`post-tool` require `tool` because the station map (SDD §6) routes
+ * an avatar by tool class — without a tool name there is no station to walk to,
+ * which is real drift worth a visible warning.
+ */
+const anyPayload = z.looseObject({})
+
+export const HOOK_PAYLOAD_SCHEMAS: Readonly<Record<HookEvent, z.ZodType>> = {
+  'session-start': anyPayload,
+  'prompt-submitted': anyPayload,
+  'pre-tool': z.looseObject({ tool: z.string().min(1) }),
+  'post-tool': z.looseObject({ tool: z.string().min(1) }),
+  stop: anyPayload,
+  'compact-start': anyPayload,
+  'compact-end': anyPayload,
+  'session-end': anyPayload
+}
+
+/**
+ * The outcome of validating one hook post's payload. Every branch is *accepted*
+ * — FR-2.3 allows exactly one response to drift, and it is "accept, warn
+ * visibly, degrade". A non-null `warning` is what the UI must surface.
+ */
+export interface HookPayloadCheck {
+  /** True when the event name is in `HOOK_EVENTS`. */
+  readonly known: boolean
+  /** The normalized event when known; the raw name otherwise. */
+  readonly event: string
+  /** Human-readable drift description, or null when the post matched the spec. */
+  readonly warning: string | null
+}
+
+/**
+ * Contract: never rejects. Returns `warning: null` for a known event with a
+ * conforming payload; a one-line warning for an unknown event name or a payload
+ * missing a field the harness reads. The caller stores the event either way and
+ * shows the warning (FR-2.3, ENGINEERING-STANDARDS §4 "fail loud, degrade
+ * visible").
+ */
+export function checkHookPayload(event: string, payload: unknown): HookPayloadCheck {
+  const classification = classifyHookEvent(event)
+  if (!classification.known) {
+    return {
+      known: false,
+      event: classification.event,
+      warning: `unknown hook event "${classification.event}" — engine schema drift; event recorded, avatar detail degraded`
+    }
+  }
+  const schema = HOOK_PAYLOAD_SCHEMAS[classification.event]
+  const parsed = schema.safeParse(payload)
+  if (parsed.success) return { known: true, event: classification.event, warning: null }
+  const first = parsed.error.issues[0]
+  const where = first && first.path.length > 0 ? first.path.join('.') : 'payload'
+  const reason = first?.message ?? 'payload did not match'
+  return {
+    known: true,
+    event: classification.event,
+    warning: `hook payload drift on "${classification.event}": ${where}: ${reason}`
+  }
+}

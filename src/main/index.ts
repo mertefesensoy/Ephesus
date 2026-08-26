@@ -3,11 +3,28 @@ import { app, BrowserWindow, screen, shell } from 'electron'
 import { sanitizeBounds } from '../shared/window-state'
 import { initHome } from './config'
 import { AppDb } from './db'
+import { HookServer } from './hooks'
 import { registerIpc } from './ipc'
 import { PtyManager } from './pty'
 
 const ptyManager = new PtyManager()
 let db: AppDb | null = null
+
+/**
+ * The event plane's front door (ADR-0002). Until the Agora's `log.jsonl` lands
+ * in M2 these two sinks are the book of record, so both say enough to find the
+ * event again (ENGINEERING-STANDARDS §4 "errors carry refs"). Drift warnings are
+ * also retained on the server for the UI to surface (FR-2.3).
+ */
+const hookServer = new HookServer({
+  onEvent: ({ envelope, known, warning }) => {
+    if (warning) console.warn(`hook drift [${envelope.agentId}/${envelope.event}]: ${warning}`)
+    else if (!known) console.warn(`hook unknown [${envelope.agentId}]: ${envelope.event}`)
+  },
+  onRejected: ({ agentId, status, reason }) => {
+    console.warn(`hook rejected [${agentId ?? 'unknown-agent'}] ${status}: ${reason}`)
+  }
+})
 
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
@@ -52,9 +69,12 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   const home = initHome()
   db = new AppDb(home.dbPath)
+  // Bound before any agent can spawn, so no spawn ever races its own hooks.
+  const endpoint = await hookServer.start(home.root)
+  console.info(`hook endpoint listening on ${endpoint}`)
   registerIpc(ptyManager)
   createWindow()
   app.on('activate', () => {
@@ -64,6 +84,7 @@ void app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   ptyManager.killAll()
+  void hookServer.stop()
   db?.close()
   if (process.platform !== 'darwin') app.quit()
 })
