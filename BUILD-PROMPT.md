@@ -122,23 +122,32 @@ milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-26, M1 close):** M0 and M1 are COMPLETE — every
-> package landed with live-run evidence, CI green on every commit, both milestones
-> audited at close by execution + design-conformance review (verdicts in
-> `docs/PROGRESS.md`). **Resume at M2.1.** The detailed M2 package plan (docs per
-> package, tests owed, risks, and where the fault-injection seams belong) is in
-> `docs/PROGRESS.md` — read it before coding. Minor choices already made are in
-> `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> **Build state (updated 2026-08-27, M2 close):** M0, M1 and M2 are COMPLETE —
+> every package landed with live-run evidence, CI green at every milestone close,
+> all three milestones audited at close by execution + design-conformance review
+> (verdicts in `docs/PROGRESS.md`). **Resume at M3.1.** The detailed M3 package
+> plan (M3.1–M3.9: docs per package, tests owed, risks, which carried item each
+> package closes) is in `docs/PROGRESS.md` — read it before coding. Minor choices
+> already made are in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
 > Standing Architect directives already folded into the docs: **MemPalace** is the
 > Library's recall/archive backend (ADR-0016; lands in M4); the floor must reach the
-> **UI-DESIGN §7 art quality bar** (licensed tileset intake path is built — the
-> sheet itself is a pending Architect purchase); pixel fonts are npm-sourced from
+> **UI-DESIGN §7 art quality bar** (Kenney CC0 sheets are staged in the tileset
+> drop; sheet-based rendering lands in M3.6; the LimeZu purchase remains pending
+> and replaces the sheets with zero code change); pixel fonts are npm-sourced from
 > `@fontsource/*` and synced by `scripts/sync-fonts.cjs` — never hand-edit
 > `src/renderer/public/fonts/`.
-> Items M1 explicitly carried into M2 (recorded in PROGRESS's M1 exit review):
-> settings.local.json startup reconcile after a force-kill (ride M2.1's reconcile);
-> `stop.pending` wiring (M2.5); the engine's Notification-hook/permission-dialog
-> visibility waits for M3's gate choke point.
+> Architect verdicts at M2 close (2026-08-27, in DECISIONS-LOG): the per-agent
+> mailbox permission grant is ratified as-is; S-GATE's voice/remote clauses are
+> policy seams with scripted stubs in M3; FR-5.4 respawn-with-memory = engine-
+> native resume in M3 (`memory.md` continuity is M4); telemetry in M3 is span
+> capture only (no waterfall UI); sheet rendering + badge double-encoding ride
+> M3.6.
+> Items carried into M3 (recorded in PROGRESS's M2 exit review; each closes in a
+> named M3 package): Notification-hook/permission-dialog visibility (M3.3),
+> `agora/human/` queue UI (M3.4), breaker signal consumption (M3.5), seat
+> assignment (M3.6), claude `resume` wiring (M3.7), `pendingTasksFor` (M3.8).
+> **Dogfood begins at M3 exit** (IMPLEMENTATION M3): from then on, Ephesus agents
+> help build Ephesus.
 
 ### M0 packages (do these first)
 

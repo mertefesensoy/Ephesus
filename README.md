@@ -128,24 +128,43 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
-**M1 complete — one real agent, both planes.** A real Claude Code runs as an
-Ephesus agent: spawned from an engine adapter's plan, observed through a
-token-gated hook event plane, its avatar walking the Terraces on real events,
-with mid-run typing queued until the agent is idle (SRS UC-03, verified live —
-see [`docs/PROGRESS.md`](./docs/PROGRESS.md) for the evidence trail and
-[the M1 record](./docs/implementations/2026-08-26-m1-agent-vertical.md)).
+**M2 complete — a company of two.** The company planes are real: shared state
+in a git-backed Agora with exactly one committer, a Hermes postal service
+between agent mailboxes, and the Stop-hook autonomy loop that keeps an agent
+working while it has mail and stops it when it doesn't. The M2 exit demo is a
+*behaviour*, not a screen — two real Claude Code agents completing a
+collaboration with nobody watching:
+
+```
+VERIFY A REQUESTED B after 21s
+VERIFY request act: request | requires_reply: true
+VERIFY watchdog woke: agent.b
+VERIFY B INFORMED BACK after 35s
+VERIFY reply act: inform | in_reply_to: 2026-08-27T09-50-00-000Z-c7d2
+VERIFY reply body: Week 34 checkout totals from checkout-totals.txt: 1281 orders,
+                   3 failures.
+VERIFY log: 1:spawn 2:delivery 3:hook 4:spawn 5:hook 6:exit 7:delivery
+```
+
+One Architect instruction started it; after that nobody typed anything — the
+wake watchdog decided agent.b needed waking and supplied the words. The last
+line is the same run reconstructed from `log.jsonl` alone. Evidence trail in
+[`docs/PROGRESS.md`](./docs/PROGRESS.md); full record in
+[the M2 record](./docs/implementations/2026-08-27-m2-company-planes.md).
+*(A screenshot of the Activity tab is owed from the next local run; the M1
+capture below still shows the live floor.)*
 
 ![A real Claude Code editing a file while its avatar works at the shelf](./docs/demo/m1-uc03-working.png)
 
-*Live UC-03: the engine's authentic TUI streams into the agent terminal
+*Live UC-03 (M1): the engine's authentic TUI streams into the agent terminal
 (right) as it edits a file; the same hook events drive its avatar's walk to
-the shelf station on the floor (left). Fonts and floor art are at their
-M1 interim state — the licensed tileset intake lands next.*
+the shelf station on the floor (left).*
 
 The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
 reaches feature parity with the inspiration at M4, with the differentiating
 subsystems (Odeon, Herald, mission profiles, org layer) landing in M3–M7.
-Next: **M2 — the Agora + Hermes** (a company of two).
+Next: **M3 — Artemis + the Watch** (a governed company; dogfood starts at its
+exit).
 
 ## License & lineage
 

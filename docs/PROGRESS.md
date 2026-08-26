@@ -660,8 +660,164 @@ deserves ratification.
 
 ## M3 — Artemis + the Watch
 
-- [ ] Package list derived at milestone start
-- [ ] M3 exit — UC-02 + UC-08 demos; S-GATE, S-BREAKER, S-LEDGER, S-SECRETS pass
+Plan drafted 2026-08-27 at M2 close (derived per BUILD-PROMPT §5 from
+IMPLEMENTATION M3 + ADR-0005/0010/0011 + SDD §1.1/§4/§7.1/§9 + TEST-STRATEGY §3).
+Execute in order; every package tests against the fake engine per-PR.
+
+**Architect decisions folded into this plan (2026-08-27, recorded in
+DECISIONS-LOG):** the M2.7 mailbox permission grant is RATIFIED as-is as a
+permission default · S-GATE's voice/remote clauses are built as *policy seams*
+in M3 — source-channel and repeat-back are first-class gate-policy inputs
+tested with scripted stubs (fake STT transcript, fake remote channel); the real
+Herald/Harbor adapters plug into the same seam in M6/M7 · FR-5.4
+respawn-with-memory means **engine-native resume** in M3 (adapter
+`ResumeSupport` + recorded session id + re-injected identity/roster; Library-
+backed `memory.md` continuity is M4's) · telemetry is span *capture* only (the
+breaker needs the data; the waterfall UI comes later) · sheet-based floor
+rendering + the owed badge double-encoding ride the M3 floor-layout package.
+
+**Carried in from M1/M2 (each closes inside a package below):** the engine's
+Notification-hook/permission-dialog invisibility (M1 → gate choke point,
+M3.3) · `pendingTasksFor` always 0 (→ M3.8) · breaker pathology signal
+emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
+`agora/human/` queue with no UI (→ M3.4) · claude adapter's missing optional
+`resume` (→ M3.7) · badge color-only pairs and tilesheet rendering (→ M3.6).
+
+- [ ] **M3.1 Secret broker + redaction filter** — write-only broker in main
+      (`secrets:` IPC per SDD §5: `set/status/test/delete` — no call returns a
+      value, asserted by API-surface test); storage via Electron `safeStorage`
+      (OS-keychain-backed encrypted file — matches ADR-0010's fallback wording,
+      zero new dependencies) behind an injected cipher seam so tests never
+      import the native path; env injection at spawn scoped to the role's
+      declared `envGrants` (registry §4.1) — undeclared vars never reach a
+      spawn; redaction filter in `pty.ts` masks known secret values in outbound
+      streams with the visible `•••eph-masked•••` marker (ADR-0010).
+      *Docs: ADR-0010, FR-11.4, SDD §1.1 (agents.ts/pty.ts), NFR-8. Tests:
+      API-surface (no read IPC exists), grant scoping least-privilege, redaction
+      masks a planted token in a PTY stream, masks marked visibly. Risk:
+      secret-shaped strings in fixtures (invariant §6) — fixture values must be
+      scanner-neutral like M1's.*
+- [ ] **M3.2 Cost ledger + budgets** — adapter `TranscriptReader` facts folded
+      into the append-only SQLite `cost_ledger(agent, session, model, day, …)`
+      (SDD §4.6) with an idempotent fold cursor; **cumulative figures computed
+      only from the ledger** (invariant §11 — the restart-reset bug class is
+      structurally excluded), session + cumulative side by side; per-agent
+      budgets from registry `budget.dailyTokens`; pre-flight burn-rate
+      projection + post-hoc enforcement; breaches → `log` kind `budget` and the
+      breaker's trip-signal #4 input (consumed M3.5). `watch: budgets()` IPC.
+      *Docs: ADR-0011, FR-11.2, SDD §4.6, §9. Tests: folding math pure and
+      table-driven; fold-cursor idempotency (re-reading a transcript never
+      double-counts); restart survival against a storage seam (S-LEDGER core);
+      claude reader against fixtures. Risk: better-sqlite3 is Electron-ABI —
+      ledger logic stays behind a storage interface, vitest never imports the
+      native module (M0 constraint 3).*
+- [ ] **M3.3 Gate core — deny-by-default + the three choke points** —
+      `watch/gates.ts` + pure policy matcher in `src/shared/`: deny-by-default
+      evaluation; profile autonomy can only *loosen* up to global maxima
+      (stricter wins, ADR-0012); gate packaging schema (what/why/blast
+      radius/rollback, schemaVersion + validator); the three SDD §9 choke
+      points: (1) engine tool-permission prompts — wire the claude adapter's
+      `Notification` hook so a native permission dialog becomes a visible gate
+      instead of an invisible stall (**closes the M1 carried item**), (2)
+      Hermes `needs_human`, (3) harness-mediated actions (spend). Gate open /
+      verdict → `log` kind `gate`; open gates block `status→done` (the §4.2
+      guard shaped in M2.2 becomes live). Source-channel + repeat-back enter
+      the policy as first-class inputs (Architect decision — scripted stubs).
+      *Docs: SDD §9, FR-11.1, ADR-0011/0012, UC-08. Tests: policy matcher
+      table-driven incl. stricter-wins composition; gate lifecycle integration
+      with the fake engine; Notification-hook mapping. Risk: policy config
+      shape is minimally specified — smallest shape that serves UC-08, logged
+      in DECISIONS-LOG, no invented policy language.*
+- [ ] **M3.4 Approvals UI + the human queue** — the Watch approvals surface
+      (UI-DESIGN §4): `watch: approvals()/approve(gateId, v)` IPC + `gate:open`
+      push; renders each gate's packaging (what/why/blast radius/rollback);
+      the M2 `agora/human/` diverted-mail queue surfaces in the same view
+      (**closes the M2 carried item** — no more invisible mail); avatar
+      `blocked` (wave at Watch post) on gate-open, prior state restored on
+      verdict (SDD §6 edge already implemented and regression-tested in M1).
+      *Docs: SDD §5, §6, UI-DESIGN §4. Tests: renderer stays a projection
+      (approve round-trip validated in main; no gate state held renderer-side);
+      queue drains visibly. Risk: inventing UI beyond the spec — the surface is
+      the documented approvals queue, nothing more.*
+- [ ] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
+      ADR-0011: tool-call spans (agent, tool, duration, outcome) recorded from
+      hook events (the span model FR-11.6 needs later; no waterfall UI yet —
+      Architect decision); trip signals as pure functions in `src/shared/`:
+      repeated near-identical tool calls in a window, error-rate threshold,
+      recurring hop-cap escalations on one conversation, burn-rate projection
+      (from M3.2); the ladder: **steer** (corrective prompt through the command
+      queue — FR-1.3 applies; avatar `looping`) → **constrain** (pause Hermes
+      deliveries, lower remaining budget, read-only tools where the engine
+      supports it) → **stop** (graceful interrupt then stop; task `stalled`
+      with breaker report; reassignment is Artemis's, M3.8). Consumes M2.5's
+      pathology signal (**closes the M2 carried item**); every trip and rung
+      transition → `log` kind `breaker`; reduced protection on `pty-heuristic`
+      engines surfaces on the agent card (ADR-0011 consequence).
+      *Docs: ADR-0011, FR-11.3, SDD §6 (looping), §9. Tests: signal functions
+      table-driven on scripted fixtures (repetition, error storm, burn rate);
+      ladder integration with the fake engine — work preserved at rungs 1–2
+      (S-BREAKER core). Risk: false trips — rung 1 must stay cheap (one
+      injected sentence), never destructive.*
+- [ ] **M3.6 Floor layout v2 — seats, temple, sheet rendering** — the floor
+      layout: real seat assignment (terrace numbering per UI-DESIGN §5 —
+      retires the every-hire-is-`terrace` placeholder, **closes the M2 carried
+      item**), Artemis's reserved temple seat/room; rooms render from the
+      installed tileset sheets (Kenney CC0 staged since M1; procedural stays
+      as the visible no-sheet fallback — Architect decision) · the owed §8
+      badge double-encoding (glyph/label beside color for `idle`↔`waiting`,
+      `alert`↔`thinking`) lands here, since gates/breaker make `waiting`,
+      `blocked` and `looping` reachable for the first time.
+      *Docs: UI-DESIGN §5–§8, SDD §6 stations, ADR-0014. Tests: seat
+      assignment pure + deterministic; scene-state assertions (state model is
+      truth, art is presentation); token/contrast checks stay green; badge
+      encodings asserted distinct without color. Risk: art must not change the
+      state model — snapshots of scene state, not pixels.*
+- [ ] **M3.7 Artemis lifecycle** — `artemis.ts`: auto-spawn at startup into
+      the temple seat, `isOrchestrator` + `orchestratorId` per SDD §4.1;
+      prompt/config assembly from `prompts/artemis/` (system prompt carries the
+      escalation policy; editable — prompt text is config, invariant §8);
+      delegated-authority table as a validated config file (FR-5.5 —
+      countersign surface lands with the Odeon, but the table and its
+      enforcement hooks are M3's); respawn on crash via adapter `ResumeSupport`
+      — wire claude's `--resume` with the session id the event plane already
+      records (**closes the M1-audit resume gap**; Architect decision:
+      engine-native resume + re-injected identity/roster IS M3's
+      respawn-with-memory; `memory.md` continuity is M4's).
+      *Docs: ADR-0005, FR-5.1–5.5, SDD §1.1 artemis.ts, §4.1. Tests: lifecycle
+      with the fake engine — auto-spawn, crash → respawn carries resume args +
+      identity; authority-table validator; prompt assembly snapshot. Risk:
+      FR-5.1 — Artemis is an ordinary engine process holding a privileged
+      *role*, not privileged code; resist rules-engine creep into main.*
+- [ ] **M3.8 Task assignment + Artemis routing + Ledger tab** — SDD §7.1: the
+      ledger endpoint (Artemis files `propose` acts from its own outbox; the
+      harness validates and writes `tasks.json` through the single committer —
+      agents never touch the ledger file); assignment `request`s with
+      self-contained specs; `pendingTasksFor` becomes real (**closes the M2
+      carried item** — the ADR-0013 branch now fires on tasks, not mail alone);
+      Hermes re-targets `to:"human"` and hop-cap diversions from the
+      `agora/human/` constant to Artemis-as-proxy (FR-3.7/ADR-0005), with only
+      critical-policy items continuing to the Architect's queue; `needs_human`
+      flip honored by Artemis; `board.md` scribing (Artemis sole scribe,
+      enforced) + `agora: board()` IPC; the Kanban Ledger tab (FR-4.3) +
+      `state:tasks` push.
+      *Docs: SDD §7.1, §4.2, §5, FR-5.2, FR-4.3, ADR-0005. Tests: ledger
+      endpoint refuses non-Artemis writers and invalid transitions; assignment
+      flow with two fakes; single-scribe enforcement; kanban stays a
+      projection. Risk: mechanism/intelligence split — main validates and
+      executes, Artemis decides; no orchestration decision hardcoded in main.*
+- [ ] **M3.9 Scenario suites + exit demos** — implement S-GATE, S-BREAKER,
+      S-LEDGER, S-SECRETS (TEST-STRATEGY §3) as automated suites over the
+      seams M3.1–M3.8 built (S-GATE's voice/remote clauses at the policy
+      boundary with scripted stubs per the Architect decision); then the exit
+      demos: **UC-02** — a real directive to Artemis fans out (decompose →
+      ledger tasks → assignee `request`s → work → verify → board update) —
+      and **UC-08** — a destructive op stops at a gate, packaged
+      what/why/blast-radius/rollback, approved in the UI, the full chain in
+      `log.jsonl`. Dogfood begins at this exit (IMPLEMENTATION M3).
+      *Docs: TEST-STRATEGY §3, UC-02/UC-08. Risk: suites run per-PR against
+      the fake engine; real-`claude` demos are exit-review territory.*
+- [ ] **M3 exit review** — UC-02 + UC-08 demo evidence; S-GATE, S-BREAKER,
+      S-LEDGER, S-SECRETS green in CI; PROGRESS + docs synced.
 
 ## M4 — The Library + engine breadth
 
