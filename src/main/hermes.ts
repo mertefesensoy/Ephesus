@@ -3,8 +3,10 @@ import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
+import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
 import { writeFileAtomic } from './fsx'
+import type { PromptStore } from './prompts'
 
 /**
  * Hermes — the router (ADR-0003, SDD §1.1 `hermes.ts`).
@@ -71,6 +73,24 @@ export interface HermesOptions {
   context?(): RoutingContext
   /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
   onBounced?(record: BounceRecord): void
+  /** Renders the block reason and the wake nudge — both are prompt surfaces. */
+  readonly prompts?: PromptStore
+  /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
+  readonly blockCap?: number
+  /** Unfinished tasks assigned to an agent; the ledger lands fully in M3. */
+  pendingTasksFor?(agentId: string): number
+  /** Writes text into a live agent's session — how the watchdog nudges. */
+  nudge?(agentId: string, text: string): void
+  /** True when the agent has finished its turn and is waiting. */
+  isIdle?(agentId: string): boolean
+  /** Raised when a session's block count looks pathological (ADR-0011, M3). */
+  onPathology?(agentId: string, blocks: number): void
+}
+
+/** What the harness tells the engine to do when a turn ends (ADR-0013). */
+export interface StopReply {
+  readonly decision: 'block'
+  readonly reason: string
 }
 
 export interface BounceRecord {
@@ -89,6 +109,10 @@ export class Hermes {
   private readonly debounces = new Map<string, NodeJS.Timeout>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   private sweeping: Promise<SweepReport> = Promise.resolve({ delivered: [], rejected: [] })
+  /** Stop-hook continuations per session, for guard 2 (ADR-0013). */
+  private readonly blocks = new Map<string, number>()
+  /** Agents already nudged for their current pending mail — "exactly once". */
+  private readonly nudged = new Set<string>()
 
   constructor(private readonly options: HermesOptions) {}
 
@@ -354,6 +378,118 @@ export class Hermes {
   /** The outbox is router-drained (SDD §2); the message now lives in the inbox. */
   private drainOutbox(file: string): void {
     fs.rmSync(file, { force: true })
+  }
+
+  // ── the autonomy loop (ADR-0013) ───────────────────────────────────────────
+
+  /** Continuations this session has had; resets when the agent respawns. */
+  blockCount(agentId: string): number {
+    return this.blocks.get(agentId) ?? 0
+  }
+
+  /** A respawned agent starts its block budget over. */
+  resetSession(agentId: string): void {
+    this.blocks.delete(agentId)
+    this.nudged.delete(agentId)
+  }
+
+  /**
+   * Decides what to tell an engine whose turn just ended (ADR-0013 steps 2-4).
+   *
+   * Contract: returns the engine-facing reply, or null to let the turn end
+   * normally. Every outcome is logged — a loop that continues silently is
+   * exactly the pathology R2 warns about, and the log is where the breaker and
+   * the next briefing will read it.
+   */
+  decideOnStop(agentId: string, payload: unknown): StopReply | null {
+    const stopHookActive =
+      typeof payload === 'object' &&
+      payload !== null &&
+      (payload as Record<string, unknown>)['stop_hook_active'] === true
+
+    const context: StopContext = {
+      stopHookActive,
+      blocksThisSession: this.blockCount(agentId),
+      pendingMail: this.pendingMailCount(agentId),
+      pendingTasks: this.options.pendingTasksFor?.(agentId) ?? 0,
+      ...(this.options.blockCap === undefined ? {} : { blockCap: this.options.blockCap })
+    }
+
+    const decision = decideStop(context)
+    this.logStop(agentId, context, decision)
+
+    if (decision.kind === 'continue') return null
+
+    const blocks = this.blockCount(agentId) + 1
+    this.blocks.set(agentId, blocks)
+    if (isPathological(blocks)) this.options.onPathology?.(agentId, blocks)
+
+    return {
+      decision: 'block',
+      reason: this.render('stop-block-reason.md', {
+        pendingMail: String(decision.pendingMail),
+        pendingTasks: String(decision.pendingTasks)
+      })
+    }
+  }
+
+  private logStop(agentId: string, context: StopContext, decision: StopDecision): void {
+    this.agora.appendLog({
+      kind: 'hook',
+      event: 'stop',
+      agentId,
+      decision: decision.kind,
+      because: decision.kind === 'continue' ? decision.because : 'pending-work',
+      pendingMail: context.pendingMail,
+      pendingTasks: context.pendingTasks,
+      blocksThisSession: context.blocksThisSession,
+      stopHookActive: context.stopHookActive
+    })
+  }
+
+  /**
+   * The inbox wake watchdog (ADR-0013, FR-3.5). Mail that lands while an agent
+   * is already idle produces no Stop event, so nothing would ever wake it. This
+   * nudges exactly once per pending episode: a second call while the same mail
+   * sits unread does nothing, and an agent that is not idle is left alone
+   * (suppressing the stale nudge ADR-0013 names).
+   */
+  wakeCheck(): readonly string[] {
+    const woken: string[] = []
+    for (const agentId of this.knownAgents()) {
+      const pending = this.pendingMailCount(agentId)
+      if (pending === 0) {
+        this.nudged.delete(agentId)
+        continue
+      }
+      if (this.nudged.has(agentId)) continue
+      if (this.options.isIdle && !this.options.isIdle(agentId)) continue
+
+      this.nudged.add(agentId)
+      this.options.nudge?.(agentId, this.render('wake-nudge.md', { pendingMail: String(pending) }))
+      this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingMail: pending })
+      woken.push(agentId)
+    }
+    return woken
+  }
+
+  /** Unread messages waiting for an agent. */
+  pendingMailCount(agentId: string): number {
+    const inbox = path.join(this.mailboxDir(agentId), 'inbox')
+    if (!fs.existsSync(inbox)) return 0
+    return fs.readdirSync(inbox).filter((name) => name.endsWith('.json')).length
+  }
+
+  /**
+   * Renders a prompt surface. Falls back to a bare factual line only when no
+   * prompt store is wired (tests), never in the app — invariant §8 keeps
+   * LLM-facing prose in `prompts/`.
+   */
+  private render(template: string, vars: Record<string, string>): string {
+    if (!this.options.prompts) {
+      return `pending mail: ${vars['pendingMail'] ?? '0'}, pending tasks: ${vars['pendingTasks'] ?? '0'}`
+    }
+    return this.options.prompts.render(path.join('hermes', template), vars)
   }
 
   // ── inbox consumption (ADR-0003 idempotency) ───────────────────────────────

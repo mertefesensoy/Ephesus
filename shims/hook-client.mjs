@@ -39,6 +39,7 @@ export const HOOK_ENDPOINT_PATH = '/hook'
  * @property {boolean} delivered   True only for a 2xx answer from the harness.
  * @property {number | null} status HTTP status, or null when nothing answered.
  * @property {string | null} error  One-line reason when `delivered` is false.
+ * @property {string | null} body   The harness's answer, for hooks that act on it.
  */
 
 /**
@@ -104,7 +105,7 @@ export function postHookEvent(endpoint, envelope, timeoutMs = 2000) {
 
     const body = serialize(envelope)
     if (body === null) {
-      finish({ delivered: false, status: null, error: 'envelope is not serializable' })
+      finish({ delivered: false, status: null, error: 'envelope is not serializable', body: null })
       return
     }
 
@@ -119,14 +120,22 @@ export function postHookEvent(endpoint, envelope, timeoutMs = 2000) {
         }
       },
       (response) => {
-        // Drain, or the socket is held open and the agent's exit stalls.
-        response.resume()
+        // The body carries the autonomy loop's decision (ADR-0013), so it is
+        // collected rather than discarded — but always drained, or the socket
+        // stays open and the agent's exit stalls.
         const status = response.statusCode ?? 0
+        let body = ''
+        response.setEncoding('utf8')
+        response.on('data', (chunk) => {
+          body += chunk
+        })
         response.on('end', () => {
+          const ok = status >= 200 && status < 300
           finish({
-            delivered: status >= 200 && status < 300,
+            delivered: ok,
             status,
-            error: status >= 200 && status < 300 ? null : `harness answered ${status}`
+            error: ok ? null : `harness answered ${status}`,
+            body
           })
         })
       }
@@ -134,11 +143,11 @@ export function postHookEvent(endpoint, envelope, timeoutMs = 2000) {
 
     request.setTimeout(timeoutMs, () => {
       request.destroy()
-      finish({ delivered: false, status: null, error: `timeout after ${timeoutMs}ms` })
+      finish({ delivered: false, status: null, error: `timeout after ${timeoutMs}ms`, body: null })
     })
 
     request.on('error', (err) => {
-      finish({ delivered: false, status: null, error: err.message })
+      finish({ delivered: false, status: null, error: err.message, body: null })
     })
 
     request.end(body)

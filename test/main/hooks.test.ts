@@ -35,7 +35,9 @@ async function startRig(): Promise<Rig> {
   const events: HookEventRecord[] = []
   const rejections: HookRejection[] = []
   const server = new HookServer({
-    onEvent: (record) => events.push(record),
+    onEvent: (record) => {
+      events.push(record)
+    },
     onRejected: (rejection) => rejections.push(rejection)
   })
   const endpoint = await server.start(home)

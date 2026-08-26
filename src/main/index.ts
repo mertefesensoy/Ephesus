@@ -14,6 +14,7 @@ import { AgentManager } from './agents'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
+import { Hermes } from './hermes'
 import { initHome } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
@@ -28,6 +29,7 @@ const ptyManager = new PtyManager()
 let db: AppDb | null = null
 let agentManager: AgentManager | null = null
 let agora: Agora | null = null
+let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
@@ -43,6 +45,9 @@ const commandQueue = new CommandQueue({
 })
 
 const avatarDirector = new AvatarDirector({
+  // The floor and the autonomy loop read the SAME fact about pending work, so
+  // they can never disagree about whether an agent is done (ADR-0013).
+  hasPendingWork: (agentId: string) => (hermes?.pendingMailCount(agentId) ? true : false),
   onChange: (agentId: string, snapshot: AvatarSnapshot) => {
     mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, { agentId, snapshot })
     // The queue flushes off the same snapshots the floor draws, so held text
@@ -63,6 +68,13 @@ const hookServer = new HookServer({
     if (warning) console.warn(`hook drift [${envelope.agentId}/${envelope.event}]: ${warning}`)
     else if (!known) console.warn(`hook unknown [${envelope.agentId}]: ${envelope.event}`)
     avatarDirector.handleHook(record)
+
+    // The autonomy hinge (ADR-0013): a finished turn continues only if the
+    // guards allow it. Returning nothing lets the turn end normally.
+    if (envelope.event === 'stop') {
+      return hermes?.decideOnStop(envelope.agentId, envelope.payload) ?? undefined
+    }
+    return undefined
   },
   onRejected: ({ agentId, status, reason }) => {
     console.warn(`hook rejected [${agentId ?? 'unknown-agent'}] ${status}: ${reason}`)
@@ -159,6 +171,23 @@ void app.whenReady().then(async () => {
       settingsRegistry: db
     })
   )
+  hermes = new Hermes({
+    agora,
+    prompts,
+    nudge: (agentId, text) => commandQueue.submit(agentId, text),
+    isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',
+    onPathology: (agentId, blocks) => {
+      // The breaker (ADR-0011) consumes this in M3; until then it is at least
+      // visible rather than an invisible overnight loop (R2).
+      console.warn(`autonomy: ${agentId} has been continued ${blocks} times this session`)
+      agora?.appendLog({ kind: 'breaker', agentId, signal: 'stop-loop', blocks, rung: 1 })
+    },
+    onBounced: ({ original, reason }) =>
+      console.warn(`hermes bounce [${original.id}] to "${original.to}": ${reason}`),
+    onRejected: ({ file, reason }) => console.warn(`hermes rejected ${file}: ${reason}`)
+  })
+  hermes.start()
+
   agentManager = new AgentManager({
     engines,
     hookServer,
@@ -175,6 +204,10 @@ void app.whenReady().then(async () => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
         avatarDirector.add(card.agentId)
+        hermes?.ensureMailbox(card.agentId)
+        hermes?.watch(card.agentId)
+        // A respawn starts its Stop-hook block budget over (ADR-0013 guard 2).
+        hermes?.resetSession(card.agentId)
       }
     }
   })
@@ -207,6 +240,7 @@ app.on('window-all-closed', () => {
     .catch((err: unknown) => console.warn(`agents: shutdown failed: ${String(err)}`))
     .finally(() => {
       avatarDirector.stop()
+      hermes?.stop()
       ptyManager.killAll()
       void hookServer.stop()
       void agora?.drained().finally(() => db?.close())
@@ -214,6 +248,7 @@ app.on('window-all-closed', () => {
     })
   if (!agentManager) {
     avatarDirector.stop()
+    hermes?.stop()
     ptyManager.killAll()
     void hookServer.stop()
     db?.close()

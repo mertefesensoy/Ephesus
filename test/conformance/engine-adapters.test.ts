@@ -100,7 +100,9 @@ async function runAdapterLive(
   const home = tempDir()
   const received: HookEventRecord[] = []
   const server = new HookServer({
-    onEvent: (record) => received.push(record),
+    onEvent: (record) => {
+      received.push(record)
+    },
     onRejected: () => {}
   })
   await server.start(home)

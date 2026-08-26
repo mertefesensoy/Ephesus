@@ -26,9 +26,14 @@ import { buildEnvelope, postHookEvent } from './hook-client.mjs'
  *   EPH_AGENT_ID · EPH_HOOK_TOKEN · EPH_HOOK_ENDPOINT
  *
  * **Fail-open, always** (SDD §10): the harness being down, misconfigured, or
- * slow must never cost the agent its turn. Every path here exits 0, and nothing
- * is written to stdout — an engine treats hook stdout as instructions, so the
- * shim stays silent and reports trouble on stderr only.
+ * slow must never cost the agent its turn. Every path here exits 0, and trouble
+ * is reported on stderr only.
+ *
+ * Stdout is the one channel an engine reads as instructions, so the shim stays
+ * silent on it *unless the harness returned a decision* — which is precisely
+ * how the autonomy loop works (ADR-0013): the Stop hook's reply is handed back
+ * to the engine as new input. A harness that returns nothing leaves the turn to
+ * end normally.
  */
 
 /**
@@ -150,6 +155,26 @@ export function sessionIdOf(raw, args) {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+/**
+ * Extracts an engine-facing decision from the harness's answer, if there is one.
+ *
+ * @param {string | null} body
+ * @returns {{ decision: string, reason: string } | null}
+ */
+export function decisionOf(body) {
+  if (!body) return null
+  try {
+    const parsed = JSON.parse(body)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const decision = /** @type {Record<string, unknown>} */ (parsed)['decision']
+    const reason = /** @type {Record<string, unknown>} */ (parsed)['reason']
+    if (typeof decision !== 'string' || typeof reason !== 'string') return null
+    return { decision, reason }
+  } catch {
+    return null
+  }
+}
+
 /** Reads all of stdin. Resolves to '' when nothing is piped in. */
 function readStdin() {
   return new Promise((resolve) => {
@@ -213,7 +238,13 @@ async function main() {
   )
   if (!delivery.delivered) {
     process.stderr.write(`eph-hook: ${args.event} not delivered (${delivery.error ?? 'unknown'})\n`)
+    return
   }
+
+  // Relay a decision — and ONLY a decision — to the engine. Anything else on
+  // stdout would be read as instructions the harness never meant to give.
+  const decision = decisionOf(delivery.body)
+  if (decision) process.stdout.write(`${JSON.stringify(decision)}\n`)
 }
 
 // Only run when executed as a program; importing it for tests must not post.

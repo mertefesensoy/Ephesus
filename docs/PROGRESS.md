@@ -481,7 +481,7 @@ Execute in order; every package tests against the fake engine per-PR.
       `Your message … to "agent.ghost" could not be delivered: no mailbox for
       "agent.ghost"`. The log carried all five events with reasons, including
       `hop cap 8 reached (hops=8); diverted from "agent.b"`.*
-- [ ] **M2.5 Stop-hook autonomy + wake watchdog** — the ADR-0013 loop: Stop-hook
+- [x] **M2.5 Stop-hook autonomy + wake watchdog** — the ADR-0013 loop: Stop-hook
       decisioning in `hermes.ts` (drain inbox on stop; `stop.pending` finally
       wired — closes the M1 carried item), triple guard (`stop_hook_active`
       respected, hard block-cap, breaker signal stub for M3), inbox wake watchdog
@@ -490,6 +490,29 @@ Execute in order; every package tests against the fake engine per-PR.
       *Docs: ADR-0013, SDD §1.1 hermes.ts, §6 autonomy branch. Tests: S-WAKE and
       S-STOPLOOP become implementable here (fake engine Stop scripts). Risk:
       R2 — loop pathology; the guards are the package, not an afterthought.*
+      *Evidence: `typecheck && lint && test` green — 545 passed / 3 skipped (28 new).
+      The guards are one pure function so their ORDERING is testable, and each is
+      asserted alone and in combination — including the case that matters most: an
+      engine that never reports `stop_hook_active` is still capped, proven by a loop
+      that runs 100 turns and blocks exactly `DEFAULT_BLOCK_CAP` times.
+      **Closes the second M1 carried item**: `stop.pending` is now the same fact
+      Hermes hands the Stop hook, injected into the avatar director, so the floor and
+      the autonomy loop cannot disagree about whether an agent is done.
+      LIVE RUN through the REAL eph-hook.mjs shim against a real socket —
+      nothing pending gave shim stdout `""` (turn ends normally); the wake watchdog
+      woke `agent.b` and returned `[]` on the second pass (exactly once) with the
+      nudge text rendered from `prompts/hermes/wake-nudge.md`; mail pending gave shim
+      stdout `{"decision":"block","reason":"You have 1 unread message(s) and 0
+      unfinished task(s)..."}` rendered from `prompts/hermes/stop-block-reason.md`,
+      so the prompt surface really is versioned config (invariant §8);
+      `stop_hook_active: true` gave `""` (guard 1 holds); and at the cap the shim got
+      `""` with `blocks this session: 3 (cap 3)` (guard 2 holds).
+      The log carried every decision with its `because` tag: `nothing-pending` then
+      `pending-work` then `stop-hook-active` then `pending-work` twice then
+      `block-cap-reached` three times.
+      The run also caught a real defect: the shim relay had silently failed to be
+      wired, so the harness decided to block and the engine never heard it — fixed,
+      with regression tests for both the relay and the stay-silent property.*
 - [ ] **M2.6 Identity/protocol injection at spawn + Activity tab** — spawn-time
       injection grows the Agora context (agent's registry row + PROTOCOL.md
       already materialized in M1 — extend to registry-backed roster); Activity

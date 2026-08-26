@@ -69,9 +69,22 @@ export interface HookRejection {
   readonly status: number
 }
 
+/**
+ * What the harness may tell the engine to do in reply to a hook. Today only the
+ * Stop hook uses it (ADR-0013): `block` hands the reason back as new input and
+ * the agent keeps working.
+ */
+export interface HookReply {
+  readonly decision: 'block'
+  readonly reason: string
+}
+
 export interface HookServerOptions {
-  /** Called for every accepted post, drifted or not. */
-  onEvent(record: HookEventRecord): void
+  /**
+   * Called for every accepted post, drifted or not. A returned reply is passed
+   * back to the engine; returning nothing lets the turn end normally.
+   */
+  onEvent(record: HookEventRecord): HookReply | void
   /** Called for every refused post. Wired to `log.jsonl` when the Agora lands (M2). */
   onRejected(rejection: HookRejection): void
   /** Largest body the endpoint will read; anything larger is refused. */
@@ -246,7 +259,7 @@ export class HookServer {
     const check = checkHookPayload(envelope.event, envelope.payload)
     if (check.warning && !this.warnings.includes(check.warning)) this.warnings.push(check.warning)
 
-    this.options.onEvent({
+    const reply = this.options.onEvent({
       envelope,
       known: check.known,
       warning: check.warning,
@@ -254,6 +267,6 @@ export class HookServer {
     })
 
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ ok: true, warning: check.warning }))
+    res.end(JSON.stringify({ ok: true, warning: check.warning, ...(reply ?? {}) }))
   }
 }

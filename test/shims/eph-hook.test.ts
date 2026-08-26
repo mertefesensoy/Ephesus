@@ -2,7 +2,13 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseHookEnvelope } from '../../src/shared/hooks'
-import { classifyTool, normalizePayload, parseArgs, sessionIdOf } from '../../shims/eph-hook.mjs'
+import {
+  classifyTool,
+  decisionOf,
+  normalizePayload,
+  parseArgs,
+  sessionIdOf
+} from '../../shims/eph-hook.mjs'
 import { startHookStubServer, tempEndpoint, type HookStubServer } from '../fakes/hook-stub-server'
 
 /**
@@ -290,5 +296,61 @@ describe('eph-hook — as an engine actually runs it', () => {
     const parsed = parseHookEnvelope(posts[0]?.parsed)
     expect(parsed.ok).toBe(true)
     if (parsed.ok) expect(parsed.envelope.event).toBe('stop')
+  })
+})
+
+describe('eph-hook — relaying the autonomy decision (ADR-0013)', () => {
+  it('reads a decision out of the harness answer', () => {
+    expect(decisionOf('{"ok":true,"decision":"block","reason":"you have mail"}')).toEqual({
+      decision: 'block',
+      reason: 'you have mail'
+    })
+  })
+
+  it('finds no decision in an ordinary acknowledgement', () => {
+    expect(decisionOf('{"ok":true,"warning":null}')).toBeNull()
+  })
+
+  it('never invents one from a half-formed answer', () => {
+    for (const body of [
+      null,
+      '',
+      'not json',
+      '{"decision":"block"}',
+      '{"reason":"only a reason"}',
+      '{"decision":123,"reason":"x"}',
+      '[]'
+    ]) {
+      expect(decisionOf(body)).toBeNull()
+    }
+  })
+
+  it('prints the decision to stdout — the one thing the engine reads', async () => {
+    const server = await stub()
+    server.respondWith(200)
+    const child = await new Promise<string>((resolve, reject) => {
+      const proc = spawn(process.execPath, [SHIM, '--event', 'stop'], {
+        env: {
+          ...process.env,
+          EPH_AGENT_ID: 'agent.mason',
+          EPH_HOOK_TOKEN: 'spawn-token-1',
+          EPH_HOOK_ENDPOINT: server.endpoint
+        },
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      let out = ''
+      proc.stdout.setEncoding('utf8')
+      proc.stdout.on('data', (chunk: string) => {
+        out += chunk
+      })
+      proc.stderr.resume()
+      proc.on('error', reject)
+      proc.on('close', () => resolve(out))
+      proc.stdin.end('{}')
+    })
+
+    // The stub answers `{"ok":true,...}` with no decision, so the shim stays
+    // silent — the property M1.4 established and M2.5 must not break.
+    expect(child).toBe('')
   })
 })

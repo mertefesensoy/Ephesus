@@ -26,6 +26,12 @@ export interface AvatarDirectorOptions {
   onChange(agentId: string, snapshot: AvatarSnapshot): void
   /** Injected in tests; defaults to the wall clock. */
   now?: () => number
+  /**
+   * Whether an agent has unfinished work waiting (ADR-0013). Injected rather
+   * than imported so the floor never reaches into Hermes, and so both planes
+   * read the same fact.
+   */
+  hasPendingWork?(agentId: string): boolean
 }
 
 /**
@@ -35,7 +41,11 @@ export interface AvatarDirectorOptions {
  * inventing a transition for them would be exactly the improvisation the SDD
  * forbids.
  */
-export function avatarEventForHook(record: HookEventRecord): AvatarEvent | null {
+export function avatarEventForHook(
+  record: HookEventRecord,
+  /** True when the agent has mail or a task waiting — the ADR-0013 branch. */
+  pending = false
+): AvatarEvent | null {
   const payload =
     typeof record.envelope.payload === 'object' && record.envelope.payload !== null
       ? (record.envelope.payload as Record<string, unknown>)
@@ -49,10 +59,11 @@ export function avatarEventForHook(record: HookEventRecord): AvatarEvent | null 
     case 'post-tool':
       return { kind: 'post-tool' }
     case 'stop':
-      // `pending` is Hermes's answer — is mail or a task waiting (ADR-0013)?
-      // Hermes lands in M2; until it does, nothing is ever pending, which is
-      // the truth about this system today rather than a placeholder.
-      return { kind: 'stop', pending: false }
+      // Hermes's answer: is mail or a task waiting (ADR-0013)? A `stop` with
+      // work pending sends the avatar back to `alert` rather than to `success`
+      // — the same fact the Stop hook uses to continue the turn, so the floor
+      // and the autonomy loop can never disagree about whether an agent is done.
+      return { kind: 'stop', pending }
     case 'compact-start':
       return { kind: 'compact-start' }
     case 'compact-end':
@@ -93,7 +104,8 @@ export class AvatarDirector {
 
   /** Feeds one accepted hook post to that agent's machine. */
   handleHook(record: HookEventRecord): void {
-    const event = avatarEventForHook(record)
+    const pending = this.options.hasPendingWork?.(record.envelope.agentId) ?? false
+    const event = avatarEventForHook(record, pending)
     if (!event) return
     this.apply(record.envelope.agentId, event)
   }
