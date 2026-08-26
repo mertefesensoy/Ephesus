@@ -457,7 +457,7 @@ Execute in order; every package tests against the fake engine per-PR.
       `{"lastProcessed":"2026-08-26T21-06-56-458Z-evid"}`. The log recorded the
       delivery with every ref (`msgId`/`from`/`to`/`act`/`conversation`/`hops`) and
       the committer landed it as `hermes: deliver 1, reject 0`.*
-- [ ] **M2.4 Hermes routing rules** — hop-cap diversion to Artemis-designate at
+- [x] **M2.4 Hermes routing rules** — hop-cap diversion to Artemis-designate at
       exactly the cap (recipient constant until Artemis exists — route to a
       `human` queue per §4.4 `to` domain), bounce (`refuse`) for archived/missing
       recipients with sender notification, broadcast fan-out, `requires_reply`
@@ -466,6 +466,21 @@ Execute in order; every package tests against the fake engine per-PR.
       obligation table) + integration bounce/broadcast with fakes. Risk: rules are
       pure functions in `src/shared/` so S-LIVELOCK/S-BOUNCE assert at the module
       boundary, not through the UI.*
+      *Evidence: `typecheck && lint && test` green — 517 passed / 3 skipped (22 new).
+      The rules are pure in `src/shared/routing.ts`, so the S-LIVELOCK and S-BOUNCE
+      boundaries are asserted there directly: delivery at `cap - 1`, diversion **at
+      exactly the cap** and above, the cap checked *before* the address (a livelock
+      aimed at a dead agent still diverts), the ping-pong arithmetic reaching the cap
+      in exactly `cap` exchanges, and a totality case proving every message is
+      delivered, diverted or bounced — never nothing.
+      LIVE RUN, one real spawned agent writing three messages, all three outcomes:
+      `delivered: 3 rejected: 0` · `agent.b inbox: 1` · `agent.c inbox: 1 (broadcast
+      fan-out)` · `human queue: 1 (hop-cap diversion)` · `agent.a inbox: 1 (the bounce
+      came back)`. The refusal that reached the sender read
+      `act: refuse | subject: undeliverable: to a departed colleague`, body
+      `Your message … to "agent.ghost" could not be delivered: no mailbox for
+      "agent.ghost"`. The log carried all five events with reasons, including
+      `hop cap 8 reached (hops=8); diverted from "agent.b"`.*
 - [ ] **M2.5 Stop-hook autonomy + wake watchdog** — the ADR-0013 loop: Stop-hook
       decisioning in `hermes.ts` (drain inbox on stop; `stop.pending` finally
       wired — closes the M1 carried item), triple guard (`stop_hook_active`

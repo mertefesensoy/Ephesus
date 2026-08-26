@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
-import { parseMessage, type Message } from '../shared/message'
+import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
+import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import type { Agora } from './agora'
 import { writeFileAtomic } from './fsx'
 
@@ -63,16 +64,21 @@ export interface HermesOptions {
   /** Notified for each rejected file — a visible state, never a silent drop. */
   onRejected?(record: RejectionRecord): void
   /**
-   * Decides what happens to a validated message before it is delivered. M2.4
-   * installs the routing rules (hop caps, bounce, broadcast) here; with no
-   * router installed every message is delivered as addressed.
+   * Supplies the roster the routing rules read. Injected rather than read from
+   * the registry directly so the rules stay testable, and so M3 can swap in the
+   * live roster without touching delivery.
    */
-  route?(message: Message): RoutingDecision | Promise<RoutingDecision>
+  context?(): RoutingContext
+  /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
+  onBounced?(record: BounceRecord): void
 }
 
-export type RoutingDecision =
-  | { readonly kind: 'deliver'; readonly to: readonly string[]; readonly message?: Message }
-  | { readonly kind: 'drop'; readonly reason: string }
+export interface BounceRecord {
+  readonly original: Message
+  readonly reason: string
+  /** The `refuse` sent back to the sender. */
+  readonly refusal: Message
+}
 
 /** Where a rejected file is parked: out of the outbox, still on disk, inspectable. */
 export const REJECTED_DIR = '.rejected'
@@ -88,6 +94,62 @@ export class Hermes {
 
   private get agora(): Agora {
     return this.options.agora
+  }
+
+  /**
+   * Where a recipient's mail lives. Agents sit under `agora/agents/<id>/`; the
+   * Architect's own queue sits at `agora/human/` — outside `agents/`, because a
+   * human is not an agent and must never appear in the roster.
+   */
+  mailboxDir(recipient: string): string {
+    return recipient === HUMAN_QUEUE ? this.agora.pathOf('human') : this.agora.agentDir(recipient)
+  }
+
+  /** Agent ids that currently have a mailbox, for the routing rules. */
+  knownAgents(): readonly string[] {
+    const root = this.agora.pathOf('agents')
+    if (!fs.existsSync(root)) return []
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+  }
+
+  /**
+   * Sends a `refuse` back to the sender and records the bounce (FR-3.4:
+   * "never drop silently"). The refusal is delivered straight into the sender's
+   * inbox rather than through its own outbox — the sender did not write it, and
+   * an outbox carries only its owner's mail.
+   */
+  private bounce(original: Message, reason: string): void {
+    const refusal = composeMessage({
+      id: makeMessageId(new Date(), `bnc${Math.random().toString(36).slice(2, 8)}`),
+      conversation: original.conversation,
+      in_reply_to: original.id,
+      from: original.from,
+      to: original.from,
+      act: 'refuse',
+      subject: `undeliverable: ${original.subject}`.slice(0, 200),
+      body: `Your message ${original.id} to "${original.to}" could not be delivered: ${reason}`,
+      hops: replyHops(original),
+      created_at: new Date().toISOString()
+    })
+
+    const target = path.join(this.mailboxDir(original.from), 'inbox', `${refusal.id}.json`)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    writeFileAtomic(target, `${JSON.stringify(refusal, null, 2)}\n`)
+
+    this.agora.appendLog({
+      kind: 'bounce',
+      msgId: original.id,
+      from: original.from,
+      to: original.to,
+      conversation: original.conversation,
+      refusalId: refusal.id,
+      reason
+    })
+    this.options.onBounced?.({ original, reason, refusal })
   }
 
   /** Creates the mailbox layout for one agent (SDD §2). Idempotent. */
@@ -212,30 +274,40 @@ export class Hermes {
       )
     }
 
-    const decision = (await this.options.route?.(parsed.message)) ?? {
-      kind: 'deliver' as const,
-      to: [parsed.message.to]
+    const context = this.options.context?.() ?? {
+      knownAgents: this.knownAgents(),
+      orchestratorId: null
     }
+    const route = routeMessage(parsed.message, context)
 
-    if (decision.kind === 'drop') {
+    if (route.kind === 'bounce') {
+      this.bounce(parsed.message, route.reason)
       this.drainOutbox(file)
-      this.agora.appendLog({
-        kind: 'bounce',
-        msgId: parsed.message.id,
-        from: parsed.message.from,
-        to: parsed.message.to,
-        conversation: parsed.message.conversation,
-        reason: decision.reason
-      })
       return { kind: 'skipped' }
     }
 
-    const message = decision.message ?? parsed.message
+    const message = parsed.message
+    const recipients = route.kind === 'divert' ? [route.to] : route.to
+    if (route.kind === 'divert') {
+      // The message still gets delivered — to the adjudicator, not the
+      // addressee. Escalation, not a drop (FR-3.3).
+      this.agora.appendLog({
+        kind: 'bounce',
+        msgId: message.id,
+        from: message.from,
+        to: message.to,
+        divertedTo: route.to,
+        conversation: message.conversation,
+        hops: message.hops,
+        reason: route.reason
+      })
+    }
+
     const records: DeliveryRecord[] = []
 
-    for (const recipient of decision.to) {
+    for (const recipient of recipients) {
       await this.options.faults?.('before-deliver')
-      const target = path.join(this.agora.agentDir(recipient), 'inbox', `${message.id}.json`)
+      const target = path.join(this.mailboxDir(recipient), 'inbox', `${message.id}.json`)
       fs.mkdirSync(path.dirname(target), { recursive: true })
       // Atomic: the recipient (and the Stop-hook drain) may read this directory
       // at any moment, so a half-written file must never be visible.
@@ -287,7 +359,7 @@ export class Hermes {
   // ── inbox consumption (ADR-0003 idempotency) ───────────────────────────────
 
   cursorPath(agentId: string): string {
-    return path.join(this.agora.agentDir(agentId), 'cursor.json')
+    return path.join(this.mailboxDir(agentId), 'cursor.json')
   }
 
   readCursor(agentId: string): Cursor {
@@ -302,7 +374,7 @@ export class Hermes {
 
   /** True when the agent has mail it has not consumed. Drives the wake watchdog. */
   hasPendingMail(agentId: string): boolean {
-    const inbox = path.join(this.agora.agentDir(agentId), 'inbox')
+    const inbox = path.join(this.mailboxDir(agentId), 'inbox')
     if (!fs.existsSync(inbox)) return false
     return fs.readdirSync(inbox).some((name) => name.endsWith('.json'))
   }
@@ -314,7 +386,7 @@ export class Hermes {
    */
   async consumeInbox(agentId: string): Promise<readonly Message[]> {
     await this.options.faults?.('before-consume')
-    const inbox = path.join(this.agora.agentDir(agentId), 'inbox')
+    const inbox = path.join(this.mailboxDir(agentId), 'inbox')
     if (!fs.existsSync(inbox)) return []
 
     const done = path.join(inbox, DONE_DIR)

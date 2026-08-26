@@ -7,6 +7,7 @@ import { composeMessage, makeMessageId, type Message } from '../../src/shared/me
 import { Agora } from '../../src/main/agora'
 import { DONE_DIR, Hermes, REJECTED_DIR, type HermesFaultPoint } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
+import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 
 /**
  * Delivery on **real fs in temp dirs** with two agents (TEST-STRATEGY §2). The
@@ -41,7 +42,7 @@ interface Rig {
 async function rig(
   options: {
     faults?: (point: HermesFaultPoint) => void | Promise<void>
-    route?: NonNullable<ConstructorParameters<typeof Hermes>[0]['route']>
+    context?: NonNullable<ConstructorParameters<typeof Hermes>[0]['context']>
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-hermes-'))
@@ -357,5 +358,74 @@ describe('Hermes — the sweep backs up fs-watch (R6)', () => {
 
     expect(reports.flatMap((report) => report.delivered)).toHaveLength(2)
     expect(r.inbox('agent.b')).toHaveLength(2)
+  })
+})
+
+describe('Hermes — routing rules end to end (M2.4)', () => {
+  it('bounces mail to a missing agent, and the sender actually receives it', async () => {
+    const r = await rig()
+    const sent = message({ to: 'agent.ghost' })
+    r.send('agent.a', sent)
+
+    await r.hermes.sweep()
+
+    // Nothing dropped: a refuse landed back in the sender's own inbox.
+    const inbox = r.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const refusal = JSON.parse(
+      fs.readFileSync(path.join(r.agora.agentDir('agent.a'), 'inbox', inbox[0] ?? ''), 'utf8')
+    ) as Message
+    expect(refusal.act).toBe('refuse')
+    expect(refusal.in_reply_to).toBe(sent.id)
+    expect(refusal.body).toContain('agent.ghost')
+    expect(r.agora.readLog().some((e) => e['kind'] === 'bounce')).toBe(true)
+  })
+
+  it('fans a broadcast out to every other agent', async () => {
+    const r = await rig()
+    r.hermes.ensureMailbox('agent.c')
+    r.send('agent.a', message({ to: 'broadcast', act: 'inform' }))
+
+    const report = await r.hermes.sweep()
+
+    expect(report.delivered).toHaveLength(2)
+    expect(r.inbox('agent.b')).toHaveLength(1)
+    expect(r.inbox('agent.c')).toHaveLength(1)
+    // Never back to the sender.
+    expect(r.inbox('agent.a')).toEqual([])
+  })
+
+  it('diverts a message at the hop cap instead of delivering it', async () => {
+    const r = await rig()
+    const sent = message({ hops: DEFAULT_HOP_CAP })
+    r.send('agent.a', sent)
+
+    await r.hermes.sweep()
+
+    // The addressee never sees it; the human queue does (no Artemis yet).
+    expect(r.inbox('agent.b')).toEqual([])
+    const humanInbox = path.join(r.agora.pathOf('human'), 'inbox')
+    expect(fs.readdirSync(humanInbox)).toEqual([`${sent.id}.json`])
+
+    const diverted = r.agora.readLog().find((e) => e['kind'] === 'bounce')
+    expect(diverted).toMatchObject({ divertedTo: 'human', hops: DEFAULT_HOP_CAP })
+  })
+
+  it('delivers one hop below the cap', async () => {
+    const r = await rig()
+    r.send('agent.a', message({ hops: DEFAULT_HOP_CAP - 1 }))
+    await r.hermes.sweep()
+    expect(r.inbox('agent.b')).toHaveLength(1)
+  })
+
+  it('routes to:human into the Architect queue, outside agents/', async () => {
+    const r = await rig()
+    r.send('agent.a', message({ to: 'human', act: 'inform' }))
+
+    await r.hermes.sweep()
+
+    expect(fs.readdirSync(path.join(r.agora.pathOf('human'), 'inbox'))).toHaveLength(1)
+    // A human is not an agent and must not appear in the roster.
+    expect(r.hermes.knownAgents()).not.toContain('human')
   })
 })
