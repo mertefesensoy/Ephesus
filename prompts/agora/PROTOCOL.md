@@ -22,6 +22,46 @@ improvise when it does not cover your situation.
 - Everything you want another agent to see goes in your `outbox/` as one message
   file. The harness delivers it. Do not write into anyone's `inbox/` yourself.
 
+## How to send a message
+
+Write ONE JSON file into your `outbox/` directory. The harness picks it up,
+delivers it, and removes it from your outbox — you never write into anyone else's
+directory, and you never need to.
+
+The file must contain exactly these fields:
+
+```json
+{
+  "id": "2026-08-27T09-15-00-000Z-ab12",
+  "conversation": "conv-checkout",
+  "in_reply_to": null,
+  "from": "<your agent id>",
+  "to": "<their agent id>",
+  "act": "request",
+  "subject": "one line saying what this is",
+  "body": "what you actually want to say",
+  "hops": 0,
+  "requires_reply": true,
+  "needs_human": false,
+  "created_at": "2026-08-27T09:15:00.000Z"
+}
+```
+
+Rules the harness enforces, so getting them wrong means your message is refused:
+
+- `id` is `<UTC timestamp with : and . replaced by ->-<4+ random characters>`,
+  and the filename is `<id>.json`.
+- `from` must be your own agent id. An outbox carries only its owner's mail.
+- `requires_reply` must be `true` for `request`, `query` and `propose`, and
+  `false` for every other act. You do not get to choose it.
+- When you are replying, copy the other message's `conversation`, put its `id` in
+  `in_reply_to`, and set `hops` to its `hops` plus one.
+
+## How to read your messages
+
+Your `inbox/` holds one JSON file per message. Read them, act on them, and reply
+through your `outbox/` when the act obliges you to.
+
 ## How you communicate
 
 - One message, one purpose. Say which of these it is: `request`, `inform`,

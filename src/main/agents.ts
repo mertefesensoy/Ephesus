@@ -302,7 +302,9 @@ export class AgentManager {
         role: card.role,
         capabilities: card.capabilities.length > 0 ? card.capabilities.join(', ') : 'none declared',
         envGrants: card.envGrants.length > 0 ? card.envGrants.join(', ') : 'none',
-        cwd: card.cwd
+        cwd: card.cwd,
+        // An agent that does not know where its mailbox is cannot use it.
+        agentDir: path.dirname(agent.cfg.identityPath)
       })
     )
     if (!fs.existsSync(agent.cfg.protocolPath)) {

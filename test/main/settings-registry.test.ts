@@ -7,7 +7,7 @@ import {
   sweepInstalledSettings,
   type InstalledSettings
 } from '../../src/main/settings-registry'
-import { InstalledSettingsPlan } from '../../src/main/engines/settings-install'
+import { InstalledSettingsPlan, settingsOwners } from '../../src/main/engines/settings-install'
 
 /**
  * The M1 carried item: a *force-killed* harness used to leave
@@ -181,5 +181,102 @@ describe('startup sweep undoes what a killed harness left behind', () => {
       removed: [],
       failed: []
     })
+  })
+})
+
+describe('two agents sharing one working directory (M2 exit-demo regression)', () => {
+  it('does not let the first agent to leave delete the file the second is using', async () => {
+    // A real two-agent run failed exactly here: agent.a finished its turn,
+    // its uninstall removed settings.local.json, and agent.b — still running
+    // in the same repo — lost access to its own mailbox mid-turn.
+    const cwd = tempCwd()
+    const target = path.join(cwd, '.claude', 'settings.local.json')
+
+    const planA = new InstalledSettingsPlan(
+      [{ path: target, contents: '{"who":"a"}\n' }],
+      'agent.a',
+      BACKUP_SUFFIX
+    )
+    const planB = new InstalledSettingsPlan(
+      [{ path: target, contents: '{"who":"a+b"}\n' }],
+      'agent.b',
+      BACKUP_SUFFIX
+    )
+
+    await planA.install()
+    await planB.install()
+    expect(settingsOwners(target)).toEqual(['agent.a', 'agent.b'])
+
+    await planA.uninstall()
+
+    // agent.b is still running: the file must still be there, with its content.
+    expect(fs.existsSync(target)).toBe(true)
+    expect(fs.readFileSync(target, 'utf8')).toBe('{"who":"a+b"}\n')
+    expect(settingsOwners(target)).toEqual(['agent.b'])
+
+    await planB.uninstall()
+
+    // Last one out restores the repo.
+    expect(fs.existsSync(target)).toBe(false)
+    expect(fs.existsSync(path.join(cwd, '.claude'))).toBe(false)
+    expect(settingsOwners(target)).toEqual([])
+  })
+
+  it('restores the Architect original only once, when the last agent leaves', async () => {
+    const cwd = tempCwd()
+    const target = path.join(cwd, '.claude', 'settings.local.json')
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    const original = '{"permissions":{"allow":["Bash(ls)"]}}\n'
+    fs.writeFileSync(target, original, 'utf8')
+
+    const planA = new InstalledSettingsPlan(
+      [{ path: target, contents: '{"who":"a"}\n' }],
+      'agent.a',
+      BACKUP_SUFFIX
+    )
+    const planB = new InstalledSettingsPlan(
+      [{ path: target, contents: '{"who":"a+b"}\n' }],
+      'agent.b',
+      BACKUP_SUFFIX
+    )
+
+    await planA.install()
+    await planB.install()
+    await planA.uninstall()
+
+    // Not restored yet — agent.b is still working.
+    expect(fs.readFileSync(target, 'utf8')).toBe('{"who":"a+b"}\n')
+
+    await planB.uninstall()
+    expect(fs.readFileSync(target, 'utf8')).toBe(original)
+    expect(fs.existsSync(`${target}${BACKUP_SUFFIX}`)).toBe(false)
+  })
+
+  it('is unaffected when the two agents work in different repositories', async () => {
+    const cwdA = tempCwd()
+    const cwdB = tempCwd()
+    const targetA = path.join(cwdA, '.claude', 'settings.local.json')
+    const targetB = path.join(cwdB, '.claude', 'settings.local.json')
+
+    const planA = new InstalledSettingsPlan(
+      [{ path: targetA, contents: 'a' }],
+      'agent.a',
+      BACKUP_SUFFIX
+    )
+    const planB = new InstalledSettingsPlan(
+      [{ path: targetB, contents: 'b' }],
+      'agent.b',
+      BACKUP_SUFFIX
+    )
+
+    await planA.install()
+    await planB.install()
+    await planA.uninstall()
+
+    expect(fs.existsSync(targetA)).toBe(false)
+    expect(fs.readFileSync(targetB, 'utf8')).toBe('b')
+
+    await planB.uninstall()
+    expect(fs.existsSync(targetB)).toBe(false)
   })
 })

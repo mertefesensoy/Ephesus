@@ -82,6 +82,32 @@ const CLAUDE_TOOL_CLASS_PREFIXES: Readonly<Record<string, string>> = {
 /** The payload key the shim classifies from, after the `tool=tool_name` rename. */
 const CLAUDE_CLASSIFY_KEY = 'tool'
 
+/**
+ * Grants the agent access to its OWN mailbox, and nothing else.
+ *
+ * An agent's `agora/agents/<id>/` directory lives in the harness home, outside
+ * the working directory it was spawned in — so the engine's own permission
+ * model blocks writing to it, and the agent cannot post to its outbox at all.
+ * That makes FR-3.2 ("agents SHALL write only inside their own `agents/<id>/`
+ * directory") impossible to satisfy, which is how this was found: a real agent
+ * in the M2 exit demo answered "the write was blocked by permissions".
+ *
+ * The grant is deliberately the narrowest thing that makes the documented
+ * design work: this agent's own directory. Not the Agora, not `agents/`, not
+ * another agent's mailbox — single-writer-per-file survives intact.
+ */
+function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
+  // Settings paths use forward slashes on every platform.
+  const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
+  // Every file tool the agent needs to work its own mailbox: read a message,
+  // list what is waiting, write a reply, move a handled one aside.
+  const tools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'LS', 'NotebookEdit']
+  return {
+    allow: tools.map((tool) => `${tool}(${agentDir}/**)`),
+    additionalDirectories: [agentDir]
+  }
+}
+
 /** Claude Code's cancel key is Escape (ADR-0009 `interrupt()`): U+001B. */
 const ESCAPE_KEY = String.fromCharCode(0x1b)
 
@@ -166,7 +192,11 @@ function hookSettingsBlock(deps: ClaudeAdapterDeps): Record<string, unknown> {
  * something we cannot parse and writing our own over it would look like it
  * worked; refusing to spawn until the file is fixed is the honest answer.
  */
-export function mergeClaudeSettings(existing: string | null, deps: ClaudeAdapterDeps): string {
+export function mergeClaudeSettings(
+  existing: string | null,
+  deps: ClaudeAdapterDeps,
+  cfg?: AgentSpawnConfig
+): string {
   let base: Record<string, unknown> = {}
   if (existing !== null && existing.trim().length > 0) {
     let parsed: unknown
@@ -199,7 +229,29 @@ export function mergeClaudeSettings(existing: string | null, deps: ClaudeAdapter
     merged[engineEvent] = [...prior, ...(entry as unknown[])]
   }
 
-  return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
+  if (!cfg) return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
+
+  // Merge the mailbox grant into whatever the Architect already allowed, never
+  // replacing their list.
+  const grant = mailboxPermissions(cfg)
+  const existingPermissions =
+    typeof base['permissions'] === 'object' &&
+    base['permissions'] !== null &&
+    !Array.isArray(base['permissions'])
+      ? (base['permissions'] as Record<string, unknown>)
+      : {}
+  const priorAllow = Array.isArray(existingPermissions['allow']) ? existingPermissions['allow'] : []
+  const priorDirs = Array.isArray(existingPermissions['additionalDirectories'])
+    ? existingPermissions['additionalDirectories']
+    : []
+
+  const permissions = {
+    ...existingPermissions,
+    allow: [...priorAllow, ...(grant['allow'] as unknown[])],
+    additionalDirectories: [...priorDirs, ...(grant['additionalDirectories'] as unknown[])]
+  }
+
+  return `${JSON.stringify({ ...base, hooks: merged, permissions }, null, 2)}\n`
 }
 
 export class ClaudeAdapter implements EngineAdapter {
@@ -265,6 +317,6 @@ export class ClaudeAdapter implements EngineAdapter {
   private settingsInjections(cfg: AgentSpawnConfig): readonly SettingsInjection[] {
     const settingsPath = path.join(cfg.cwd, CLAUDE_SETTINGS_REL)
     const existing = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : null
-    return [{ path: settingsPath, contents: mergeClaudeSettings(existing, this.deps) }]
+    return [{ path: settingsPath, contents: mergeClaudeSettings(existing, this.deps, cfg) }]
   }
 }

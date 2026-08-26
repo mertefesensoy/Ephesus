@@ -537,7 +537,7 @@ Execute in order; every package tests against the fake engine per-PR.
       "hookFidelity":"native","spawnedAt":"2026-08-26T21:30:51.075Z"}` — which the
       single committer landed as `roster: agent.mason (+1 more)`, and the Activity
       feed read `#1 spawn` back through the `agora:log` IPC.*
-- [ ] **M2.7 Scenario suites + exit demo** — implement S-BLACKOUT (kill main at
+- [x] **M2.7 Scenario suites + exit demo** — implement S-BLACKOUT (kill main at
       injected fault points mid-delivery/mid-commit; restart; zero loss, zero
       double-processing), S-LIVELOCK (ping-pong fakes → diversion at exactly the
       cap), S-BOUNCE, S-WAKE, S-STOPLOOP (TEST-STRATEGY §3 specs) as automated
@@ -546,6 +546,30 @@ Execute in order; every package tests against the fake engine per-PR.
       collaboration (A `request`s data from B, B `inform`s back) unattended.
       *Docs: TEST-STRATEGY §3. Risk: fault points are designed in (M2.1/M2.3
       accept an injectable failure hook), not monkey-patched.*
+      *Evidence: `typecheck && lint && test` green — 581 passed / 3 skipped. The five
+      named suites live in `test/scenarios/` and run 25 cases against REAL spawned
+      `fake-engine` processes over real git, a real socket and real files:
+      S-BLACKOUT (7) · S-LIVELOCK (3) · S-BOUNCE (4) · S-WAKE (4) · S-STOPLOOP (7).
+      The fault points are the production seams from M2.1/M2.3, not monkey-patches,
+      and "restart" is modelled by abandoning the objects mid-flight and building a
+      fresh company over the same home. Run twice in a row clean.
+      **M2 EXIT DEMO — two REAL `claude` agents, unattended:**
+      `agent.a REQUESTED agent.b after 18s` ·
+      `request {"from":"agent.a","to":"agent.b","act":"request","requires_reply":true,"subject":"Week 34 checkout totals"}` ·
+      `wake watchdog nudged: agent.b` ·
+      `agent.b INFORMED BACK after 24s` ·
+      `reply {"from":"agent.b","to":"agent.a","act":"inform","in_reply_to":"…-f3a8","subject":"Week 34 checkout totals"}` ·
+      body `Week 34 checkout totals from checkout-totals.txt: 1281 orders, 3 failures.`
+      One Architect instruction started it; nobody typed anything after that — the
+      watchdog decided agent.b needed waking and supplied the text. The book of
+      record shows the whole exchange: `spawn` → `delivery request` → `hook wake` →
+      `spawn` → `hook stop continue` → `exit` → `delivery inform` → `exit`, with the
+      committer landing each batch.
+      The demo found two real defects, both fixed with named regression tests: an
+      agent could not write to its own mailbox because it lives outside the working
+      directory (the adapter now grants exactly that directory), and two agents
+      sharing a repository clobbered each other's settings — the first to exit
+      deleted the file the second was running under.*
 - [ ] **M2 exit review** — the five S-suites green in CI; two-real-agent
       collaboration demo evidence; PROGRESS + docs synced.
 

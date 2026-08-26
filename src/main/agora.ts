@@ -273,7 +273,17 @@ export class Agora {
    */
   private clearStaleLock(): void {
     const lock = path.join(this.options.root, '.git', 'index.lock')
-    if (fs.existsSync(lock)) fs.rmSync(lock, { force: true })
+    if (!fs.existsSync(lock)) return
+    try {
+      // A git child of the process we just replaced can still hold this open for
+      // a moment (Windows keeps the handle until it actually exits), so retry
+      // briefly rather than throwing a boot away over it. If it is still held
+      // after that, the commit retry loop will come back to it — failing to
+      // clear a lock is a delay, not a lost commit.
+      fs.rmSync(lock, { force: true, maxRetries: 10, retryDelay: 50 })
+    } catch {
+      // Left for the next attempt, deliberately.
+    }
   }
 
   private async drain(): Promise<void> {

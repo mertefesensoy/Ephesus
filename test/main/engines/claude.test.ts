@@ -8,7 +8,8 @@ import {
   CLAUDE_HOOK_EVENTS,
   CLAUDE_SETTINGS_BACKUP_REL,
   CLAUDE_SETTINGS_REL,
-  ClaudeAdapter
+  ClaudeAdapter,
+  mergeClaudeSettings
 } from '../../../src/main/engines/claude'
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
 import { PromptStore } from '../../../src/main/prompts'
@@ -242,8 +243,14 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
 
     expect(fs.existsSync(backupPath)).toBe(true)
     expect(fs.readFileSync(backupPath).equals(originalBytes)).toBe(true)
-    const installed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as Record<string, unknown>
-    expect(installed['permissions']).toEqual({ allow: ['Bash(ls)'] })
+    const installed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[]; additionalDirectories: string[] }
+    }
+    // The Architect's own rule survives, with the mailbox grant merged in
+    // beside it — never replacing it.
+    expect(installed.permissions.allow[0]).toBe('Bash(ls)')
+    expect(installed.permissions.allow.some((rule) => rule.startsWith('Write('))).toBe(true)
+    expect(installed.permissions.additionalDirectories).toHaveLength(1)
 
     await plan.uninstall()
 
@@ -317,5 +324,49 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
     fs.writeFileSync(settingsPath, '{ this is not json', 'utf8')
 
     expect(() => adapter.wireHooks(cfg)).toThrow(/not valid JSON, refusing to overwrite/)
+  })
+})
+
+describe('claude adapter — the mailbox grant (FR-3.2)', () => {
+  it('grants the agent its OWN directory, and nothing wider', async () => {
+    const { adapter, cfg, settingsPath } = rig()
+    const plan = adapter.wireHooks(cfg)
+    await plan.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[]; additionalDirectories: string[] }
+    }
+    const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
+
+    expect(written.permissions.additionalDirectories).toEqual([agentDir])
+    expect(written.permissions.allow).toContain(`Read(${agentDir}/**)`)
+    expect(written.permissions.allow).toContain(`Write(${agentDir}/**)`)
+    expect(written.permissions.allow).toContain(`Glob(${agentDir}/**)`)
+    // Never the Agora, never `agents/`, never a sibling mailbox — single-writer-
+    // per-file has to survive the grant that makes the mailbox usable at all.
+    // Every rule is scoped to THIS agent's own directory and nothing above it.
+    for (const rule of written.permissions.allow) {
+      expect(rule.endsWith(`(${agentDir}/**)`)).toBe(true)
+    }
+    const parent = path.dirname(path.dirname(cfg.identityPath)).split(path.sep).join('/')
+    for (const rule of written.permissions.allow) {
+      expect(rule).not.toBe(`Write(${parent}/**)`)
+      expect(rule).not.toContain(`${parent}/**`)
+    }
+    expect(written.permissions.additionalDirectories).not.toContain(parent)
+
+    await plan.uninstall()
+  })
+
+  it('adds no permissions block when there is no spawn to grant for', () => {
+    const { adapter } = rig()
+    const settings = JSON.parse(
+      mergeClaudeSettings(null, {
+        prompts: new PromptStore('x', BUNDLED_PROMPTS),
+        hookShimPath: 'shim'
+      })
+    ) as Record<string, unknown>
+    expect(settings['permissions']).toBeUndefined()
+    expect(adapter.id).toBe('claude')
   })
 })
