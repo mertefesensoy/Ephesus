@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   AGENTS_STATE_CHANNEL,
+  AVATARS_STATE_CHANNEL,
   IpcChannels,
   ptyDataChannel,
   ptyExitChannel,
+  type AvatarUpdate,
   type ConfigSnapshot,
-  type EphApi
+  type EphApi,
+  type HooksState
 } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 
@@ -31,6 +34,17 @@ const eph: EphApi = {
       ipcRenderer.on(AGENTS_STATE_CHANNEL, listener)
       return () => ipcRenderer.removeListener(AGENTS_STATE_CHANNEL, listener)
     }
+  },
+  avatars: {
+    list: () => ipcRenderer.invoke(IpcChannels.avatarsList) as Promise<readonly AvatarUpdate[]>,
+    onChange: (cb) => {
+      const listener = (_ev: IpcRendererEvent, update: AvatarUpdate): void => cb(update)
+      ipcRenderer.on(AVATARS_STATE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(AVATARS_STATE_CHANNEL, listener)
+    }
+  },
+  hooks: {
+    state: () => ipcRenderer.invoke(IpcChannels.hooksState) as Promise<HooksState>
   },
   pty: {
     ensureDevShell: () => ipcRenderer.invoke(IpcChannels.ptyEnsureDevShell) as Promise<string>,

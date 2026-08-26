@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseHookEnvelope } from '../../src/shared/hooks'
-import { normalizePayload, parseArgs, sessionIdOf } from '../../shims/eph-hook.mjs'
+import { classifyTool, normalizePayload, parseArgs, sessionIdOf } from '../../shims/eph-hook.mjs'
 import { startHookStubServer, tempEndpoint, type HookStubServer } from '../fakes/hook-stub-server'
 
 /**
@@ -68,7 +68,7 @@ describe('eph-hook — argument parsing', () => {
         '--session-field',
         'session_id'
       ])
-    ).toEqual({
+    ).toMatchObject({
       event: 'pre-tool',
       fields: [
         ['tool', 'tool_name'],
@@ -79,7 +79,36 @@ describe('eph-hook — argument parsing', () => {
   })
 
   it('defaults to no mapping at all', () => {
-    expect(parseArgs([])).toEqual({ event: '', fields: [], sessionField: null })
+    expect(parseArgs([])).toEqual({
+      event: '',
+      fields: [],
+      sessionField: null,
+      classifyKey: null,
+      classes: [],
+      classPrefixes: []
+    })
+  })
+
+  it('reads tool-class lists and prefixes the adapter supplies', () => {
+    expect(
+      parseArgs([
+        '--classify',
+        'tool',
+        '--class',
+        'file=Read,Write,Edit',
+        '--class',
+        'shell=Bash',
+        '--class-prefix',
+        'mcp=mcp__'
+      ])
+    ).toMatchObject({
+      classifyKey: 'tool',
+      classes: [
+        ['file', ['Read', 'Write', 'Edit']],
+        ['shell', ['Bash']]
+      ],
+      classPrefixes: [['mcp', 'mcp__']]
+    })
   })
 
   it('ignores a field argument with no "="', () => {
@@ -113,6 +142,55 @@ describe('eph-hook — payload normalization (NFR-12: engine names stay in the a
     expect(sessionIdOf({ session_id: '' }, withField)).toBeNull()
     expect(sessionIdOf({ other: 'sess-77' }, withField)).toBeNull()
     expect(sessionIdOf({ session_id: 'sess-77' }, parseArgs([]))).toBeNull()
+  })
+})
+
+describe('eph-hook — tool classification (SDD §6 station map is keyed by class)', () => {
+  const args = parseArgs([
+    '--field',
+    'tool=tool_name',
+    '--classify',
+    'tool',
+    '--class',
+    'file=Read,Write,Edit',
+    '--class',
+    'shell=Bash',
+    '--class-prefix',
+    'mcp=mcp__'
+  ])
+
+  it.each([
+    ['Read', 'file'],
+    ['Edit', 'file'],
+    ['Bash', 'shell'],
+    ['mcp__github__create_issue', 'mcp']
+  ])('classifies %s as %s', (tool, cls) => {
+    expect(normalizePayload({ tool_name: tool }, args)['toolClass']).toBe(cls)
+  })
+
+  it('leaves an unknown tool unclassified rather than guessing a station', () => {
+    expect(normalizePayload({ tool_name: 'BrandNewTool' }, args)['toolClass']).toBeUndefined()
+  })
+
+  it('prefers an exact name over a prefix', () => {
+    const both = parseArgs([
+      '--classify',
+      'tool',
+      '--class',
+      'file=mcp__fs__read',
+      '--class-prefix',
+      'mcp=mcp__'
+    ])
+    expect(classifyTool({ tool: 'mcp__fs__read' }, both)['toolClass']).toBe('file')
+  })
+
+  it('does nothing without a --classify key', () => {
+    expect(classifyTool({ tool: 'Read' }, parseArgs([]))['toolClass']).toBeUndefined()
+  })
+
+  it('ignores a non-string tool name', () => {
+    expect(classifyTool({ tool: 42 }, args)['toolClass']).toBeUndefined()
+    expect(classifyTool({ tool: '' }, args)['toolClass']).toBeUndefined()
   })
 })
 

@@ -189,7 +189,7 @@ in order, one package per session-commit; tests are part of each package).
       as found. Two real bugs were caught by this run and fixed with named regression
       tests — Windows PATH resolution for a PTY spawn, and a check-then-act race that
       let a second spawn orphan the first agent's hook token (see DECISIONS-LOG).*
-- [ ] **M1.5 Avatar state machine** — implement SDD §6 verbatim as a pure reducer in
+- [x] **M1.5 Avatar state machine** — implement SDD §6 verbatim as a pure reducer in
       `src/shared/avatar.ts` (states, transitions, station map incl. 250 ms
       success→idle) driven ONLY by event-plane data; floor consumes poses from it;
       per-agent avatar rendering replaces the M0 hardcoded patrol.
@@ -200,6 +200,27 @@ in order, one package per session-commit; tests are part of each package).
       the renderer, so it owes the visible surface for `HookServer.driftWarnings()` —
       FR-2.3 warnings and an "events stale" state must be shown, not merely recorded
       (invariant §7).*
+      *Evidence: `typecheck && lint && test` green — 288 passed / 3 skipped (78 new:
+      the §6 transition table, every documented edge plus a table of edges the SDD
+      does NOT have asserted inert, station map, the two timers, terminal absorption,
+      and the director's walk clock against the real floor geometry).
+      Carried obligation CLOSED: the status strip now shows `● events: live`,
+      `⚠ events: live · N schema drift warnings` (hover for the warnings), or
+      `⚠ events stale — hook endpoint unavailable: <reason>` when the endpoint failed
+      to bind; main no longer crashes on a bind failure, it degrades visibly.
+      LIVE UC-03 SEQUENCE with a real `claude`, avatar snapshots pushed to the
+      renderer over `state:avatars`:
+      `idle at desk` → `alert at desk` → `thinking at shelf (walking from desk)` →
+      `thinking at desk (walking from shelf)` → `thinking at desk` →
+      `success at desk` → `idle at desk`.
+      That is file edit → shelf walk → desk → idle, driven only by real hook events,
+      with the tool class supplied by the adapter's table so the floor never saw the
+      word `Read`. Two findings from the run, both fixed/recorded: an interrupted
+      walk used to teleport the sprite to the station it never reached (renderer now
+      starts the return walk from the sprite's actual position), and Architect text
+      must reach a PTY as two writes — text, then the submit key — because the TUI's
+      bracketed-paste mode swallows a trailing CR (binding on M1.6, see
+      DECISIONS-LOG).*
 - [ ] **M1.5b Floor art v1** — UI-DESIGN §7 quality bar (Architect directive
       2026-08-26): licensed 16×16 tileset intake at 2× integer scale (reference:
       LimeZu Modern Interiors lineage) with `src/renderer/src/assets/ATTRIBUTION.md`

@@ -18,6 +18,9 @@ import { buildEnvelope, postHookEvent } from './hook-client.mjs'
  *   node eph-hook.mjs --event <harness-event>
  *                     [--field <harnessKey>=<engineKey>]...
  *                     [--session-field <engineKey>]
+ *                     [--classify <payloadKey>]
+ *                     [--class <class>=<name,name,...>]...
+ *                     [--class-prefix <class>=<prefix>]...
  *
  * Environment, from the spawn plan (SDD §3):
  *   EPH_AGENT_ID · EPH_HOOK_TOKEN · EPH_HOOK_ENDPOINT
@@ -28,7 +31,14 @@ import { buildEnvelope, postHookEvent } from './hook-client.mjs'
  * shim stays silent and reports trouble on stderr only.
  */
 
-/** @typedef {{ event: string, fields: Array<[string, string]>, sessionField: string | null }} ShimArgs */
+/**
+ * @typedef {{ event: string,
+ *             fields: Array<[string, string]>,
+ *             sessionField: string | null,
+ *             classifyKey: string | null,
+ *             classes: Array<[string, string[]]>,
+ *             classPrefixes: Array<[string, string]> }} ShimArgs
+ */
 
 /**
  * @param {readonly string[]} argv
@@ -37,8 +47,19 @@ import { buildEnvelope, postHookEvent } from './hook-client.mjs'
 export function parseArgs(argv) {
   let event = ''
   let sessionField = null
+  let classifyKey = null
   /** @type {Array<[string, string]>} */
   const fields = []
+  /** @type {Array<[string, string[]]>} */
+  const classes = []
+  /** @type {Array<[string, string]>} */
+  const classPrefixes = []
+
+  /** @param {string} pair @returns {[string, string] | null} */
+  const split = (pair) => {
+    const at = pair.indexOf('=')
+    return at > 0 ? [pair.slice(0, at), pair.slice(at + 1)] : null
+  }
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -46,16 +67,54 @@ export function parseArgs(argv) {
       event = argv[i + 1] ?? ''
       i += 1
     } else if (arg === '--field') {
-      const pair = argv[i + 1] ?? ''
-      const split = pair.indexOf('=')
-      if (split > 0) fields.push([pair.slice(0, split), pair.slice(split + 1)])
+      const pair = split(argv[i + 1] ?? '')
+      if (pair) fields.push(pair)
       i += 1
     } else if (arg === '--session-field') {
       sessionField = argv[i + 1] ?? null
       i += 1
+    } else if (arg === '--classify') {
+      classifyKey = argv[i + 1] ?? null
+      i += 1
+    } else if (arg === '--class') {
+      const pair = split(argv[i + 1] ?? '')
+      if (pair) classes.push([pair[0], pair[1].split(',').filter((n) => n.length > 0)])
+      i += 1
+    } else if (arg === '--class-prefix') {
+      const pair = split(argv[i + 1] ?? '')
+      if (pair) classPrefixes.push(pair)
+      i += 1
     }
   }
-  return { event, fields, sessionField }
+  return { event, fields, sessionField, classifyKey, classes, classPrefixes }
+}
+
+/**
+ * Adds `toolClass` to the payload from the adapter-supplied name lists.
+ *
+ * The floor's station map is keyed by tool CLASS (SDD §6), and classifying an
+ * engine's tool names is engine knowledge — so the lists come from the adapter
+ * and the matching happens here, generically. Core never sees a tool name.
+ *
+ * Contract: exact names win over prefixes; an unmatched tool gets no class at
+ * all, which the avatar machine renders as "works at its desk" rather than
+ * guessing a station.
+ *
+ * @param {Record<string, unknown>} payload
+ * @param {ShimArgs} args
+ * @returns {Record<string, unknown>}
+ */
+export function classifyTool(payload, args) {
+  if (!args.classifyKey) return payload
+  const name = payload[args.classifyKey]
+  if (typeof name !== 'string' || name.length === 0) return payload
+  for (const [cls, names] of args.classes) {
+    if (names.includes(name)) return { ...payload, toolClass: cls }
+  }
+  for (const [cls, prefix] of args.classPrefixes) {
+    if (prefix.length > 0 && name.startsWith(prefix)) return { ...payload, toolClass: cls }
+  }
+  return payload
 }
 
 /**
@@ -76,7 +135,7 @@ export function normalizePayload(raw, args) {
   for (const [harnessKey, engineKey] of args.fields) {
     if (engineKey in payload && !(harnessKey in payload)) payload[harnessKey] = payload[engineKey]
   }
-  return payload
+  return classifyTool(payload, args)
 }
 
 /**

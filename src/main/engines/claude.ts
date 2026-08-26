@@ -55,6 +55,31 @@ const CLAUDE_FIELD_MAPS: Readonly<Record<string, readonly string[]>> = {
   PostToolUse: ['tool=tool_name']
 }
 
+/**
+ * Claude Code's tools, sorted into the SDD §6 station-map classes. This table is
+ * the *only* place these names exist in Ephesus: it is handed to the shim as
+ * arguments, so the floor and the avatar machine see `file`/`shell`/`web`/`mcp`/
+ * `ledger` and never a Claude tool name (NFR-12).
+ *
+ * A tool matching nothing here gets no class, and the avatar works at its desk
+ * rather than walking to an invented station — the honest degradation when a new
+ * engine tool appears (FR-2.3 in the visual domain).
+ */
+const CLAUDE_TOOL_CLASSES: Readonly<Record<string, readonly string[]>> = {
+  file: ['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep'],
+  shell: ['Bash', 'BashOutput', 'KillShell', 'KillBash'],
+  web: ['WebFetch', 'WebSearch'],
+  ledger: ['TodoWrite']
+}
+
+/** MCP tools are named `mcp__<server>__<tool>`; matched by prefix. */
+const CLAUDE_TOOL_CLASS_PREFIXES: Readonly<Record<string, string>> = {
+  mcp: 'mcp__'
+}
+
+/** The payload key the shim classifies from, after the `tool=tool_name` rename. */
+const CLAUDE_CLASSIFY_KEY = 'tool'
+
 /** Claude Code's cancel key is Escape (ADR-0009 `interrupt()`): U+001B. */
 const ESCAPE_KEY = String.fromCharCode(0x1b)
 
@@ -99,7 +124,19 @@ function hookSettingsBlock(deps: ClaudeAdapterDeps): Record<string, unknown> {
   const node = deps.nodeCommand ?? 'node'
   const hooks: Record<string, unknown> = {}
   for (const [engineEvent, harnessEvent] of Object.entries(CLAUDE_HOOK_EVENTS)) {
-    const fields = (CLAUDE_FIELD_MAPS[engineEvent] ?? []).map((pair) => ` --field ${pair}`).join('')
+    const maps = CLAUDE_FIELD_MAPS[engineEvent] ?? []
+    const fields = maps.map((pair) => ` --field ${pair}`).join('')
+    // Only the tool hooks carry a tool name, so only they need classifying.
+    const classify =
+      maps.length > 0
+        ? ` --classify ${CLAUDE_CLASSIFY_KEY}` +
+          Object.entries(CLAUDE_TOOL_CLASSES)
+            .map(([cls, names]) => ` --class ${shellQuote(`${cls}=${names.join(',')}`)}`)
+            .join('') +
+          Object.entries(CLAUDE_TOOL_CLASS_PREFIXES)
+            .map(([cls, prefix]) => ` --class-prefix ${shellQuote(`${cls}=${prefix}`)}`)
+            .join('')
+        : ''
     hooks[engineEvent] = [
       {
         hooks: [
@@ -107,7 +144,7 @@ function hookSettingsBlock(deps: ClaudeAdapterDeps): Record<string, unknown> {
             type: 'command',
             command:
               `${node} ${shellQuote(deps.hookShimPath)} --event ${harnessEvent}` +
-              `${fields} --session-field ${CLAUDE_SESSION_FIELD}`
+              `${fields}${classify} --session-field ${CLAUDE_SESSION_FIELD}`
           }
         ]
       }

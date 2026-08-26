@@ -1,4 +1,5 @@
 import type { AgentCard, SpawnRequest } from './agents'
+import type { AvatarSnapshot } from './avatar'
 import type { EphConfig } from './config'
 
 /**
@@ -17,7 +18,9 @@ export const IpcChannels = {
   agentsCard: 'agents:card',
   agentsKill: 'agents:kill',
   agentsInterrupt: 'agents:interrupt',
-  agentsSend: 'agents:send'
+  agentsSend: 'agents:send',
+  avatarsList: 'avatars:list',
+  hooksState: 'hooks:state'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -43,6 +46,30 @@ export interface ConfigSnapshot {
 /** Push channel carrying agent-card changes to the renderer (SDD §5 `state:agents`). */
 export const AGENTS_STATE_CHANNEL = 'state:agents'
 
+/** Push channel carrying one agent's avatar snapshot (SDD §6, ADR-0002). */
+export const AVATARS_STATE_CHANNEL = 'state:avatars'
+
+/** One agent's avatar snapshot, addressed. */
+export interface AvatarUpdate {
+  readonly agentId: string
+  readonly snapshot: AvatarSnapshot
+}
+
+/**
+ * Health of the event plane, for the visible degradation states FR-2.3 and
+ * SDD §10 require: schema drift must be shown, and a hook endpoint that never
+ * came up must be shown as "events unavailable" rather than a frozen floor with
+ * no explanation.
+ */
+export interface HooksState {
+  /** Endpoint currently listening, or null when the event plane is down. */
+  readonly endpoint: string | null
+  /** Distinct drift warnings seen this run, in first-seen order (FR-2.3). */
+  readonly driftWarnings: readonly string[]
+  /** Why the endpoint is down, when it is. */
+  readonly failure: string | null
+}
+
 export interface EphApi {
   config: {
     get: () => Promise<ConfigSnapshot>
@@ -59,6 +86,15 @@ export interface EphApi {
     send: (agentId: string, text: string) => Promise<void>
     /** Subscribe to agent-card changes. Returns an unsubscribe function. */
     onChange: (cb: (card: AgentCard) => void) => () => void
+  }
+  avatars: {
+    list: () => Promise<readonly AvatarUpdate[]>
+    /** Subscribe to avatar snapshots. Returns an unsubscribe function. */
+    onChange: (cb: (update: AvatarUpdate) => void) => () => void
+  }
+  hooks: {
+    /** Event-plane health, including drift warnings that must be shown. */
+    state: () => Promise<HooksState>
   }
   pty: {
     /** Spawns the M0.3 hardcoded dev shell if needed; resolves with its pty id. */

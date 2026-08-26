@@ -1,9 +1,16 @@
 import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
-import { DEV_SHELL_ID, IpcChannels, type ConfigSnapshot } from '../shared/ipc'
+import {
+  DEV_SHELL_ID,
+  IpcChannels,
+  type AvatarUpdate,
+  type ConfigSnapshot,
+  type HooksState
+} from '../shared/ipc'
 import { ptyKillSchema, ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
 import type { AgentManager } from './agents'
+import type { AvatarDirector } from './avatars'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
 
@@ -15,7 +22,23 @@ const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(
  * Invariant: main validates all renderer input; handlers taking arguments
  * parse them with a src/shared/ validator before acting (BUILD-PROMPT §3.2).
  */
-export function registerIpc(ptyManager: PtyManager, agents: AgentManager): void {
+export interface IpcDeps {
+  readonly ptyManager: PtyManager
+  readonly agents: AgentManager
+  readonly avatars: AvatarDirector
+  /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
+  hooksState(): HooksState
+}
+
+export function registerIpc(deps: IpcDeps): void {
+  const { ptyManager, agents, avatars } = deps
+
+  ipcMain.handle(IpcChannels.avatarsList, (): readonly AvatarUpdate[] =>
+    [...avatars.list()].map(([agentId, snapshot]) => ({ agentId, snapshot }))
+  )
+
+  ipcMain.handle(IpcChannels.hooksState, (): HooksState => deps.hooksState())
+
   ipcMain.handle(IpcChannels.configGet, (): ConfigSnapshot => {
     const home = getHome()
     return { config: home.config, warning: home.configWarning }

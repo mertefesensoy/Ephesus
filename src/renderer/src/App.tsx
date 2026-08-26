@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { ConfigSnapshot } from '../../shared/ipc'
+import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
 import { TerminalPanel } from './TerminalPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
 
@@ -8,8 +8,38 @@ type BridgeState =
   | { kind: 'ready'; snapshot: ConfigSnapshot }
   | { kind: 'unavailable'; reason: string }
 
+/**
+ * Event-plane health, refreshed on a slow poll. FR-2.3 requires hook schema
+ * drift to be *visible*, and SDD §10 requires an endpoint that is down to say so
+ * rather than leaving a silently frozen floor.
+ */
+const HOOKS_POLL_MS = 2000
+
 export function App(): ReactElement {
   const [bridge, setBridge] = useState<BridgeState>({ kind: 'loading' })
+  const [hooks, setHooks] = useState<HooksState | null>(null)
+
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    let cancelled = false
+    const poll = (): void => {
+      eph.hooks
+        .state()
+        .then((state) => {
+          if (!cancelled) setHooks(state)
+        })
+        .catch(() => {
+          /* the bridge banner already reports a dead bridge */
+        })
+    }
+    poll()
+    const timer = setInterval(poll, HOOKS_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     const eph = window.eph
@@ -54,6 +84,27 @@ export function App(): ReactElement {
           )}
           {bridge.kind === 'unavailable' && (
             <span style={{ color: 'var(--eph-status-blocked)' }}>bridge: {bridge.reason}</span>
+          )}
+        </span>
+        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+          {hooks === null && 'events: …'}
+          {hooks !== null && hooks.endpoint === null && (
+            <span style={{ color: 'var(--eph-status-blocked)' }}>
+              ⚠ events stale — hook endpoint unavailable
+              {hooks.failure ? `: ${hooks.failure}` : ''}
+            </span>
+          )}
+          {hooks !== null && hooks.endpoint !== null && hooks.driftWarnings.length === 0 && (
+            <span style={{ color: 'var(--eph-status-success)' }}>● events: live</span>
+          )}
+          {hooks !== null && hooks.endpoint !== null && hooks.driftWarnings.length > 0 && (
+            <span
+              style={{ color: 'var(--eph-status-looping)' }}
+              title={hooks.driftWarnings.join(String.fromCharCode(10))}
+            >
+              ⚠ events: live · {hooks.driftWarnings.length} schema drift warning
+              {hooks.driftWarnings.length === 1 ? '' : 's'}
+            </span>
           )}
         </span>
       </header>
