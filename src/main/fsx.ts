@@ -8,10 +8,13 @@ import path from 'node:path'
  * process may read goes through here. rename() replaces existing targets on all
  * supported platforms (MOVEFILE_REPLACE_EXISTING semantics on Windows).
  */
-export function writeFileAtomic(filePath: string, data: string): void {
+export function writeFileAtomic(filePath: string, data: string | Buffer): void {
   const dir = path.dirname(filePath)
   const tmp = path.join(dir, `.${path.basename(filePath)}.${randomBytes(6).toString('hex')}.tmp`)
-  fs.writeFileSync(tmp, data, 'utf8')
+  // A Buffer is written verbatim: restoring a backed-up settings file must not
+  // re-encode it (ADR-0009 uninstall restores byte-for-byte).
+  if (typeof data === 'string') fs.writeFileSync(tmp, data, 'utf8')
+  else fs.writeFileSync(tmp, data)
   try {
     fs.renameSync(tmp, filePath)
   } catch (err) {

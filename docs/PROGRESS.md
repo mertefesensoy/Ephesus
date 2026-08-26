@@ -156,6 +156,23 @@ in order, one package per session-commit; tests are part of each package).
       (backup created, uninstall restores byte-for-byte); spawn-plan snapshot; probe
       parsing. Live spawn is nightly territory, not per-PR. Risk: do not touch the
       user's real ~/.claude — everything through temp cwds.*
+      *Evidence (M1.4a — adapter, shim, prompt store): `typecheck && lint && test`
+      green — 185 passed / 2 skipped (44 new). Settings hygiene runs only inside
+      `os.tmpdir()` cwds; the real `~/.claude` and the repo's own `.claude/` are
+      untouched (verified by `git status` + directory listing after the live run).
+      LIVE RUN WITH A REAL `claude` (2.1.195): the adapter wrote
+      `settings.local.json` into a temp cwd wiring all eight hooks through
+      `shims/eph-hook.mjs`, and a real `claude -p` spawned on the adapter's own
+      spawn plan produced five envelopes on a real named pipe —
+      `session-start`, `prompt-submitted`, `pre-tool (tool Read)`,
+      `post-tool (tool Read)`, `stop` — every one carrying `v1`, `agent.mason`,
+      the registered spawn token and the engine's real session id
+      `f2da49bd-63ee-4631-8a06-cdc301d32760`. The `tool` field was renamed from the
+      engine's `tool_name` by the shim, so core saw no Claude-ism. **Identity
+      injection was observable in-session**: asked for its agent id, the model
+      answered `agent.mason` — it knew only from the injected appendix. That is
+      the declared `native` grade demonstrated rather than asserted (the M1.7
+      hook-grade-honesty case), and the tool-use half of the UC-03 demo.*
 - [ ] **M1.5 Avatar state machine** — implement SDD §6 verbatim as a pure reducer in
       `src/shared/avatar.ts` (states, transitions, station map incl. 250 ms
       success→idle) driven ONLY by event-plane data; floor consumes poses from it;
