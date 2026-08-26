@@ -430,7 +430,7 @@ Execute in order; every package tests against the fake engine per-PR.
       `seed the Agora`), with `registry.json`, `tasks.json` and `log.jsonl` tracked.
       **Append-only proven across a restart:** seq continued 1,2 → 3,4 and the first
       421 bytes stayed byte-identical (md5 `aadfa8f1…` before and after new appends).*
-- [ ] **M2.3 Hermes delivery core** — outbox watchers (fs-watch, 50 ms debounce +
+- [x] **M2.3 Hermes delivery core** — outbox watchers (fs-watch, 50 ms debounce +
       periodic sweep fallback — SDD §11); message schema §4.4 validated at pickup;
       atomic delivery temp+rename into recipient `inbox/`; per-agent
       `cursor.json` + `inbox/.done/` idempotency; delivery + log events before
@@ -439,6 +439,24 @@ Execute in order; every package tests against the fake engine per-PR.
       real fs — delivery p95 budget smoke, duplicate-pickup idempotency, malformed
       message → visible reject, watcher-miss caught by sweep. Risk: don't
       "simplify" outbox/inbox into direct writes (BUILD-PROMPT §7).*
+      *Evidence: `typecheck && lint && test` green — 495 passed / 3 skipped (47 new),
+      two agents on real fs. Delivery is outbox → temp+rename → inbox with the outbox
+      router-drained; the indirection is intact (no direct writes, no merged
+      mailboxes). Rejections are *parked* in `outbox/.rejected/` and logged, never
+      dropped: unparseable JSON, a forged `from` that does not own the outbox, and a
+      message whose `requires_reply` disagrees with its act are each refused with a
+      reason, and a second sweep does not re-reject them. Consumption is idempotent
+      by `.done/`, proven including replay of an already-consumed id after a crash.
+      Both crash directions asserted through the production fault seam: dying before
+      the rename leaves the outbox file intact (nothing lost); dying after it and
+      re-sweeping does not double-deliver.
+      LIVE RUN with the REAL fake-engine binary writing the outbox:
+      `[fake-engine] outbox-wrote 2026-08-26T21-06-56-458Z-evid.json` →
+      **delivered in 71 ms** (NFR-2 budget 500 ms) → `agent.b consumed: send me last
+      week checkout totals` → second consume returned 0 → cursor
+      `{"lastProcessed":"2026-08-26T21-06-56-458Z-evid"}`. The log recorded the
+      delivery with every ref (`msgId`/`from`/`to`/`act`/`conversation`/`hops`) and
+      the committer landed it as `hermes: deliver 1, reject 0`.*
 - [ ] **M2.4 Hermes routing rules** — hop-cap diversion to Artemis-designate at
       exactly the cap (recipient constant until Artemis exists — route to a
       `human` queue per §4.4 `to` domain), bounce (`refuse`) for archived/missing
