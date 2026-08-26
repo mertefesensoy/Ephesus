@@ -33,7 +33,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
-    files: ['src/**/*.{ts,tsx}', 'shims/**/*.ts', 'test/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}', 'shims/**/*.{ts,mjs}', 'test/**/*.{ts,mjs}'],
     ignores: ['src/main/herald/**', 'src/main/engines/**', 'src/renderer/**'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [...voiceSdkPatterns, ...engineSdkPatterns] }]
@@ -49,6 +49,20 @@ export default tseslint.config(
     files: ['src/main/engines/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: voiceSdkPatterns }]
+    }
+  },
+  {
+    // The hook shim and the fake engine are dependency-free ESM run by bare
+    // `node` outside any bundler, so they see the Node globals directly.
+    files: ['shims/**/*.mjs', 'test/fakes/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        Buffer: 'readonly',
+        console: 'readonly',
+        process: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly'
+      }
     }
   },
   {

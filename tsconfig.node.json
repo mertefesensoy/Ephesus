@@ -2,11 +2,17 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "lib": ["ES2022"]
+    "lib": ["ES2022"],
+    // The hook shim and the fake engine are dependency-free ESM run by bare
+    // `node` (no build step available to them), but ENGINEERING-STANDARDS §1
+    // still owes them type safety: `@ts-check` + JSDoc, checked here.
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "src/main/**/*",
     "src/shared/**/*",
+    "shims/**/*",
     "test/**/*",
     "electron.vite.config.ts",
     "vitest.config.mts"

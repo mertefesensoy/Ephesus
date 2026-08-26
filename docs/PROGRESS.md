@@ -96,8 +96,9 @@ in order, one package per session-commit; tests are part of each package).
       optional `resume`/`transcripts`). Live boundary proof: a renderer file importing
       `../../main/engines` and a `src/main/` file importing `@anthropic-ai/sdk` are
       both rejected by `no-restricted-imports` (probe files run through eslint, then
-      removed) — NFR-12 containment holds for the new `engines/` directory.*
-- [ ] **M1.2 Fake engine** — `test/fakes/fake-engine/`: a real spawnable Node CLI
+      removed) — NFR-12 containment holds for the new `engines/` directory.
+      CI: run 32997376748 SUCCESS on 8ea26a2.*
+- [x] **M1.2 Fake engine** — `test/fakes/fake-engine/`: a real spawnable Node CLI
       (plain JS or pre-built TS, runnable under system Node, NOT Electron-ABI)
       that reads a JSON script file: emits scripted hook POSTs to the hook endpoint
       (token from `EPH_HOOK_TOKEN`), reads inbox files, writes outbox files, echoes
@@ -106,6 +107,19 @@ in order, one package per session-commit; tests are part of each package).
       *Docs: TEST-STRATEGY §1.2, §5. Tests: script-driven smoke (spawn fake, assert
       scripted stdout + hook posts against a stub server). Risk: Windows named-pipe
       client code diverging from UDS — abstract the client once, here.*
+      *Evidence: `typecheck && lint && test` green — 122/122 (32 new). The named-pipe
+      risk is closed by construction: `shims/hook-client.mjs` is the single client and
+      Node's `socketPath` takes UDS and named pipes through one code path — the shim
+      and the fake share it, and `test/fakes/hook-stub-server.ts` is the matching
+      single-path listener. Live run outside the test runner, on a real Windows named
+      pipe `\\.\pipe\eph-live-demo`: the fake posted 4 envelopes
+      (`session-start`/`pre-tool`/`post-tool`/`stop`, all `POST /hook`, v1, agent
+      `agent.mason`, session `sess-live`, payloads intact), read its seeded inbox
+      message and moved it to `inbox/.done/`, wrote `outbox/m-live-1.json` via
+      temp+rename, and exited 0. Fail-open proven both ways: no listener → `hook-failed
+      … ENOENT` and the agent keeps working; a 503 answer → `hook-failed stop harness
+      answered 503`, exit 0. Script drift refused loudly (bad `schemaVersion` and
+      unknown step kind both exit 2 with a `fatal:` line, never a guess).*
 - [ ] **M1.3 Hook server** — `src/main/hooks.ts`: UDS at `~/.ephesus/events.sock`
       (Windows: named pipe `\\.\pipe\ephesus-events-<uid>`), fs mode 0600 where
       applicable; per-spawn token validated on every payload; zod payload schemas in
