@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
+import { HERMES_SENDER, LEDGER_ENDPOINT } from '../shared/reserved'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
@@ -79,6 +80,12 @@ export interface HermesOptions {
   context?(): RoutingContext
   /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
   onBounced?(record: BounceRecord): void
+  /**
+   * The harness's ledger endpoint (SDD §7.1). Injected rather than imported so
+   * the router never learns what a task is — it carries the message to the
+   * endpoint and reports the answer, exactly as it carries mail to a mailbox.
+   */
+  ledger?(message: Message): { readonly ok: boolean; readonly reasons?: readonly string[] }
   /** Renders the block reason and the wake nudge — both are prompt surfaces. */
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
@@ -167,6 +174,61 @@ export class Hermes {
   }
 
   /**
+   * Hands a proposal to the ledger endpoint and answers the proposer.
+   *
+   * `propose` obligates a reply (ADR-0003's table), and the reply is the whole
+   * value of the endpoint being a correspondent rather than a file: an accepted
+   * proposal comes back `agree`, a refused one comes back `refuse` carrying
+   * every reason, so Artemis can fix it in one pass instead of guessing.
+   */
+  private submitToLedger(proposal: Message): void {
+    const outcome = this.options.ledger?.(proposal) ?? {
+      ok: false,
+      reasons: ['the ledger endpoint is not available']
+    }
+    const reasons = outcome.reasons ?? []
+    this.replyFromHarness(
+      proposal,
+      outcome.ok ? 'agree' : 'refuse',
+      outcome.ok
+        ? `ledger: accepted "${proposal.subject}"`
+        : `ledger: refused "${proposal.subject}"`,
+      outcome.ok
+        ? 'The proposal was applied to the ledger.'
+        : `The proposal was not applied. Nothing changed.\n\n${reasons.map((r) => `- ${r}`).join('\n')}`
+    )
+  }
+
+  /**
+   * Writes a harness-authored reply straight into the recipient's inbox.
+   *
+   * Straight in, like a bounce: the harness has no outbox, and an outbox
+   * carries only its owner's mail.
+   */
+  private replyFromHarness(
+    original: Message,
+    act: 'agree' | 'refuse',
+    subject: string,
+    body: string
+  ): void {
+    const reply = composeMessage({
+      id: makeMessageId(new Date(), `lgr${Math.random().toString(36).slice(2, 8)}`),
+      conversation: original.conversation,
+      in_reply_to: original.id,
+      from: LEDGER_ENDPOINT,
+      to: original.from,
+      act,
+      subject: subject.slice(0, 200),
+      body,
+      hops: replyHops(original),
+      created_at: new Date().toISOString()
+    })
+    const target = path.join(this.mailboxDir(original.from), 'inbox', `${reply.id}.json`)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    writeFileAtomic(target, `${JSON.stringify(reply, null, 2)}\n`)
+  }
+
+  /**
    * Sends a `refuse` back to the sender and records the bounce (FR-3.4:
    * "never drop silently"). The refusal is delivered straight into the sender's
    * inbox rather than through its own outbox — the sender did not write it, and
@@ -180,7 +242,12 @@ export class Hermes {
       id: makeMessageId(new Date(), `bnc${Math.random().toString(36).slice(2, 8)}`),
       conversation: original.conversation,
       in_reply_to: original.id,
-      from: original.from,
+      // The router wrote this, not the sender. Through M2 it claimed
+      // `from: <the original sender>` — a message the sender never wrote,
+      // attributed to them — because §4.4 gave the harness no legal identity.
+      // `agent.hermes` is reserved (`src/shared/reserved.ts`) and no hire can
+      // take it, which closes the gap the M2 close-out recorded.
+      from: HERMES_SENDER,
       to: original.from,
       act: 'refuse',
       subject: this.render('bounce-subject.md', vars).trim().slice(0, 200),
@@ -351,6 +418,16 @@ export class Hermes {
 
     if (route.kind === 'bounce') {
       this.bounce(parsed.message, route.reason)
+      this.drainOutbox(file)
+      return { kind: 'skipped' }
+    }
+
+    if (route.kind === 'endpoint') {
+      // SDD §7.1: not delivered to a mailbox — handed to the harness, which
+      // validates it and writes `tasks.json` through the single committer.
+      // Artemis gets an answer either way: a proposal that vanished silently
+      // would leave her believing work exists that does not.
+      this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }
     }

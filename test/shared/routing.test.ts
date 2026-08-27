@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { BROADCAST, HUMAN, composeMessage, type Message } from '../../src/shared/message'
+import { LEDGER_ENDPOINT } from '../../src/shared/reserved'
+import {
+  BROADCAST,
+  HUMAN,
+  composeMessage,
+  makeMessageId,
+  type Message
+} from '../../src/shared/message'
 import {
   DEFAULT_HOP_CAP,
   HUMAN_QUEUE,
@@ -158,5 +165,93 @@ describe('special addresses (FR-3.7)', () => {
       kind: 'deliver',
       to: [HUMAN_QUEUE]
     })
+  })
+})
+
+describe('the ledger endpoint is addressable, and guarded (SDD §7.1)', () => {
+  const LEDGER = LEDGER_ENDPOINT
+  const ctx = {
+    knownAgents: ['agent.artemis', 'agent.mason'],
+    orchestratorId: 'agent.artemis'
+  }
+
+  function proposal(over: Partial<Message> = {}): Message {
+    return composeMessage({
+      id: makeMessageId(new Date(), 'aa11'),
+      conversation: 'conv-1',
+      from: 'agent.artemis',
+      to: LEDGER,
+      act: 'propose',
+      subject: 'decompose the directive',
+      body: '{}',
+      created_at: new Date().toISOString(),
+      ...over
+    })
+  }
+
+  it('hands the orchestrator’s proposal to the endpoint, not to a mailbox', () => {
+    expect(routeMessage(proposal(), ctx)).toEqual({ kind: 'endpoint', endpoint: LEDGER })
+  })
+
+  it('refuses a writer who is not the orchestrator', () => {
+    // "Agents never touch tasks.json" — enforced at the transport layer, where
+    // ADR-0003 puts the addressing rules.
+    const route = routeMessage(proposal({ from: 'agent.mason' }), ctx)
+    expect(route.kind).toBe('bounce')
+    expect(route.kind === 'bounce' ? route.reason : '').toMatch(/only the orchestrator/)
+  })
+
+  it('refuses an act that is not a proposal', () => {
+    for (const act of ['request', 'inform', 'done'] as const) {
+      const route = routeMessage(proposal({ act }), ctx)
+      expect(route.kind, act).toBe('bounce')
+    }
+  })
+
+  it('refuses when no orchestrator is hired', () => {
+    const route = routeMessage(proposal(), { ...ctx, orchestratorId: null })
+    expect(route.kind).toBe('bounce')
+    expect(route.kind === 'bounce' ? route.reason : '').toMatch(/no orchestrator/)
+  })
+
+  it('still catches a livelocked proposal at the hop cap first', () => {
+    // The cap exists to stop loops, whatever the address.
+    const route = routeMessage(proposal({ hops: DEFAULT_HOP_CAP }), ctx)
+    expect(route.kind).toBe('divert')
+  })
+
+  it('does not need a mailbox to exist for the endpoint', () => {
+    expect(ctx.knownAgents).not.toContain(LEDGER)
+    expect(routeMessage(proposal(), ctx).kind).toBe('endpoint')
+  })
+})
+
+describe('mail for the Architect reaches Artemis (FR-3.7, ADR-0005)', () => {
+  function toHuman(): Message {
+    return composeMessage({
+      id: makeMessageId(new Date(), 'bb22'),
+      conversation: 'conv-2',
+      from: 'agent.mason',
+      to: 'human',
+      act: 'query',
+      subject: 'which staging database?',
+      body: 'both look current',
+      created_at: new Date().toISOString()
+    })
+  }
+
+  it('routes to the orchestrator when one is hired', () => {
+    const route = routeMessage(toHuman(), {
+      knownAgents: ['agent.mason'],
+      orchestratorId: 'agent.artemis'
+    })
+    expect(route).toEqual({ kind: 'deliver', to: ['agent.artemis'] })
+  })
+
+  it('queues for the Architect when there is no proxy', () => {
+    // Losing a message addressed to the human would be the worst outcome
+    // available, so with no orchestrator it queues rather than bouncing.
+    const route = routeMessage(toHuman(), { knownAgents: ['agent.mason'], orchestratorId: null })
+    expect(route).toEqual({ kind: 'deliver', to: [HUMAN_QUEUE] })
   })
 })

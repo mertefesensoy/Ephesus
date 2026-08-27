@@ -1,3 +1,4 @@
+import { LEDGER_ENDPOINT } from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -29,6 +30,12 @@ export interface RoutingContext {
 export type Route =
   /** Deliver as addressed, to one or more mailboxes. */
   | { readonly kind: 'deliver'; readonly to: readonly string[] }
+  /**
+   * Addressed to the harness's ledger endpoint (SDD §7.1): not delivered to a
+   * mailbox at all — handed to the endpoint, which validates it and writes
+   * `tasks.json` through the single committer.
+   */
+  | { readonly kind: 'endpoint'; readonly endpoint: string }
   /** Hop cap reached: goes to the adjudicator instead of the addressee. */
   | { readonly kind: 'divert'; readonly to: string; readonly reason: string }
   /** Undeliverable: the sender gets a `refuse` back and the log gets a bounce. */
@@ -75,7 +82,32 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
   }
 
   if (message.to === HUMAN) {
+    // FR-3.7/ADR-0005: Artemis is the Architect's proxy. Only what she judges
+    // critical continues to the Architect's own queue — and that judgement is
+    // hers, made by flipping `needs_human`, not a rule in this function.
     return { kind: 'deliver', to: [ctx.orchestratorId ?? HUMAN_QUEUE] }
+  }
+
+  if (message.to === LEDGER_ENDPOINT) {
+    // "Agents never touch tasks.json." The endpoint is the only way in, and
+    // this is where the two rules that make it safe live — because ADR-0003
+    // calls these transport rules, not etiquette.
+    if (ctx.orchestratorId === null) {
+      return { kind: 'bounce', reason: 'the ledger endpoint has no orchestrator to write for it' }
+    }
+    if (message.from !== ctx.orchestratorId) {
+      return {
+        kind: 'bounce',
+        reason: `only the orchestrator may write the ledger; "${message.from}" may not`
+      }
+    }
+    if (message.act !== 'propose') {
+      return {
+        kind: 'bounce',
+        reason: `the ledger endpoint takes "propose" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: LEDGER_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

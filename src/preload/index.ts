@@ -6,6 +6,7 @@ import {
   GATE_OPEN_CHANNEL,
   IpcChannels,
   LOG_APPEND_CHANNEL,
+  TASKS_STATE_CHANNEL,
   ptyDataChannel,
   ptyExitChannel,
   type AgoraHealth,
@@ -62,6 +63,12 @@ const eph: EphApi = {
   agora: {
     registry: () => ipcRenderer.invoke(IpcChannels.agoraRegistry) as Promise<Registry>,
     tasks: () => ipcRenderer.invoke(IpcChannels.agoraTasks) as Promise<TaskLedger>,
+    board: () => ipcRenderer.invoke(IpcChannels.agoraBoard) as Promise<string>,
+    onTasks: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(TASKS_STATE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(TASKS_STATE_CHANNEL, listener)
+    },
     log: (afterSeq, limit) =>
       ipcRenderer.invoke(IpcChannels.agoraLog, { afterSeq, limit }) as Promise<readonly LogEntry[]>,
     onAppend: (cb) => {

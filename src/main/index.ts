@@ -10,12 +10,14 @@ import {
   COMMANDS_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
   LOG_APPEND_CHANNEL,
+  TASKS_STATE_CHANNEL,
   type AgoraHealth,
   type HooksState
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis } from './artemis'
+import { LedgerEndpoint } from './ledger'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
@@ -58,6 +60,7 @@ let db: AppDb | null = null
 let agentManager: AgentManager | null = null
 let agora: Agora | null = null
 let artemis: Artemis | null = null
+let ledger: LedgerEndpoint | null = null
 let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
@@ -329,6 +332,10 @@ void app.whenReady().then(async () => {
       // transition was implemented and regression-tested in M1; this is the
       // package that finally makes it reachable in the running app.
       avatarDirector.apply(gate.agentId, { kind: 'gate-opened' })
+      // SDD §4.2's `gates` field, written for the first time (carried from the
+      // M3.3 review). Until this, "the harness refuses `→ done` while a gate is
+      // open" was a rule guarding a field nobody ever filled.
+      if (gate.taskId) ledger?.noteGate(gate.taskId, gate.id, true)
     },
     onSettled: (gate) => {
       // Only when the LAST gate on that agent clears: an agent held behind two
@@ -336,6 +343,7 @@ void app.whenReady().then(async () => {
       if (!gates?.isBlocked(gate.agentId)) {
         avatarDirector.apply(gate.agentId, { kind: 'gate-verdict' })
       }
+      if (gate.taskId) ledger?.noteGate(gate.taskId, gate.id, false)
       mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
     },
     // Invariant §8: the words a refusal shows are a prompt surface.
@@ -436,9 +444,34 @@ void app.whenReady().then(async () => {
     )
   }
 
+  // SDD §7.1: Artemis proposes, the harness validates and writes. Nothing here
+  // decides what a good decomposition looks like — only whether a proposal is
+  // well-formed and legal against the ledger as it stands (FR-5.2).
+  ledger = new LedgerEndpoint({
+    store: agora,
+    knownAgents: () => hermes?.knownAgents() ?? [],
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onChange: () => mainWindow?.webContents.send(TASKS_STATE_CHANNEL),
+    onDegraded: (detail) => reportDegradation('agora', detail)
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
+    ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
+    // FR-3.7/ADR-0005: with Artemis hired, `to:"human"` reaches the Architect's
+    // proxy rather than piling up in a queue nobody reads. Read per call, so a
+    // respawn or a hire mid-run is picked up without restarting the router.
+    context: () => ({
+      knownAgents: hermes?.knownAgents() ?? [],
+      orchestratorId: agora?.registry().orchestratorId ?? null
+    }),
+    // ADR-0013's second branch, real at last (the M2 carried item): an agent
+    // with assigned work keeps going even when its inbox is empty.
+    pendingTasksFor: (agentId) => ledger?.pendingFor(agentId) ?? 0,
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
     nudge: (agentId, text) => commandQueue.submit(agentId, text),
     isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',

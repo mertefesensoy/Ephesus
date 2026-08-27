@@ -117,6 +117,7 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
   ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())
+  ipcMain.handle(IpcChannels.agoraBoard, () => agora.board())
   ipcMain.handle(IpcChannels.agoraLog, (_ev, raw: unknown) => {
     const { afterSeq, limit } = agoraLogSchema.parse(raw)
     return agora.readLog(afterSeq, limit)

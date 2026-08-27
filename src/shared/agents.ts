@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { engineIdSchema, type EngineId, type HookSupport } from './engines'
+import { isReservedAgentId } from './reserved'
 
 /**
  * The agent surface both planes share (SDD §5 `agents:` group). Main validates
@@ -25,6 +26,15 @@ export const agentIdSchema = z
   .regex(/^agent\.[a-z0-9][a-z0-9-]*$/, 'agent id: "agent." followed by lowercase alphanumerics')
 
 /**
+ * A hire's id. Same shape as `agentIdSchema`, minus the ids the harness writes
+ * mail under (`src/shared/reserved.ts`) — a hire that took one could forge a
+ * router refusal or a ledger reply in the harness's name.
+ */
+export const hireIdSchema = agentIdSchema.refine((id) => !isReservedAgentId(id), {
+  message: 'agent id: reserved for the harness'
+})
+
+/**
  * Process lifecycle, distinct from the avatar state machine of SDD §6. This
  * answers "does a process exist and can it be talked to"; the avatar answers
  * "what is the agent doing", from the event plane. Conflating them is how a
@@ -48,7 +58,7 @@ export type AgentLifecycle = z.infer<typeof agentLifecycleSchema>
 
 export const spawnRequestSchema = z
   .object({
-    agentId: agentIdSchema,
+    agentId: hireIdSchema,
     name: z.string().min(1).max(64),
     role: z.string().min(1).max(64),
     engine: engineIdSchema,

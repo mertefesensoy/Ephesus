@@ -763,7 +763,7 @@ rendering + the owed badge double-encoding ride the M3 floor-layout package.
 
 **Carried in from M1/M2 (each closes inside a package below):** the engine's
 Notification-hook/permission-dialog invisibility (M1 → gate choke point,
-M3.3) · `pendingTasksFor` always 0 (→ M3.8) · breaker pathology signal
+M3.3) · `pendingTasksFor` always 0 (closed M3.8) · breaker pathology signal
 emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
 `agora/human/` queue with no UI (→ M3.4) · claude adapter's missing optional
 `resume` (closed M3.7) · badge color-only pairs and tilesheet rendering (closed M3.6).
@@ -1313,7 +1313,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       the first, and the countersign *surface* (filing into the memo/gate archive) is
       the Odeon's (M5). Recorded rather than hidden, on the same footing as M3.5's
       `forceEvaluate`.*
-- [ ] **M3.8 Task assignment + Artemis routing + Ledger tab** — SDD §7.1: the
+- [x] **M3.8 Task assignment + Artemis routing + Ledger tab** — SDD §7.1: the
       ledger endpoint (Artemis files `propose` acts from its own outbox; the
       harness validates and writes `tasks.json` through the single committer —
       agents never touch the ledger file); assignment `request`s with
@@ -1330,6 +1330,57 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       flow with two fakes; single-scribe enforcement; kanban stays a
       projection. Risk: mechanism/intelligence split — main validates and
       executes, Artemis decides; no orchestration decision hardcoded in main.*
+      *Evidence: `typecheck && lint && invariants && test` green — 1207 passed / 2
+      skipped (71 new). **The split holds**: `src/shared/ledger.ts` decides only
+      whether a proposal is well-formed and legal against the ledger as it stands —
+      nothing in main has an opinion about what a good decomposition looks like, who
+      should get a task, or when one is finished. A proposal applies **whole or not
+      at all**, with every reason returned at once, so Artemis can fix it in one pass.
+      **Agents never touch `tasks.json`**: the writer check lives in `routeMessage`,
+      because ADR-0003 calls the addressing rules transport rules — so it guards the
+      only way in, and the endpoint is reached having already established that the
+      orchestrator sent it. Planting the removal of that check fails 3 tests across
+      two suites; removing the endpoint call in Hermes fails 10.
+      **`board.md` travels through the same endpoint**, which is what makes FR-4.2's
+      "single scribe = Artemis" enforceable rather than a comment on a file anyone
+      could write.
+      **The M2 carried item is closed**: `pendingTasksFor` counts `todo` and
+      `in_progress` work assigned to an agent, so ADR-0013's branch now fires on
+      tasks, not mail alone. `blocked` and `stalled` deliberately do not count — an
+      agent that cannot proceed should stop, not be told to continue.
+      **`task.gates` is written for the first time** (carried from the M3.3 review):
+      the Watch records an open gate against its task and clears it on verdict, so
+      SDD §4.2's "refuse `→ done` while a gate is open" finally guards a field
+      something fills.
+      **A gap the M2 close-out recorded is closed**: the router-authored bounce said
+      `from: <the original sender>` — a message the sender never wrote, attributed to
+      them — because §4.4 gave the harness no legal identity. Reserved agent ids
+      (`agent.hermes`, `agent.ledger`) give it one with no schema change, and
+      `spawnRequestSchema` refuses them so no hire can forge a refusal.
+      LIVE RUN of the REAL app — the UC-02 chain end to end, with Artemis
+      auto-spawned as a real `claude` 2.1.247 and a real worker hired beside her:
+      `ledger after her proposal: 2 task(s) — t-uc02-1:todo→agent.mason,
+      t-uc02-2:todo→agent.mason` · `deps recorded: ["t-uc02-1"]` ·
+      `source traced to her message (NFR-13): {"kind":"propose","via":"hermes",
+      "log":"msg#…"}` · `board.md scribed: true` ·
+      `the harness answered her: act=agree from=agent.ledger` ·
+      `request delivered to the assignee: act=request subject="t-uc02-1: …"` ·
+      `pending work for the assignee: 2` · `kanban IPC sees 2 task(s)`.
+      Then both safety rules were attacked from a real worker's outbox:
+      `ledger after a worker proposed: 2 task(s) (unchanged: true)` ·
+      `board after a worker tried to scribe: still Artemis's (true)` ·
+      `the worker got a refusal: act=refuse from=agent.hermes reason="… only the
+      orchestrator may write the ledger; "agent.mason" may not"`.
+      Screenshot: [`docs/demo/m3-uc02-ledger.png`](./demo/m3-uc02-ledger.png).
+      **A layout bug surfaced from that screenshot and was fixed here**: the Ledger
+      panel had no `minWidth: 0`, and a flex child defaults to "never shrink below my
+      content" — so six kanban columns squeezed the terminal pane to a sliver and gave
+      the whole window a horizontal scrollbar. The columns scroll inside the panel now.
+      **Owed forward:** the endpoint's address is a reserved agent id rather than a
+      `"ledger"` literal in SDD §4.4, to avoid deviating from a normative schema —
+      raised in the session report for the Architect to promote if they prefer. The
+      `needs_human` flip stays Artemis's to make (her policy text says when); the
+      harness honours it at the M3.3 choke point already.*
 - [ ] **M3.9 Scenario suites + exit demos** — implement S-GATE, S-BREAKER,
       S-LEDGER, S-SECRETS (TEST-STRATEGY §3) as automated suites over the
       seams M3.1–M3.8 built (S-GATE's voice/remote clauses at the policy

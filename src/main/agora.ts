@@ -88,6 +88,8 @@ interface Pending {
 export const PROTOCOL_REL = 'PROTOCOL.md'
 export const REGISTRY_REL = 'registry.json'
 export const TASKS_REL = 'tasks.json'
+/** The blackboard (FR-4.2, SDD §2). Exactly one scribe: Artemis, via the endpoint. */
+export const BOARD_REL = 'board.md'
 export const LOG_REL = 'log.jsonl'
 
 /** How many give-up failures to keep for the UI before dropping the oldest. */
@@ -161,6 +163,28 @@ export class Agora {
   writeRegistry(registry: Registry): void {
     this.refuseWriteOverCorrupt(REGISTRY_REL)
     writeFileAtomic(this.pathOf(REGISTRY_REL), `${JSON.stringify(registry, null, 2)}\n`)
+  }
+
+  /**
+   * The blackboard as it stands (FR-4.2). Missing reads as empty rather than as
+   * an error: a company that has not written to its board yet is not degraded.
+   */
+  board(): string {
+    try {
+      return fs.readFileSync(this.pathOf(BOARD_REL), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+
+  /**
+   * Writes the blackboard. Only the ledger endpoint calls this, which is how
+   * "exactly one scribe" (SDD §2) is enforced rather than merely stated —
+   * agents have no path to this file that does not go through the endpoint's
+   * writer check.
+   */
+  writeBoard(body: string): void {
+    writeFileAtomic(this.pathOf(BOARD_REL), body.endsWith('\n') ? body : `${body}\n`)
   }
 
   writeTasks(ledger: TaskLedger): void {
@@ -259,6 +283,10 @@ export class Agora {
     }
     if (!fs.existsSync(this.pathOf(TASKS_REL))) {
       this.writeTasks(emptyLedger)
+      seeded = true
+    }
+    if (!fs.existsSync(this.pathOf(BOARD_REL))) {
+      this.writeBoard(this.options.prompts.read(path.join('agora', 'board.md')))
       seeded = true
     }
     this.log.open()
