@@ -38,6 +38,8 @@ async function restartOver(home: string): Promise<Company> {
   const { Agora } = await import('../../src/main/agora')
   const { Hermes } = await import('../../src/main/hermes')
   const { PromptStore } = await import('../../src/main/prompts')
+  const { GateManager } = await import('../../src/main/watch/gates')
+  const { denyAllPolicy } = await import('../../src/shared/gates')
   const { fileURLToPath } = await import('node:url')
   const repo = fileURLToPath(new URL('../../', import.meta.url))
 
@@ -53,6 +55,9 @@ async function restartOver(home: string): Promise<Company> {
     hermes,
     hookServer: null as never,
     hookEvents: [],
+    // The restarted half of a blackout re-reads state from disk; it never
+    // opens a gate, so a deny-all manager with no sinks is the honest stand-in.
+    gates: new GateManager({ policy: () => denyAllPolicy }),
     hire: (agentId) => hermes.ensureMailbox(agentId),
     runTurn: async () => '',
     inbox: (agentId) => {

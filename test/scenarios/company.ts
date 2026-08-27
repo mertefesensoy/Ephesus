@@ -9,10 +9,12 @@ import {
   type Message,
   type SpeechAct
 } from '../../src/shared/message'
+import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { GateManager, packageNotification } from '../../src/main/watch/gates'
 import { FAKE_ENGINE_CLI } from '../fakes/fake-adapter'
 
 /**
@@ -33,6 +35,8 @@ export interface CompanyOptions {
   readonly isIdle?: (agentId: string) => boolean
   readonly nudge?: (agentId: string, text: string) => void
   readonly onPathology?: (agentId: string, blocks: number) => void
+  /** The Watch's policy for this company. Defaults to deny-all (FR-11.1). */
+  readonly gatePolicy?: GatePolicy
 }
 
 export interface Company {
@@ -41,6 +45,8 @@ export interface Company {
   readonly hermes: Hermes
   readonly hookServer: HookServer
   readonly hookEvents: readonly HookEventRecord[]
+  /** The Watch's approval queue, wired to the same choke points main wires. */
+  readonly gates: GateManager
   /** Gives an agent a mailbox and a live hook token. */
   hire(agentId: string): void
   /** Runs the REAL fake-engine binary for one agent with a scripted turn. */
@@ -110,6 +116,16 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   })
   await agora.ensureRepo()
 
+  // The Watch (SDD §9). Deny-all unless the scenario says otherwise, so a
+  // scenario that forgets to configure a policy tests the safe default.
+  const gates = new GateManager({
+    policy: () => options.gatePolicy ?? denyAllPolicy,
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
   const hermes = new Hermes({
     agora,
     prompts,
@@ -117,13 +133,34 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     ...(options.blockCap === undefined ? {} : { blockCap: options.blockCap }),
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
     ...(options.nudge ? { nudge: options.nudge } : {}),
-    ...(options.onPathology ? { onPathology: options.onPathology } : {})
+    ...(options.onPathology ? { onPathology: options.onPathology } : {}),
+    // SDD §9 choke point 2, wired exactly as src/main/index.ts wires it.
+    onNeedsHuman: ({ message }) => {
+      gates.submit({
+        kind: 'needs-human',
+        agentId: message.from,
+        packaging: {
+          what: message.subject,
+          why: `${message.from} flagged this for a human decision`,
+          blastRadius: `the conversation ${message.conversation} and any work waiting on it`,
+          rollback: 'denying returns the question to the agent unanswered'
+        }
+      })
+    }
   })
 
   const hookEvents: HookEventRecord[] = []
   const hookServer = new HookServer({
     onEvent: (record) => {
       hookEvents.push(record)
+      // SDD §9 choke point 1, wired exactly as src/main/index.ts wires it.
+      if (record.envelope.event === 'notification') {
+        gates.submit({
+          kind: 'tool-permission',
+          agentId: record.envelope.agentId,
+          packaging: packageNotification(record.envelope.payload)
+        })
+      }
       return record.envelope.event === 'stop'
         ? hermes
             .decideOnStop(record.envelope.agentId, record.envelope.payload)
@@ -142,6 +179,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     hermes,
     hookServer,
     hookEvents,
+    gates,
 
     hire(agentId) {
       hermes.ensureMailbox(agentId)

@@ -116,6 +116,10 @@ export const CLAUDE_HOOK_EVENTS: Readonly<Record<string, HookEvent>> = {
   UserPromptSubmit: 'prompt-submitted',
   PreToolUse: 'pre-tool',
   PostToolUse: 'post-tool',
+  // The engine's permission dialogs and trust prompts. Mapped from M3.3: an
+  // agent stalled behind a dialog now becomes a visible gate (SDD §9 choke
+  // point 1) instead of a floor that quietly stops moving.
+  Notification: 'notification',
   Stop: 'stop',
   PreCompact: 'compact-start',
   PostCompact: 'compact-end',

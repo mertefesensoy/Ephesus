@@ -63,6 +63,12 @@ export interface HermesOptions {
   readonly faults?: HermesFaultInjector
   /** Notified for each delivered message, before the commit is queued. */
   onDelivered?(record: DeliveryRecord): void
+  /**
+   * A delivered message the router or Artemis flagged `needs_human` (SDD §4.4).
+   * This is the Watch's second gate choke point (SDD §9): the mail is still
+   * delivered, and the action behind it is also put in front of the Architect.
+   */
+  onNeedsHuman?(record: DeliveryRecord): void
   /** Notified for each rejected file — a visible state, never a silent drop. */
   onRejected?(record: RejectionRecord): void
   /**
@@ -389,6 +395,11 @@ export class Hermes {
       const record: DeliveryRecord = { message, deliveredTo: target }
       records.push(record)
       this.options.onDelivered?.(record)
+      // SDD §9's second gate choke point. The message is delivered either way —
+      // escalation never swallows mail (FR-3.3) — but a `needs_human` flag also
+      // puts the action in front of the Architect instead of leaving it to be
+      // noticed in a thread.
+      if (message.needs_human) this.options.onNeedsHuman?.(record)
     }
 
     await this.options.faults?.('before-drain-outbox')

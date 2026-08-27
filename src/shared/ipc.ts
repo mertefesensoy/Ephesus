@@ -72,6 +72,14 @@ export const COMMANDS_STATE_CHANNEL = 'state:commands'
 /** Push channel signalling that `log.jsonl` has grown (SDD §5 `log:append`). */
 export const LOG_APPEND_CHANNEL = 'log:append'
 
+/**
+ * Push channel for the approvals queue (SDD §5 `gate:open`). Carries the gate
+ * that just opened, or null when one was settled — the payload is a nudge, not
+ * a second copy of the queue: the renderer re-reads `watch:approvals` so it can
+ * never disagree with main about what is open (the renderer is a projection).
+ */
+export const GATE_OPEN_CHANNEL = 'gate:open'
+
 /** One agent's avatar snapshot, addressed. */
 export interface AvatarUpdate {
   readonly agentId: string

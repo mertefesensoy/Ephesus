@@ -83,12 +83,16 @@ describe('hook event classification (FR-2.3)', () => {
     }
   })
 
-  it('carries the SDD §6 socket-borne triggers plus the session bracket', () => {
+  it('carries the SDD §6 socket-borne triggers, the session bracket, and the gate signal', () => {
     expect([...HOOK_EVENTS]).toEqual([
       'session-start',
       'prompt-submitted',
       'pre-tool',
       'post-tool',
+      // Added in M3.3 for SDD §9's first choke point: without it an agent
+      // stalled behind the engine's own permission dialog was invisible to the
+      // harness — the M1 carried item.
+      'notification',
       'stop',
       'compact-start',
       'compact-end',

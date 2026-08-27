@@ -8,6 +8,7 @@ import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
+  GATE_OPEN_CHANNEL,
   LOG_APPEND_CHANNEL,
   type AgoraHealth,
   type HooksState
@@ -30,12 +31,16 @@ import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { BudgetWatcher } from './watch/budgets'
 import { safeStorageCipher } from './watch/cipher'
+import { GateManager, loadGatePolicy, packageNotification } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
+let gates: GateManager | null = null
+/** The composed gate policy, reloaded from disk on every evaluation. */
+let gatePolicyPath = ''
 // The redaction filter reads through the broker on every chunk (ADR-0010), so
 // a credential stored while an agent is already running is masked in that
 // agent's live stream too.
@@ -102,6 +107,13 @@ const hookServer = new HookServer({
     // "session" and "cumulative" be told apart without a running total.
     if (envelope.sessionId) costLedger?.noteSession(envelope.agentId, envelope.sessionId)
 
+    // SDD §9 choke point 1: the engine is waiting on a human. Through M1 and
+    // M2 this event was unmapped, so an agent stalled behind a permission
+    // dialog was invisible — the floor simply stopped moving (M1 carried item).
+    if (envelope.event === 'notification') {
+      openNotificationGate(envelope.agentId, envelope.payload)
+    }
+
     // The autonomy hinge (ADR-0013): a finished turn continues only if the
     // guards allow it. Returning nothing lets the turn end normally.
     if (envelope.event === 'stop') {
@@ -122,6 +134,11 @@ const hookServer = new HookServer({
       `event handler failed: ${err instanceof Error ? err.message : String(err)}`
     )
 })
+
+/** SDD §9 choke point 1 — the engine is waiting on a human (M1 carried item). */
+function openNotificationGate(agentId: string, payload: unknown): void {
+  gates?.submit({ kind: 'tool-permission', agentId, packaging: packageNotification(payload) })
+}
 
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
@@ -226,6 +243,39 @@ void app.whenReady().then(async () => {
   const reconciled = await agora.reconcile()
   if (reconciled.sha) console.info(`agora reconciled at ${reconciled.sha.slice(0, 8)}`)
 
+  // The Watch's gate policy (SDD §9). Deny-by-default: an unconfigured
+  // Ephesus, or one whose policy file will not parse, holds every gated action.
+  gatePolicyPath = path.join(home.root, 'gate-policy.json')
+  gates = new GateManager({
+    policy: () => {
+      const loaded = loadGatePolicy(gatePolicyPath)
+      // A policy that cannot be read is a visible degradation, not a silent
+      // deny — the Architect has to know why everything is suddenly held.
+      if (loaded.warning) reportDegradation('gates', loaded.warning)
+      return loaded.policy
+    },
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
+    },
+    onOpen: (gate) => {
+      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, gate)
+      // The avatar waves at the Watch post while a gate is open (SDD §6). The
+      // transition was implemented and regression-tested in M1; this is the
+      // package that finally makes it reachable in the running app.
+      avatarDirector.apply(gate.agentId, { kind: 'gate-opened' })
+    },
+    onSettled: (gate) => {
+      // Only when the LAST gate on that agent clears: an agent held behind two
+      // gates must not walk back to its desk after the first verdict.
+      if (!gates?.isBlocked(gate.agentId)) {
+        avatarDirector.apply(gate.agentId, { kind: 'gate-verdict' })
+      }
+      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
+    }
+  })
+
   // The durable cost ledger (ADR-0011). Its storage is the app-local SQLite
   // file, so every figure survives a restart by construction — there is no
   // in-memory counter to zero (invariant §11).
@@ -263,6 +313,20 @@ void app.whenReady().then(async () => {
       // visible rather than an invisible overnight loop (R2).
       reportDegradation('autonomy', `${agentId} has been continued ${blocks} times this session`)
       agora?.appendLog({ kind: 'breaker', agentId, signal: 'stop-loop', blocks, rung: 1 })
+    },
+    onNeedsHuman: ({ message }) => {
+      // SDD §9 choke point 2. The message was delivered either way; this puts
+      // the decision behind it in front of the Architect (UC-08 step 2).
+      gates?.submit({
+        kind: 'needs-human',
+        agentId: message.from,
+        packaging: {
+          what: message.subject,
+          why: `${message.from} flagged this for a human decision`,
+          blastRadius: `the conversation ${message.conversation} and any work waiting on it`,
+          rollback: 'denying returns the question to the agent unanswered'
+        }
+      })
     },
     onBounced: ({ original, reason }) =>
       reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
@@ -359,6 +423,23 @@ void app.whenReady().then(async () => {
       agora?.commitSoon(`budget ${verdict.state} for ${agentId}`)
       if (verdict.state !== 'ok') {
         reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
+      }
+      // SDD §9 choke point 3: spend is a harness-mediated action, so continuing
+      // past a budget is the Architect's call, not the agent's.
+      if (verdict.state === 'breached' || verdict.state === 'projected-breach') {
+        gates?.submit({
+          kind: 'spend',
+          agentId,
+          spendCents: verdict.spent,
+          packaging: {
+            what: `continue spending beyond ${agentId}'s daily budget`,
+            why: `${verdict.spent} tokens spent today; the budget ${
+              verdict.state === 'breached' ? 'is exhausted' : 'is projected to be exhausted'
+            }`,
+            blastRadius: `further spend on ${agentId}'s current work, billed to your provider account`,
+            rollback: 'denying stops the agent; approving raises the ceiling for today only'
+          }
+        })
       }
     },
     onDegraded: (detail) => reportDegradation('budgets', detail)

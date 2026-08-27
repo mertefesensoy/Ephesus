@@ -878,7 +878,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       by the test (NFR-12). Each subject now supplies a sample in its own format and
       the suite asserts the *behaviour* ADR-0009 actually specifies: a missing file
       yields nothing, junk yields nothing, and a good line yields exactly what it said.*
-- [ ] **M3.3 Gate core — deny-by-default + the three choke points** —
+- [x] **M3.3 Gate core — deny-by-default + the three choke points** —
       `watch/gates.ts` + pure policy matcher in `src/shared/`: deny-by-default
       evaluation; profile autonomy can only *loosen* up to global maxima
       (stricter wins, ADR-0012); gate packaging schema (what/why/blast
@@ -895,6 +895,38 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       with the fake engine; Notification-hook mapping. Risk: policy config
       shape is minimally specified — smallest shape that serves UC-08, logged
       in DECISIONS-LOG, no invented policy language.*
+      *Evidence: `typecheck && lint && invariants && test` green — 754 passed / 2
+      skipped (64 new). Deny-by-default is asserted **exhaustively, not by example**:
+      a table over every `GATE_KIND` holds each one under the default policy and
+      again under a policy that permits a different class. Stricter-wins is asserted
+      over the full 3×3 autonomy cross-product against `Math.min` — the property,
+      not three cases.
+      **S-GATE lands early, as a real suite** (`test/scenarios/s-gate.test.ts`, 11
+      cases on the M2 rig: real spawned `fake-engine` processes, a real socket, real
+      git). All three of TEST-STRATEGY §3's clauses pass: destructive op
+      deny-by-default; the remote path is held unless the policy names the channel
+      and the verdict is tagged `remote`; a voice approval is refused until repeat-back
+      — and refusing is *not* denying, so the gate stays open (scripted-STT stub at
+      the policy seam, per the Architect decision; the Herald plugs in here in M6).
+      **All three SDD §9 choke points are wired and proven.** (1) The engine's
+      `Notification` hook is mapped — a real fake-engine process emitting it opens a
+      packaged gate, **closing the M1 carried item** where an agent stalled behind a
+      permission dialog was invisible to the harness. (2) A real `needs_human` message
+      is delivered *and* gated — escalation never swallows mail (FR-3.3). (3) A budget
+      breach files a `spend` gate.
+      Open gates now populate `task.gates`, so M2.2's `status→done` guard bites for the
+      first time; the avatar's `gate-opened`/`gate-verdict` edges (implemented in M1,
+      unreachable until now) are driven, and only the LAST gate on an agent walks it
+      back to its desk.
+      LIVE RUN under real Electron (xvfb) against a real harness home and real Agora:
+      `no policy file: autonomy=manual rules=0` — an unconfigured Ephesus holds
+      everything · `corrupt policy: autonomy=manual rules=0 warning="gate-policy.json
+      unreadable, holding everything: …"` — **a policy the harness cannot read never
+      becomes a policy that permits** · `policy permits spend only; destructive op:
+      held=true because=no-rule` · `profile asks autonomous under a supervised global:
+      held=true because=autonomy` · `notification hook → gate: held=true what="Claude
+      needs permission to use Bash"`. The chain read back out of `log.jsonl` alone
+      (NFR-13): `seq=4 opened kind=tool-permission` → `seq=5 approved`.*
 - [ ] **M3.4 Approvals UI + the human queue** — the Watch approvals surface
       (UI-DESIGN §4): `watch: approvals()/approve(gateId, v)` IPC + `gate:open`
       push; renders each gate's packaging (what/why/blast radius/rollback);

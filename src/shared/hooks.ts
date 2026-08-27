@@ -38,6 +38,13 @@ export const HOOK_EVENTS = [
   'prompt-submitted',
   'pre-tool',
   'post-tool',
+  /**
+   * The engine wants something from a human — a tool-permission dialog, a
+   * folder-trust prompt. Unmapped through M1 and M2, which is exactly why an
+   * agent could sit stalled behind a dialog with no harness-visible signal (the
+   * M1 carried item). It is the first of SDD §9's three gate choke points.
+   */
+  'notification',
   'stop',
   'compact-start',
   'compact-end',
@@ -123,6 +130,12 @@ export const HOOK_PAYLOAD_SCHEMAS: Readonly<Record<HookEvent, z.ZodType>> = {
   'prompt-submitted': anyPayload,
   'pre-tool': z.looseObject({ tool: z.string().min(1) }),
   'post-tool': z.looseObject({ tool: z.string().min(1) }),
+  // Loose like the rest: engines word their prompts differently, and the
+  // harness reads only `message` when the engine offers one. A notification
+  // with no message still opens a gate — "the engine is waiting on you" is the
+  // fact that matters, and losing it to a missing field is the stall this
+  // event exists to end.
+  notification: anyPayload,
   stop: anyPayload,
   'compact-start': anyPayload,
   'compact-end': anyPayload,
