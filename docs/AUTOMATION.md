@@ -34,6 +34,7 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 ### Skills (`.claude/skills/` — invoke as slash commands)
 | Skill | Purpose |
 |---|---|
+| `/goal` | Drives the current milestone's run end-to-end: enforces the Architect's sole git authorship and per-package `feature/m<x>-<n>-<slug>` branches, loops `/build-package` through the milestone's packages, closes with `/milestone-review`. The milestone-run entry point (M3 as of 2026-08-27). |
 | `/build-package` | Executes the next BUILD-PROMPT work package end-to-end with the verified loop; resumes from `docs/PROGRESS.md`. The default "keep building" entry point. |
 | `/milestone-review` | Gate-keeps milestone completion: runs exit criteria and S-suites *by execution*, sweeps for stubs/debt, records the verdict. |
 | `/doc-sync` | Audits code↔docs drift (module map, IPC surface, schemas, invariant tripwires) and fixes mechanical drift; escalates behavioral divergence. |

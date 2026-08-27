@@ -58,6 +58,8 @@ test output). One work package per PR. Do not create PRs unless asked.
 
 ## Project skills available here
 
-`/build-package` (execute next BUILD-PROMPT work package) · `/milestone-review`
-(verify exit criteria, update PROGRESS) · `/doc-sync` (code↔docs drift check) ·
-`/improve` (file a Gymnasium improvement proposal). See `docs/AUTOMATION.md`.
+`/goal` (drive the current milestone run: authorship + branch policy +
+package loop) · `/build-package` (execute next BUILD-PROMPT work package) ·
+`/milestone-review` (verify exit criteria, update PROGRESS) · `/doc-sync`
+(code↔docs drift check) · `/improve` (file a Gymnasium improvement proposal).
+See `docs/AUTOMATION.md`.
