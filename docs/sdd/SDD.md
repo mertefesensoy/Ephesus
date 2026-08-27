@@ -68,6 +68,9 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) with idempotent ticks — a trigger fires at most once per interval and is never re-entered while running. `reflection.ts` is its first client: it asks an agent to condense its own memory (ADR-0006 layer 3) and applies what the agent proposes back to the reserved `agent.library` endpoint — the harness never summarizes (ADR-0005) | 0006, 0005 |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
+| `home.ts` | The harness home's shape: `HOME_DIRS`, creation, `config.json` load with a visible warning on a corrupt file (SDD §2) | — |
+| `fsx.ts` | `writeFileAtomic` — temp file + rename, the one write path for anything another process reads (invariant §3) | 0003 |
+| `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, and owns shutdown. Holds no logic of its own | 0001 |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
 
 ---

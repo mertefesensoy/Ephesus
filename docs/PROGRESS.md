@@ -1958,9 +1958,84 @@ triage).
       skipped** (the fifth skip is the MemPalace rung's smoke case, which runs
       only when `EPH_MEMPALACE` is set — reported, per above, never silent).
 
-- [ ] **M4 exit review** — respawn-with-memory demo evidence; recall smoke
+- [x] **M4 exit review** — respawn-with-memory demo evidence; recall smoke
       green; codex + gemini conform at honest grades; S-CRASH green in CI;
       PROGRESS + docs synced.
+
+### M4 verdict — DONE (2026-08-27)
+
+Every exit criterion was verified **by running it**.
+
+| IMPLEMENTATION §M4 exit criterion | How it was verified | Result |
+|---|---|---|
+| Kill and respawn an agent — it resumes with memory | The demo, live: real Agora + git, real hook socket, real child processes, real files; a real process SIGKILLed mid-tool-call. Capture: [`m4-respawn-recall.txt`](./demo/m4-respawn-recall.txt) | `exitCode=-1` · offer `resumable=true memorySections=1 tasksReturned=["t-demo-1"]` · ledger `t-demo-1=todo` · the **new process printed back the context it was handed**, containing its own sentence verbatim · `log.jsonl: memoryCarried=true resumed=true sessionId=sess-mason-demo` |
+| Recall smoke test with known-answer queries passes | `EPH_MEMPALACE=<real mempalace> npx vitest run test/conformance/recall-smoke.test.ts` | **16 passed** — five known-answer queries plus a known-*un*answer, green on **grep, fts and mempalace**; scoped queries stayed in scope at every rung |
+| Two extra engines pass conformance | `npx vitest run test/conformance/engine-adapters.test.ts` | **72 passed / 2 skipped** — the table ran 17 cases against **codex** and 17 against **gemini**, beside claude's 17 and the fake engine's 23. Both new adapters declare `pty-heuristic`, and both *demonstrate* it: they write no settings and the suite checks that they write none |
+| Parity with the upstream inspiration's core loop | Recorded below | **Reached** |
+| S-CRASH (TEST-STRATEGY §3) | `npx vitest run test/scenarios/s-crash.test.ts` | 3 passed — SIGKILL mid-task → ghost → archived, task back to `todo`, respawn offer, resume where the adapter supports it and an honest `false` where it does not |
+| Every scenario suite still green | `npx vitest run test/scenarios` | **76 passed** across 11 files (73 at M3 close + S-CRASH's 3) |
+| The whole gate | `npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm test` | green — **1506 passed / 5 skipped**, run **twice** with no flake, up from 1236 at M3 close |
+| Per-package CI green (the M3-close verdict made real) | GitHub Actions on every `feature/m4-*` push | runs **44–51**, all `success`: [44](https://github.com/mertefesensoy/ephesus/actions/runs/33075733612) · [45](https://github.com/mertefesensoy/ephesus/actions/runs/33076950842) · [46](https://github.com/mertefesensoy/ephesus/actions/runs/33078145285) · [47](https://github.com/mertefesensoy/ephesus/actions/runs/33079302409) · [48](https://github.com/mertefesensoy/ephesus/actions/runs/33080103288) · [49](https://github.com/mertefesensoy/ephesus/actions/runs/33080925749) · [50](https://github.com/mertefesensoy/ephesus/actions/runs/33081401238) · [51](https://github.com/mertefesensoy/ephesus/actions/runs/33082003210) |
+| Sole authorship | `node scripts/check-attribution.cjs` | `attribution ok (59 commit(s) reachable from HEAD)` |
+
+**Parity checkpoint (IMPLEMENTATION M4, and R8's "parity at M4 means the
+project is useful even if paused there").** The upstream inspiration's core
+loop is: spawn real engine CLIs you own → give them identity and a shared
+protocol → let them message each other through files → coordinate through a
+blackboard and a task ledger → govern them with gates, budgets and a breaker
+→ and give them memory that survives the process, with detect-and-degrade
+recall over it. As of M4 every one of those is implemented, tested at the
+seam it actually runs on, and demonstrated live: M1 the owned spawn and the
+event plane, M2 Hermes and the Agora, M3 Artemis and the Watch, M4 the
+Library. **Reached.** What M5–M7 add is the differentiator — accountability
+(the Odeon), voice (the Herald), the Harbor and missions — not parity.
+
+**Carried items, closed where the plan assigned them:** `memory.md` continuity
+on respawn (→ M4.1 — M3.7's `memoryCarried` log fact is now *true*, asserted
+by S-CRASH and shown in the demo). **Not this milestone's, still carried:**
+the agent↔task binding join (→ M5 with the Odeon) · Artemis's `mayDecide`
+first production caller (→ M5 memo triage).
+
+**Debt sweep:** no `TODO`/`FIXME`/`XXX` markers anywhere in `src/`, `shims/`
+or `scripts/`. Doc drift found and fixed in this review: SDD §1.1's module map
+was missing `fsx.ts`, `home.ts` and `index.ts` (the same drift class the M3
+close-out found with `ledger.ts`); the map now covers every file in
+`src/main/`. Every IPC channel's group is documented in SDD §5. SDD §2 (the
+`worktrees/` and `index/` entries, `events.sock`'s recall path, `memory.md`'s
+one sanctioned rewriter), §3 (memory layer on the spawn config, worktree cwd),
+§4.6 (why the keyword index is not in `db.sqlite`), §5 (the four Library
+channels) and §10 (the crash row's note, resumable and memory facts) were
+updated as the packages landed.
+
+**Owed to a local session, recorded rather than faked:**
+
+1. **The Memory panel's screenshot.** `electron-rebuild` cannot complete in
+   this environment — the proxy answers 403 to `www.electronjs.org`, so
+   node-gyp cannot fetch Electron headers, `better-sqlite3` stays Node-ABI and
+   `npm run dev` cannot boot. Everything provable without Electron was proven
+   by live run of the shipped IPC deps (M4.5's record).
+2. **A real-engine respawn demo.** No engine in this environment can
+   authenticate (`codex doctor` reports no credentials and unreachable
+   provider endpoints). The demo runs real processes with scripted words — the
+   M3.9 rule, stated plainly rather than implied.
+
+**Still owed: the two-agent close-out audit.** M0–M3 each closed with an
+independent `spec-verifier` (verification by execution) + `doc-guardian`
+(design conformance) pass, and that pattern has caught real defects at every
+milestone — eleven landed fixes at M3 alone. This session could not run it:
+the harness it ran under withheld the Agent tool. The review above was
+performed by execution, first-hand, and every number in the table came from a
+command run in this session — but a second pair of eyes on the M4 diff has not
+happened, and this milestone should not be treated as audited until it does.
+
+**Open for the Architect (not blocking) — full statements in the session
+report:** `ResumeSupport`'s append-only contract cannot express codex's
+subcommand resume or gemini's index-based one, so both ship without resume ·
+gemini's hook wiring needs a ruling on writing a *tracked* settings file ·
+codex's needs one on hook trust · SDD §4.3's closed log-kind list has no
+`memory` kind (reflection needed none, but a future Library event would) ·
+four IPC channels widened the SDD §5 surface, documented in-commit per the
+M3.1 rule.
 
 ## M5 — The Odeon + Gymnasium v1
 

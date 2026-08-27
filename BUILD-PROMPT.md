@@ -122,14 +122,20 @@ milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-27, M3 close):** M0–M3 are COMPLETE — every
+> **Build state (updated 2026-08-27, M4 close):** M0–M4 are COMPLETE — every
 > package landed with live-run evidence (M3's under real Electron/xvfb with real
-> `claude` 2.1.247 agents), CI green on `main` at every milestone close, all four
-> milestones audited at close by execution + design-conformance review (verdicts
-> in `docs/PROGRESS.md`, including the M3 close-out audit's eleven landed fixes).
-> **Resume at M4.1.** The detailed M4 package plan (M4.1–M4.9: docs per package,
-> tests owed, risks, which carried item each package closes) is in
-> `docs/PROGRESS.md` — read it before coding. Minor choices already made are in
+> `claude` 2.1.247 agents; M4's against real MemPalace 3.8.0, real
+> `codex-cli` 0.150.1 and real `gemini` 0.57.0), CI green at every milestone
+> close and — from M4 — on **every package branch**. M0–M3 were each audited at
+> close by execution + design-conformance review (verdicts in
+> `docs/PROGRESS.md`, including the M3 close-out audit's eleven landed fixes);
+> M4's exit review was verified by execution, and its two-agent close-out audit
+> is the one thing still owed.
+> **Resume at M5.1.** M4's nine packages all landed with live-run evidence and
+> per-package CI green (runs 44–51); the M4 verdict, its evidence table and the
+> parity checkpoint are in `docs/PROGRESS.md`. Derive the M5 package list at
+> milestone start per §5, and read the M4 verdict's "open for the Architect"
+> list first — several of its items are M5's to settle. Minor choices already made are in
 > `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
 > Standing Architect directives already folded into the docs: **MemPalace** is
 > the Library's recall/archive backend (ADR-0016; M4.3) — an *optional* external:
