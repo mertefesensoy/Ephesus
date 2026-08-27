@@ -51,7 +51,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `prompts.ts` | `PromptStore`: harness-home-first prompt/template loading, seeded from the bundled copies | — |
 | `hooks.ts` | UDS/named-pipe server; payload validation; schema-drift warnings; PTY-heuristic fallback registration | 0002 |
 | `hermes.ts` | Outbox watchers, delivery (temp+rename), hop-cap diversion, bounce, broadcast fan-out, wake watchdog, Stop-hook decisioning | 0003, 0013 |
-| `git.ts` | The **only** module that invokes `git`. ADR-0004's single-committer claim lives here, and CI fails on a `git` call anywhere else | 0004 |
+| `git.ts` | The **only** module that invokes `git` in the app. ADR-0004's single-committer claim lives here, and CI fails on a `git` call anywhere else — except the named development-repo tools in `check-invariants.cjs`'s allowlist, which run outside the app process and never touch a harness home | 0004 |
 | `eventlog.ts` | `log.jsonl` appender/reader: seq recovery, append-only writes, tolerance of a torn tail from a killed harness | 0004 |
 | `settings-registry.ts` | Durable record of settings files written into an agent's repo, so a force-killed harness can undo them on the next boot | 0009 |
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
