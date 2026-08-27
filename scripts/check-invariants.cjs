@@ -7,7 +7,9 @@
  *    `src/main/git.ts`. A `git` invocation anywhere else is the failure mode the
  *    whole single-committer design exists to prevent.
  * 2. Invariant §5 — `log.jsonl` and the cost ledger are append-only. A truncating
- *    write to either is a rewrite of the book of record.
+ *    write to either is a rewrite of the book of record — and since M3.2 the
+ *    ledger is a SQL table, so the rewrite vector is `UPDATE`/`DELETE`, which a
+ *    `writeFileSync` pattern cannot see.
  * 3. ENGINEERING-STANDARDS §5 / ADR-0010 — credentials reach code in exactly one
  *    way. Nothing outside `watch/` and `herald/` reads a credential out of the
  *    process environment, and no fixture anywhere carries a secret-shaped
@@ -49,6 +51,14 @@ const GIT_ALLOWLIST = new Set([
 
 const GIT_INVOCATION = /(execFile|execFileSync|exec|execSync|spawn|spawnSync)\s*\(\s*['"`]git['"`]/
 const TRUNCATING_LOG_WRITE = /writeFileSync\s*\([^)]*\b(log\.jsonl|cost_ledger|costLedger)\b/
+/**
+ * The ledger's rewrite vector now that it is a SQLite table. No allowlist: not
+ * one line of this app has a reason to update or delete a spend row, and the
+ * whole "a restart cannot zero your spend" guarantee rests on that staying
+ * true. `cost_fold_cursor` is deliberately NOT covered — it is metadata about
+ * reading, not a record of spend, and it is meant to be updated.
+ */
+const LEDGER_REWRITE = /(UPDATE|DELETE\s+FROM)\s+cost_ledger\b/i
 
 /**
  * A credential read straight out of the environment. ADR-0010 routes every
@@ -114,6 +124,11 @@ for (const dir of SEARCH_DIRS) {
       if (appRules && TRUNCATING_LOG_WRITE.test(line)) {
         failures.push(
           `${rel}:${i + 1}  truncating write to an append-only record — invariant §5 forbids rewriting it`
+        )
+      }
+      if (appRules && LEDGER_REWRITE.test(line)) {
+        failures.push(
+          `${rel}:${i + 1}  UPDATE/DELETE against cost_ledger — the ledger is append-only (invariant §5, ADR-0011)`
         )
       }
       if (rel === SELF) return

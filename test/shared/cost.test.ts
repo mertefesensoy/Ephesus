@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   dayKey,
+  dayOfFact,
   evaluateBudget,
   foldFacts,
   ledgerRowSchema,
@@ -24,27 +25,28 @@ function fact(over: Partial<FoldableFact> = {}): FoldableFact {
     inTokens: 10,
     outTokens: 5,
     costUsd: null,
+    at: null,
     ...over
   }
 }
 
-const CONTEXT = { agent: 'agent.mason', day: '2026-08-27' }
+const CONTEXT = { fallbackDay: '2026-08-27' }
 
 describe('foldFacts — the cursor is what makes re-reading safe', () => {
   it('folds every fact the first time', () => {
     const folded = foldFacts(
       [fact(), fact({ inTokens: 1 })],
-      { source: 't.jsonl', folded: 0 },
+      { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
       CONTEXT
     )
     expect(folded.rows).toHaveLength(2)
-    expect(folded.cursor).toEqual({ source: 't.jsonl', folded: 2 })
+    expect(folded.cursor).toEqual({ agent: 'agent.mason', source: 't.jsonl', folded: 2 })
     expect(folded.restarted).toBe(false)
   })
 
   it('folds nothing when the transcript has not grown', () => {
     const facts = [fact(), fact()]
-    const first = foldFacts(facts, { source: 't.jsonl', folded: 0 }, CONTEXT)
+    const first = foldFacts(facts, { agent: 'agent.mason', source: 't.jsonl', folded: 0 }, CONTEXT)
     // The same file read again — a transcript is re-read on every tick, so this
     // is the common case, not an edge one.
     const second = foldFacts(facts, first.cursor, CONTEXT)
@@ -53,7 +55,11 @@ describe('foldFacts — the cursor is what makes re-reading safe', () => {
   })
 
   it('folds only the new tail when the transcript grew', () => {
-    const first = foldFacts([fact()], { source: 't.jsonl', folded: 0 }, CONTEXT)
+    const first = foldFacts(
+      [fact()],
+      { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
+      CONTEXT
+    )
     const second = foldFacts([fact(), fact({ outTokens: 99 })], first.cursor, CONTEXT)
     expect(second.rows).toHaveLength(1)
     expect(second.rows[0]?.outTokens).toBe(99)
@@ -63,7 +69,11 @@ describe('foldFacts — the cursor is what makes re-reading safe', () => {
   it('re-folds from zero and says so when the transcript shrank', () => {
     // A rotated or crash-truncated file: skipping its first N facts forever
     // would under-report, which is the failure this ledger exists to prevent.
-    const restarted = foldFacts([fact()], { source: 't.jsonl', folded: 5 }, CONTEXT)
+    const restarted = foldFacts(
+      [fact()],
+      { agent: 'agent.mason', source: 't.jsonl', folded: 5 },
+      CONTEXT
+    )
     expect(restarted.restarted).toBe(true)
     expect(restarted.rows).toHaveLength(1)
     expect(restarted.cursor.folded).toBe(1)
@@ -72,7 +82,7 @@ describe('foldFacts — the cursor is what makes re-reading safe', () => {
   it('stamps every row with the SDD §4.6 key', () => {
     const folded = foldFacts(
       [fact({ sessionId: 's-9', model: 'm-2', costUsd: 0.5 })],
-      { source: 'file.jsonl', folded: 0 },
+      { agent: 'agent.mason', source: 'file.jsonl', folded: 0 },
       CONTEXT
     )
     const row = folded.rows[0]
@@ -87,6 +97,43 @@ describe('foldFacts — the cursor is what makes re-reading safe', () => {
       source: 'file.jsonl'
     })
     expect(ledgerRowSchema.safeParse(row).success).toBe(true)
+  })
+})
+
+describe('the day of SPEND, not the day of folding', () => {
+  it('bills a fact to the day its transcript says it happened', () => {
+    // `day` IS the budget window (SDD §4.6 with registry §4.1). Folding an old
+    // transcript must not bill yesterday's tokens to today's budget — an agent
+    // in a previously-used repo would breach on its first tick from history.
+    const folded = foldFacts(
+      [fact({ at: '2026-08-20T09:30:00.000Z' })],
+      { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
+      { fallbackDay: '2026-08-27' }
+    )
+    expect(folded.rows[0]?.day).toBe(dayKey(new Date('2026-08-20T09:30:00.000Z')))
+  })
+
+  it('splits one transcript across the days it spans', () => {
+    // An agent running across midnight bills each side to its own day.
+    const folded = foldFacts(
+      [fact({ at: '2026-08-26T23:59:00.000Z' }), fact({ at: '2026-08-27T00:01:00.000Z' })],
+      { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
+      { fallbackDay: '2026-08-27' }
+    )
+    expect(new Set(folded.rows.map((row) => row.day)).size).toBe(2)
+  })
+
+  it('falls back only for a fact whose transcript said nothing', () => {
+    const folded = foldFacts(
+      [fact({ at: null })],
+      { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
+      { fallbackDay: '2026-08-27' }
+    )
+    expect(folded.rows[0]?.day).toBe('2026-08-27')
+  })
+
+  it('falls back rather than producing an unmatchable day from junk', () => {
+    expect(dayOfFact(fact({ at: 'not a date' }), '2026-08-27')).toBe('2026-08-27')
   })
 })
 
@@ -173,6 +220,35 @@ describe('evaluateBudget — post-hoc enforcement plus the pre-flight projection
     expect(verdict.state).toBe('projected-breach')
     expect(verdict.projected).toBe(5400)
     expect(verdict.because).toBe('projection')
+  })
+
+  it('measures the rate over the window it can actually see', () => {
+    // `spent` is durable (all of today, across restarts); `elapsedMinutes` can
+    // only measure this process's uptime. Dividing the first by the second is
+    // how a healthy agent gets projected into a breach after a restart.
+    const verdict = evaluateBudget({
+      spent: 400_000,
+      spentAtWindowStart: 399_400,
+      dailyTokens: 1_000_000,
+      elapsedMinutes: 6,
+      remainingMinutes: 600
+    })
+    // 600 tokens in 6 minutes → 60_000 projected, comfortably inside the
+    // 600_000 remaining. Without the window baseline this projected 40M.
+    expect(verdict.state).toBe('ok')
+    expect(verdict.projected).toBe(60_000)
+  })
+
+  it('still catches a genuine burn inside the window', () => {
+    const verdict = evaluateBudget({
+      spent: 400_000,
+      spentAtWindowStart: 300_000,
+      dailyTokens: 500_000,
+      elapsedMinutes: 10,
+      remainingMinutes: 60
+    })
+    // 100k in 10 minutes → 600k projected against 100k remaining.
+    expect(verdict.state).toBe('projected-breach')
   })
 
   it('refuses to project from too little history', () => {

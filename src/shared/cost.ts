@@ -11,9 +11,12 @@ import { z } from 'zod'
  * Everything in this file is pure: the storage interface (`LedgerStore`) is
  * implemented over SQLite in main, and over a plain array in tests, because
  * better-sqlite3 is Electron-ABI and cannot load under vitest (M0 constraint 3).
+ *
+ * There is deliberately no `schemaVersion` here. Invariant §9 versions schema'd
+ * *files*; the ledger is a SQLite table, governed by migration on open, and a
+ * constant nothing persists would be the appearance of compliance with nothing
+ * behind it.
  */
-
-export const COST_SCHEMA_VERSION = 1
 
 /**
  * One folded row of the ledger, keyed exactly as SDD §4.6 specifies:
@@ -57,6 +60,13 @@ export function dayKey(at: Date): string {
  */
 export const foldCursorSchema = z
   .object({
+    /**
+     * Keyed by (agent, source), not by source alone. Two agents may share a
+     * `cwd` — FR-1.5 makes worktree isolation optional — and a source-only key
+     * would let whichever ticked first claim every fact while the other
+     * silently recorded zero.
+     */
+    agent: z.string().min(1).max(64),
     source: z.string().min(1).max(1024),
     folded: z.number().int().nonnegative()
   })
@@ -71,6 +81,8 @@ export interface FoldableFact {
   readonly inTokens: number
   readonly outTokens: number
   readonly costUsd: number | null
+  /** When the engine recorded it; null when the transcript does not say. */
+  readonly at: string | null
 }
 
 /**
@@ -86,7 +98,13 @@ export interface FoldableFact {
 export function foldFacts(
   facts: readonly FoldableFact[],
   cursor: FoldCursor,
-  context: { readonly agent: string; readonly day: string }
+  /**
+   * `fallbackDay` is used only for a fact whose transcript carried no
+   * timestamp. Every fact that HAS one is billed to the day it was spent —
+   * `day` is the budget window (SDD §4.6 with registry §4.1), so folding an
+   * old transcript must not bill yesterday's tokens to today.
+   */
+  context: { readonly fallbackDay: string }
 ): {
   readonly rows: readonly LedgerRow[]
   readonly cursor: FoldCursor
@@ -95,16 +113,31 @@ export function foldFacts(
   const restarted = facts.length < cursor.folded
   const from = restarted ? 0 : cursor.folded
   const rows = facts.slice(from).map((fact) => ({
-    agent: context.agent,
+    agent: cursor.agent,
     session: fact.sessionId,
     model: fact.model,
-    day: context.day,
+    day: dayOfFact(fact, context.fallbackDay),
     inTokens: fact.inTokens,
     outTokens: fact.outTokens,
     costUsd: fact.costUsd,
     source: cursor.source
   }))
-  return { rows, cursor: { source: cursor.source, folded: facts.length }, restarted }
+  return {
+    rows,
+    cursor: { agent: cursor.agent, source: cursor.source, folded: facts.length },
+    restarted
+  }
+}
+
+/**
+ * Contract: the calendar day a fact was spent on, or `fallback` when the
+ * transcript carried no usable timestamp. An unparseable timestamp falls back
+ * rather than producing an `Invalid Date` day nothing could ever match.
+ */
+export function dayOfFact(fact: FoldableFact, fallback: string): string {
+  if (fact.at === null) return fallback
+  const at = new Date(fact.at)
+  return Number.isNaN(at.getTime()) ? fallback : dayKey(at)
 }
 
 /** A folded total over some slice of the ledger. */
@@ -146,6 +179,13 @@ export function tokensOf(totals: CostTotals): number {
  */
 export interface AgentSpend {
   readonly agent: string
+  /**
+   * Whether this agent's engine reports usage at all. `none` is a visible
+   * product tier (ADR-0009 makes `transcripts` optional), and it has to be
+   * distinguishable from an agent that genuinely spent nothing — otherwise a
+   * zero is a silent fallback, which invariant §7 does not allow.
+   */
+  readonly reporting: 'engine' | 'none'
   /** This spawn's session, or null before the engine has reported one. */
   readonly session: string | null
   /** Spend attributed to the current session only. */
@@ -193,7 +233,17 @@ export interface BudgetVerdict {
 export function evaluateBudget(input: {
   readonly spent: number
   readonly dailyTokens: number | null
-  /** Minutes the agent has been spending today. */
+  /**
+   * Tokens already spent when the observation window opened. The rate is
+   * computed over `spent - spentAtWindowStart`, because `spent` is durable
+   * (all of today, across restarts) while `elapsedMinutes` can only measure
+   * this process's uptime. Dividing all of today's spend by six minutes of
+   * uptime projects a breach for a perfectly healthy agent — and the 5-minute
+   * floor below does not help, because the origin, not the sample size, is
+   * what is wrong.
+   */
+  readonly spentAtWindowStart?: number
+  /** Minutes the agent has been spending in the current observation window. */
   readonly elapsedMinutes: number
   /** Minutes left in the budget window (rest of the day). */
   readonly remainingMinutes: number
@@ -211,7 +261,8 @@ export function evaluateBudget(input: {
   if (input.elapsedMinutes < minMinutes || input.remainingMinutes <= 0) {
     return { state: 'ok', spent, remaining, projected: null, because: 'under' }
   }
-  const perMinute = spent / input.elapsedMinutes
+  const inWindow = Math.max(0, spent - (input.spentAtWindowStart ?? 0))
+  const perMinute = inWindow / input.elapsedMinutes
   const projected = Math.round(perMinute * input.remainingMinutes)
   if (projected > remaining) {
     return { state: 'projected-breach', spent, remaining, projected, because: 'projection' }

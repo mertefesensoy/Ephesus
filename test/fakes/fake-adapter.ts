@@ -71,7 +71,8 @@ const transcripts: TranscriptReader = {
           model: row['model'],
           inTokens: row['inTokens'],
           outTokens: row['outTokens'],
-          costUsd: typeof row['costUsd'] === 'number' ? row['costUsd'] : null
+          costUsd: typeof row['costUsd'] === 'number' ? row['costUsd'] : null,
+          at: typeof row['at'] === 'string' ? row['at'] : null
         })
       } catch {
         // A line we cannot read yields no fact — never an invented one.

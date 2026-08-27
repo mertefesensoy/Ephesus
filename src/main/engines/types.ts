@@ -138,6 +138,18 @@ export interface UsageFact {
   readonly outTokens: number
   /** Engine-reported cost when it reports one; null means "derive downstream". */
   readonly costUsd: number | null
+  /**
+   * When the engine recorded this usage, ISO-8601, or null when the transcript
+   * does not say.
+   *
+   * The ledger's `day` column IS the budget window (SDD §4.6 read with registry
+   * §4.1's `dailyTokens`), so it has to be the day the tokens were *spent*, not
+   * the day the harness happened to fold them. Without this, an agent running
+   * across midnight bills its pre-midnight spend to tomorrow, and a repo with a
+   * pre-existing transcript breaches its budget on the first tick from history
+   * alone.
+   */
+  readonly at: string | null
 }
 
 /** ADR-0009 `transcripts?`: the token/cost telemetry source for an engine. */

@@ -23,6 +23,15 @@ import { writeFileAtomic } from './fsx'
  * Node test runner after `electron-rebuild` (DECISIONS-LOG).
  */
 
+/** What the Watch needs about one spawn to fold and budget it (ADR-0011). */
+export interface BudgetedSpawn {
+  readonly agentId: string
+  readonly adapter: EngineAdapter
+  readonly cfg: AgentSpawnConfig
+  readonly dailyTokens: number | null
+  readonly sessionIds: readonly string[]
+}
+
 /** The slice of `PtyManager` the lifecycle needs. */
 export interface AgentSpawner {
   /** Starts `plan.argv` under `id`, streaming bytes on `pty:data:<id>`. */
@@ -102,10 +111,28 @@ export interface AgentManagerOptions {
   }
   /** Raised when a spawn could not be given every credential its role declares. */
   onGrantsMissing?(agentId: string, missing: readonly string[]): void
+  /**
+   * The daily budget already recorded for this hire in the roster (SDD §4.1),
+   * consulted when the spawn request does not carry one.
+   *
+   * The enforcement ceiling must not be whatever the *renderer* supplied
+   * (invariant §2): a hire whose registry entry declares 500k would otherwise
+   * be unbudgeted the moment a spawn call omitted the field, and a harness
+   * restart would lose the declaration entirely.
+   */
+  rosterBudget?(agentId: string): number | null
 }
 
 interface LiveAgent {
   card: AgentCard
+  /**
+   * Engine session ids this spawn has reported, in first-seen order. The Watch
+   * folds only the transcripts these name: an engine keys its transcript
+   * directory on the working directory, so two agents in one repo — and the
+   * Architect's own history there — otherwise land in whichever agent's ledger
+   * ticked first.
+   */
+  readonly sessionIds: string[]
   readonly adapter: EngineAdapter
   /**
    * Rebuilt at every `start()` so credentials are resolved AT SPAWN
@@ -134,25 +161,37 @@ export class AgentManager {
     return [...this.agents.values()].map((agent) => agent.card)
   }
 
+  /** Records an engine session id this spawn reported (from the event plane). */
+  noteSession(agentId: string, sessionId: string): void {
+    const agent = this.agents.get(agentId)
+    if (agent && !agent.sessionIds.includes(sessionId)) agent.sessionIds.push(sessionId)
+  }
+
   /**
    * The spawns the Watch folds transcripts for (ADR-0011). Exposes the adapter
    * and its spawn config because that is what `TranscriptReader.transcriptDir`
    * takes — the Watch never learns anything engine-specific itself (NFR-12).
    */
-  liveSpawns(): readonly {
-    readonly agentId: string
-    readonly adapter: EngineAdapter
-    readonly cfg: AgentSpawnConfig
-    readonly dailyTokens: number | null
-  }[] {
+  liveSpawns(): readonly BudgetedSpawn[] {
     return [...this.agents.values()]
       .filter((agent) => agent.card.lifecycle === 'running')
-      .map((agent) => ({
-        agentId: agent.card.agentId,
-        adapter: agent.adapter,
-        cfg: agent.cfg,
-        dailyTokens: agent.card.dailyTokens
-      }))
+      .map((agent) => this.budgeted(agent))
+  }
+
+  /** One spawn's budget view, live or not — used for the final fold at exit. */
+  spawnOf(agentId: string): BudgetedSpawn | null {
+    const agent = this.agents.get(agentId)
+    return agent ? this.budgeted(agent) : null
+  }
+
+  private budgeted(agent: LiveAgent): BudgetedSpawn {
+    return {
+      agentId: agent.card.agentId,
+      adapter: agent.adapter,
+      cfg: agent.cfg,
+      dailyTokens: agent.card.dailyTokens,
+      sessionIds: [...agent.sessionIds]
+    }
   }
 
   card(agentId: string): AgentCard {
@@ -193,7 +232,7 @@ export class AgentManager {
     // observed live before this reservation existed.
     const cfg = this.spawnConfig(request)
     const card = this.newCard(request, adapter, null)
-    this.agents.set(request.agentId, { card, adapter, cfg, hookPlan: null })
+    this.agents.set(request.agentId, { card, adapter, cfg, hookPlan: null, sessionIds: [] })
     this.options.onChange?.(card)
 
     const spec = adapter.binary()
@@ -210,7 +249,12 @@ export class AgentManager {
       // then every hire sits on the terraces.
       seat: 'terrace',
       envGrants: [...request.envGrants],
-      ...(request.budget ? { budget: request.budget } : {}),
+      // The card already resolved the effective budget — request first, then
+      // whatever the roster declared. Writing `request.budget` here would erase
+      // a roster-declared budget on any spawn call that omitted the field.
+      ...(this.card(request.agentId).dailyTokens === null
+        ? {}
+        : { budget: { dailyTokens: this.card(request.agentId).dailyTokens as number } }),
       profile: null,
       target: request.cwd,
       status: 'idle',
@@ -366,7 +410,8 @@ export class AgentManager {
       ptyId: request.agentId,
       settingsWritten: [],
       envGrants: request.envGrants,
-      dailyTokens: request.budget?.dailyTokens ?? null,
+      dailyTokens:
+        request.budget?.dailyTokens ?? this.options.rosterBudget?.(request.agentId) ?? null,
       capabilities: request.capabilities,
       spawnedAt: new Date().toISOString(),
       exitCode: null

@@ -21,6 +21,15 @@ export interface BudgetedAgent {
   readonly cfg: AgentSpawnConfig
   /** The role's daily token budget (registry §4.1), or null when unbudgeted. */
   readonly dailyTokens: number | null
+  /**
+   * Engine session ids this spawn has reported. Transcripts are keyed on the
+   * agent's `cwd`, not on the agent — two agents sharing a repo see the same
+   * directory, and so does the Architect's own `claude` history in it. Folding
+   * the directory wholesale attributes their spend to whoever ticked first,
+   * which is exactly the mis-attribution ADR-0011 rejected provider-side caps
+   * for. Only files this spawn's sessions produced are folded.
+   */
+  readonly sessionIds: readonly string[]
 }
 
 export interface BudgetWatcherOptions {
@@ -101,18 +110,27 @@ export class BudgetWatcher {
     }
   }
 
+  /** Folds one agent now — used by the tick and by the final fold at exit. */
+  async foldNow(agent: BudgetedAgent): Promise<void> {
+    await this.foldOne(agent)
+  }
+
   private async foldOne(agent: BudgetedAgent): Promise<void> {
     const reader = agent.adapter.transcripts
     // An engine with no transcript reader is a visible product tier, not a
-    // failure (ADR-0009 makes it optional) — its agents simply have no spend
-    // data, which the UI shows as an unbudgeted zero rather than a guess.
+    // failure (ADR-0009 makes it optional) — reported as `reporting: 'none'`
+    // so a zero can never be mistaken for "spent nothing".
     if (reader) {
       const dir = reader.transcriptDir(agent.cfg)
-      for (const file of transcriptFiles(dir)) {
+      for (const file of await transcriptFiles(dir, agent.sessionIds)) {
         this.options.ledger.fold(agent.agentId, file, await reader.read(file))
       }
     }
-    const spend = this.options.ledger.spendFor(agent.agentId, agent.dailyTokens)
+    const spend = this.options.ledger.spendFor(
+      agent.agentId,
+      agent.dailyTokens,
+      reader ? 'engine' : 'none'
+    )
     const previous = this.lastState.get(agent.agentId)
     if (previous !== spend.budget.state) {
       this.lastState.set(agent.agentId, spend.budget.state)
@@ -129,13 +147,34 @@ export class BudgetWatcher {
   }
 }
 
-/** Contract: the transcript files in `dir`, or none when it does not exist. */
-export function transcriptFiles(dir: string): readonly string[] {
-  if (!fs.existsSync(dir)) return []
+/**
+ * Contract: the transcript files in `dir` that belong to `sessionIds`, or none
+ * when the directory is absent or unreadable.
+ *
+ * Engines name a transcript after the session it records, so the session ids
+ * the event plane already reported are the filter. **An empty `sessionIds`
+ * yields nothing**: before an engine has told us which session it is running,
+ * folding the directory would bill someone else's history to this agent. The
+ * safe direction is to record nothing until we know whose it is.
+ *
+ * Async because this runs on the same event loop that carries PTY bytes and
+ * hook events (SDD §11, NFR-1/NFR-2).
+ */
+export async function transcriptFiles(
+  dir: string,
+  sessionIds: readonly string[]
+): Promise<readonly string[]> {
+  if (sessionIds.length === 0) return []
+  const wanted = new Set(sessionIds)
   try {
-    return fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    return entries
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          entry.name.endsWith('.jsonl') &&
+          wanted.has(entry.name.slice(0, -'.jsonl'.length))
+      )
       .map((entry) => path.join(dir, entry.name))
       .sort()
   } catch {

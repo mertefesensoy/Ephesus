@@ -20,6 +20,7 @@ function fact(over: Partial<FoldableFact> = {}): FoldableFact {
     inTokens: 100,
     outTokens: 20,
     costUsd: null,
+    at: null,
     ...over
   }
 }

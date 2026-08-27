@@ -105,7 +105,12 @@ const hookServer = new HookServer({
     // The ledger learns which session a spawn is running under from the same
     // event plane the floor reads (ADR-0002) — the attribution key that lets
     // "session" and "cumulative" be told apart without a running total.
-    if (envelope.sessionId) costLedger?.noteSession(envelope.agentId, envelope.sessionId)
+    if (envelope.sessionId) {
+      costLedger?.noteSession(envelope.agentId, envelope.sessionId)
+      // The Watch folds only the transcripts these sessions produced, so a
+      // shared repo cannot cross-attribute spend between agents (ADR-0011).
+      agentManager?.noteSession(envelope.agentId, envelope.sessionId)
+    }
 
     // SDD §9 choke point 1: the engine is waiting on a human. Through M1 and
     // M2 this event was unmapped, so an agent stalled behind a permission
@@ -187,6 +192,9 @@ function createWindow(): void {
 void app.whenReady().then(async () => {
   const home = initHome()
   db = new AppDb(home.dbPath)
+  // A stored ledger row that fails validation on read is dropped and reported,
+  // never repaired — the ledger is append-only (invariant §5).
+  db.onUnreadableRow = (detail) => reportDegradation('ledger', detail)
   // Bound before any agent can spawn, so no spawn ever races its own hooks.
   // A failure here is a *visible* degraded state, never a dead app: agents still
   // run, the floor freezes, and the UI says why (SDD §10, invariant §7).
@@ -350,6 +358,15 @@ void app.whenReady().then(async () => {
         'agents',
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    rosterBudget: (agentId) => {
+      try {
+        return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
+      } catch {
+        // A corrupt roster is already a visible degradation elsewhere; an
+        // unreadable budget means "unbudgeted", never "unlimited".
+        return null
+      }
+    },
     resolveGrants: (declared) =>
       secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
     onGrantsMissing: (agentId, missing) =>
@@ -385,8 +402,23 @@ void app.whenReady().then(async () => {
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
       if (card.lifecycle === 'exited') {
-        costLedger?.clearSession(card.agentId)
-        budgetWatcher?.forget(card.agentId)
+        // One last fold BEFORE the session is forgotten: usage written in the
+        // seconds between the final tick and the exit would otherwise never be
+        // folded, and this spawn is never `running` under that session again.
+        // Under-reporting is the ledger's one unforgivable failure.
+        const spawn = agentManager?.spawnOf(card.agentId)
+        const finalFold = spawn && budgetWatcher ? budgetWatcher.foldNow(spawn) : Promise.resolve()
+        void finalFold
+          .catch((err: unknown) =>
+            reportDegradation(
+              'budgets',
+              `final fold for ${card.agentId} failed: ${err instanceof Error ? err.message : String(err)}`
+            )
+          )
+          .finally(() => {
+            costLedger?.clearSession(card.agentId)
+            budgetWatcher?.forget(card.agentId)
+          })
       }
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
         avatarDirector.add(card.agentId)
@@ -453,10 +485,18 @@ void app.whenReady().then(async () => {
     commands: commandQueue,
     agora,
     secrets,
+    // Exited agents are INCLUDED: their cumulative figure is precisely what the
+    // durable ledger exists to preserve, and hiding it behind a liveness filter
+    // would put it out of reach of the only IPC that can show it (FR-11.2).
     budgets: () =>
       (agentManager?.list() ?? [])
-        .filter((card) => card.lifecycle !== 'exited')
-        .map((card) => costLedger?.spendFor(card.agentId, card.dailyTokens))
+        .map((card) =>
+          costLedger?.spendFor(
+            card.agentId,
+            card.dailyTokens,
+            engines.get(card.engine).transcripts ? 'engine' : 'none'
+          )
+        )
         .filter((spend): spend is NonNullable<typeof spend> => spend !== undefined),
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),

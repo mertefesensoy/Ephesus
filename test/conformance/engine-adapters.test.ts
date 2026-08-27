@@ -69,11 +69,19 @@ runAdapterConformance({
         model: 'test-model',
         inTokens: 10,
         outTokens: 20,
-        costUsd: 0.5
+        costUsd: 0.5,
+        at: '2026-08-27T09:00:00.000Z'
       })
     ],
     expected: [
-      { sessionId: 's-1', model: 'test-model', inTokens: 10, outTokens: 20, costUsd: 0.5 }
+      {
+        sessionId: 's-1',
+        model: 'test-model',
+        inTokens: 10,
+        outTokens: 20,
+        costUsd: 0.5,
+        at: '2026-08-27T09:00:00.000Z'
+      }
     ],
     ignoredLines: ['not json at all', JSON.stringify({ sessionId: 's-2', model: 'test-model' })]
   }
@@ -96,6 +104,7 @@ runAdapterConformance({
         type: 'assistant',
         sessionId: 's-1',
         requestId: 'req_1',
+        timestamp: '2026-08-27T09:00:00.000Z',
         message: {
           model: 'claude-opus-5',
           usage: {
@@ -108,7 +117,14 @@ runAdapterConformance({
       })
     ],
     expected: [
-      { sessionId: 's-1', model: 'claude-opus-5', inTokens: 10, outTokens: 20, costUsd: null }
+      {
+        sessionId: 's-1',
+        model: 'claude-opus-5',
+        inTokens: 10,
+        outTokens: 20,
+        costUsd: null,
+        at: '2026-08-27T09:00:00.000Z'
+      }
     ],
     ignoredLines: [
       'not json at all',

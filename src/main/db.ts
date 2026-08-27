@@ -13,6 +13,9 @@ import type { LedgerStore } from './watch/ledger'
 export class AppDb implements SettingsRegistry, LedgerStore {
   private readonly db: Database.Database
 
+  /** Raised when a stored row failed validation on read (invariant §7). */
+  onUnreadableRow?: (detail: string) => void
+
   constructor(dbPath: string) {
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
@@ -42,10 +45,16 @@ export class AppDb implements SettingsRegistry, LedgerStore {
     this.db.exec('CREATE INDEX IF NOT EXISTS cost_ledger_agent ON cost_ledger (agent)')
     // How far each transcript file has been folded. Metadata about READING,
     // not a record of spend — the one mutable row in this design.
+    // Keyed by (agent, source): two agents may share a `cwd`, and therefore a
+    // transcript directory, since FR-1.5 makes worktree isolation optional. A
+    // source-only key let whichever agent ticked first claim every fact while
+    // the other silently recorded zero.
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS cost_fold_cursor (
-         source TEXT PRIMARY KEY,
-         folded INTEGER NOT NULL
+         agent TEXT NOT NULL,
+         source TEXT NOT NULL,
+         folded INTEGER NOT NULL,
+         PRIMARY KEY (agent, source)
        )`
     )
     // Every settings file the harness writes into somebody else's repo, so a
@@ -127,29 +136,44 @@ export class AppDb implements SettingsRegistry, LedgerStore {
       cost_usd: number | null
       source: string
     }[]
-    return rows.map((row) => ({
-      agent: row.agent,
-      session: row.session,
-      model: row.model,
-      day: row.day,
-      inTokens: row.in_tokens,
-      outTokens: row.out_tokens,
-      costUsd: row.cost_usd,
-      source: row.source
-    }))
+    // Validated on read, as this class's contract says: a corrupted or
+    // hand-edited row (NULL model, negative tokens) must not flow into the
+    // totals the UI trusts. An unreadable row is dropped and reported, never
+    // repaired — the ledger is append-only (invariant §5).
+    const parsed: LedgerRow[] = []
+    for (const row of rows) {
+      const candidate = ledgerRowSchema.safeParse({
+        agent: row.agent,
+        session: row.session,
+        model: row.model,
+        day: row.day,
+        inTokens: row.in_tokens,
+        outTokens: row.out_tokens,
+        costUsd: row.cost_usd,
+        source: row.source
+      })
+      if (candidate.success) parsed.push(candidate.data)
+      else
+        this.onUnreadableRow?.(
+          `cost_ledger row for ${agent}: ${candidate.error.issues[0]?.message ?? 'invalid'}`
+        )
+    }
+    return parsed
   }
 
-  cursor(source: string): FoldCursor {
-    const row = this.db.prepare('SELECT folded FROM cost_fold_cursor WHERE source = ?').get(source)
+  cursor(agent: string, source: string): FoldCursor {
+    const row = this.db
+      .prepare('SELECT folded FROM cost_fold_cursor WHERE agent = ? AND source = ?')
+      .get(agent, source)
     const folded = (row as { folded: number } | undefined)?.folded
-    return { source, folded: typeof folded === 'number' && folded >= 0 ? folded : 0 }
+    return { agent, source, folded: typeof folded === 'number' && folded >= 0 ? folded : 0 }
   }
 
   saveCursor(cursor: FoldCursor): void {
     this.db
       .prepare(
-        `INSERT INTO cost_fold_cursor (source, folded) VALUES (@source, @folded)
-         ON CONFLICT(source) DO UPDATE SET folded=@folded`
+        `INSERT INTO cost_fold_cursor (agent, source, folded) VALUES (@agent, @source, @folded)
+         ON CONFLICT(agent, source) DO UPDATE SET folded=@folded`
       )
       .run(cursor)
   }

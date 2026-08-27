@@ -65,7 +65,10 @@ describe('claudeUsageFact', () => {
       // them out would under-report, which is the bug ADR-0011 exists to close.
       inTokens: 59570,
       outTokens: 183,
-      costUsd: null
+      costUsd: null,
+      // The engine's own timestamp, so the ledger bills the day of SPEND
+      // rather than the day the harness happened to fold it.
+      at: '2026-08-27T00:46:12.433Z'
     })
   })
 
@@ -79,6 +82,12 @@ describe('claudeUsageFact', () => {
       })
     )
     expect(claudeUsageFact(line)?.inTokens).toBe(41)
+  })
+
+  it('carries the engine timestamp through, and null when there is none', () => {
+    expect(claudeUsageFact(JSON.parse(assistantLine()))?.at).toBe('2026-08-27T00:46:12.433Z')
+    expect(claudeUsageFact(JSON.parse(assistantLine({ timestamp: undefined })))?.at).toBeNull()
+    expect(claudeUsageFact(JSON.parse(assistantLine({ timestamp: 42 })))?.at).toBeNull()
   })
 
   it('reports no cost, because the engine reports none', () => {

@@ -877,7 +877,44 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       demanded that Claude Code parse the fake's JSON, a conformance failure invented
       by the test (NFR-12). Each subject now supplies a sample in its own format and
       the suite asserts the *behaviour* ADR-0009 actually specifies: a missing file
-      yields nothing, junk yields nothing, and a good line yields exactly what it said.*
+      yields nothing, junk yields nothing, and a good line yields exactly what it said.
+      **Design-conformance review at package close found thirteen issues; the twelve
+      code findings are fixed in `fix/m3-2-ledger-attribution`, the thirteenth is a
+      plan gap now assigned to M3.4** (final gate: typecheck PASS · lint PASS ·
+      invariants PASS · tests 778 passed / 2 skipped). The three that mattered:
+      (1) **spend landed on the wrong agent** — transcripts are keyed on `cwd`, and
+      FR-1.5 makes worktree isolation optional, so two agents in one repo (and the
+      Architect's own `claude` history there) all folded into whoever ticked first.
+      Folding is now restricted to the session ids the event plane recorded, and the
+      fold cursor is keyed `(agent, source)` instead of `source`. An empty session
+      list folds nothing: recording nothing until we know whose it is beats recording
+      it as ours. (2) **`day` was the day of FOLDING, not of spend** — the ledger's
+      `day` IS the budget window, so an agent in a previously-used repo breached on
+      its first tick from history alone, and one running across midnight billed
+      pre-midnight spend to tomorrow. `UsageFact` now carries the engine's timestamp
+      (ADR-0009 names the member, not the fact shape, so §8.2 not §8.3).
+      (3) **the burn-rate projection divided a whole day's durable spend by this
+      process's uptime** — after a restart a healthy agent projected straight into
+      `projected-breach`, the false trip the 5-minute floor was supposed to prevent;
+      the floor could not help, because the origin was wrong, not the sample size.
+      The window now carries its own baseline.
+      Also fixed: the last fold before exit (every session's tail was lost); budgets
+      read from the registry, not from whatever the untrusted renderer supplied;
+      `reporting: 'engine' | 'none'` so a zero from an engine that cannot report is
+      distinguishable from an agent that spent nothing; async transcript IO off the
+      event loop that carries PTY bytes; a tripwire for `UPDATE`/`DELETE FROM
+      cost_ledger` (the ledger is a SQL table now, so `writeFileSync` patterns cannot
+      see its rewrite vector — proven to bite on both); read-side row validation;
+      exited agents included in `watch:budgets()` (their cumulative figure is what the
+      ledger exists to preserve); the phantom `COST_SCHEMA_VERSION` removed, and
+      **`src/main/watch/budgets.ts`, which had no tests at all, now has 17**.
+      LIVE RE-RUN on real better-sqlite3 and a real 415-fact transcript, proving the
+      two headline fixes: `facts carry engine timestamps? 415/415` ·
+      `folded a week later: rows land on day(s) ["2026-08-27"], folding day is
+      2026-09-03` · `billed to the day of SPEND, not of folding? true` · the folding
+      day's budget is `"ok"` · `agent.mason rows=415 agent.other rows=415 (same
+      transcript, both complete)` — two agents over one transcript, neither starving
+      the other.*
 - [x] **M3.3 Gate core — deny-by-default + the three choke points** —
       `watch/gates.ts` + pure policy matcher in `src/shared/`: deny-by-default
       evaluation; profile autonomy can only *loosen* up to global maxima
@@ -927,17 +964,26 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       held=true because=autonomy` · `notification hook → gate: held=true what="Claude
       needs permission to use Bash"`. The chain read back out of `log.jsonl` alone
       (NFR-13): `seq=4 opened kind=tool-permission` → `seq=5 approved`.*
-- [ ] **M3.4 Approvals UI + the human queue** — the Watch approvals surface
+- [ ] **M3.4 Approvals UI + the human queue (+ the FR-11.2 spend strip)** — the Watch approvals surface
       (UI-DESIGN §4): `watch: approvals()/approve(gateId, v)` IPC + `gate:open`
       push; renders each gate's packaging (what/why/blast radius/rollback);
       the M2 `agora/human/` diverted-mail queue surfaces in the same view
       (**closes the M2 carried item** — no more invisible mail); avatar
       `blocked` (wave at Watch post) on gate-open, prior state restored on
       verdict (SDD §6 edge already implemented and regression-tested in M1).
-      *Docs: SDD §5, §6, UI-DESIGN §4. Tests: renderer stays a projection
+      **Plan amendment (2026-08-27, from the M3.2 review):** FR-11.2's clause
+      "the UI SHALL show session and cumulative figures separately" and
+      ADR-0011's "always shows session and cumulative side by side" had **no
+      owner in the M3 plan** — `watch: budgets()` shipped in M3.2 with no
+      consumer, and M3.8's "Ledger tab" is the task kanban (FR-4.3), not cost.
+      It lands here: the Watch panel is the Watch's surface, and a budgets strip
+      beside the approvals queue is the documented reading of both sources. No
+      new UI is invented — the two figures the requirement names, nothing more.
+      *Docs: SDD §5, §6, UI-DESIGN §4, FR-11.2. Tests: renderer stays a projection
       (approve round-trip validated in main; no gate state held renderer-side);
-      queue drains visibly. Risk: inventing UI beyond the spec — the surface is
-      the documented approvals queue, nothing more.*
+      queue drains visibly; both spend figures render from the ledger. Risk:
+      inventing UI beyond the spec — the surface is the documented approvals
+      queue plus the two figures FR-11.2 names.*
 - [ ] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
       ADR-0011: tool-call spans (agent, tool, duration, outcome) recorded from
       hook events (the span model FR-11.6 needs later; no waterfall UI yet —

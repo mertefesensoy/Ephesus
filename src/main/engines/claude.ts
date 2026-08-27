@@ -46,9 +46,17 @@ export function claudeTranscriptDir(cwd: string): string {
 const claudeTranscripts: TranscriptReader = {
   transcriptDir: (cfg) => claudeTranscriptDir(cfg.cwd),
   read: async (filePath) => {
-    if (!fs.existsSync(filePath)) return []
+    // Read asynchronously and catch ENOENT rather than pre-checking: this runs
+    // on the same event loop that carries PTY bytes and hook events (SDD §11,
+    // NFR-1/NFR-2), and these transcripts reach tens of megabytes.
+    let text: string
+    try {
+      text = await fs.promises.readFile(filePath, 'utf8')
+    } catch {
+      return []
+    }
     const facts: UsageFact[] = []
-    for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
+    for (const line of text.split('\n')) {
       if (line.trim().length === 0) continue
       let raw: unknown
       try {
@@ -87,7 +95,15 @@ export function claudeUsageFact(raw: unknown): UsageFact | null {
     num('input_tokens') + num('cache_creation_input_tokens') + num('cache_read_input_tokens')
   // A line with a usage object but no tokens at all is not a fact worth a row.
   if (inTokens === 0 && outTokens === 0) return null
-  return { sessionId, model, inTokens, outTokens, costUsd: null }
+  const timestamp = row['timestamp']
+  return {
+    sessionId,
+    model,
+    inTokens,
+    outTokens,
+    costUsd: null,
+    at: typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : null
+  }
 }
 
 /**
