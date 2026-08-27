@@ -5,7 +5,7 @@ import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
 import type { AgentSpend } from '../shared/cost'
 import { gateApproveSchema, type OpenGate } from '../shared/gates'
-import type { Message } from '../shared/message'
+import { messageIdSchema, type Message } from '../shared/message'
 import {
   IpcChannels,
   type AgoraHealth,
@@ -37,6 +37,9 @@ const agoraLogSchema = z
   })
   .strict()
 
+/** One message from the Architect's own queue (SDD §5 `watch:dismiss`). */
+const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
+
 /** Architect keystrokes bound for an agent's PTY (FR-1.3). */
 const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(65536) }).strict()
 
@@ -59,6 +62,8 @@ export interface IpcDeps {
   readonly gates: GateManager
   /** Mail Hermes diverted to `agora/human/` (FR-3.7). */
   humanQueue(): readonly Message[]
+  /** Archives one message from the Architect's queue. */
+  dismissFromHumanQueue(messageId: string): boolean
   /** Per-agent breaker state (ADR-0011). */
   breakerState(): readonly BreakerState[]
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
@@ -94,11 +99,19 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle(IpcChannels.watchBreaker, (): readonly BreakerState[] => deps.breakerState())
 
+  ipcMain.handle(IpcChannels.watchDismiss, (_ev, raw: unknown): boolean =>
+    deps.dismissFromHumanQueue(messageIdPayloadSchema.parse(raw).messageId)
+  )
+
   ipcMain.handle(IpcChannels.watchApprove, (_ev, raw: unknown) => {
     // The verdict is validated in main like every other renderer payload: the
     // renderer holds no gate state and cannot invent a gate id (invariant §2).
-    const { gateId, verdict, context } = gateApproveSchema.parse(raw)
-    const result = deps.gates.decide(gateId, verdict, context ?? {})
+    // The channel is stamped HERE, not taken from the payload: a verdict
+    // arriving through the window bridge is `local` by definition, and letting
+    // the renderer name it would put the provenance of a destructive approval
+    // under untrusted control (NFR-9, NFR-13).
+    const { gateId, verdict } = gateApproveSchema.parse(raw)
+    const result = deps.gates.decide(gateId, verdict, { channel: 'local' })
     return { ok: result.ok, reason: result.ok ? null : result.reason }
   })
 

@@ -5,7 +5,7 @@ import type { LogEntry } from './log'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
 import type { AgentSpend } from './cost'
-import type { GateVerdict, OpenGate, SourceChannel } from './gates'
+import type { GateVerdict, OpenGate } from './gates'
 import type { Message } from './message'
 import type { SecretStatus, SecretTest } from './secrets'
 import type { TaskLedger } from './tasks'
@@ -47,7 +47,8 @@ export const IpcChannels = {
   watchApprovals: 'watch:approvals',
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
-  watchBreaker: 'watch:breaker-state'
+  watchBreaker: 'watch:breaker-state',
+  watchDismiss: 'watch:dismiss'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -200,14 +201,16 @@ export interface EphApi {
     /** Gates waiting on the Architect, oldest first (UC-08). */
     approvals: () => Promise<readonly OpenGate[]>
     /**
-     * Records a verdict. Resolves with the refusal reason when the verdict
-     * could not be taken — a voice approval that was never repeated back is
-     * refused without denying the gate (NFR-9).
+     * Records a verdict from the app window — always the `local` channel,
+     * which main stamps itself. There is deliberately no way to claim another
+     * channel from here: voice and remote verdicts arrive on the Herald (M6)
+     * and Harbor (M7) paths inside main (NFR-9).
+     *
+     * Resolves with the refusal reason when the verdict could not be taken.
      */
     approve: (
       gateId: string,
-      verdict: GateVerdict,
-      context?: { channel?: SourceChannel; repeatBackConfirmed?: boolean }
+      verdict: GateVerdict
     ) => Promise<{ readonly ok: boolean; readonly reason: string | null }>
     /**
      * Mail Hermes diverted to the Architect's own queue at `agora/human/`
@@ -216,6 +219,13 @@ export interface EphApi {
      * post is where the Architect actually looks.
      */
     humanQueue: () => Promise<readonly Message[]>
+    /**
+     * Archives one message from the Architect's queue, the same way an agent's
+     * inbox is consumed (atomic rename into `.done/`, ADR-0003). Resolves
+     * false when it was already gone — a second click on a stale render is not
+     * an error.
+     */
+    dismiss: (messageId: string) => Promise<boolean>
     /** Subscribe to "a gate opened or closed"; the view then re-reads. */
     onGateChange: (cb: () => void) => () => void
     /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PIXEL_FACES } from '../../src/renderer/src/fonts'
+import { PIXEL_FACES } from '../../src/shared/fonts'
 
 /**
  * Regression test for the always-missing-fonts bug.

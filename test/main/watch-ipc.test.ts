@@ -87,8 +87,8 @@ describe('watch:approve validates in main (invariant §2)', () => {
     ['a missing verdict', { gateId: 'g-1' }],
     ['an unknown field', { gateId: 'g-1', verdict: 'approved', force: true }],
     [
-      'an unknown channel',
-      { gateId: 'g-1', verdict: 'approved', context: { channel: 'telepathy' } }
+      'a claimed channel — main stamps it, the renderer may not name it',
+      { gateId: 'g-1', verdict: 'approved', context: { channel: 'voice' } }
     ]
   ])('refuses %s', (_name, payload) => {
     expect(gateApproveSchema.safeParse(payload).success).toBe(false)
@@ -177,13 +177,46 @@ describe('the Architect’s queue drains visibly (FR-3.7, the M2 carried item)',
     expect(hermes.humanQueue().map((m) => m.id)).toEqual([first.id, second.id])
   })
 
-  it('drains as messages are consumed', async () => {
+  it('drains through the harness, not by the test deleting the file', async () => {
     const { hermes } = await rig()
     const message = humanMessage()
     deliverToHuman(hermes, message)
     expect(hermes.humanQueue()).toHaveLength(1)
-    fs.rmSync(path.join(hermes.mailboxDir(HUMAN_QUEUE), 'inbox', `${message.id}.json`))
+
+    // The product's own act — the first draft of this test performed the drain
+    // itself, which proved a property the app did not have.
+    expect(hermes.dismissFromHumanQueue(message.id)).toBe(true)
     expect(hermes.humanQueue()).toEqual([])
+  })
+
+  it('archives rather than deletes, so the mail survives as evidence', async () => {
+    const { hermes } = await rig()
+    const message = humanMessage()
+    deliverToHuman(hermes, message)
+    hermes.dismissFromHumanQueue(message.id)
+    // Same act `consumeInbox` performs for an agent: atomic rename into
+    // `.done/` (ADR-0003), never an unlink.
+    const done = path.join(hermes.mailboxDir(HUMAN_QUEUE), 'inbox', '.done', `${message.id}.json`)
+    expect(fs.existsSync(done)).toBe(true)
+    expect(JSON.parse(fs.readFileSync(done, 'utf8'))).toMatchObject({ id: message.id })
+  })
+
+  it('is a no-op on a second click from a stale render', async () => {
+    const { hermes } = await rig()
+    const message = humanMessage()
+    deliverToHuman(hermes, message)
+    expect(hermes.dismissFromHumanQueue(message.id)).toBe(true)
+    expect(hermes.dismissFromHumanQueue(message.id)).toBe(false)
+  })
+
+  it('drains one message without touching the rest', async () => {
+    const { hermes } = await rig()
+    const first = humanMessage({ id: makeMessageId(new Date(2026, 7, 27, 9), 'bb01') })
+    const second = humanMessage({ id: makeMessageId(new Date(2026, 7, 27, 10), 'bb02') })
+    deliverToHuman(hermes, first)
+    deliverToHuman(hermes, second)
+    hermes.dismissFromHumanQueue(first.id)
+    expect(hermes.humanQueue().map((m) => m.id)).toEqual([second.id])
   })
 
   it('skips one unreadable file rather than hiding the whole queue', async () => {

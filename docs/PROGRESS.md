@@ -1059,7 +1059,46 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       the repo yet, and adding one is a dependency decision. What IS automated is the
       property that matters: main is the authority (a stale gate id, a second verdict,
       a malformed payload are each refused) and the queue reads and drains on real
-      files. Carried to M3.9's S-GATE/E2E work.*
+      files. Carried to M3.9's S-GATE/E2E work.
+      **Design-conformance review at package close found thirteen issues; all thirteen
+      are fixed in `fix/m3-4-watch-panel`** (final gate: typecheck PASS · lint PASS ·
+      invariants PASS · tests 958 passed / 2 skipped). The one that mattered:
+      **the untrusted renderer was writing the verdict's provenance into the
+      append-only log.** `watch:approve` accepted a `context` naming the channel and
+      the repeat-back flag, and `GateManager.decide` wrote both into the `gate` entry —
+      so a buggy or compromised renderer could stamp "approved by voice, repeat-back
+      confirmed" onto the record of a destructive act the Architect merely clicked.
+      Main knows a verdict through the window bridge is `local`; it now stamps it, and
+      the payload carries no channel at all. Voice and remote verdicts arrive on the
+      Herald (M6) and Harbor (M7) paths *inside* main, which know their own channel
+      because they are it.
+      Also fixed: **the token contrast test UI-DESIGN §8 has promised since M0 now
+      exists** — nothing had ever checked it, and writing it immediately caught
+      `ink-500` on `marble-100` at 4.49:1 (a hair under AA) and disproved a blanket
+      claim I had put in the test's own first draft (`status-thinking` is 5.2:1);
+      status colours are now pinned as sub-AA reinforcements with the WORD in
+      `ink-900`, `because` is visible text rather than a hover-only `title`, and the
+      test keeps `tokens.ts` and `tokens.css` in lockstep, which their own header asks
+      for and nothing verified · the panel gained UI-DESIGN §4's full anatomy (3-layer
+      border, title tab, offset shadow) and explicit `fontWeight: normal`, since only
+      Regular faces are bundled · APPROVE and DENY carry `laurel`/`wine` borders, the
+      two tokens §2.3 names for exactly this pair, so the irreversible control no
+      longer looks identical to the safe one, with the letters staying `ink-900` ·
+      every control and card is named for a screen reader · a failing
+      `watch:approvals` read renders `⚠ gates: unavailable` instead of continuing to
+      show "none open" in success green — a degradation failing as *good news*, the
+      one direction invariant §7 does not allow · concurrent refreshes apply
+      newest-only · **`watch:dismiss` makes the queue genuinely drainable**: the owed
+      "queue drains visibly" test had performed the drain itself with `fs.rmSync`,
+      proving a property the product did not have. It archives into `inbox/.done/` by
+      atomic rename, the same act `consumeInbox` performs for an agent, so the mail
+      survives as evidence. **And a test that exercises main's registered handlers,
+      not just its schemas**: removing the `parse` from `watch:approve` had left every
+      test green — the third time this repo has recorded that defect class; six tests
+      now fail on it.
+      The screenshot is re-captured: the earlier one was taken with all three pixel
+      faces missing (the `file://` font bug fixed in M3.5), so it could not have
+      supported any claim about typography.*
 - [x] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
       ADR-0011: tool-call spans (agent, tool, duration, outcome) recorded from
       hook events (the span model FR-11.6 needs later; no waterfall UI yet —

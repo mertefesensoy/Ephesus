@@ -325,19 +325,17 @@ export type OpenGate = z.infer<typeof openGateSchema>
  * The `watch:approve` payload (SDD §5). It lives here with the other gate
  * validators rather than inline in `ipc.ts`, so the shape the renderer must
  * satisfy is defined next to the types it validates (ENGINEERING-STANDARDS §3).
+ *
+ * It carries NO channel and NO repeat-back flag, deliberately. A verdict
+ * arriving through the window bridge *is* `local` — main knows that with
+ * certainty — and taking the renderer's word for the provenance would let an
+ * untrusted surface stamp "approved by voice, repeat-back confirmed" onto the
+ * append-only record of a destructive act (invariant §2, NFR-13). Voice and
+ * remote verdicts arrive on the Herald (M6) and Harbor (M7) paths inside main,
+ * which know their own channel because they are it.
  */
 export const gateApproveSchema = z
-  .object({
-    gateId: gateIdSchema,
-    verdict: gateVerdictSchema,
-    context: z
-      .object({
-        channel: sourceChannelSchema.optional(),
-        repeatBackConfirmed: z.boolean().optional()
-      })
-      .strict()
-      .optional()
-  })
+  .object({ gateId: gateIdSchema, verdict: gateVerdictSchema })
   .strict()
 
 export type GateApprove = z.infer<typeof gateApproveSchema>

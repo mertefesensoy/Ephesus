@@ -602,6 +602,7 @@ void app.whenReady().then(async () => {
     secrets,
     gates,
     humanQueue: () => hermes?.humanQueue() ?? [],
+    dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')

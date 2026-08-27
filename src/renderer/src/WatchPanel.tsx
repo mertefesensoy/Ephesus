@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type { BreakerState } from '../../shared/breaker'
 import type { AgentSpend } from '../../shared/cost'
 import { RUNG_NAMES } from '../../shared/breaker'
@@ -33,29 +33,73 @@ interface WatchState {
 
 const EMPTY: WatchState = { gates: [], queue: [], spend: [], breaker: [] }
 
+/**
+ * UI-DESIGN §4 panel anatomy: "3-layer border (ink-900 2px → marble-50 1px
+ * light seam → ink-700 1px), title tab top-left in Display face, hard 2px
+ * ink-900 offset shadow." The inner two layers are insets so the outer stroke
+ * stays exactly 2px on the pixel grid.
+ */
 const panel = {
   fontFamily: 'var(--eph-face-data)',
   fontSize: '12px',
   border: '2px solid var(--eph-ink-900)',
+  boxShadow:
+    'inset 0 0 0 1px var(--eph-marble-50), inset 0 0 0 2px var(--eph-ink-700), 2px 2px 0 var(--eph-ink-900)',
   background: 'var(--eph-marble-50)',
   padding: '12px',
   overflowY: 'auto'
 } as const
 
+/**
+ * `fontWeight: 'normal'` is explicit: only Regular files are bundled
+ * (UI-DESIGN §3 "no faux bold/italic"), and an <h2> would otherwise be
+ * synthesized bold by the browser.
+ */
 const heading = {
   fontFamily: 'var(--eph-face-display)',
   fontSize: '8px',
+  fontWeight: 'normal',
   margin: '0 0 8px 0'
+} as const
+
+/** The §4 title tab: the panel says its own name, not only the nav button. */
+const titleTab = {
+  fontFamily: 'var(--eph-face-display)',
+  fontSize: '8px',
+  fontWeight: 'normal',
+  display: 'inline-block',
+  margin: '-12px 0 12px -12px',
+  padding: '4px 8px',
+  background: 'var(--eph-ink-900)',
+  color: 'var(--eph-marble-50)'
+} as const
+
+/** A gate's approve/deny control. The hue distinguishes them; the word names them. */
+const control = {
+  fontFamily: 'var(--eph-face-display)',
+  fontSize: '8px',
+  fontWeight: 'normal',
+  color: 'var(--eph-ink-900)',
+  padding: '4px 8px',
+  border: '2px solid var(--eph-ink-900)',
+  background: 'var(--eph-marble-100)'
 } as const
 
 /** One labelled line of a gate's packaging. */
 function Field({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
-      <span style={{ color: 'var(--eph-ink-500)', minWidth: '88px' }}>{label}</span>
+      <span style={{ color: 'var(--eph-ink-700)', minWidth: '96px' }}>{label}</span>
       <span style={{ color: 'var(--eph-ink-900)' }}>{value}</span>
     </div>
   )
+}
+
+/** The hue that reinforces a budget word. Never the only carrier of meaning. */
+function budgetHue(state: AgentSpend['budget']['state']): string {
+  if (state === 'breached') return 'var(--eph-status-blocked)'
+  if (state === 'projected-breach') return 'var(--eph-status-looping)'
+  return 'var(--eph-ink-700)'
 }
 
 function tokens(spend: AgentSpend, which: 'sessionTotals' | 'cumulativeTotals'): string {
@@ -68,12 +112,17 @@ export function WatchPanel(): ReactElement {
   const [refusal, setRefusal] = useState<string | null>(null)
   const [bridge, setBridge] = useState<string | null>(null)
 
+  /** Monotonic, so a slow earlier read cannot overwrite a newer one. */
+  const generation = useRef(0)
+
   const refresh = useCallback(() => {
     const eph = window.eph
     if (!eph) {
       setBridge('window.eph bridge not exposed')
       return
     }
+    generation.current += 1
+    const mine = generation.current
     void Promise.all([
       eph.watch.approvals(),
       eph.watch.humanQueue(),
@@ -81,10 +130,14 @@ export function WatchPanel(): ReactElement {
       eph.watch.breakerState()
     ])
       .then(([gates, queue, spend, breaker]) => {
+        // A stale read must not re-show a gate main has already settled.
+        if (mine !== generation.current) return
         setBridge(null)
         setState({ gates, queue, spend, breaker })
       })
-      .catch((err: unknown) => setBridge(String(err)))
+      .catch((err: unknown) => {
+        if (mine === generation.current) setBridge(String(err))
+      })
   }, [])
 
   useEffect(() => {
@@ -116,11 +169,22 @@ export function WatchPanel(): ReactElement {
     [refresh]
   )
 
+  const dismiss = useCallback(
+    (messageId: string) => {
+      void window.eph?.watch
+        .dismiss(messageId)
+        .then(() => refresh())
+        .catch((err: unknown) => setRefusal(String(err)))
+    },
+    [refresh]
+  )
+
   return (
     <section style={{ ...panel, flex: 1, minWidth: 0 }} aria-label="Watch">
+      <div style={titleTab}>WATCH</div>
       {bridge !== null && (
-        <p style={{ color: 'var(--eph-status-blocked)', margin: '0 0 8px 0' }}>
-          watch unavailable: {bridge}
+        <p style={{ color: 'var(--eph-ink-900)', margin: '0 0 8px 0' }}>
+          ⚠ watch unavailable: {bridge}
         </p>
       )}
 
@@ -152,21 +216,20 @@ export function WatchPanel(): ReactElement {
                 <td style={{ padding: '0 8px 4px 0' }}>
                   {spend.reporting === 'none' ? '—' : tokens(spend, 'cumulativeTotals')}
                 </td>
-                <td
-                  style={{
-                    padding: '0 0 4px 0',
-                    color:
-                      spend.budget.state === 'breached'
-                        ? 'var(--eph-status-blocked)'
-                        : spend.budget.state === 'projected-breach'
-                          ? 'var(--eph-status-looping)'
-                          : 'var(--eph-ink-500)'
-                  }}
-                  // Double-encoded: the word carries the state, not the colour
-                  // alone (UI-DESIGN §8, NFR-15).
-                  title={`because: ${spend.budget.because}`}
-                >
+                {/* The WORD carries the state and clears AA in ink-900; the
+                    status hue is a leading glyph beside it, never the only
+                    carrier of meaning (UI-DESIGN §8, NFR-15). `because` is
+                    visible text, not a hover-only title. */}
+                <td style={{ padding: '0 0 4px 0', color: 'var(--eph-ink-900)' }}>
+                  {spend.budget.state !== 'ok' && spend.reporting !== 'none' && (
+                    <span aria-hidden="true" style={{ color: budgetHue(spend.budget.state) }}>
+                      {'\u25CF '}
+                    </span>
+                  )}
                   {spend.reporting === 'none' ? 'engine reports no usage' : spend.budget.state}
+                  {spend.reporting !== 'none' && (
+                    <span style={{ color: 'var(--eph-ink-700)' }}> ({spend.budget.because})</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -196,12 +259,12 @@ export function WatchPanel(): ReactElement {
               <tr key={agent.agentId}>
                 <td style={{ padding: '0 8px 4px 0' }}>{agent.agentId}</td>
                 {/* The rung NAME, not just a number or a colour (UI-DESIGN §8). */}
-                <td
-                  style={{
-                    padding: '0 8px 4px 0',
-                    color: agent.rung === 0 ? 'var(--eph-ink-500)' : 'var(--eph-status-looping)'
-                  }}
-                >
+                <td style={{ padding: '0 8px 4px 0', color: 'var(--eph-ink-900)' }}>
+                  {agent.rung !== 0 && (
+                    <span aria-hidden="true" style={{ color: 'var(--eph-status-looping)' }}>
+                      {'\u25CF '}
+                    </span>
+                  )}
                   {agent.rung === 0 ? 'clear' : `${String(agent.rung)} · ${RUNG_NAMES[agent.rung]}`}
                 </td>
                 <td style={{ padding: '0 8px 4px 0' }}>
@@ -212,16 +275,9 @@ export function WatchPanel(): ReactElement {
                 <td style={{ padding: '0 0 4px 0' }}>
                   {/* ADR-0011's stated consequence: a weaker engine's reduced
                       protection is surfaced here, never hidden. */}
-                  {agent.reducedProtection ? (
-                    <span
-                      style={{ color: 'var(--eph-status-looping)' }}
-                      title={`blind to: ${agent.blindSignals.join(', ')}`}
-                    >
-                      ⚠ reduced ({agent.blindSignals.length} signals blind)
-                    </span>
-                  ) : (
-                    `full · ${String(agent.spanCount)} spans`
-                  )}
+                  {agent.reducedProtection
+                    ? `⚠ reduced · blind to ${agent.blindSignals.join(', ')}`
+                    : `full · ${String(agent.spanCount)} spans`}
                 </td>
               </tr>
             ))}
@@ -233,8 +289,8 @@ export function WatchPanel(): ReactElement {
         GATES{state.gates.length > 0 ? ` (${String(state.gates.length)})` : ''}
       </h2>
       {refusal !== null && (
-        <p style={{ color: 'var(--eph-status-blocked)', margin: '0 0 8px 0' }}>
-          verdict refused: {refusal}
+        <p style={{ color: 'var(--eph-ink-900)', margin: '0 0 8px 0' }} role="alert">
+          ⚠ verdict refused: {refusal}
         </p>
       )}
       {state.gates.length === 0 && (
@@ -243,6 +299,7 @@ export function WatchPanel(): ReactElement {
       {state.gates.map((gate) => (
         <article
           key={gate.id}
+          aria-label={`gate: ${gate.packaging.what}`}
           style={{
             border: '1px solid var(--eph-ink-700)',
             padding: '8px',
@@ -260,29 +317,23 @@ export function WatchPanel(): ReactElement {
           <Field label="blast radius" value={gate.packaging.blastRadius} />
           <Field label="rollback" value={gate.packaging.rollback} />
           <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            {/* UI-DESIGN §2.3 names `laurel` for approvals granted and `wine`
+                for destructive; on a gate the irreversible control must not
+                look identical to the safe one. The hue is the BORDER — the
+                letters stay ink-900, which clears AA. */}
             <button
               type="button"
               onClick={() => decide(gate.id, 'approved')}
-              style={{
-                fontFamily: 'var(--eph-face-display)',
-                fontSize: '8px',
-                padding: '4px 8px',
-                border: '2px solid var(--eph-ink-900)',
-                background: 'var(--eph-marble-100)'
-              }}
+              aria-label={`approve: ${gate.packaging.what}`}
+              style={{ ...control, borderColor: 'var(--eph-laurel)' }}
             >
               APPROVE
             </button>
             <button
               type="button"
               onClick={() => decide(gate.id, 'denied')}
-              style={{
-                fontFamily: 'var(--eph-face-display)',
-                fontSize: '8px',
-                padding: '4px 8px',
-                border: '2px solid var(--eph-ink-900)',
-                background: 'var(--eph-marble-100)'
-              }}
+              aria-label={`deny: ${gate.packaging.what}`}
+              style={{ ...control, borderColor: 'var(--eph-wine)' }}
             >
               DENY
             </button>
@@ -299,9 +350,10 @@ export function WatchPanel(): ReactElement {
       {state.queue.map((message) => (
         <article
           key={message.id}
+          aria-label={`diverted mail: ${message.subject}`}
           style={{ border: '1px solid var(--eph-ink-700)', padding: '8px', marginBottom: '8px' }}
         >
-          <div style={{ color: 'var(--eph-ink-500)', marginBottom: '4px' }}>
+          <div style={{ color: 'var(--eph-ink-700)', marginBottom: '4px' }}>
             {message.from} · {message.act} · hops {message.hops}
             {message.needs_human ? ' · flagged for you' : ''}
           </div>
@@ -309,6 +361,17 @@ export function WatchPanel(): ReactElement {
           <div style={{ color: 'var(--eph-ink-700)', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
             {message.body}
           </div>
+          {/* The queue has to be drainable, not only readable: a queue you can
+              read but never clear is only half of "no more invisible mail".
+              Archived, never deleted — atomic rename into `.done/`. */}
+          <button
+            type="button"
+            onClick={() => dismiss(message.id)}
+            aria-label={`archive: ${message.subject}`}
+            style={{ ...control, marginTop: '8px' }}
+          >
+            ARCHIVE
+          </button>
         </article>
       ))}
     </section>

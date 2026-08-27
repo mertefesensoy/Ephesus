@@ -95,13 +95,15 @@ const eph: EphApi = {
   watch: {
     budgets: () => ipcRenderer.invoke(IpcChannels.watchBudgets) as Promise<readonly AgentSpend[]>,
     approvals: () => ipcRenderer.invoke(IpcChannels.watchApprovals) as Promise<readonly OpenGate[]>,
-    approve: (gateId, verdict, context) =>
-      ipcRenderer.invoke(IpcChannels.watchApprove, { gateId, verdict, context }) as Promise<{
+    approve: (gateId, verdict) =>
+      ipcRenderer.invoke(IpcChannels.watchApprove, { gateId, verdict }) as Promise<{
         ok: boolean
         reason: string | null
       }>,
     humanQueue: () =>
       ipcRenderer.invoke(IpcChannels.watchHumanQueue) as Promise<readonly Message[]>,
+    dismiss: (messageId) =>
+      ipcRenderer.invoke(IpcChannels.watchDismiss, { messageId }) as Promise<boolean>,
     breakerState: () =>
       ipcRenderer.invoke(IpcChannels.watchBreaker) as Promise<readonly BreakerState[]>,
     onGateChange: (cb) => {

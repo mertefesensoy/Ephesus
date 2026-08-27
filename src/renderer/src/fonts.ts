@@ -8,35 +8,13 @@
  * looking broken for reasons nobody can name (invariant §7).
  *
  * Files go in `src/renderer/public/fonts/` — see the README there for names and
- * licences, and `assets/ATTRIBUTION.md` for the attribution rules.
+ * licences, and `assets/ATTRIBUTION.md` for the attribution rules. The face
+ * list itself lives in `src/shared/fonts.ts`, so its paths can be asserted
+ * without pulling `FontFace`/`document` into a plain test.
  */
+import { PIXEL_FACES } from '../../shared/fonts'
 
-export interface PixelFace {
-  /** CSS family name, matching the stacks in tokens.css. */
-  readonly family: string
-  /** File served from the renderer's public root. */
-  readonly file: string
-}
-
-/**
- * Paths are RELATIVE, not absolute.
- *
- * A packaged app loads its renderer from `file://…/out/renderer/index.html`,
- * where `/fonts/x.woff2` resolves to the filesystem root and `fetch` fails
- * outright — so the built app never loaded a single bundled face and showed
- * "3 of 3 pixel faces missing" permanently, while the dev server (an http
- * origin, where the absolute path works) looked fine. A degradation warning
- * that is always on is worse than none: it trains the Architect to ignore the
- * surface every other degradation shares. Found by an M3 evidence screenshot.
- *
- * `./` resolves correctly under both, because `index.html` sits at the root of
- * the served tree in the dev server and beside `fonts/` in the build.
- */
-export const PIXEL_FACES: readonly PixelFace[] = [
-  { family: 'Press Start 2P', file: './fonts/PressStart2P-Regular.woff2' },
-  { family: 'Pixelify Sans', file: './fonts/PixelifySans-Regular.woff2' },
-  { family: 'IBM Plex Mono', file: './fonts/IBMPlexMono-Regular.woff2' }
-]
+export { PIXEL_FACES, type PixelFace } from '../../shared/fonts'
 
 export interface FontStatus {
   readonly loaded: readonly string[]

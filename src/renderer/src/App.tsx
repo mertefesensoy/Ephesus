@@ -41,8 +41,13 @@ export function App(): ReactElement {
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
   const [tab, setTab] = useState<'floor' | 'activity' | 'watch'>('floor')
-  /** Open gates, for the status strip's badge count (UI-DESIGN §4). */
-  const [openGates, setOpenGates] = useState<number | null>(null)
+  /**
+   * Open gates, for the status strip's badge (UI-DESIGN §4). `'error'` is a
+   * distinct state from `null`: a stale gate count that keeps showing "none
+   * open" is a degradation failing as GOOD news, which is the one direction
+   * invariant §7 does not allow.
+   */
+  const [openGates, setOpenGates] = useState<number | 'error' | null>(null)
   // A newly spawned agent is selected only when nothing is: an agent appearing
   // must never yank the Architect's attention off the one they are watching.
   const onAgentSeen = useCallback((agentId: string) => {
@@ -82,7 +87,8 @@ export function App(): ReactElement {
           if (!cancelled) setOpenGates(gates.length)
         })
         .catch(() => {
-          /* the bridge banner already reports a dead bridge */
+          // Not swallowed: an unknown gate count must never render as "none".
+          if (!cancelled) setOpenGates('error')
         })
       // Data-plane health rides the same slow poll (invariant §7: every
       // degradation is a visible state, never only a main-process warn).
@@ -183,10 +189,14 @@ export function App(): ReactElement {
           )}
         </span>
         <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
-          {openGates !== null && openGates === 0 && (
+          {openGates === null && 'gates: …'}
+          {openGates === 'error' && (
+            <span style={{ color: 'var(--eph-status-looping)' }}>⚠ gates: unavailable</span>
+          )}
+          {openGates === 0 && (
             <span style={{ color: 'var(--eph-status-success)' }}>● gates: none open</span>
           )}
-          {openGates !== null && openGates > 0 && (
+          {typeof openGates === 'number' && openGates > 0 && (
             <span style={{ color: 'var(--eph-status-blocked)' }}>
               ⚠ gates: {openGates} waiting on you
             </span>
@@ -224,7 +234,9 @@ export function App(): ReactElement {
             }}
           >
             {name.toUpperCase()}
-            {name === 'watch' && openGates !== null && openGates > 0 ? ` ${String(openGates)}` : ''}
+            {name === 'watch' && typeof openGates === 'number' && openGates > 0
+              ? ` ${String(openGates)}`
+              : ''}
           </button>
         ))}
       </nav>

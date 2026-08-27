@@ -591,6 +591,34 @@ export class Hermes {
     else this.paused.delete(agentId)
   }
 
+  /**
+   * Archives one message from the Architect's own queue (`agora/human/`).
+   *
+   * The same act `consumeInbox` performs for an agent — atomic rename into
+   * `inbox/.done/`, so the message is kept as evidence and a redelivery of the
+   * same id is a no-op (ADR-0003). Without it the Architect's queue could only
+   * ever grow: the M2 carried item was that the mail was *invisible*, and a
+   * queue you can read but never clear is only half of that.
+   *
+   * Contract: returns false when the message is not there — a second click on
+   * a stale render is not an error.
+   */
+  dismissFromHumanQueue(messageId: string): boolean {
+    const inbox = path.join(this.mailboxDir(HUMAN_QUEUE), 'inbox')
+    const file = path.join(inbox, `${messageId}.json`)
+    if (!fs.existsSync(file)) return false
+    const done = path.join(inbox, DONE_DIR)
+    fs.mkdirSync(done, { recursive: true })
+    fs.renameSync(file, path.join(done, `${messageId}.json`))
+    this.agora.appendLog({
+      kind: 'delivery',
+      to: HUMAN_QUEUE,
+      msgId: messageId,
+      event: 'dismissed'
+    })
+    return true
+  }
+
   /** True while the breaker is holding this agent's deliveries. */
   isPaused(agentId: string): boolean {
     return this.paused.has(agentId)
