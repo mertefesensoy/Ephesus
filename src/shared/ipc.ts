@@ -2,6 +2,8 @@ import type { AgentCard, SpawnRequest } from './agents'
 import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
+import type { KnowledgeDoc, MemoryView } from './memory'
+import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
 import type { AgentSpend } from './cost'
@@ -35,6 +37,14 @@ export const IpcChannels = {
   agoraBoard: 'agora:board',
   agoraLog: 'agora:log',
   agoraHealth: 'agora:health',
+  // The Library's surface (SDD §5 `agora: memory(id)` plus the three the Memory
+  // panel needs to show the ladder honestly and to fill the shelf). Documented
+  // in SDD §5 in the same commit — the M3.1 rule: a new channel gets a doc line
+  // and a DECISIONS-LOG entry, or it does not ship.
+  agoraMemory: 'agora:memory',
+  agoraRecall: 'agora:recall',
+  agoraKnowledge: 'agora:knowledge',
+  agoraRegisterKnowledge: 'agora:register-knowledge',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
   // there is deliberately no `secrets:get`, and the API-surface test in
   // test/main/secrets.test.ts fails if a fifth channel is ever added here —
@@ -177,6 +187,18 @@ export interface EphApi {
     onAppend: (cb: () => void) => () => void
     /** Data-plane degradations — shown, never only logged (invariant §7). */
     health: () => Promise<AgoraHealth>
+    /** One agent's memory, its archive, and whether reflection is due (ADR-0006). */
+    memory: (agentId: string) => Promise<MemoryView>
+    /**
+     * Recall, on the same path and the same rungs `eph-recall` uses. The
+     * response carries which rung answered and why it was not a higher one, so
+     * the panel can show the ladder rather than implying the best one.
+     */
+    recall: (query: string, scope: string | null, limit: number) => Promise<RecallResponse>
+    /** The Architect's reference shelf (FR-6.4). */
+    knowledge: () => Promise<readonly KnowledgeDoc[]>
+    /** Registers one reference document; the file goes through the committer. */
+    registerKnowledge: (name: string, text: string) => Promise<readonly KnowledgeDoc[]>
   }
   commands: {
     /** Agents currently holding unsent Architect text. */

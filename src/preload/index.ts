@@ -22,6 +22,8 @@ import type { AgentSpend } from '../shared/cost'
 import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
+import type { KnowledgeDoc, MemoryView } from '../shared/memory'
+import type { RecallResponse } from '../shared/recall'
 import type { Registry } from '../shared/registry'
 import type { SecretStatus, SecretTest } from '../shared/secrets'
 import type { TaskLedger } from '../shared/tasks'
@@ -76,7 +78,21 @@ const eph: EphApi = {
       ipcRenderer.on(LOG_APPEND_CHANNEL, listener)
       return () => ipcRenderer.removeListener(LOG_APPEND_CHANNEL, listener)
     },
-    health: () => ipcRenderer.invoke(IpcChannels.agoraHealth) as Promise<AgoraHealth>
+    health: () => ipcRenderer.invoke(IpcChannels.agoraHealth) as Promise<AgoraHealth>,
+    memory: (agentId) =>
+      ipcRenderer.invoke(IpcChannels.agoraMemory, { agentId }) as Promise<MemoryView>,
+    recall: (query, scope, limit) =>
+      ipcRenderer.invoke(IpcChannels.agoraRecall, {
+        query,
+        scope,
+        limit
+      }) as Promise<RecallResponse>,
+    knowledge: () =>
+      ipcRenderer.invoke(IpcChannels.agoraKnowledge) as Promise<readonly KnowledgeDoc[]>,
+    registerKnowledge: (name, text) =>
+      ipcRenderer.invoke(IpcChannels.agoraRegisterKnowledge, { name, text }) as Promise<
+        readonly KnowledgeDoc[]
+      >
   },
   commands: {
     list: () => ipcRenderer.invoke(IpcChannels.commandsList) as Promise<readonly CommandState[]>,

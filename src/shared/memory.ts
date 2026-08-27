@@ -177,3 +177,24 @@ export function selectMemoryForInjection(
     truncated: kept.length < sections.length
   }
 }
+
+/** One document on the Architect's knowledge shelf (FR-6.4). */
+export interface KnowledgeDoc {
+  readonly name: string
+  readonly bytes: number
+  readonly text: string
+}
+
+/** Everything the Memory panel shows for one agent (SDD §5 `agora.memory`). */
+export interface MemoryView {
+  readonly agentId: string
+  readonly path: string
+  readonly text: string
+  readonly sections: number
+  readonly archive: readonly { readonly name: string; readonly text: string }[]
+  readonly reflection: {
+    readonly due: boolean
+    readonly because: string
+    readonly chars: number
+  }
+}

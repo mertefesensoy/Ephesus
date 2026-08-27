@@ -84,7 +84,25 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       dismissFromHumanQueue: () => true,
       breakerState: () => [],
       hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),
-      agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] })
+      agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] }),
+      memoryView: (agentId: string) => ({
+        agentId,
+        path: '',
+        text: '',
+        sections: 0,
+        archive: [],
+        reflection: { due: false, because: 'no library in this rig', chars: 0 }
+      }),
+      recall: (query: string) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          query,
+          rung: 'grep' as const,
+          hits: [],
+          degraded: 'no library in this rig'
+        }),
+      knowledge: () => [],
+      registerKnowledge: () => []
     })
 
     const secretChannels = [...handlers.keys()].filter((c) => c.startsWith('secrets:')).sort()

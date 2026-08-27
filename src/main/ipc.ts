@@ -20,6 +20,8 @@ import {
   type SecretStatus,
   type SecretTest
 } from '../shared/secrets'
+import type { KnowledgeDoc, MemoryView } from '../shared/memory'
+import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
 import type { AvatarDirector } from './avatars'
@@ -39,6 +41,33 @@ const agoraLogSchema = z
 
 /** One message from the Architect's own queue (SDD §5 `watch:dismiss`). */
 const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
+
+/** One recall query from the Memory panel (SDD §5 `agora:recall`). */
+const agoraRecallSchema = z
+  .object({
+    query: z.string().min(1).max(1_000),
+    scope: z.string().min(1).max(64).nullable(),
+    limit: z.number().int().min(1).max(RECALL_MAX_LIMIT)
+  })
+  .strict()
+
+/**
+ * One reference document for the shelf (FR-6.4, SDD §5 `agora:register-knowledge`).
+ *
+ * The name is bounded here AND re-checked in `library.knowledgePath` — the
+ * renderer is untrusted (invariant §2), and a traversal that only this schema
+ * refused would be one refactor away from being possible again.
+ */
+const agoraRegisterKnowledgeSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'a plain document name, no path separators'),
+    text: z.string().min(1).max(500_000)
+  })
+  .strict()
 
 /** Architect keystrokes bound for an agent's PTY (FR-1.3). */
 const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(65536) }).strict()
@@ -70,6 +99,14 @@ export interface IpcDeps {
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
   agoraHealth(): AgoraHealth
+  /** One agent's memory view (ADR-0006 layer 1, SDD §5 `agora.memory(id)`). */
+  memoryView(agentId: string): MemoryView
+  /** Recall on the best rung that answers (ADR-0006 layer 2). */
+  recall(query: string, scope: string | null, limit: number): Promise<RecallResponse>
+  /** The Architect's reference shelf (FR-6.4). */
+  knowledge(): readonly KnowledgeDoc[]
+  /** Registers a shelf document and commits it through the single committer. */
+  registerKnowledge(name: string, text: string): readonly KnowledgeDoc[]
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -137,6 +174,23 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.hooksState, (): HooksState => deps.hooksState())
 
   ipcMain.handle(IpcChannels.agoraHealth, (): AgoraHealth => deps.agoraHealth())
+
+  ipcMain.handle(IpcChannels.agoraMemory, (_ev, raw: unknown): MemoryView => {
+    const { agentId } = agentIdPayloadSchema.parse(raw)
+    return deps.memoryView(agentId)
+  })
+  ipcMain.handle(IpcChannels.agoraRecall, async (_ev, raw: unknown): Promise<RecallResponse> => {
+    const { query, scope, limit } = agoraRecallSchema.parse(raw)
+    return deps.recall(query, scope, limit)
+  })
+  ipcMain.handle(IpcChannels.agoraKnowledge, (): readonly KnowledgeDoc[] => deps.knowledge())
+  ipcMain.handle(
+    IpcChannels.agoraRegisterKnowledge,
+    (_ev, raw: unknown): readonly KnowledgeDoc[] => {
+      const { name, text } = agoraRegisterKnowledgeSchema.parse(raw)
+      return deps.registerKnowledge(name, text)
+    }
+  )
 
   ipcMain.handle(IpcChannels.configGet, (): ConfigSnapshot => {
     const home = getHome()

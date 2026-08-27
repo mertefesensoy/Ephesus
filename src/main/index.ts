@@ -19,6 +19,7 @@ import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { LedgerEndpoint } from './ledger'
 import { Library } from './library'
+import { RECALL_SCHEMA_VERSION } from '../shared/recall'
 import { ReflectionJob } from './reflection'
 import { Scheduler } from './scheduler'
 import { FtsIndex } from './library-fts'
@@ -862,7 +863,37 @@ async function boot(): Promise<void> {
       fileWarnings: agora?.fileWarnings() ?? [],
       commitFailures: agora?.commitFailures() ?? [],
       runtime: [...runtimeHealth]
-    })
+    }),
+    // The Library's surface (ADR-0006). The renderer is a projection: it gets
+    // these views and every write goes back through main (invariant §2).
+    memoryView: (agentId) =>
+      library?.memoryView(agentId) ?? {
+        agentId,
+        path: '',
+        text: '',
+        sections: 0,
+        archive: [],
+        reflection: { due: false, because: 'the Library is not available', chars: 0 }
+      },
+    recall: async (query, scope, limit) =>
+      library
+        ? library.recall(query, scope, limit)
+        : {
+            schemaVersion: RECALL_SCHEMA_VERSION,
+            query,
+            rung: 'grep' as const,
+            hits: [],
+            degraded: 'the Library is not available'
+          },
+    knowledge: () => library?.knowledge() ?? [],
+    registerKnowledge: (name, text) => {
+      if (!library) throw new Error('knowledge: the Library is not available')
+      library.registerKnowledge(name, text)
+      // ADR-0004: the Library wrote the file, the ONE committer commits it.
+      // Queued, never awaited — the panel must never wait on git.
+      agora?.commitSoon(`knowledge: ${name}`)
+      return library.knowledge()
+    }
   })
   createWindow()
   app.on('activate', () => {

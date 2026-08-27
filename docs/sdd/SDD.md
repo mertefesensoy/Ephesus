@@ -265,6 +265,10 @@ avatars:  list()                                     // §6 snapshots; push on s
 commands: list() submit(id, text)                    // FR-1.3 queue-until-idle
 hooks:    state()                                    // event-plane health + drift warnings
 agora:    registry() tasks() board() log(afterSeq, limit) memory(id)
+          recall(query, scope, limit) knowledge() registerKnowledge(name, text)
+          // recall answers on the best rung that will answer and says which
+          // (ADR-0006's ladder, visible); registerKnowledge writes the shelf
+          // file and commits it through the single committer (FR-6.4, ADR-0004)
 hermes:   threads(filter) compose(msgDraft)          // human-authored mail goes via Artemis
 odeon:    briefs() decks() memos(queue) verdict(memoId, v) convene(meeting) meetingSay(text)
 herald:   pttStart() pttStop() speakBrief(id) config()

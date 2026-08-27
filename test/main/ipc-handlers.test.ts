@@ -61,7 +61,25 @@ async function rig(): Promise<{
     dismissFromHumanQueue: () => true,
     breakerState: () => [],
     hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),
-    agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] })
+    agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] }),
+    memoryView: (agentId: string) => ({
+      agentId,
+      path: '',
+      text: '',
+      sections: 0,
+      archive: [],
+      reflection: { due: false, because: 'no library in this rig', chars: 0 }
+    }),
+    recall: (query: string) =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        query,
+        rung: 'grep' as const,
+        hits: [],
+        degraded: 'no library in this rig'
+      }),
+    knowledge: () => [],
+    registerKnowledge: () => []
   })
   return {
     gates,
@@ -170,5 +188,64 @@ describe('the secrets group stays write-only through the handlers', () => {
       'secrets:status',
       'secrets:test'
     ])
+  })
+})
+
+describe('the Library group validates before it acts (ADR-0006, invariant §2)', () => {
+  it('registers the four channels SDD §5 documents for it', async () => {
+    await rig()
+    const library = [...handlers.keys()]
+      .filter(
+        (c) =>
+          ['agora:memory', 'agora:recall', 'agora:knowledge'].includes(c) ||
+          c === 'agora:register-knowledge'
+      )
+      .sort()
+    expect(library).toEqual([
+      'agora:knowledge',
+      'agora:memory',
+      'agora:recall',
+      'agora:register-knowledge'
+    ])
+  })
+
+  it.each([
+    ['a malformed agent id', { agentId: '../escape' }],
+    ['a missing field', {}],
+    ['an extra field', { agentId: 'agent.mason', deep: true }]
+  ])('agora:memory refuses %s', async (_label, payload) => {
+    const { call } = await rig()
+    await expect(call('agora:memory', payload)).rejects.toThrow()
+  })
+
+  it.each([
+    ['an empty query', { query: '', scope: null, limit: 5 }],
+    ['a limit of zero', { query: 'q', scope: null, limit: 0 }],
+    ['a limit past the cap', { query: 'q', scope: null, limit: 1000 }],
+    ['a missing scope', { query: 'q', limit: 5 }],
+    ['an extra field', { query: 'q', scope: null, limit: 5, wing: 'x' }]
+  ])('agora:recall refuses %s', async (_label, payload) => {
+    const { call } = await rig()
+    await expect(call('agora:recall', payload)).rejects.toThrow()
+  })
+
+  it.each([
+    ['a path separator', { name: 'sub/dir', text: 'x' }],
+    ['a traversal', { name: '../escape', text: 'x' }],
+    ['an empty body', { name: 'runbook', text: '' }],
+    ['an extra field', { name: 'runbook', text: 'x', commit: true }]
+  ])('agora:register-knowledge refuses %s', async (_label, payload) => {
+    const { call } = await rig()
+    await expect(call('agora:register-knowledge', payload)).rejects.toThrow()
+  })
+
+  it('takes a well-formed recall and a well-formed registration', async () => {
+    const { call } = await rig()
+    await expect(call('agora:recall', { query: 'flaky', scope: null, limit: 5 })).resolves.toEqual(
+      expect.objectContaining({ rung: 'grep' })
+    )
+    await expect(
+      call('agora:register-knowledge', { name: 'runbook', text: 'body' })
+    ).resolves.toEqual([])
   })
 })

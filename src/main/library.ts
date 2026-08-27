@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import {
   archiveFileName,
   nothingDestroyed,
@@ -241,6 +242,69 @@ export class Library {
     return {
       text: this.options.prompts.render(LAYER_PROMPT, { memory: facts.text, notice }).trim(),
       facts
+    }
+  }
+
+  /**
+   * A shelf document's path. Contract: refuses a name that is not a plain file
+   * name — the shelf is a flat directory inside the Agora, and a name with a
+   * separator or a `..` in it would let a register call write anywhere the
+   * harness can reach.
+   */
+  knowledgePath(name: string): string {
+    const base = name.endsWith('.md') ? name : `${name}.md`
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(base) || base.includes('..')) {
+      throw new Error(`library: "${name}" is not a legal knowledge document name`)
+    }
+    return path.join(this.knowledgeDir(), base)
+  }
+
+  /** The shelf, as the Memory panel and the corpus see it (FR-6.4). */
+  knowledge(): readonly KnowledgeDoc[] {
+    return listFiles(this.knowledgeDir()).map((file) => {
+      let bytes: number
+      try {
+        bytes = fs.statSync(file).size
+      } catch {
+        bytes = 0
+      }
+      return { name: path.basename(file), bytes, text: readOrNull(file) ?? '' }
+    })
+  }
+
+  /**
+   * Registers one reference document on the shelf (FR-6.4).
+   *
+   * Contract: writes the file atomically and returns its path; **committing is
+   * the caller's**, through the single committer (ADR-0004). This module never
+   * runs git, and the Agora's queue owns the retries.
+   */
+  registerKnowledge(name: string, text: string): string {
+    const file = this.knowledgePath(name)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    writeFileAtomic(file, text.endsWith('\n') ? text : `${text}\n`)
+    return file
+  }
+
+  /**
+   * Everything the Memory panel shows for one agent (SDD §5 `agora.memory(id)`).
+   *
+   * Assembled here rather than in the renderer because the renderer is a
+   * projection (invariant §2): it renders this and holds no memory state of
+   * its own.
+   */
+  memoryView(agentId: string): MemoryView {
+    const plan = this.reflectionPlan(agentId)
+    return {
+      agentId,
+      path: this.memoryPath(agentId),
+      text: this.read(agentId),
+      sections: this.sections(agentId).length,
+      archive: this.archiveFiles(agentId).map((name) => ({
+        name,
+        text: readOrNull(path.join(this.archiveDir(agentId), name)) ?? ''
+      })),
+      reflection: { due: plan.due, because: plan.because, chars: plan.chars }
     }
   }
 

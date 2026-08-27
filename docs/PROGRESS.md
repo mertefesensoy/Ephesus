@@ -1775,7 +1775,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1388 passed / 2
       skipped** (was 1350).
 
-- [ ] **M4.5 Knowledge shelf + Memory panel** — `agora/knowledge/`
+- [x] **M4.5 Knowledge shelf + Memory panel** — `agora/knowledge/`
       Architect-registered reference docs (register/list via IPC, files
       through the single committer); the Memory panel tab (UI-DESIGN §4):
       per-agent memory view, recall search over `eph-recall`'s same path, the
@@ -1785,6 +1785,33 @@ triage).
       projection; shelf writes only via main; panel states track the ladder.
       Risk: inventing UI — the panel is the documented Memory panel, nothing
       more.*
+      *Landed 2026-08-27 (`feature/m4-5-knowledge-memory-panel`).*
+      `Library.knowledge()/registerKnowledge()/memoryView()` ·
+      `src/renderer/src/MemoryPanel.tsx` (agent picker, recall box with the
+      **ladder chip**, `memory.md` view, archive browser, shelf list + register
+      form) · the Memory tab joins Floor/Activity/Ledger/Watch · four new IPC
+      channels, documented in SDD §5 in the same commit per the M3.1 rule:
+      `agora:memory` (SDD §5's `memory(id)`), `agora:recall`,
+      `agora:knowledge`, `agora:register-knowledge`.
+      **Evidence (live run of the shipped IPC deps over a real Agora + git and
+      real MemPalace 3.8.0):** registered `release-runbook.md (73B)` and the
+      single committer committed it (`committed: true`); `../escape`,
+      `sub/dir` and `/etc/passwd` each refused at the Library boundary as well
+      as at the schema; `agora:memory` returned
+      `sections=2 chars=799 reflection due=false archive=[]`; `agora:recall`
+      answered `rung=mempalace degraded=null` for both queries; and the same
+      panel against a broken top rung answered `rung=grep` with
+      `degraded="mempalace: MemPalace not available (spawn … ENOENT) — install
+      it with: pip install mempalace"` — the chip the Architect sees.
+      **Owed to a local session:** the rendered screenshot. `electron-rebuild`
+      cannot finish here — this environment's proxy answers 403 to
+      `www.electronjs.org`, so node-gyp cannot fetch Electron headers and
+      `better-sqlite3` stays Node-ABI, which means `npm run dev` cannot boot.
+      Recorded rather than faked, on the same footing as MemPalace's
+      environment caveat.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1413 passed / 2
+      skipped** (was 1388).
+
 - [ ] **M4.6 Codex adapter** — `src/main/engines/codex.ts` at its honest hook
       grade (declared = demonstrated — the M1.7 grade-honesty case must bite);
       spawn plan, settings/config hygiene with backup + uninstall, interrupt
