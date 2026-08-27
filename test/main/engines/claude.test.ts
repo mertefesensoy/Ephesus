@@ -86,6 +86,19 @@ describe('claude adapter — declared surface (ADR-0009)', () => {
     expect(adapter.interrupt().bytes.charCodeAt(0)).toBe(27)
   })
 
+  it('declares resume, and resumes by the session id the event plane records', () => {
+    // The M1 audit recorded this as missing: `ResumeSupport` was in the type
+    // and no adapter implemented it, so a crashed agent came back with no idea
+    // what it had been doing. `--resume` is Claude Code's own flag.
+    const { adapter } = rig()
+    expect(adapter.resume).toBeDefined()
+    expect(adapter.resume?.resumeArgs('sess-9f3')).toEqual(['--resume', 'sess-9f3'])
+  })
+
+  it('declares transcripts, so the Watch can fold its spend', () => {
+    expect(rig().adapter.transcripts).toBeDefined()
+  })
+
   it('maps every Claude hook onto a harness event, and covers the whole vocabulary', () => {
     const mapped = Object.values(CLAUDE_HOOK_EVENTS)
     expect(new Set(mapped).size).toBe(mapped.length)

@@ -15,6 +15,7 @@ import {
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
+import { Artemis } from './artemis'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
@@ -56,6 +57,7 @@ const ptyManager = new PtyManager({
 let db: AppDb | null = null
 let agentManager: AgentManager | null = null
 let agora: Agora | null = null
+let artemis: Artemis | null = null
 let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
@@ -486,6 +488,9 @@ void app.whenReady().then(async () => {
         return null
       }
     },
+    // ADR-0005 "prompt as policy": Artemis's standing context is text she is
+    // handed like any other hire's role brief. The lifecycle never reads it.
+    roleBrief: (card) => artemis?.roleBrief(card) ?? null,
     rosterSeats: () => {
       const seats = new Map<string, string>()
       try {
@@ -532,6 +537,10 @@ void app.whenReady().then(async () => {
     },
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
+      // FR-5.4: the orchestrator is brought back when it dies. Driven off the
+      // same card stream the UI reads, so nothing else has to agree about who
+      // is running.
+      artemis?.noteCard(card)
       if (card.lifecycle === 'exited') {
         // A respawn starts at rung 0 with no span history.
         breaker?.forget(card.agentId)
@@ -605,6 +614,34 @@ void app.whenReady().then(async () => {
   })
   budgetWatcher.start()
 
+  // FR-5.1/5.4: Artemis is hired like any other agent — this module owns her
+  // lifecycle and nothing about what she decides (ADR-0005).
+  artemis = new Artemis({
+    agents: agentManager,
+    prompts,
+    home: home.root,
+    // She runs in the Agora, because `board.md` is hers to scribe (SDD §2).
+    cwd: agora.root,
+    setOrchestrator: (agentId) => {
+      try {
+        const registry = agora?.registry()
+        if (registry) agora?.writeRegistry({ ...registry, orchestratorId: agentId })
+        agora?.commitSoon(`roster: orchestrator ${agentId ?? 'cleared'}`)
+      } catch (err) {
+        reportDegradation(
+          'agora',
+          `orchestrator id not recorded: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    },
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`log ${draft.kind} ${String(draft['event'] ?? '')}`)
+    },
+    onDegraded: (detail) => reportDegradation('artemis', detail)
+  })
+
   registerIpc({
     ptyManager,
     agents: agentManager,
@@ -648,6 +685,15 @@ void app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  // Last, and not awaited: a company whose orchestrator is slow to start is
+  // still a usable company, and her failure is a degradation rather than a
+  // boot error (FR-5.4).
+  // The engine she is hired on is the registry's first registered adapter, so
+  // adding one never leaves this line naming an engine that is not there.
+  const orchestratorEngine = engines.list()[0]?.id
+  if (orchestratorEngine) void artemis.start(orchestratorEngine)
+  else reportDegradation('artemis', 'no engine adapter registered; not hired')
 })
 
 app.on('window-all-closed', () => {

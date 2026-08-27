@@ -34,6 +34,8 @@ export const LOG_KINDS = [
   'meeting',
   'breaker',
   'budget',
+  /** Artemis's lifecycle and her countersigned decisions (FR-5.4, FR-5.5). */
+  'orchestrator',
   'remote',
   'secret-rotated',
   'profile',

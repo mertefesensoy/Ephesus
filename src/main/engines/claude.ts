@@ -11,6 +11,7 @@ import type {
   EngineAdapter,
   HookPlan,
   KeySequence,
+  ResumeSupport,
   SettingsInjection,
   SpawnPlan,
   TranscriptReader,
@@ -407,6 +408,16 @@ export class ClaudeAdapter implements EngineAdapter {
 
   interrupt(): KeySequence {
     return { label: 'Escape', bytes: ESCAPE_KEY }
+  }
+
+  /**
+   * `claude --resume <session>` reopens a session by the id the event plane
+   * already records (ADR-0009 `ResumeSupport`, FR-1.4, FR-5.4). Declared but
+   * unimplemented since M1 — the M1-audit gap — so a crashed agent came back
+   * with no idea what it had been doing.
+   */
+  readonly resume: ResumeSupport = {
+    resumeArgs: (sessionId) => ['--resume', sessionId]
   }
 
   readonly transcripts: TranscriptReader = claudeTranscripts

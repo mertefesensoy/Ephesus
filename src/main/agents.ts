@@ -110,6 +110,17 @@ export interface AgentManagerOptions {
    */
   onExitError?(agentId: string, err: unknown): void
   /**
+   * Extra standing context appended to an agent's `identity.md`, supplied by
+   * whoever hired them.
+   *
+   * Artemis's orchestrator policy arrives this way (ADR-0005, "prompt as
+   * policy": her escalation policy and delegated-authority posture are text in
+   * `prompts/artemis/`, editable by the Architect, never compiled in). The
+   * manager never reads the text — it renders the identity, appends this, and
+   * writes the file — so no orchestration rule lands in the lifecycle.
+   */
+  roleBrief?(card: AgentCard): string | null
+  /**
    * Seats already taken, agent id → seat, usually read straight off the roster.
    * Injected for the same reason the budget lookup is: seating is a property of
    * the *company*, not of the spawns this manager happens to be holding, and an
@@ -470,19 +481,18 @@ export class AgentManager {
   private materializeIdentity(agent: LiveAgent): void {
     const card = agent.card
     fs.mkdirSync(path.dirname(agent.cfg.identityPath), { recursive: true })
-    writeFileAtomic(
-      agent.cfg.identityPath,
-      this.options.prompts.render(path.join('agents', 'identity.md'), {
-        name: card.name,
-        agentId: card.agentId,
-        role: card.role,
-        capabilities: card.capabilities.length > 0 ? card.capabilities.join(', ') : 'none declared',
-        envGrants: card.envGrants.length > 0 ? card.envGrants.join(', ') : 'none',
-        cwd: card.cwd,
-        // An agent that does not know where its mailbox is cannot use it.
-        agentDir: path.dirname(agent.cfg.identityPath)
-      })
-    )
+    const identity = this.options.prompts.render(path.join('agents', 'identity.md'), {
+      name: card.name,
+      agentId: card.agentId,
+      role: card.role,
+      capabilities: card.capabilities.length > 0 ? card.capabilities.join(', ') : 'none declared',
+      envGrants: card.envGrants.length > 0 ? card.envGrants.join(', ') : 'none',
+      cwd: card.cwd,
+      // An agent that does not know where its mailbox is cannot use it.
+      agentDir: path.dirname(agent.cfg.identityPath)
+    })
+    const brief = this.options.roleBrief?.(card)?.trim()
+    writeFileAtomic(agent.cfg.identityPath, brief ? `${identity}\n\n${brief}\n` : identity)
     if (!fs.existsSync(agent.cfg.protocolPath)) {
       fs.mkdirSync(path.dirname(agent.cfg.protocolPath), { recursive: true })
       writeFileAtomic(
@@ -492,7 +502,44 @@ export class AgentManager {
     }
   }
 
-  private async start(agentId: string): Promise<void> {
+  /**
+   * Restarts an exited agent in place — the mechanism half of FR-5.4.
+   *
+   * A respawn is a *new process*, so it gets a new hook token: the old one died
+   * with the old process, and a token that outlived its process would let a
+   * dead agent keep writing the event plane. Identity, settings and grants are
+   * all re-established the same way a first spawn establishes them.
+   *
+   * What it carries forward is the engine session, when the adapter can resume
+   * one. That is what respawn-with-memory means in M3 (Architect decision):
+   * engine-native resume plus re-injected identity and protocol; `memory.md`
+   * continuity through the Library is M4's. An engine with no `resume` still
+   * respawns — with a fresh session, and the log says so rather than implying
+   * a continuity that is not there.
+   */
+  async respawn(agentId: string): Promise<AgentCard> {
+    const agent = this.require(agentId)
+    if (this.options.spawner.has(agentId)) {
+      throw new Error(`agents: "${agentId}" is still running; stop it before respawning`)
+    }
+    agent.cfg = { ...agent.cfg, hookToken: randomBytes(32).toString('hex') }
+    this.update(agentId, { lifecycle: 'starting', exitCode: null })
+    await this.start(agentId, { resume: true })
+    return this.card(agentId)
+  }
+
+  /**
+   * The argv fragment that resumes this agent's last engine session (ADR-0009
+   * `ResumeSupport`), or nothing when the engine has no resume or the event
+   * plane never reported a session.
+   */
+  private resumeArgsFor(agent: LiveAgent): readonly string[] {
+    const sessionId = agent.sessionIds.at(-1)
+    if (sessionId === undefined || !agent.adapter.resume) return []
+    return agent.adapter.resume.resumeArgs(sessionId)
+  }
+
+  private async start(agentId: string, opts: { resume?: boolean } = {}): Promise<void> {
     const agent = this.require(agentId)
 
     // ADR-0010: least-privilege by construction, resolved HERE — the moment
@@ -517,11 +564,27 @@ export class AgentManager {
       agent.hookPlan = hookPlan
 
       const plan = agent.adapter.spawnArgs(agent.cfg)
+      const resumeArgs = opts.resume ? this.resumeArgsFor(agent) : []
       this.update(agentId, {
         lifecycle: 'running',
         settingsWritten: plan.settings.map((injection) => injection.path)
       })
-      this.options.spawner.spawnAgent(agentId, plan)
+      if (opts.resume) {
+        this.options.onLogEvent?.({
+          kind: 'spawn',
+          agentId,
+          engine: agent.adapter.id,
+          respawn: true,
+          // Whether memory actually carried over, not whether we hoped it would.
+          resumed: resumeArgs.length > 0,
+          sessionId: resumeArgs.length > 0 ? (agent.sessionIds.at(-1) ?? null) : null,
+          envGrants: [...agent.card.envGrants]
+        })
+      }
+      this.options.spawner.spawnAgent(
+        agentId,
+        resumeArgs.length > 0 ? { ...plan, argv: [...plan.argv, ...resumeArgs] } : plan
+      )
     } catch (err) {
       await this.unwind(agentId)
       throw err

@@ -80,6 +80,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  never in the Agora or SQLite (ADR-0010, NFR-8)
   gate-policy.json           # the Watch's gate policy (SDD §9). Absent or unreadable
                              #  ⇒ deny-all: it can only ever loosen, never tighten
+  authority.json             # Artemis's delegated-authority table (FR-5.5). Absent or
+                             #  unreadable ⇒ no delegated authority: everything escalates
   events.sock                # hook socket (0600)
   db.sqlite                  # app-local + cost ledger
   prompts/                   # versioned text assets: artemis system prompt, block-reason
@@ -194,7 +196,9 @@ or `gates` is non-empty.
   "subject": "checkout test green", "msgId": "…", "conversation": "conv-7f3" }
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
-brief, deck, meeting, breaker, budget, remote, secret-rotated, profile, gym, error }`.
+brief, deck, meeting, breaker, budget, orchestrator, remote, secret-rotated, profile,
+gym, error }`. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
+FR-5.5's countersignatures and escalations.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
 briefing compiler, metrics, and forensics consume only this file + git history.
 

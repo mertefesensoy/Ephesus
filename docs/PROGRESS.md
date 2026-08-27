@@ -766,7 +766,7 @@ Notification-hook/permission-dialog invisibility (M1 → gate choke point,
 M3.3) · `pendingTasksFor` always 0 (→ M3.8) · breaker pathology signal
 emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
 `agora/human/` queue with no UI (→ M3.4) · claude adapter's missing optional
-`resume` (→ M3.7) · badge color-only pairs and tilesheet rendering (closed M3.6).
+`resume` (closed M3.7) · badge color-only pairs and tilesheet rendering (closed M3.6).
 
 - [x] **M3.1 Secret broker + redaction filter** — write-only broker in main
       (`secrets:` IPC per SDD §5: `set/status/test/delete` — no call returns a
@@ -1241,7 +1241,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       DOM test project), so what pins the wiring is the live run above — the same
       standing exception recorded for the approvals panel in M3.4. Contrast/token
       checks stayed green untouched.*
-- [ ] **M3.7 Artemis lifecycle** — `artemis.ts`: auto-spawn at startup into
+- [x] **M3.7 Artemis lifecycle** — `artemis.ts`: auto-spawn at startup into
       the temple seat, `isOrchestrator` + `orchestratorId` per SDD §4.1;
       prompt/config assembly from `prompts/artemis/` (system prompt carries the
       escalation policy; editable — prompt text is config, invariant §8);
@@ -1257,6 +1257,62 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       identity; authority-table validator; prompt assembly snapshot. Risk:
       FR-5.1 — Artemis is an ordinary engine process holding a privileged
       *role*, not privileged code; resist rules-engine creep into main.*
+      *Evidence: `typecheck && lint && invariants && test` green — 1136 passed / 2
+      skipped (70 new). **`artemis.ts` holds lifecycle and nothing else** — hire,
+      seat, policy text, respawn, and one question ("may she settle this?") answered
+      from a table the Architect wrote. FR-5.1 is asserted directly: a test grants
+      every class and shows the harness allows every one of them, because it has no
+      opinion of its own to override the Architect's with; with the table silent it
+      refuses even the requests that "look routine", since the notion of routine is
+      hers and lives in `prompts/artemis/system.md`.
+      Her system prompt reaches her through a **general `roleBrief` seam** on
+      `AgentManager` rather than a special case — the manager renders the identity,
+      appends what the hirer supplied, and writes the file without reading it. An
+      edit in the harness home wins over the bundled copy, which is what "editable
+      from the UI" means on disk, and a policy file that will not read is a reported
+      degradation rather than an orchestrator quietly running with no policy.
+      **The M1-audit resume gap is closed**: `claude --resume <sessionId>`, with the
+      id coming off the event plane exactly as `ResumeSupport`'s contract always
+      said. A respawn mints a **fresh hook token** (a token that outlived its
+      process would let a dead agent keep writing the event plane), re-injects
+      identity and protocol, and logs whether memory actually carried over — an
+      engine with no resume still respawns, with a fresh session, and says so.
+      **A design flaw was found by a test, not by review**: the first draft reset the
+      respawn ladder whenever the agent reached `running`, so the ladder could never
+      be spent by the one failure it exists to bound — a process that starts and
+      immediately dies would be respawned forever. A 60 s **stability window** fixes
+      it: recovery is coming back and *staying* back. Giving up is loud — a
+      degradation, a log line, and `orchestratorId` cleared rather than left naming a
+      dead agent.
+      **The authority table (FR-5.5)** lives at `<home>/authority.json` beside
+      `gate-policy.json`, with the same posture: absent or unreadable ⇒ nothing
+      delegated, everything escalates. It is re-read per decision (the Architect
+      edits it while the company runs) and its parse failure is reported once per
+      distinct reason. The permission and the countersignature are the **same call**,
+      so no path takes a decision under delegated authority without leaving something
+      to audit. A grant with no domains is a parse error rather than "all domains",
+      and a spend grant is refused without a ceiling — by the schema, and again by
+      `mayDecide` if one is constructed anyway.
+      LIVE RUN of the REAL app, nobody asking for her:
+      `auto-spawned without being asked: true` ·
+      `card: agent.artemis role=orchestrator seat=temple engine=claude v2.1.247` ·
+      `registry.orchestratorId = agent.artemis`, `isOrchestrator=true`,
+      `budget={"dailyTokens":2000000}` · `envGrants: []` (ADR-0010: orchestration is
+      routing and text) · `identity.md carries prompts/artemis/system.md: true`.
+      Then her REAL `claude` process was killed by pid, after a hook carrying a
+      session id was posted through the real endpoint with the token read from that
+      process's own `/proc/<pid>/environ`:
+      `respawned: true (new pid 29630, was 29591)` ·
+      `respawn argv carries --resume: true (session sess-temple-live-1)` · and the
+      chain in `log.jsonl`: `orchestrator/spawned` →
+      `orchestrator/respawn-scheduled attempt=1 waitMs=1000` →
+      `spawn respawn=true resumed=true sessionId=sess-temple-live-1` →
+      `orchestrator/respawned attempt=1`.
+      Screenshot: [`docs/demo/m3-artemis-temple.png`](./demo/m3-artemis-temple.png).
+      **Owed forward:** `mayDecide` has no production caller yet — M3.8's routing is
+      the first, and the countersign *surface* (filing into the memo/gate archive) is
+      the Odeon's (M5). Recorded rather than hidden, on the same footing as M3.5's
+      `forceEvaluate`.*
 - [ ] **M3.8 Task assignment + Artemis routing + Ledger tab** — SDD §7.1: the
       ledger endpoint (Artemis files `propose` acts from its own outbox; the
       harness validates and writes `tasks.json` through the single committer —

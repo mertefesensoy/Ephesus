@@ -25,7 +25,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty documented kinds', () => {
+  it('carries the twenty-one documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -42,6 +42,9 @@ describe('log line format (SDD §4.3)', () => {
       'meeting',
       'breaker',
       'budget',
+      // Added in M3.7: FR-5.5 requires everything Artemis decides under
+      // delegated authority to be auditable, and no existing kind carried it.
+      'orchestrator',
       'remote',
       'secret-rotated',
       'profile',

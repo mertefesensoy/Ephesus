@@ -135,6 +135,25 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
         expect(key.label.length).toBeGreaterThan(0)
       })
 
+      it('resumes a session by id, when it declares resume (FR-1.4, FR-5.4)', () => {
+        const adapter = subject.make()
+        if (!adapter.resume) return // optional capability; absence is legal
+        const args = adapter.resume.resumeArgs('sess-abc123')
+        // The contract is an argv *fragment* appended to the spawn plan, so it
+        // must be non-empty, must name the session, and must not smuggle the
+        // whole command back in — the caller already has argv[0].
+        expect(args.length).toBeGreaterThan(0)
+        expect(args.join(' ')).toContain('sess-abc123')
+        expect(args[0]).not.toBe(adapter.spawnArgs(conformanceRig().cfg).argv[0])
+      })
+
+      it('resumes different sessions differently, and the same one the same way', () => {
+        const adapter = subject.make()
+        if (!adapter.resume) return
+        expect(adapter.resume.resumeArgs('sess-a')).toEqual(adapter.resume.resumeArgs('sess-a'))
+        expect(adapter.resume.resumeArgs('sess-a')).not.toEqual(adapter.resume.resumeArgs('sess-b'))
+      })
+
       it('reads transcripts without inventing facts, when it declares them', async () => {
         const adapter = subject.make()
         if (!adapter.transcripts) {
