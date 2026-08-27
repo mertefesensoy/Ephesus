@@ -40,6 +40,7 @@ async function restartOver(home: string): Promise<Company> {
   const { PromptStore } = await import('../../src/main/prompts')
   const { GateManager, wireGateChokePoints } = await import('../../src/main/watch/gates')
   const { Breaker } = await import('../../src/main/watch/breaker')
+  const { CostLedger, MemoryLedgerStore } = await import('../../src/main/watch/ledger')
   const { denyAllPolicy } = await import('../../src/shared/gates')
   const { fileURLToPath } = await import('node:url')
   const repo = fileURLToPath(new URL('../../', import.meta.url))
@@ -74,7 +75,14 @@ async function restartOver(home: string): Promise<Company> {
       steerText: () => ''
     }),
     breakerActs: [],
+    // A blackout scenario asserts what survived on disk in the *data plane*;
+    // the cost plane's own restart property is S-LEDGER's. Honest stand-ins.
+    ledgerStore: new MemoryLedgerStore(),
+    costs: new CostLedger({ store: new MemoryLedgerStore() }),
+    foldSpend: async () => {},
+    runTurnIn: async () => '',
     hire: (agentId) => hermes.ensureMailbox(agentId),
+    sessionOf: (agentId) => `sess-${agentId}`,
     runTurn: async () => '',
     inbox: (agentId) => {
       const dir = path.join(hermes.mailboxDir(agentId), 'inbox')

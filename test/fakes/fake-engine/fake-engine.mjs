@@ -55,12 +55,22 @@ const MARKER = '[fake-engine]'
 /** The interrupt key every engine in the roster uses (ADR-0009 `interrupt()`). */
 const ESCAPE = String.fromCharCode(0x1b)
 
-const STEP_KINDS = ['stdout', 'hook', 'wait', 'read-inbox', 'write-outbox', 'echo-env', 'exit']
+const STEP_KINDS = [
+  'stdout',
+  'hook',
+  'wait',
+  'read-inbox',
+  'write-outbox',
+  'write-transcript',
+  'echo-env',
+  'exit'
+]
 
 /**
  * @typedef {{ kind: string, text?: unknown, event?: unknown, payload?: unknown,
  *             ms?: unknown, consume?: unknown, message?: unknown, name?: unknown,
- *             code?: unknown }} Step
+ *             code?: unknown, model?: unknown, inTokens?: unknown,
+ *             outTokens?: unknown, costUsd?: unknown, at?: unknown }} Step
  * @typedef {{ steps: Step[], onPrompt: Step[], onInterrupt: Step[] }} Script
  */
 
@@ -210,6 +220,28 @@ async function runStep(step) {
       const file = path.join(outbox, `${id}.json`)
       writeFileAtomic(file, `${JSON.stringify(message, null, 2)}\n`)
       say(`outbox-wrote ${id}.json`)
+      return
+    }
+
+    case 'write-transcript': {
+      // A real engine records what a turn cost, in its own format, in its own
+      // place. The fake's format is one JSON usage fact per line under
+      // `.fake-engine/transcripts/<sessionId>.jsonl` — which is exactly what
+      // `makeFakeAdapter`'s TranscriptReader reads, so S-LEDGER folds a file an
+      // engine actually wrote rather than one the test hand-placed.
+      const dir = path.join(process.cwd(), '.fake-engine', 'transcripts')
+      fs.mkdirSync(dir, { recursive: true })
+      const file = path.join(dir, `${sessionId}.jsonl`)
+      const fact = {
+        sessionId,
+        model: String(step.model ?? 'fake-1'),
+        inTokens: Number(step.inTokens ?? 0),
+        outTokens: Number(step.outTokens ?? 0),
+        costUsd: step.costUsd === undefined ? null : Number(step.costUsd),
+        at: typeof step.at === 'string' ? step.at : new Date().toISOString()
+      }
+      fs.appendFileSync(file, `${JSON.stringify(fact)}\n`)
+      say(`transcript-wrote ${path.basename(file)} in=${fact.inTokens} out=${fact.outTokens}`)
       return
     }
 

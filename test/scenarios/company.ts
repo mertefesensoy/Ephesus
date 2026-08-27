@@ -15,6 +15,8 @@ import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { Breaker } from '../../src/main/watch/breaker'
+import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
+import { CostLedger, MemoryLedgerStore, type LedgerStore } from '../../src/main/watch/ledger'
 import { GateManager, wireGateChokePoints } from '../../src/main/watch/gates'
 import { FAKE_ENGINE_CLI } from '../fakes/fake-adapter'
 
@@ -38,6 +40,13 @@ export interface CompanyOptions {
   readonly onPathology?: (agentId: string, blocks: number) => void
   /** The Watch's policy for this company. Defaults to deny-all (FR-11.1). */
   readonly gatePolicy?: GatePolicy
+  /**
+   * The durable cost plane. Passing the SAME store to a second `startCompany`
+   * is what "restart" means for S-LEDGER: the harness objects are rebuilt, the
+   * durable rows are not (ADR-0011 — cost figures come only from the ledger,
+   * never from an in-memory counter).
+   */
+  readonly ledgerStore?: LedgerStore
 }
 
 export interface Company {
@@ -54,8 +63,34 @@ export interface Company {
   readonly breaker: Breaker
   /** What each rung actually did, in order — S-BREAKER reads this. */
   readonly breakerActs: readonly string[]
-  /** Gives an agent a mailbox and a live hook token. */
-  hire(agentId: string): void
+  /** The durable cost plane, so a restarted company can be given the same one. */
+  readonly ledgerStore: LedgerStore
+  /** The durable cost ledger (ADR-0011). */
+  readonly costs: CostLedger
+  /** Folds real engine transcripts into the ledger on demand. */
+  foldSpend(agent: BudgetedAgent, cwd: string): Promise<void>
+  /**
+   * Runs a turn in a directory of its own, so the engine writes real
+   * transcripts. `env` is injected into the CHILD's environment the way a spawn
+   * plan injects declared grants (ADR-0010) — never through this process's own,
+   * which would be the harness reading a credential outside the broker.
+   */
+  runTurnIn(
+    agentId: string,
+    cwd: string,
+    steps: readonly unknown[],
+    env?: Readonly<Record<string, string>>
+  ): Promise<string>
+  /**
+   * Gives an agent a mailbox, a live hook token and a session.
+   *
+   * The session id is fresh per company by default, which is what a respawn
+   * without engine-native resume gets. Passing one models `--resume` (M3.7):
+   * the same session continuing across a restart.
+   */
+  hire(agentId: string, sessionId?: string): void
+  /** The session id this company's spawn of `agentId` reports. */
+  sessionOf(agentId: string): string
   /** Runs the REAL fake-engine binary for one agent with a scripted turn. */
   runTurn(agentId: string, steps: readonly unknown[]): Promise<string>
   /** Files currently in an agent's inbox. */
@@ -83,6 +118,8 @@ export function cleanupHomes(): void {
 }
 
 let seq = 0
+/** Distinguishes one company from the next; a restart is a new spawn. */
+let companies = 0
 
 /** A well-formed message, with a unique sortable id per call. */
 export function scenarioMessage(fields: {
@@ -111,6 +148,8 @@ export function scenarioMessage(fields: {
 }
 
 export async function startCompany(options: CompanyOptions = {}): Promise<Company> {
+  companies += 1
+  const companyIndex = companies
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-scenario-'))
   openHomes.push(home)
   const prompts = new PromptStore(path.join(home, 'prompts'), path.join(REPO, 'prompts'))
@@ -193,6 +232,21 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       })
   })
 
+  // The durable cost plane (ADR-0011). The store is the seam SQLite sits behind
+  // in production — `better-sqlite3` is Electron-ABI and cannot load here — and
+  // handing the SAME store to a second `startCompany` is what S-LEDGER's
+  // "restart" means: the harness objects are rebuilt, the rows are not.
+  const ledgerStore = options.ledgerStore ?? new MemoryLedgerStore()
+  const costs = new CostLedger({ store: ledgerStore })
+  const budgets = new BudgetWatcher({
+    ledger: costs,
+    agents: () => budgetedAgents,
+    onBudgetChange: (agentId, verdict) =>
+      agora.appendLog({ kind: 'budget', agentId, state: verdict.state }),
+    onDegraded: () => {}
+  })
+  const budgetedAgents: BudgetedAgent[] = []
+
   const hookEvents: HookEventRecord[] = []
   const hookServer = new HookServer({
     onEvent: (record) => {
@@ -226,6 +280,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   await hookServer.start(home)
 
   const tokens = new Map<string, string>()
+  const sessions = new Map<string, string>()
 
   return {
     home,
@@ -237,12 +292,58 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     chokePoints,
     breaker,
     breakerActs,
+    ledgerStore,
+    costs,
 
-    hire(agentId) {
+    async foldSpend(agent, cwd) {
+      budgetedAgents.splice(0, budgetedAgents.length, agent)
+      await budgets.foldNow(agent)
+      void cwd
+    },
+
+    async runTurnIn(agentId, cwd, steps, env) {
+      fs.mkdirSync(cwd, { recursive: true })
+      const script = path.join(home, `${agentId}-${Date.now()}-${Math.random()}.json`)
+      fs.writeFileSync(script, JSON.stringify({ schemaVersion: 1, steps }), 'utf8')
+      return new Promise<string>((resolve, reject) => {
+        const child = spawn(process.execPath, [FAKE_ENGINE_CLI, '--script', script], {
+          cwd,
+          env: {
+            ...process.env,
+            EPH_AGENT_ID: agentId,
+            EPH_AGENT_DIR: agora.agentDir(agentId),
+            EPH_HOOK_TOKEN: tokens.get(agentId) ?? '',
+            EPH_HOOK_ENDPOINT: hookServer.endpoint() ?? '',
+            EPH_FAKE_SESSION: sessions.get(agentId) ?? `sess-${agentId}`,
+            ...(env ?? {})
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
+        })
+        let out = ''
+        child.stdout.setEncoding('utf8')
+        child.stderr.resume()
+        child.stdout.on('data', (chunk: string) => {
+          out += chunk
+        })
+        child.on('error', reject)
+        child.on('close', () => resolve(out))
+      })
+    },
+
+    hire(agentId, sessionId) {
       hermes.ensureMailbox(agentId)
       const token = `token-${agentId}`
       tokens.set(agentId, token)
+      const session = sessionId ?? `sess-${agentId}-c${String(companyIndex)}`
+      sessions.set(agentId, session)
       hookServer.registerSpawn(agentId, token)
+      // The event plane is where the ledger learns a spawn's session id
+      // (ADR-0002), so the same attribution key drives both planes.
+      costs.noteSession(agentId, session)
+    },
+
+    sessionOf(agentId) {
+      return sessions.get(agentId) ?? `sess-${agentId}-c${String(companyIndex)}`
     },
 
     async runTurn(agentId, steps) {
@@ -296,6 +397,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     },
 
     async close() {
+      budgets.stop()
       hermes.stop()
       await hookServer.stop()
       await agora.drained().catch(() => {})

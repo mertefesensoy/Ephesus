@@ -1381,7 +1381,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       raised in the session report for the Architect to promote if they prefer. The
       `needs_human` flip stays Artemis's to make (her policy text says when); the
       harness honours it at the M3.3 choke point already.*
-- [ ] **M3.9 Scenario suites + exit demos** — implement S-GATE, S-BREAKER,
+- [x] **M3.9 Scenario suites + exit demos** — implement S-GATE, S-BREAKER,
       S-LEDGER, S-SECRETS (TEST-STRATEGY §3) as automated suites over the
       seams M3.1–M3.8 built (S-GATE's voice/remote clauses at the policy
       boundary with scripted stubs per the Architect decision); then the exit
@@ -1392,6 +1392,53 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       `log.jsonl`. Dogfood begins at this exit (IMPLEMENTATION M3).
       *Docs: TEST-STRATEGY §3, UC-02/UC-08. Risk: suites run per-PR against
       the fake engine; real-`claude` demos are exit-review territory.*
+      *Evidence: `typecheck && lint && invariants && test` green — 1233 passed / 2
+      skipped (26 new). **All four named suites are automated and run per-PR**:
+      S-GATE (17 cases, M3.3) and S-BREAKER (9, M3.5) landed with their packages;
+      **S-LEDGER** (13) and **S-SECRETS** (13) land here. 73 scenario cases in all.
+      **S-LEDGER** folds transcripts a REAL spawned `fake-engine` wrote, in its own
+      format and its own directory, read by the adapter's own `TranscriptReader` —
+      the fake engine gained a `write-transcript` step so the suite proves the
+      pipeline rather than the reader. The upstream regression class is pinned three
+      ways: the cumulative figure survives a restart, the session figure resets
+      (unless the engine resumed the same session — M3.7 made that case reachable,
+      and it is asserted separately), and a **budget is enforced against the day**,
+      so a crash-loop cannot spend the cap N times. One test counts store reads to
+      prove the figures are re-read rather than cached — the in-memory counter is
+      what actually regressed.
+      **S-SECRETS** asserts the three promises separately, because they fail
+      separately: every `secrets:` channel is called with a planted value in the
+      store and no response anywhere contains it; two roles' grants are scoped so
+      neither can see the other's, proven by a REAL agent process reporting its own
+      environment; and the redaction filter masks a planted token — split across
+      chunks, repeated, and stored mid-stream — while leaving ordinary output byte
+      for byte. **The invariant tripwire caught the first draft** setting
+      `process.env` to reach the child; grants now travel in the child's spawn
+      environment, the way a spawn plan carries them.
+      **The exit demos ran on the REAL app**, Artemis auto-spawned as `claude`
+      2.1.247 into the temple with a real worker hired beside her.
+      **UC-02** — `decompose → ledger: t-uc02-a … t-uc02-b …` ·
+      `assignee request delivered: "t-uc02-a: …"` ·
+      `work reported back to Artemis: act=done from=agent.mason` ·
+      `verified + closed: t-uc02-a status=done resultRef=run#8842` ·
+      `board updated by the one scribe` · and the chain in `log.jsonl`:
+      `create:t-uc02-a → create:t-uc02-b → board → update:t-uc02-a → board`.
+      **UC-08** — a real `notification` hook (token read from the live worker's own
+      `/proc/<pid>/environ`) held a destructive op at a gate carrying all four
+      packaging fields (`what: Claude needs your permission to run rm -rf build/` ·
+      `why` · `blast radius` · `rollback`), rendered in the approvals post, approved
+      through the same `watch:approve` the button calls (`{"ok":true,"reason":null}`),
+      queue drained to 0, and the chain in `log.jsonl`:
+      `gate opened … kind=tool-permission channel=local` →
+      `gate approved … repeatBack=false`.
+      Screenshot: [`docs/demo/m3-uc08-exit.png`](./demo/m3-uc08-exit.png).
+      Log kinds recorded across both demos:
+      `budget, delivery, gate, hook, orchestrator, spawn, task`.
+      **Stated plainly:** every process, socket, router, endpoint, gate, committer
+      and IPC in the demos is the real one; the agents' own *words* are scripted,
+      because the `claude` binaries in this environment are unauthenticated and sit
+      at a login prompt. Their messages are written into their real outboxes and
+      routed exactly as composed ones would be.*
 - [ ] **M3 exit review** — UC-02 + UC-08 demo evidence; S-GATE, S-BREAKER,
       S-LEDGER, S-SECRETS green in CI; PROGRESS + docs synced.
 
