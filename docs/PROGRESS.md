@@ -1060,7 +1060,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       property that matters: main is the authority (a stale gate id, a second verdict,
       a malformed payload are each refused) and the queue reads and drains on real
       files. Carried to M3.9's S-GATE/E2E work.*
-- [ ] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
+- [x] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
       ADR-0011: tool-call spans (agent, tool, duration, outcome) recorded from
       hook events (the span model FR-11.6 needs later; no waterfall UI yet —
       Architect decision); trip signals as pure functions in `src/shared/`:
@@ -1079,6 +1079,48 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       ladder integration with the fake engine — work preserved at rungs 1–2
       (S-BREAKER core). Risk: false trips — rung 1 must stay cheap (one
       injected sentence), never destructive.*
+      *Evidence: `typecheck && lint && invariants && test` green — 915 passed / 2
+      skipped (68 new). The ladder's two load-bearing properties are asserted
+      exhaustively: it **never skips a rung** (the full 0→1→2→3 table, plus a
+      dedicated "cannot reach stop on a first trip however bad the signals"), and a
+      quiet agent **falls straight back to 0** rather than serving out a sentence.
+      **S-BREAKER lands as a real suite** (`test/scenarios/s-breaker.test.ts`, 9 cases
+      on the M2 rig): real spawned `fake-engine` processes emitting real hook events
+      over a real socket, through the same span-capture wiring `index.ts` uses.
+      **Work is preserved at rungs 1 and 2** — the scenario asserts that mail to a
+      constrained agent is HELD in its sender's outbox and *arrives when the
+      constraint lifts*, because constraining an agent is not the same as losing its
+      mail. Only the third step interrupts, and it interrupts gracefully before the
+      stop.
+      A **rung-dwell** was added after the scenario caught a design flaw: evaluating
+      on every span close meant an error storm reached `stop` three tool calls after
+      the floor, and the steer — queued until idle (FR-1.3) — may not even have been
+      delivered. A ladder that climbs three rungs in three seconds is a kill switch
+      with extra steps. Recovery is never delayed by the dwell.
+      **The M2 carried item is closed**: ADR-0013's pathology signal, emitted and
+      logged from M2 with nothing reading it, now enters the ladder at rung 1.
+      LIVE RUN of the REAL app with a real `claude` 2.1.247: the harness's own
+      `PreToolUse`/`PostToolUse` hook commands were executed verbatim with the live
+      agent's own environment, five times on the same file —
+      `breaker: rung=1 firing=["repetition"] spans=5` · `avatar: looping` ·
+      `steer queued for the agent: "You appear to be looping: the harness has seen the
+      same Read call 5 times…"` — a real sentence rendered from
+      `prompts/watch/steer-repetition.md`, queued through the command queue like any
+      other prompt. Eight reads of eight DIFFERENT files then left it at rung 1:
+      **the breaker does not climb on ordinary work.**
+      Screenshot: [`docs/demo/m3-breaker-rung1.png`](./demo/m3-breaker-rung1.png).
+      **A real production bug surfaced from that screenshot and was fixed here**: the
+      packaged app loads its renderer over `file://`, where the absolute
+      `/fonts/*.woff2` path resolves to the filesystem root — so the built app had
+      **never** loaded a bundled pixel face and showed "3 of 3 pixel faces missing"
+      permanently, while the dev server's http origin made it look fine. A warning
+      that is always on trains the Architect to ignore the surface every other
+      degradation shares, which is the real damage. Relative paths fix it
+      (`document.fonts.size: 3`, strip now reads `● fonts: bundled`), with a
+      regression test that resolves both a `file://` and an `http://` base.
+      **Owed forward:** S-BREAKER's "ledger `stalled`" clause needs Artemis's
+      reassignment (M3.8) and its "brief mentions trip" clause needs the Odeon (M5);
+      both are named in the suite rather than faked.*
 - [ ] **M3.6 Floor layout v2 — seats, temple, sheet rendering** — the floor
       layout: real seat assignment (terrace numbering per UI-DESIGN §5 —
       retires the every-hire-is-`terrace` placeholder, **closes the M2 carried

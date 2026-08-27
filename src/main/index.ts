@@ -23,12 +23,13 @@ import { initHome } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
 import { engines } from './engines'
-import { HookServer } from './hooks'
+import { HookServer, type HookEventRecord } from './hooks'
 import { registerIpc } from './ipc'
 import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
 import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
+import { Breaker } from './watch/breaker'
 import { BudgetWatcher } from './watch/budgets'
 import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
@@ -39,6 +40,7 @@ let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
 let gates: GateManager | null = null
+let breaker: Breaker | null = null
 /** SDD §9's choke points, wired once (see `wireGateChokePoints`). */
 let chokePoints: ReturnType<typeof wireGateChokePoints> | null = null
 /** The composed gate policy, reloaded from disk on every evaluation. */
@@ -106,6 +108,9 @@ const hookServer = new HookServer({
     if (warning) console.warn(`hook drift [${envelope.agentId}/${envelope.event}]: ${warning}`)
     else if (!known) console.warn(`hook unknown [${envelope.agentId}]: ${envelope.event}`)
     avatarDirector.handleHook(record)
+    // Span capture (FR-11.6) and the breaker's repetition/error signals
+    // (ADR-0011) both read the same tool stream the floor reads (ADR-0002).
+    recordSpan(record)
     // The ledger learns which session a spawn is running under from the same
     // event plane the floor reads (ADR-0002) — the attribution key that lets
     // "session" and "cumulative" be told apart without a running total.
@@ -147,6 +152,43 @@ const hookServer = new HookServer({
       `event handler failed: ${err instanceof Error ? err.message : String(err)}`
     )
 })
+
+/**
+ * Feeds the breaker's span capture from the event plane (FR-11.6, ADR-0011).
+ *
+ * The engine tells us a tool started and a tool finished; the outcome comes
+ * from the payload when the engine reports one and is `ok` otherwise — an
+ * engine that does not report failures gives a weaker error signal, which is
+ * what ADR-0011's reduced-protection note is about, not something to guess at.
+ */
+function recordSpan(record: HookEventRecord): void {
+  const { envelope } = record
+  const payload = envelope.payload as Record<string, unknown> | null
+  const tool = typeof payload?.['tool'] === 'string' ? payload['tool'] : null
+  if (tool === null) return
+  if (envelope.event === 'pre-tool') {
+    breaker?.openSpan(envelope.agentId, tool, payload)
+    return
+  }
+  if (envelope.event === 'post-tool') {
+    const failed =
+      payload?.['error'] !== undefined ||
+      payload?.['success'] === false ||
+      payload?.['ok'] === false
+    breaker?.closeSpan(envelope.agentId, tool, failed ? 'error' : 'ok')
+    // Evaluated on close, not on a timer: the signals are about tool calls, so
+    // a tool call finishing is exactly when the answer can have changed.
+    breaker?.evaluate(envelope.agentId)
+  }
+}
+
+/**
+ * Which steer template a signal uses. A mapping, not prose: the words live in
+ * `prompts/watch/steer-*.md` and the tag chooses which file (invariant §8).
+ */
+function steerTemplateFor(hit: { signal: string; detail: Record<string, unknown> }): string {
+  return hit.detail['source'] === 'stop-loop' ? 'stop-loop' : hit.signal
+}
 
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
@@ -306,6 +348,66 @@ void app.whenReady().then(async () => {
     onError: (detail) => reportDegradation('gates', detail)
   })
 
+  // The circuit breaker (ADR-0011). Constructed before anything can spawn, so
+  // no tool event arrives with nowhere to go.
+  breaker = new Breaker({
+    effects: {
+      // A prompt, so FR-1.3's queue-until-idle applies to it exactly as it does
+      // to the Architect's own typing.
+      steer: (agentId, text) => commandQueue.submit(agentId, text),
+      pauseDeliveries: (agentId, paused) => hermes?.setPaused(agentId, paused),
+      interrupt: (agentId) => {
+        try {
+          agentManager?.interrupt(agentId)
+        } catch (err) {
+          reportDegradation('breaker', `interrupt failed for ${agentId}: ${String(err)}`)
+        }
+      },
+      stop: (agentId) => {
+        try {
+          agentManager?.kill(agentId)
+        } catch (err) {
+          reportDegradation('breaker', `stop failed for ${agentId}: ${String(err)}`)
+        }
+      },
+      avatar: (agentId, event) => avatarDirector.apply(agentId, event)
+    },
+    // Invariant §8: the corrective sentence is config, not a literal here.
+    steerText: (hit) =>
+      prompts
+        .render(path.join('watch', `steer-${steerTemplateFor(hit)}.md`), {
+          ...Object.fromEntries(
+            Object.entries(hit.detail).map(([key, value]) => [key, String(value)])
+          )
+        })
+        .trim(),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(
+        `breaker ${String(draft['action'] ?? 'trip')} for ${String(draft['agentId'] ?? '')}`
+      )
+      if (draft['rung'] !== 0) {
+        reportDegradation(
+          'breaker',
+          `${String(draft['agentId'])} at rung ${String(draft['rung'])} (${String(draft['action'])})`
+        )
+      }
+    },
+    hookFidelity: (agentId) => {
+      try {
+        return agentManager?.card(agentId).hookFidelity ?? 'native'
+      } catch {
+        return 'native'
+      }
+    },
+    budgetState: (agentId) => {
+      const card = agentManager?.list().find((entry) => entry.agentId === agentId)
+      if (!card || !costLedger) return null
+      return costLedger.spendFor(agentId, card.dailyTokens).budget.state
+    }
+  })
+
   // The durable cost ledger (ADR-0011). Its storage is the app-local SQLite
   // file, so every figure survives a restart by construction — there is no
   // in-memory counter to zero (invariant §11).
@@ -338,12 +440,10 @@ void app.whenReady().then(async () => {
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
     nudge: (agentId, text) => commandQueue.submit(agentId, text),
     isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',
-    onPathology: (agentId, blocks) => {
-      // The breaker (ADR-0011) consumes this in M3; until then it is at least
-      // visible rather than an invisible overnight loop (R2).
-      reportDegradation('autonomy', `${agentId} has been continued ${blocks} times this session`)
-      agora?.appendLog({ kind: 'breaker', agentId, signal: 'stop-loop', blocks, rung: 1 })
-    },
+    // ADR-0013's pathology signal, emitted and logged from M2 with nothing
+    // reading it — the M2 carried item. It now enters the breaker's ladder at
+    // rung 1 like any other signal.
+    onPathology: (agentId, blocks) => breaker?.notePathology(agentId, blocks),
     onNeedsHuman: ({ message }) =>
       // SDD §9 choke point 2. The message was delivered either way; this puts
       // the decision behind it in front of the Architect (UC-08 step 2).
@@ -352,8 +452,11 @@ void app.whenReady().then(async () => {
         subject: message.subject,
         conversation: message.conversation
       }),
-    onBounced: ({ original, reason }) =>
-      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
+    onBounced: ({ original, reason }) => {
+      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`)
+      // Trip signal #3: recurring hop-cap escalations on one conversation.
+      if (reason.includes('hop')) breaker?.noteHopCap(original.from, original.conversation)
+    },
     onSweepError: (err: unknown) =>
       reportDegradation(
         'hermes',
@@ -418,6 +521,8 @@ void app.whenReady().then(async () => {
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
       if (card.lifecycle === 'exited') {
+        // A respawn starts at rung 0 with no span history.
+        breaker?.forget(card.agentId)
         // One last fold BEFORE the session is forgotten: usage written in the
         // seconds between the final tick and the exit would otherwise never be
         // folded, and this spawn is never `running` under that session again.
@@ -474,6 +579,8 @@ void app.whenReady().then(async () => {
       }
       // SDD §9 choke point 3: spend is a harness-mediated action, so continuing
       // past a budget is the Architect's call, not the agent's.
+      // Trip signal #4 (ADR-0011): the budget feeds the breaker directly.
+      breaker?.evaluate(agentId)
       if (verdict.state === 'breached' || verdict.state === 'projected-breach') {
         chokePoints?.submitSpend(
           agentId,
@@ -495,6 +602,11 @@ void app.whenReady().then(async () => {
     secrets,
     gates,
     humanQueue: () => hermes?.humanQueue() ?? [],
+    breakerState: () =>
+      (agentManager?.list() ?? [])
+        .filter((card) => card.lifecycle !== 'exited')
+        .map((card) => breaker?.stateFor(card.agentId))
+        .filter((state): state is NonNullable<typeof state> => state !== undefined),
     // Exited agents are INCLUDED: their cumulative figure is precisely what the
     // durable ledger exists to preserve, and hiding it behind a liveness filter
     // would put it out of reach of the only IPC that can show it (FR-11.2).

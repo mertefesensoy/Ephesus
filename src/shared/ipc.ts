@@ -3,6 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { Registry } from './registry'
+import type { BreakerState } from './breaker'
 import type { AgentSpend } from './cost'
 import type { GateVerdict, OpenGate, SourceChannel } from './gates'
 import type { Message } from './message'
@@ -45,7 +46,8 @@ export const IpcChannels = {
   watchBudgets: 'watch:budgets',
   watchApprovals: 'watch:approvals',
   watchApprove: 'watch:approve',
-  watchHumanQueue: 'watch:human-queue'
+  watchHumanQueue: 'watch:human-queue',
+  watchBreaker: 'watch:breaker-state'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -216,6 +218,12 @@ export interface EphApi {
     humanQueue: () => Promise<readonly Message[]>
     /** Subscribe to "a gate opened or closed"; the view then re-reads. */
     onGateChange: (cb: () => void) => () => void
+    /**
+     * Per-agent breaker state (ADR-0011): the rung, what is firing, and
+     * whether this engine's hook grade weakens the protection — the last of
+     * which ADR-0011 requires on the agent card rather than hidden.
+     */
+    breakerState: () => Promise<readonly BreakerState[]>
   }
   pty: {
     /**

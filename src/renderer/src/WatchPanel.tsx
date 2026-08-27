@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import type { BreakerState } from '../../shared/breaker'
 import type { AgentSpend } from '../../shared/cost'
+import { RUNG_NAMES } from '../../shared/breaker'
 import type { GateVerdict, OpenGate } from '../../shared/gates'
 import type { Message } from '../../shared/message'
 
@@ -26,9 +28,10 @@ interface WatchState {
   readonly gates: readonly OpenGate[]
   readonly queue: readonly Message[]
   readonly spend: readonly AgentSpend[]
+  readonly breaker: readonly BreakerState[]
 }
 
-const EMPTY: WatchState = { gates: [], queue: [], spend: [] }
+const EMPTY: WatchState = { gates: [], queue: [], spend: [], breaker: [] }
 
 const panel = {
   fontFamily: 'var(--eph-face-data)',
@@ -71,10 +74,15 @@ export function WatchPanel(): ReactElement {
       setBridge('window.eph bridge not exposed')
       return
     }
-    void Promise.all([eph.watch.approvals(), eph.watch.humanQueue(), eph.watch.budgets()])
-      .then(([gates, queue, spend]) => {
+    void Promise.all([
+      eph.watch.approvals(),
+      eph.watch.humanQueue(),
+      eph.watch.budgets(),
+      eph.watch.breakerState()
+    ])
+      .then(([gates, queue, spend, breaker]) => {
         setBridge(null)
-        setState({ gates, queue, spend })
+        setState({ gates, queue, spend, breaker })
       })
       .catch((err: unknown) => setBridge(String(err)))
   }, [])
@@ -159,6 +167,61 @@ export function WatchPanel(): ReactElement {
                   title={`because: ${spend.budget.because}`}
                 >
                   {spend.reporting === 'none' ? 'engine reports no usage' : spend.budget.state}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h2 style={heading}>BREAKER</h2>
+      {state.breaker.length === 0 && (
+        <p style={{ color: 'var(--eph-ink-500)', margin: '0 0 16px 0' }}>no agents yet</p>
+      )}
+      {state.breaker.length > 0 && (
+        <table
+          style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}
+          aria-label="breaker"
+        >
+          <thead>
+            <tr style={{ color: 'var(--eph-ink-500)', textAlign: 'left' }}>
+              <th style={{ fontWeight: 'normal', padding: '0 8px 4px 0' }}>agent</th>
+              <th style={{ fontWeight: 'normal', padding: '0 8px 4px 0' }}>rung</th>
+              <th style={{ fontWeight: 'normal', padding: '0 8px 4px 0' }}>firing</th>
+              <th style={{ fontWeight: 'normal', padding: '0 0 4px 0' }}>protection</th>
+            </tr>
+          </thead>
+          <tbody>
+            {state.breaker.map((agent) => (
+              <tr key={agent.agentId}>
+                <td style={{ padding: '0 8px 4px 0' }}>{agent.agentId}</td>
+                {/* The rung NAME, not just a number or a colour (UI-DESIGN §8). */}
+                <td
+                  style={{
+                    padding: '0 8px 4px 0',
+                    color: agent.rung === 0 ? 'var(--eph-ink-500)' : 'var(--eph-status-looping)'
+                  }}
+                >
+                  {agent.rung === 0 ? 'clear' : `${String(agent.rung)} · ${RUNG_NAMES[agent.rung]}`}
+                </td>
+                <td style={{ padding: '0 8px 4px 0' }}>
+                  {agent.firing.length === 0
+                    ? '—'
+                    : agent.firing.map((hit) => hit.signal).join(', ')}
+                </td>
+                <td style={{ padding: '0 0 4px 0' }}>
+                  {/* ADR-0011's stated consequence: a weaker engine's reduced
+                      protection is surfaced here, never hidden. */}
+                  {agent.reducedProtection ? (
+                    <span
+                      style={{ color: 'var(--eph-status-looping)' }}
+                      title={`blind to: ${agent.blindSignals.join(', ')}`}
+                    >
+                      ⚠ reduced ({agent.blindSignals.length} signals blind)
+                    </span>
+                  ) : (
+                    `full · ${String(agent.spanCount)} spans`
+                  )}
                 </td>
               </tr>
             ))}

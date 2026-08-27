@@ -39,6 +39,7 @@ async function restartOver(home: string): Promise<Company> {
   const { Hermes } = await import('../../src/main/hermes')
   const { PromptStore } = await import('../../src/main/prompts')
   const { GateManager, wireGateChokePoints } = await import('../../src/main/watch/gates')
+  const { Breaker } = await import('../../src/main/watch/breaker')
   const { denyAllPolicy } = await import('../../src/shared/gates')
   const { fileURLToPath } = await import('node:url')
   const repo = fileURLToPath(new URL('../../', import.meta.url))
@@ -60,6 +61,19 @@ async function restartOver(home: string): Promise<Company> {
     // opens a gate, so a deny-all manager with no sinks is the honest stand-in.
     gates: blackoutGates,
     chokePoints: wireGateChokePoints({ gates: blackoutGates, prompts }),
+    // A blackout scenario never trips the breaker; it asserts what survived on
+    // disk. A no-effect breaker is the honest stand-in.
+    breaker: new Breaker({
+      effects: {
+        steer: () => {},
+        pauseDeliveries: () => {},
+        interrupt: () => {},
+        stop: () => {},
+        avatar: () => {}
+      },
+      steerText: () => ''
+    }),
+    breakerActs: [],
     hire: (agentId) => hermes.ensureMailbox(agentId),
     runTurn: async () => '',
     inbox: (agentId) => {

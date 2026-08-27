@@ -16,6 +16,7 @@ import {
 } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
+import type { BreakerState } from '../shared/breaker'
 import type { AgentSpend } from '../shared/cost'
 import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
@@ -101,6 +102,8 @@ const eph: EphApi = {
       }>,
     humanQueue: () =>
       ipcRenderer.invoke(IpcChannels.watchHumanQueue) as Promise<readonly Message[]>,
+    breakerState: () =>
+      ipcRenderer.invoke(IpcChannels.watchBreaker) as Promise<readonly BreakerState[]>,
     onGateChange: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(GATE_OPEN_CHANNEL, listener)

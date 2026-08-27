@@ -137,6 +137,8 @@ export class Hermes {
   private readonly blocks = new Map<string, number>()
   /** Agents already nudged for their current pending mail — "exactly once". */
   private readonly nudged = new Set<string>()
+  /** Agents whose deliveries the breaker is holding (rung 2, ADR-0011). */
+  private readonly paused = new Set<string>()
 
   constructor(private readonly options: HermesOptions) {}
 
@@ -373,6 +375,18 @@ export class Hermes {
     const records: DeliveryRecord[] = []
 
     for (const recipient of recipients) {
+      // Breaker rung 2 (ADR-0011 "pause its Hermes inbox deliveries"). The
+      // message stays in the outbox and is delivered when the pause lifts —
+      // constraining an agent must never lose its mail.
+      if (this.paused.has(recipient)) {
+        this.agora.appendLog({
+          kind: 'breaker',
+          agentId: recipient,
+          action: 'delivery-held',
+          msgId: message.id
+        })
+        return { kind: 'skipped' }
+      }
       await this.options.faults?.('before-deliver')
       const target = path.join(this.mailboxDir(recipient), 'inbox', `${message.id}.json`)
       fs.mkdirSync(path.dirname(target), { recursive: true })
@@ -565,6 +579,21 @@ export class Hermes {
       }
     }
     return messages
+  }
+
+  /**
+   * Holds or resumes deliveries to one agent — breaker rung 2 (ADR-0011).
+   * Held mail stays in its sender's outbox and arrives when the pause lifts;
+   * constraining an agent is not the same as losing its mail.
+   */
+  setPaused(agentId: string, paused: boolean): void {
+    if (paused) this.paused.add(agentId)
+    else this.paused.delete(agentId)
+  }
+
+  /** True while the breaker is holding this agent's deliveries. */
+  isPaused(agentId: string): boolean {
+    return this.paused.has(agentId)
   }
 
   /** Unread messages waiting for an agent. */

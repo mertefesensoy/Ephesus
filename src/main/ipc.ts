@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
+import type { BreakerState } from '../shared/breaker'
 import type { AgentSpend } from '../shared/cost'
 import { gateApproveSchema, type OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
@@ -58,6 +59,8 @@ export interface IpcDeps {
   readonly gates: GateManager
   /** Mail Hermes diverted to `agora/human/` (FR-3.7). */
   humanQueue(): readonly Message[]
+  /** Per-agent breaker state (ADR-0011). */
+  breakerState(): readonly BreakerState[]
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
@@ -88,6 +91,8 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.watchApprovals, (): readonly OpenGate[] => deps.gates.list())
 
   ipcMain.handle(IpcChannels.watchHumanQueue, (): readonly Message[] => deps.humanQueue())
+
+  ipcMain.handle(IpcChannels.watchBreaker, (): readonly BreakerState[] => deps.breakerState())
 
   ipcMain.handle(IpcChannels.watchApprove, (_ev, raw: unknown) => {
     // The verdict is validated in main like every other renderer payload: the

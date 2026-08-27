@@ -14,6 +14,7 @@ import { Agora, type FaultPoint } from '../../src/main/agora'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { Breaker } from '../../src/main/watch/breaker'
 import { GateManager, wireGateChokePoints } from '../../src/main/watch/gates'
 import { FAKE_ENGINE_CLI } from '../fakes/fake-adapter'
 
@@ -49,6 +50,10 @@ export interface Company {
   readonly gates: GateManager
   /** The choke-point submitters, for scenarios that drive spend directly. */
   readonly chokePoints: ReturnType<typeof wireGateChokePoints>
+  /** The circuit breaker, fed by the same event plane the floor reads. */
+  readonly breaker: Breaker
+  /** What each rung actually did, in order — S-BREAKER reads this. */
+  readonly breakerActs: readonly string[]
   /** Gives an agent a mailbox and a live hook token. */
   hire(agentId: string): void
   /** Runs the REAL fake-engine binary for one agent with a scripted turn. */
@@ -134,6 +139,40 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   // with the production wiring deleted — found by review.
   const chokePoints = wireGateChokePoints({ gates, prompts })
 
+  // The breaker (ADR-0011), wired to the same effects `index.ts` wires — the
+  // acts are recorded rather than performed, because a scenario cannot kill a
+  // process it also needs to assert against.
+  const breakerActs: string[] = []
+  const breaker = new Breaker({
+    effects: {
+      steer: (agentId, text) => breakerActs.push(`steer:${agentId}:${text.slice(0, 40)}`),
+      pauseDeliveries: (agentId, paused) => {
+        breakerActs.push(`pause:${agentId}:${String(paused)}`)
+        hermes.setPaused(agentId, paused)
+      },
+      interrupt: (agentId) => breakerActs.push(`interrupt:${agentId}`),
+      stop: (agentId) => breakerActs.push(`stop:${agentId}`),
+      avatar: (agentId, event) =>
+        breakerActs.push(
+          `avatar:${agentId}:${event.kind === 'breaker' ? `rung${String(event.rung)}` : 'recover'}`
+        )
+    },
+    steerText: (hit) =>
+      prompts
+        .render(
+          path.join(
+            'watch',
+            `steer-${hit.detail['source'] === 'stop-loop' ? 'stop-loop' : hit.signal}.md`
+          ),
+          Object.fromEntries(Object.entries(hit.detail).map(([k, v]) => [k, String(v)]))
+        )
+        .trim(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`breaker ${String(draft['action'] ?? 'trip')}`)
+    }
+  })
+
   const hermes = new Hermes({
     agora,
     prompts,
@@ -141,7 +180,11 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     ...(options.blockCap === undefined ? {} : { blockCap: options.blockCap }),
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
     ...(options.nudge ? { nudge: options.nudge } : {}),
-    ...(options.onPathology ? { onPathology: options.onPathology } : {}),
+    onPathology: (agentId, blocks) => {
+      // ADR-0013's signal, consumed by the breaker as `index.ts` consumes it.
+      breaker.notePathology(agentId, blocks)
+      options.onPathology?.(agentId, blocks)
+    },
     onNeedsHuman: ({ message }) =>
       chokePoints.submitNeedsHuman({
         from: message.from,
@@ -156,6 +199,21 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       hookEvents.push(record)
       if (record.envelope.event === 'notification') {
         chokePoints.submitNotification(record.envelope.agentId, record.envelope.payload)
+      }
+      // Span capture (FR-11.6) off the same tool stream the floor reads, wired
+      // as `index.ts` wires it.
+      const payload = record.envelope.payload as Record<string, unknown> | null
+      const tool = typeof payload?.['tool'] === 'string' ? payload['tool'] : null
+      if (tool !== null && record.envelope.event === 'pre-tool') {
+        breaker.openSpan(record.envelope.agentId, tool, payload)
+      }
+      if (tool !== null && record.envelope.event === 'post-tool') {
+        breaker.closeSpan(
+          record.envelope.agentId,
+          tool,
+          payload?.['error'] === undefined ? 'ok' : 'error'
+        )
+        breaker.evaluate(record.envelope.agentId)
       }
       return record.envelope.event === 'stop'
         ? hermes
@@ -177,6 +235,8 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     hookEvents,
     gates,
     chokePoints,
+    breaker,
+    breakerActs,
 
     hire(agentId) {
       hermes.ensureMailbox(agentId)
