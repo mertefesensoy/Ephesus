@@ -7,6 +7,7 @@ import {
   LOG_APPEND_CHANNEL,
   ptyDataChannel,
   ptyExitChannel,
+  type AgoraHealth,
   type AvatarUpdate,
   type ConfigSnapshot,
   type EphApi,
@@ -61,7 +62,8 @@ const eph: EphApi = {
       const listener = (): void => cb()
       ipcRenderer.on(LOG_APPEND_CHANNEL, listener)
       return () => ipcRenderer.removeListener(LOG_APPEND_CHANNEL, listener)
-    }
+    },
+    health: () => ipcRenderer.invoke(IpcChannels.agoraHealth) as Promise<AgoraHealth>
   },
   commands: {
     list: () => ipcRenderer.invoke(IpcChannels.commandsList) as Promise<readonly CommandState[]>,

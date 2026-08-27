@@ -3,11 +3,13 @@ import { app, BrowserWindow, screen, shell } from 'electron'
 import type { AgentCard } from '../shared/agents'
 import type { AvatarSnapshot } from '../shared/avatar'
 import type { CommandState } from '../shared/commands'
+import { BLOCK_CAP_ENV, blockCapFromEnv } from '../shared/autonomy'
 import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
   LOG_APPEND_CHANNEL,
+  type AgoraHealth,
   type HooksState
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
@@ -34,6 +36,19 @@ let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
+
+/**
+ * Runtime degradations, bounded and surfaced through `agora:health` so every
+ * give-up is a visible UI state (invariant §7) — `console.warn` alone is a
+ * developer console the Architect never sees.
+ */
+const RUNTIME_HEALTH_LIMIT = 50
+const runtimeHealth: { at: number; source: string; detail: string }[] = []
+function reportDegradation(source: string, detail: string): void {
+  console.warn(`${source}: ${detail}`)
+  runtimeHealth.push({ at: Date.now(), source, detail })
+  if (runtimeHealth.length > RUNTIME_HEALTH_LIMIT) runtimeHealth.shift()
+}
 
 /**
  * The floor's only source of motion (ADR-0002). It is constructed before the
@@ -73,13 +88,22 @@ const hookServer = new HookServer({
     // The autonomy hinge (ADR-0013): a finished turn continues only if the
     // guards allow it. Returning nothing lets the turn end normally.
     if (envelope.event === 'stop') {
-      return hermes?.decideOnStop(envelope.agentId, envelope.payload) ?? undefined
+      return hermes
+        ? hermes
+            .decideOnStop(envelope.agentId, envelope.payload)
+            .then((reply) => reply ?? undefined)
+        : undefined
     }
     return undefined
   },
   onRejected: ({ agentId, status, reason }) => {
     console.warn(`hook rejected [${agentId ?? 'unknown-agent'}] ${status}: ${reason}`)
-  }
+  },
+  onEventError: (err) =>
+    reportDegradation(
+      'hooks',
+      `event handler failed: ${err instanceof Error ? err.message : String(err)}`
+    )
 })
 
 function createWindow(): void {
@@ -155,7 +179,7 @@ void app.whenReady().then(async () => {
     )
   }
   for (const failure of sweep.failed) {
-    console.warn(`settings sweep: could not restore ${failure.path}: ${failure.reason}`)
+    reportDegradation('settings', `sweep could not restore ${failure.path}: ${failure.reason}`)
   }
 
   // The Agora is a git repo committed only by this process (ADR-0004). It is
@@ -164,7 +188,7 @@ void app.whenReady().then(async () => {
     root: path.join(home.root, 'agora'),
     prompts,
     onCommitError: (failure) =>
-      console.warn(`agora: gave up committing "${failure.subject}": ${failure.reason}`)
+      reportDegradation('agora', `gave up committing "${failure.subject}": ${failure.reason}`)
   })
   await agora.ensureRepo()
   const reconciled = await agora.reconcile()
@@ -177,22 +201,36 @@ void app.whenReady().then(async () => {
       settingsRegistry: db
     })
   )
+  // ADR-0013: the block cap is env-configurable; an invalid value can never
+  // silently disable the cap — it is refused visibly and the default holds.
+  const envCap = blockCapFromEnv(process.env)
+  if (envCap.cap === undefined && envCap.invalid !== undefined) {
+    reportDegradation(
+      'autonomy',
+      `ignoring invalid ${BLOCK_CAP_ENV}="${envCap.invalid}" — default cap applies`
+    )
+  }
+
   hermes = new Hermes({
     agora,
     prompts,
+    ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
     nudge: (agentId, text) => commandQueue.submit(agentId, text),
     isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',
     onPathology: (agentId, blocks) => {
       // The breaker (ADR-0011) consumes this in M3; until then it is at least
       // visible rather than an invisible overnight loop (R2).
-      console.warn(`autonomy: ${agentId} has been continued ${blocks} times this session`)
+      reportDegradation('autonomy', `${agentId} has been continued ${blocks} times this session`)
       agora?.appendLog({ kind: 'breaker', agentId, signal: 'stop-loop', blocks, rung: 1 })
     },
     onBounced: ({ original, reason }) =>
-      console.warn(`hermes bounce [${original.id}] to "${original.to}": ${reason}`),
+      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
     onSweepError: (err: unknown) =>
-      console.warn(`hermes sweep failed: ${err instanceof Error ? err.message : String(err)}`),
-    onRejected: ({ file, reason }) => console.warn(`hermes rejected ${file}: ${reason}`)
+      reportDegradation(
+        'hermes',
+        `sweep failed: ${err instanceof Error ? err.message : String(err)}`
+      ),
+    onRejected: ({ file, reason }) => reportDegradation('hermes', `rejected ${file}: ${reason}`)
   })
   hermes.start()
 
@@ -203,17 +241,27 @@ void app.whenReady().then(async () => {
     prompts,
     agoraRoot: agora.root,
     onExitError: (agentId, err) =>
-      console.warn(
-        `agent teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
+      reportDegradation(
+        'agents',
+        `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
     onRosterChange: (agentId, entry) => {
       if (!agora) return
-      const registry = agora.registry()
-      const agents = { ...registry.agents }
-      if (entry) agents[agentId] = entry
-      else delete agents[agentId]
-      agora.writeRegistry({ ...registry, agents })
-      agora.commitSoon(`roster: ${agentId}`)
+      try {
+        const registry = agora.registry()
+        const agents = { ...registry.agents }
+        if (entry) agents[agentId] = entry
+        else delete agents[agentId]
+        agora.writeRegistry({ ...registry, agents })
+        agora.commitSoon(`roster: ${agentId}`)
+      } catch (err) {
+        // A corrupt registry refuses overwrite (evidence preservation); the
+        // company keeps running and the refusal is a visible degradation.
+        reportDegradation(
+          'agora',
+          `roster update for ${agentId} refused: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
@@ -247,6 +295,11 @@ void app.whenReady().then(async () => {
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),
       failure: hookFailure
+    }),
+    agoraHealth: (): AgoraHealth => ({
+      fileWarnings: agora?.fileWarnings() ?? [],
+      commitFailures: agora?.commitFailures() ?? [],
+      runtime: [...runtimeHealth]
     })
   })
   createWindow()

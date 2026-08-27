@@ -59,8 +59,14 @@ Rules the harness enforces, so getting them wrong means your message is refused:
 
 ## How to read your messages
 
-Your `inbox/` holds one JSON file per message. Read them, act on them, and reply
-through your `outbox/` when the act obliges you to.
+The harness hands you new mail: when you finish a turn with messages waiting, or
+when mail arrives while you are idle, the messages' full content is delivered
+into your session and the files are archived to `inbox/.done/` in the same act.
+Act on what you are handed, and reply through your `outbox/` when the act
+obliges you to.
+
+You do not need to poll `inbox/` yourself; anything still sitting there simply
+has not been handed to you yet, and `inbox/.done/` is your read history.
 
 ## How you communicate
 

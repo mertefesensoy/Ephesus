@@ -32,10 +32,13 @@ describe('S-WAKE', () => {
     ])
     await company.hermes.sweep()
 
-    expect(company.hermes.wakeCheck()).toEqual(['agent.b'])
-    // Five more passes while the same mail sits unread: still one nudge.
-    for (let i = 0; i < 5; i += 1) company.hermes.wakeCheck()
+    expect(await company.hermes.wakeCheck()).toEqual(['agent.b'])
+    // Five more passes after the hand-over: still one nudge.
+    for (let i = 0; i < 5; i += 1) await company.hermes.wakeCheck()
     expect(nudges).toEqual(['agent.b'])
+    // Hand-over consumption: the nudge carried the mail, the file is archived.
+    expect(company.inbox('agent.b')).toEqual([])
+    expect(company.done('agent.b')).toHaveLength(1)
 
     expect(company.agora.readLog().filter((e) => e['event'] === 'wake')).toHaveLength(1)
   })
@@ -51,8 +54,10 @@ describe('S-WAKE', () => {
     ])
     await company.hermes.sweep()
 
-    expect(company.hermes.wakeCheck()).toEqual([])
+    expect(await company.hermes.wakeCheck()).toEqual([])
     expect(nudges).toEqual([])
+    // Not handed over either: a busy agent's mail stays pending for its Stop.
+    expect(company.inbox('agent.b')).toHaveLength(1)
   })
 
   it('wakes again for the next batch, once the first is consumed', async () => {
@@ -64,16 +69,15 @@ describe('S-WAKE', () => {
       sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b' }))
     ])
     await company.hermes.sweep()
-    expect(company.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(await company.hermes.wakeCheck()).toEqual(['agent.b'])
 
-    await company.hermes.consumeInbox('agent.b')
-    expect(company.hermes.wakeCheck()).toEqual([])
+    expect(await company.hermes.wakeCheck()).toEqual([])
 
     await company.runTurn('agent.a', [
       sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b' }))
     ])
     await company.hermes.sweep()
-    expect(company.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(await company.hermes.wakeCheck()).toEqual(['agent.b'])
   })
 
   it('is idempotent on replay: a redelivered id is never consumed twice', async () => {

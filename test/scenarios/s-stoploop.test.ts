@@ -108,11 +108,20 @@ describe('S-STOPLOOP', () => {
   })
 
   it('honours the hard block cap even though the mail never goes away', async () => {
-    company = await withMail({ blockCap: 4 })
+    company = await startCompany({ blockCap: 4 })
+    company.hire('agent.a')
+    company.hire('agent.b')
     const endpoint = company.hookServer.endpoint() ?? ''
 
+    // The pathological case: a fresh message lands before every Stop, round
+    // after round. (Each block hands its mail over — ADR-0003 hand-over — so
+    // the loop only persists while mail keeps arriving.)
     const replies: string[] = []
     for (let turn = 0; turn < 10; turn += 1) {
+      await company.runTurn('agent.a', [
+        sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b', act: 'request' }))
+      ])
+      await company.hermes.sweep()
       replies.push(await fireStopHook(endpoint, 'agent.b', { session_id: 's1' }))
     }
 
@@ -121,19 +130,26 @@ describe('S-STOPLOOP', () => {
     expect(replies.slice(4).every((r) => r === '')).toBe(true)
     expect(company.hermes.blockCount('agent.b')).toBe(4)
 
-    // The mail really is still there — the cap stopped the loop, not the work.
-    expect(company.hermes.pendingMailCount('agent.b')).toBe(1)
+    // The mail past the cap really is still there — the cap stopped the loop,
+    // and only handed-over rounds were archived: 4 consumed, 6 still pending.
+    expect(company.hermes.pendingMailCount('agent.b')).toBe(6)
   })
 
   it('signals the breaker at rung 1 before the cap fires (ADR-0011)', async () => {
     const signals: { agentId: string; blocks: number }[] = []
-    company = await withMail({
+    company = await startCompany({
       blockCap: DEFAULT_BLOCK_CAP,
       onPathology: (agentId, blocks) => signals.push({ agentId, blocks })
     })
+    company.hire('agent.a')
+    company.hire('agent.b')
     const endpoint = company.hookServer.endpoint() ?? ''
 
     for (let turn = 0; turn < PATHOLOGY_SIGNAL_AT; turn += 1) {
+      await company.runTurn('agent.a', [
+        sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b', act: 'request' }))
+      ])
+      await company.hermes.sweep()
       await fireStopHook(endpoint, 'agent.b', { session_id: 's1' })
     }
 
@@ -150,6 +166,11 @@ describe('S-STOPLOOP', () => {
 
     await fireStopHook(endpoint, 'agent.b', { session_id: 's1' })
     await fireStopHook(endpoint, 'agent.b', { session_id: 's1', stop_hook_active: true })
+    // The first block handed its mail over; a fresh message lands before round 3.
+    await company.runTurn('agent.a', [
+      sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b', act: 'request' }))
+    ])
+    await company.hermes.sweep()
     await fireStopHook(endpoint, 'agent.b', { session_id: 's1' })
     await fireStopHook(endpoint, 'agent.b', { session_id: 's1' })
 
@@ -170,6 +191,11 @@ describe('S-STOPLOOP', () => {
 
     company.hermes.resetSession('agent.b')
 
+    // The first block handed its mail over; the respawned session gets new mail.
+    await company.runTurn('agent.a', [
+      sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b', act: 'request' }))
+    ])
+    await company.hermes.sweep()
     expect(await fireStopHook(endpoint, 'agent.b', { session_id: 's2' })).toContain('block')
   })
 })

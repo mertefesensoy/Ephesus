@@ -2,7 +2,13 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
-import { IpcChannels, type AvatarUpdate, type ConfigSnapshot, type HooksState } from '../shared/ipc'
+import {
+  IpcChannels,
+  type AgoraHealth,
+  type AvatarUpdate,
+  type ConfigSnapshot,
+  type HooksState
+} from '../shared/ipc'
 import { ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
@@ -35,6 +41,8 @@ export interface IpcDeps {
   readonly agora: Agora
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
+  /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
+  agoraHealth(): AgoraHealth
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -59,6 +67,8 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.hooksState, (): HooksState => deps.hooksState())
+
+  ipcMain.handle(IpcChannels.agoraHealth, (): AgoraHealth => deps.agoraHealth())
 
   ipcMain.handle(IpcChannels.configGet, (): ConfigSnapshot => {
     const home = getHome()

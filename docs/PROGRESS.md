@@ -578,8 +578,10 @@ Execute in order; every package tests against the fake engine per-PR.
 Both exit criteria were verified **by running them**, against the committed tree.
 
 **Criterion 1 — "S-BLACKOUT, S-LIVELOCK, S-BOUNCE, S-WAKE, S-STOPLOOP pass."**
-MET. `npx vitest run test/scenarios` → 26 passed (26): S-BLACKOUT 7 ·
-S-LIVELOCK 3 · S-BOUNCE 4 · S-WAKE 4 · S-STOPLOOP 7, plus the harness anchor.
+MET. `npx vitest run test/scenarios` → 26 passed (26): S-BLACKOUT 6 ·
+S-LIVELOCK 3 · S-BOUNCE 4 · S-WAKE 4 · S-STOPLOOP 7 + its own real-shim
+anchor, plus the harness smoke anchor. *(Breakdown corrected at the close-out
+audit — the total was always 26, the per-suite attribution was wrong.)*
 All five run REAL spawned `fake-engine` processes over real git, a real socket
 and real files, and S-STOPLOOP drives the REAL `eph-hook.mjs` shim as a
 subprocess. Run repeatedly clean.
@@ -626,8 +628,11 @@ company down. Three regression tests, each with a `process.on(
 § Close-out fix.
 
 The milestone is closed on the fixed tree, not the red one. **CI green on
-`3505a46`** (run 33019889138); the five suites and the full 586 also run green
-on Linux there, which is where the rejection surfaced and Windows did not.
+`3505a46`** (run 33019889138); the five suites and the full suite also run
+green on Linux there, which is where the rejection surfaced and Windows did
+not. *(Corrected at the close-out audit: the counts are platform-conditional —
+Linux runs 587 passed / 2 skipped, Windows 586 / 3, the same 589 tests; the
+"586" gate figure recorded above was the Windows run.)*
 
 **Debt swept at close:** zero TODO/FIXME/HACK markers in
 `src|shims|scripts|test|prompts`; every M2 package ticked with evidence. Doc
@@ -657,6 +662,85 @@ deserves ratification.
   temple seat arrive with M3.
 - The Architect's `human` queue at `agora/human/` accumulates diverted mail with
   no UI to read it; the approvals surface lands in M3.
+
+### M2 close-out audit (2026-08-27) — verdict: DONE, with audit fixes landed
+
+Independent two-agent audit at milestone close, the M0/M1 pattern:
+
+- **spec-verifier** (verification by execution): **M2 stands as DONE on its
+  stated exit criteria.** Typecheck · zero-warning lint · invariant tripwire
+  (proven to bite on a planted probe) · full suite green **twice** with no
+  flake · all five scenario suites 26/26 against real spawned processes, real
+  git, a real socket and the real shim · single-committer and append-only hold
+  mechanically · close-out regression tests pass · zero debt markers · clean
+  temp-home hygiene. Live-`claude` demos and CI citations are not re-runnable
+  in the audit environment; their records were checked for internal
+  consistency. Two record errata found and corrected in place above (scenario
+  breakdown; the "586 on Linux" figure).
+- **doc-guardian** (design conformance): **conforms on the data plane** —
+  schemas field-for-field with SDD §4.1–4.4, committer, transport, and their
+  tests faithful — **but the autonomy loop as wired did not yet conform**:
+  three violations plus four contained ones and two undocumented deviations,
+  all listed below.
+
+**Findings FIXED at close (each with named regression tests; gate after fixes:
+typecheck PASS · lint PASS · invariants PASS · tests 595 passed / 2 skipped,
+run twice · scenarios 26/26):**
+
+1. **The periodic sweep timer still carried the close-out's own harness-killer**
+   (`setInterval(() => void this.sweep(), …)`) — the close-out fix guarded the
+   watcher path and missed the timer path; proven process-fatal by a live
+   probe. Both paths now route through one guarded tick.
+2. **The wake watchdog was dead code in the shipped app** — `wakeCheck()` had
+   zero production callers; only test drivers ever ran it, so mail landing on
+   an idle agent woke nobody in the app as committed. The production tick now
+   chains `wakeCheck` onto every sweep (watcher and timer), with a wiring test
+   that nudges without any test driver.
+3. **Inbox consumption had no owner** — `consumeInbox()` (`.done/` + cursor)
+   was never called in production and PROTOCOL.md never mentioned `.done/`, so
+   a protocol-following agent re-triggered the Stop block on the same handled
+   mail until the cap — the loop manufactured the pathology its guards exist
+   to prevent. **Architect verdict: hand-over consumption.** `decideOnStop`
+   and `wakeCheck` now consume the inbox in the same act that hands the
+   messages' content to the session (rendered into the block reason / wake
+   nudge via the `{{messages}}` slot); PROTOCOL.md documents that handed-over
+   mail is already archived. S-WAKE and S-STOPLOOP updated to the hand-over
+   semantics (the cap case now feeds fresh mail per round, which is the
+   pathology as ADR-0013 actually describes it).
+4. **Agora degradations never reached a UI-visible surface (invariant §7)** —
+   `fileWarnings()`/`commitFailures()` had no consumers and every runtime
+   error callback died at `console.warn`. **Architect verdict: fix now.** New
+   `agora:health` IPC + a status-strip chip (`● agora: ok` /
+   `⚠ agora: N issues` with details on hover); all runtime callbacks report
+   through a bounded degradation collector.
+5. **A corrupt `registry.json` was silently overwritten on the next spawn**,
+   destroying the evidence the M2.2 decision promised to keep — schema files
+   that failed to parse now refuse overwrite until repaired (visible via the
+   health surface), with a repair-lifts-the-refusal test.
+6. **Secret-shaped fixture** (`ghp_…` prefix) renamed scanner-neutral, per the
+   project's own M1-audit ruling.
+7. **`PROTOCOL.md` was seeded with a bare `writeFileSync`** onto a live shared
+   path — now `writeFileAtomic` like every other agent-read file.
+8. **Bounce refusal text was a string literal** (invariant §8) — now rendered
+   from `prompts/hermes/bounce-subject.md` / `bounce-body.md`; the no-prompts
+   test fallback is now a mechanical serialization, not prose.
+9. **The block cap was not env-configurable** though ADR-0013 requires it —
+   `EPH_BLOCK_CAP` now parsed and validated (`blockCapFromEnv`, table-tested);
+   an invalid value can never disable the cap and is reported visibly.
+
+**Recorded, not fixed (deliberate, with reasons):**
+- The router-authored bounce carries `from: <original sender>` because SDD
+  §4.4 gives the router no legal identity — a schema gap for M3 to consider
+  alongside Artemis's proxy role (documented deviation).
+- Hook-server events also flow to the health surface via `onEventError`; the
+  engine always gets fail-open `{ok:true}` (SDD §10).
+- Nits owed forward: ActivityPanel's `2px` padding + single-border chrome vs
+  UI-DESIGN §4's spacing scale and 3-layer anatomy (ride M3.6's UI pass);
+  Hermes messages and log lines carry no `schemaVersion` because SDD §4.3/§4.4
+  omit it (SDD wins by precedence; contradiction now recorded); the Activity
+  tab's 300-row window and `EventLog.read()`'s full-file re-parse are fine at
+  M2 scale but will meet SDD §11's budgets at 30-agent scale (M5 org-layer
+  territory).
 
 ## M3 — Artemis + the Watch
 

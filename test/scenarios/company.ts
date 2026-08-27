@@ -125,7 +125,9 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     onEvent: (record) => {
       hookEvents.push(record)
       return record.envelope.event === 'stop'
-        ? (hermes.decideOnStop(record.envelope.agentId, record.envelope.payload) ?? undefined)
+        ? hermes
+            .decideOnStop(record.envelope.agentId, record.envelope.payload)
+            .then((reply) => reply ?? undefined)
         : undefined
     },
     onRejected: () => {}

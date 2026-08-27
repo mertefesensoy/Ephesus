@@ -84,6 +84,39 @@ describe('agora reads (SDD §5)', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe('{ not json')
   })
 
+  it('refuses to overwrite a corrupt roster — the evidence survives the next write', async () => {
+    // Found by the M2 close-out audit: the first roster write after corruption
+    // atomically replaced the corrupt file with the empty default, destroying
+    // the on-disk evidence the degradation promised to keep.
+    const agora = await rig()
+    const file = agora.pathOf('registry.json')
+    fs.writeFileSync(file, '{ not json', 'utf8')
+    expect(agora.registry().agents).toEqual({})
+
+    expect(() =>
+      agora.writeRegistry({
+        schemaVersion: REGISTRY_SCHEMA_VERSION,
+        orchestratorId: null,
+        agents: { 'agent.mason': entry }
+      })
+    ).toThrow(/refusing to overwrite registry\.json/)
+    expect(fs.readFileSync(file, 'utf8')).toBe('{ not json')
+
+    // A repaired file lifts the refusal on the next read.
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({ schemaVersion: REGISTRY_SCHEMA_VERSION, orchestratorId: null, agents: {} })}\n`,
+      'utf8'
+    )
+    expect(agora.registry().agents).toEqual({})
+    agora.writeRegistry({
+      schemaVersion: REGISTRY_SCHEMA_VERSION,
+      orchestratorId: null,
+      agents: { 'agent.mason': entry }
+    })
+    expect(agora.registry().agents['agent.mason']).toEqual(entry)
+  })
+
   it('degrades visibly on a ledger that fails validation', async () => {
     const agora = await rig()
     fs.writeFileSync(

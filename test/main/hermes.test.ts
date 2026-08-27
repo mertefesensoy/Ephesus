@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import { Agora } from '../../src/main/agora'
-import { DONE_DIR, Hermes, REJECTED_DIR, type HermesFaultPoint } from '../../src/main/hermes'
+import {
+  DONE_DIR,
+  Hermes,
+  REJECTED_DIR,
+  type HermesFaultPoint,
+  type StopReply
+} from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 import { PATHOLOGY_SIGNAL_AT } from '../../src/shared/autonomy'
@@ -360,6 +366,69 @@ describe('Hermes — a sweep nobody awaits', () => {
     expect((seen[0] as Error).message).toMatch(/watcher-time blackout/)
     expect(unhandled).toEqual([])
   })
+
+  it('reports a timer-triggered failure instead of killing the harness', async () => {
+    // The M2 close-out fixed the watcher path but missed this one: the periodic
+    // sweep timer fired `void this.sweep()`, so a delivery failure on a tick
+    // with no watcher armed was an unhandledRejection — fatal to the Electron
+    // main process. Found by the M2 close-out audit.
+    const seen: unknown[] = []
+    const r = await rig({
+      faults: (point) => {
+        if (point === 'before-deliver') throw new Error('timer-time blackout')
+      },
+      onSweepError: (err) => seen.push(err)
+    })
+    // Deliberately NO watcher: only the timer can find this mail.
+    r.hermes.start()
+
+    const unhandled: unknown[] = []
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', capture)
+    try {
+      r.send('agent.a', message())
+      for (let i = 0; i < 200 && seen.length === 0; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      await new Promise((resolve) => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      process.off('unhandledRejection', capture)
+      r.hermes.stop()
+    }
+
+    expect(seen.length).toBeGreaterThanOrEqual(1)
+    expect((seen[0] as Error).message).toMatch(/timer-time blackout/)
+    expect(unhandled).toEqual([])
+  })
+
+  it('wakes an idle agent from the production tick, no test driver involved', async () => {
+    // The M2 close-out audit found wakeCheck() had zero production callers —
+    // the watchdog only ran when a test called it. The tick now chains it onto
+    // every sweep, so this asserts the app's own wiring wakes the agent.
+    const nudges: string[] = []
+    const r = await rig({
+      isIdle: () => true,
+      nudge: (agentId) => {
+        nudges.push(agentId)
+      }
+    })
+    r.hermes.watch('agent.a')
+    r.hermes.start()
+    try {
+      r.send('agent.a', message())
+      for (let i = 0; i < 200 && nudges.length === 0; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+    } finally {
+      r.hermes.stop()
+    }
+
+    expect(nudges).toEqual(['agent.b'])
+    expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
+  })
 })
 
 describe('Hermes — the sweep backs up fs-watch (R6)', () => {
@@ -476,7 +545,7 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
 describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
   it('lets a turn end when nothing is pending', async () => {
     const r = await rig()
-    expect(r.hermes.decideOnStop('agent.b', {})).toBeNull()
+    expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
   })
 
   it('blocks a turn that has unread mail, handing back a reason (S-STOPLOOP)', async () => {
@@ -484,11 +553,17 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     r.send('agent.a', message())
     await r.hermes.sweep()
 
-    const reply = r.hermes.decideOnStop('agent.b', {})
+    const reply = await r.hermes.decideOnStop('agent.b', {})
 
     expect(reply?.decision).toBe('block')
     expect(reply?.reason).toContain('1')
     expect(r.hermes.blockCount('agent.b')).toBe(1)
+    // Hand-over consumption (ADR-0003, close-out audit): the mail travels in
+    // the reason and its file is archived in the same act — a second Stop with
+    // nothing new can never re-block on the same message.
+    expect(reply?.reason).toContain(message().subject)
+    expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
+    expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
   })
 
   it('never re-blocks a turn the hook itself continued (guard 1)', async () => {
@@ -496,17 +571,20 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     r.send('agent.a', message())
     await r.hermes.sweep()
 
-    expect(r.hermes.decideOnStop('agent.b', { stop_hook_active: true })).toBeNull()
+    expect(await r.hermes.decideOnStop('agent.b', { stop_hook_active: true })).toBeNull()
     expect(r.hermes.blockCount('agent.b')).toBe(0)
   })
 
   it('stops blocking at the cap however much mail keeps arriving (guard 2, S-STOPLOOP)', async () => {
     const r = await rig({ blockCap: 3 })
-    r.send('agent.a', message())
-    await r.hermes.sweep()
 
-    // The pathological case: mail never runs out, the agent never consumes it.
-    const decisions = [1, 2, 3, 4, 5].map(() => r.hermes.decideOnStop('agent.b', {}))
+    // The pathological case: mail keeps arriving, round after round.
+    const decisions: (StopReply | null)[] = []
+    for (let i = 0; i < 5; i += 1) {
+      r.send('agent.a', message())
+      await r.hermes.sweep()
+      decisions.push(await r.hermes.decideOnStop('agent.b', {}))
+    }
 
     expect(decisions.slice(0, 3).every((d) => d?.decision === 'block')).toBe(true)
     expect(decisions.slice(3).every((d) => d === null)).toBe(true)
@@ -519,33 +597,37 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
       blockCap: 50,
       onPathology: (agentId, blocks) => signals.push({ agentId, blocks })
     })
-    r.send('agent.a', message())
-    await r.hermes.sweep()
-
-    for (let i = 0; i < PATHOLOGY_SIGNAL_AT; i += 1) r.hermes.decideOnStop('agent.b', {})
+    for (let i = 0; i < PATHOLOGY_SIGNAL_AT; i += 1) {
+      r.send('agent.a', message())
+      await r.hermes.sweep()
+      await r.hermes.decideOnStop('agent.b', {})
+    }
 
     expect(signals.at(-1)).toEqual({ agentId: 'agent.b', blocks: PATHOLOGY_SIGNAL_AT })
   })
 
   it('gives a respawned agent a fresh block budget', async () => {
     const r = await rig({ blockCap: 2 })
-    r.send('agent.a', message())
-    await r.hermes.sweep()
-    r.hermes.decideOnStop('agent.b', {})
-    r.hermes.decideOnStop('agent.b', {})
-    expect(r.hermes.decideOnStop('agent.b', {})).toBeNull()
+    const decide = async (): Promise<StopReply | null> => {
+      r.send('agent.a', message())
+      await r.hermes.sweep()
+      return r.hermes.decideOnStop('agent.b', {})
+    }
+    expect((await decide())?.decision).toBe('block')
+    expect((await decide())?.decision).toBe('block')
+    expect(await decide()).toBeNull()
 
     r.hermes.resetSession('agent.b')
 
-    expect(r.hermes.decideOnStop('agent.b', {})?.decision).toBe('block')
+    expect((await decide())?.decision).toBe('block')
   })
 
   it('logs every stop decision, so a silent loop is impossible', async () => {
     const r = await rig()
     r.send('agent.a', message())
     await r.hermes.sweep()
-    r.hermes.decideOnStop('agent.b', {})
-    r.hermes.decideOnStop('agent.c', {})
+    await r.hermes.decideOnStop('agent.b', {})
+    await r.hermes.decideOnStop('agent.c', {})
 
     const stops = r.agora.readLog().filter((e) => e['kind'] === 'hook' && e['event'] === 'stop')
     expect(stops).toHaveLength(2)
@@ -564,12 +646,15 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     r.send('agent.a', message())
     await r.hermes.sweep()
 
-    expect(r.hermes.wakeCheck()).toEqual(['agent.b'])
-    // Called again while the same mail sits unread: no second nudge.
-    expect(r.hermes.wakeCheck()).toEqual([])
-    expect(r.hermes.wakeCheck()).toEqual([])
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
+    // Called again after the hand-over: no second nudge, nothing left pending.
+    expect(await r.hermes.wakeCheck()).toEqual([])
+    expect(await r.hermes.wakeCheck()).toEqual([])
     expect(nudges).toHaveLength(1)
     expect(nudges[0]?.agentId).toBe('agent.b')
+    // The nudge carries the mail, and the file is archived in the same act.
+    expect(nudges[0]?.text).toContain(message().subject)
+    expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
   })
 
   it('suppresses the nudge for an agent that is not idle', async () => {
@@ -577,33 +662,32 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     r.send('agent.a', message())
     await r.hermes.sweep()
 
-    expect(r.hermes.wakeCheck()).toEqual([])
+    expect(await r.hermes.wakeCheck()).toEqual([])
   })
 
   it('nudges again for the NEXT batch of mail, once the first is consumed', async () => {
     const r = await rig({ isIdle: () => true, nudge: () => {} })
     r.send('agent.a', message())
     await r.hermes.sweep()
-    expect(r.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
 
-    await r.hermes.consumeInbox('agent.b')
-    expect(r.hermes.wakeCheck()).toEqual([])
+    expect(await r.hermes.wakeCheck()).toEqual([])
 
     r.send('agent.a', message())
     await r.hermes.sweep()
-    expect(r.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
   })
 
   it('does not nudge an agent with an empty inbox', async () => {
     const r = await rig({ isIdle: () => true, nudge: () => {} })
-    expect(r.hermes.wakeCheck()).toEqual([])
+    expect(await r.hermes.wakeCheck()).toEqual([])
   })
 
   it('records each wake in the log', async () => {
     const r = await rig({ isIdle: () => true, nudge: () => {} })
     r.send('agent.a', message())
     await r.hermes.sweep()
-    r.hermes.wakeCheck()
+    await r.hermes.wakeCheck()
 
     expect(r.agora.readLog().some((e) => e['kind'] === 'hook' && e['event'] === 'wake')).toBe(true)
   })

@@ -106,7 +106,7 @@ describe('registry (SDD §4.1)', () => {
   it('refuses a secret VALUE smuggled into envGrants (ADR-0010)', () => {
     // Grants are NAMES. A lowercase value-looking string is not a grant name.
     expect(
-      registryEntrySchema.safeParse({ ...entry, envGrants: ['ghp_realtokenvalue'] }).success
+      registryEntrySchema.safeParse({ ...entry, envGrants: ['not-shaped-like-an-env-var'] }).success
     ).toBe(false)
   })
 

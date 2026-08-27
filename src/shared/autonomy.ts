@@ -30,6 +30,25 @@
  */
 export const DEFAULT_BLOCK_CAP = 20
 
+/** Environment variable holding the ADR-0013 "env-configurable" block cap. */
+export const BLOCK_CAP_ENV = 'EPH_BLOCK_CAP'
+
+/**
+ * ADR-0013 makes the cap env-configurable. A positive integer wins; anything
+ * else (unset, empty, junk, zero, negative) is refused so the cap can never be
+ * accidentally disabled — the caller falls back to `DEFAULT_BLOCK_CAP` and may
+ * surface the refusal.
+ */
+export function blockCapFromEnv(
+  env: Readonly<Record<string, string | undefined>>
+): { cap: number } | { cap: undefined; invalid?: string } {
+  const raw = env[BLOCK_CAP_ENV]
+  if (raw === undefined || raw === '') return { cap: undefined }
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed <= 0) return { cap: undefined, invalid: raw }
+  return { cap: parsed }
+}
+
 /**
  * Blocks-in-a-session at which the loop looks pathological and the breaker
  * should hear about it. Deliberately *below* the cap: the point is to signal

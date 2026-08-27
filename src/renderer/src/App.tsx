@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import type { ConfigSnapshot, HooksState } from '../../shared/ipc'
+import type { AgoraHealth, ConfigSnapshot, HooksState } from '../../shared/ipc'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
@@ -11,6 +11,15 @@ type BridgeState =
   | { kind: 'ready'; snapshot: ConfigSnapshot }
   | { kind: 'unavailable'; reason: string }
 
+/** Flattens the data-plane health into one visible line per issue. */
+function agoraIssues(health: AgoraHealth): readonly string[] {
+  return [
+    ...health.fileWarnings.map((w) => `${w.file}: ${w.reason}`),
+    ...health.commitFailures.map((f) => `commit "${f.subject}": ${f.reason}`),
+    ...health.runtime.map((r) => `${r.source}: ${r.detail}`)
+  ]
+}
+
 /**
  * Event-plane health, refreshed on a slow poll. FR-2.3 requires hook schema
  * drift to be *visible*, and SDD §10 requires an endpoint that is down to say so
@@ -21,6 +30,7 @@ const HOOKS_POLL_MS = 2000
 export function App(): ReactElement {
   const [bridge, setBridge] = useState<BridgeState>({ kind: 'loading' })
   const [hooks, setHooks] = useState<HooksState | null>(null)
+  const [health, setHealth] = useState<AgoraHealth | null>(null)
   const [fonts, setFonts] = useState<FontStatus | null>(null)
   /** The agent the terminal and the command bar both act on (UC-03 step 2). */
   const [selected, setSelected] = useState<string | null>(null)
@@ -57,6 +67,16 @@ export function App(): ReactElement {
         .state()
         .then((state) => {
           if (!cancelled) setHooks(state)
+        })
+        .catch(() => {
+          /* the bridge banner already reports a dead bridge */
+        })
+      // Data-plane health rides the same slow poll (invariant §7: every
+      // degradation is a visible state, never only a main-process warn).
+      eph.agora
+        .health()
+        .then((state) => {
+          if (!cancelled) setHealth(state)
         })
         .catch(() => {
           /* the bridge banner already reports a dead bridge */
@@ -147,6 +167,21 @@ export function App(): ReactElement {
           )}
           {fonts !== null && fonts.missing.length === 0 && (
             <span style={{ color: 'var(--eph-status-success)' }}>● fonts: bundled</span>
+          )}
+        </span>
+        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+          {health === null && 'agora: …'}
+          {health !== null && agoraIssues(health).length === 0 && (
+            <span style={{ color: 'var(--eph-status-success)' }}>● agora: ok</span>
+          )}
+          {health !== null && agoraIssues(health).length > 0 && (
+            <span
+              style={{ color: 'var(--eph-status-looping)' }}
+              title={agoraIssues(health).join(String.fromCharCode(10))}
+            >
+              ⚠ agora: {agoraIssues(health).length} issue
+              {agoraIssues(health).length === 1 ? '' : 's'}
+            </span>
           )}
         </span>
       </header>

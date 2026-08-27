@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BLOCK_CAP_ENV,
   DEFAULT_BLOCK_CAP,
   PATHOLOGY_SIGNAL_AT,
+  blockCapFromEnv,
   decideStop,
   isPathological,
   type StopContext
@@ -111,5 +113,24 @@ describe('the pathology signal (ADR-0011, consumed in M3)', () => {
     expect(PATHOLOGY_SIGNAL_AT).toBeLessThan(DEFAULT_BLOCK_CAP)
     expect(isPathological(PATHOLOGY_SIGNAL_AT - 1)).toBe(false)
     expect(isPathological(PATHOLOGY_SIGNAL_AT)).toBe(true)
+  })
+})
+
+describe('blockCapFromEnv (ADR-0013: the cap is env-configurable)', () => {
+  it('accepts a positive integer', () => {
+    expect(blockCapFromEnv({ [BLOCK_CAP_ENV]: '7' })).toEqual({ cap: 7 })
+  })
+
+  it('yields no cap when the variable is unset or empty', () => {
+    expect(blockCapFromEnv({})).toEqual({ cap: undefined })
+    expect(blockCapFromEnv({ [BLOCK_CAP_ENV]: '' })).toEqual({ cap: undefined })
+  })
+
+  it('refuses junk, zero and negatives — the cap can never be disabled by env', () => {
+    for (const raw of ['abc', '0', '-3', '2.5', 'Infinity', 'NaN']) {
+      const result = blockCapFromEnv({ [BLOCK_CAP_ENV]: raw })
+      expect(result.cap).toBeUndefined()
+      expect('invalid' in result && result.invalid).toBe(raw)
+    }
   })
 })

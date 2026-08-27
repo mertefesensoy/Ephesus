@@ -112,6 +112,8 @@ export class Agora {
   private readonly log: EventLog
   private readonly warnings: AgoraWarning[] = []
   private readonly failures: CommitFailure[] = []
+  /** Schema files whose last read failed — protected from overwrite. */
+  private readonly corrupt = new Set<string>()
 
   constructor(private readonly options: AgoraOptions) {
     this.git = options.git ?? new ExecGitRunner()
@@ -157,11 +159,27 @@ export class Agora {
 
   /** Writes the roster atomically — agents read it live (invariant §3). */
   writeRegistry(registry: Registry): void {
+    this.refuseWriteOverCorrupt(REGISTRY_REL)
     writeFileAtomic(this.pathOf(REGISTRY_REL), `${JSON.stringify(registry, null, 2)}\n`)
   }
 
   writeTasks(ledger: TaskLedger): void {
+    this.refuseWriteOverCorrupt(TASKS_REL)
     writeFileAtomic(this.pathOf(TASKS_REL), `${JSON.stringify(ledger, null, 2)}\n`)
+  }
+
+  /**
+   * A schema file that failed to parse is evidence, and the promise attached to
+   * that degradation (DECISIONS-LOG, M2.2) is that the file is never rewritten.
+   * Without this guard the first roster write after corruption would atomically
+   * replace the corrupt file with the empty default — destroying the evidence.
+   */
+  private refuseWriteOverCorrupt(rel: string): void {
+    if (this.corrupt.has(rel)) {
+      throw new Error(
+        `agora: refusing to overwrite ${rel} — it failed to parse this run and is kept as evidence; repair or remove it, then restart`
+      )
+    }
   }
 
   private readSchemaFile<T>(
@@ -170,16 +188,24 @@ export class Agora {
     parse: (raw: unknown) => { ok: true; value: T } | { ok: false; reason: string }
   ): T {
     const file = this.pathOf(rel)
-    if (!fs.existsSync(file)) return fallback
+    if (!fs.existsSync(file)) {
+      this.corrupt.delete(rel)
+      return fallback
+    }
     let raw: unknown
     try {
       raw = JSON.parse(fs.readFileSync(file, 'utf8'))
     } catch (err) {
+      this.corrupt.add(rel)
       this.warn(rel, firstLine(err))
       return fallback
     }
     const parsed = parse(raw)
-    if (parsed.ok) return parsed.value
+    if (parsed.ok) {
+      this.corrupt.delete(rel)
+      return parsed.value
+    }
+    this.corrupt.add(rel)
     this.warn(rel, parsed.reason)
     return fallback
   }
@@ -221,7 +247,9 @@ export class Agora {
 
     const protocolPath = this.pathOf(PROTOCOL_REL)
     if (!fs.existsSync(protocolPath)) {
-      fs.writeFileSync(protocolPath, this.options.prompts.read(path.join('agora', 'PROTOCOL.md')))
+      // Atomic like every other live shared file (invariant §3): agents read
+      // PROTOCOL.md, so a half-written seed must never be visible.
+      writeFileAtomic(protocolPath, this.options.prompts.read(path.join('agora', 'PROTOCOL.md')))
       seeded = true
     }
 

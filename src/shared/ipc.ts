@@ -27,7 +27,8 @@ export const IpcChannels = {
   commandsSubmit: 'commands:submit',
   agoraRegistry: 'agora:registry',
   agoraTasks: 'agora:tasks',
-  agoraLog: 'agora:log'
+  agoraLog: 'agora:log',
+  agoraHealth: 'agora:health'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -80,6 +81,25 @@ export interface HooksState {
   readonly failure: string | null
 }
 
+/**
+ * Data-plane health, for invariant §7: every degradation is a visible UI state,
+ * never a `console.warn` only the developer can see. Corrupt schema files,
+ * commit-queue give-ups, and runtime failures (sweep/exit/hook-handler errors)
+ * all surface here.
+ */
+export interface AgoraHealth {
+  /** Schema files that failed to parse this run (kept on disk as evidence). */
+  readonly fileWarnings: readonly { readonly file: string; readonly reason: string }[]
+  /** Commits the queue gave up on after exhausting its retry budget. */
+  readonly commitFailures: readonly { readonly subject: string; readonly reason: string }[]
+  /** Runtime degradations reported by main since boot (bounded, newest last). */
+  readonly runtime: readonly {
+    readonly at: number
+    readonly source: string
+    readonly detail: string
+  }[]
+}
+
 export interface EphApi {
   config: {
     get: () => Promise<ConfigSnapshot>
@@ -115,6 +135,8 @@ export interface EphApi {
     log: (afterSeq: number, limit: number) => Promise<readonly LogEntry[]>
     /** Subscribe to "the log grew"; the feed then pages from its own cursor. */
     onAppend: (cb: () => void) => () => void
+    /** Data-plane degradations — shown, never only logged (invariant §7). */
+    health: () => Promise<AgoraHealth>
   }
   commands: {
     /** Agents currently holding unsent Architect text. */

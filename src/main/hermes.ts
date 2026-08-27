@@ -86,9 +86,11 @@ export interface HermesOptions {
   /** Raised when a session's block count looks pathological (ADR-0011, M3). */
   onPathology?(agentId: string, blocks: number): void
   /**
-   * Raised when a sweep the *watcher* started failed. Callers who await `sweep()`
-   * get the rejection; nobody awaits the watcher's, so without this the error
-   * would be an `unhandledRejection` and take the main process down.
+   * Raised when a sweep the *watcher or the periodic timer* started failed.
+   * Callers who await `sweep()` get the rejection; nobody awaits those two, so
+   * without this the error would be an `unhandledRejection` and take the main
+   * process down. (The timer path was missed at M2 close and caught by the
+   * close-out audit — both paths route here now.)
    */
   onSweepError?(err: unknown): void
 }
@@ -109,6 +111,16 @@ export interface BounceRecord {
 /** Where a rejected file is parked: out of the outbox, still on disk, inspectable. */
 export const REJECTED_DIR = '.rejected'
 export const DONE_DIR = '.done'
+
+/**
+ * Serializes handed-over mail for a prompt surface's `{{messages}}` slot. Pure
+ * data (the messages verbatim, as JSON) — every word of framing around it lives
+ * in `prompts/hermes/` (invariant §8).
+ */
+export function formatHandover(messages: readonly Message[]): string {
+  if (messages.length === 0) return '(none)'
+  return messages.map((m) => JSON.stringify(m, null, 2)).join('\n')
+}
 
 export class Hermes {
   private readonly watchers = new Map<string, fs.FSWatcher>()
@@ -153,6 +165,9 @@ export class Hermes {
    * an outbox carries only its owner's mail.
    */
   private bounce(original: Message, reason: string): void {
+    // The refusal's words reach an LLM, so they are a prompt surface
+    // (invariant §8) — rendered from prompts/hermes/, never string literals.
+    const vars = { id: original.id, to: original.to, subject: original.subject, reason }
     const refusal = composeMessage({
       id: makeMessageId(new Date(), `bnc${Math.random().toString(36).slice(2, 8)}`),
       conversation: original.conversation,
@@ -160,8 +175,8 @@ export class Hermes {
       from: original.from,
       to: original.from,
       act: 'refuse',
-      subject: `undeliverable: ${original.subject}`.slice(0, 200),
-      body: `Your message ${original.id} to "${original.to}" could not be delivered: ${reason}`,
+      subject: this.render('bounce-subject.md', vars).trim().slice(0, 200),
+      body: this.render('bounce-body.md', vars).trim(),
       hops: replyHops(original),
       created_at: new Date().toISOString()
     })
@@ -212,8 +227,22 @@ export class Hermes {
   /** Starts the sweep that backs up fs-watch (R6). Idempotent. */
   start(): void {
     if (this.sweepTimer) return
-    this.sweepTimer = setInterval(() => void this.sweep(), SWEEP_INTERVAL_MS)
+    // Nobody awaits the timer's sweep either — same rule as the watcher's: a
+    // delivery error is a reported degradation, never a dead harness.
+    this.sweepTimer = setInterval(() => {
+      this.sweepAndWake().catch((err: unknown) => this.options.onSweepError?.(err))
+    }, SWEEP_INTERVAL_MS)
     this.sweepTimer.unref?.()
+  }
+
+  /**
+   * One production tick: deliver, then run the wake watchdog. The watchdog is
+   * chained onto every sweep so mail landing on an idle agent wakes it from the
+   * app's own wiring (ADR-0013, FR-3.5) — not only from a test driver.
+   */
+  private async sweepAndWake(): Promise<void> {
+    await this.sweep()
+    await this.wakeCheck()
   }
 
   stop(): void {
@@ -231,7 +260,7 @@ export class Hermes {
       this.debounces.delete('sweep')
       // Nobody is awaiting this one, so it must absorb its own failure: a
       // delivery error is a reported degradation, never a dead harness.
-      this.sweep().catch((err: unknown) => this.options.onSweepError?.(err))
+      this.sweepAndWake().catch((err: unknown) => this.options.onSweepError?.(err))
     }, WATCH_DEBOUNCE_MS)
     timer.unref?.()
     this.debounces.set('sweep', timer)
@@ -409,7 +438,7 @@ export class Hermes {
    * exactly the pathology R2 warns about, and the log is where the breaker and
    * the next briefing will read it.
    */
-  decideOnStop(agentId: string, payload: unknown): StopReply | null {
+  async decideOnStop(agentId: string, payload: unknown): Promise<StopReply | null> {
     const stopHookActive =
       typeof payload === 'object' &&
       payload !== null &&
@@ -432,9 +461,17 @@ export class Hermes {
     this.blocks.set(agentId, blocks)
     if (isPathological(blocks)) this.options.onPathology?.(agentId, blocks)
 
+    // Hand-over consumption (ADR-0003, Architect verdict at the M2 close-out
+    // audit): the mail is consumed — moved to `inbox/.done/` — in the same act
+    // that hands its content to the session. Without this, handled mail stayed
+    // "pending" and re-blocked every Stop until the cap: the loop manufactured
+    // the very pathology its guards exist to prevent.
+    const handed = decision.pendingMail > 0 ? await this.consumeInbox(agentId) : []
+
     return {
       decision: 'block',
       reason: this.render('stop-block-reason.md', {
+        messages: formatHandover(handed),
         pendingMail: String(decision.pendingMail),
         pendingTasks: String(decision.pendingTasks)
       })
@@ -462,7 +499,10 @@ export class Hermes {
    * sits unread does nothing, and an agent that is not idle is left alone
    * (suppressing the stale nudge ADR-0013 names).
    */
-  wakeCheck(): readonly string[] {
+  async wakeCheck(): Promise<readonly string[]> {
+    // No nudge sink means nobody to hand the mail to — consuming it here would
+    // archive messages no session ever saw. Leave the inbox alone.
+    if (!this.options.nudge) return []
     const woken: string[] = []
     for (const agentId of this.knownAgents()) {
       const pending = this.pendingMailCount(agentId)
@@ -474,7 +514,16 @@ export class Hermes {
       if (this.options.isIdle && !this.options.isIdle(agentId)) continue
 
       this.nudged.add(agentId)
-      this.options.nudge?.(agentId, this.render('wake-nudge.md', { pendingMail: String(pending) }))
+      // Hand-over consumption: the nudge carries the mail itself, archived to
+      // `inbox/.done/` in the same act (see decideOnStop).
+      const handed = await this.consumeInbox(agentId)
+      this.options.nudge?.(
+        agentId,
+        this.render('wake-nudge.md', {
+          messages: formatHandover(handed),
+          pendingMail: String(pending)
+        })
+      )
       this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingMail: pending })
       woken.push(agentId)
     }
@@ -489,13 +538,13 @@ export class Hermes {
   }
 
   /**
-   * Renders a prompt surface. Falls back to a bare factual line only when no
-   * prompt store is wired (tests), never in the app — invariant §8 keeps
-   * LLM-facing prose in `prompts/`.
+   * Renders a prompt surface. When no prompt store is wired (tests only, never
+   * the app) the fallback is a mechanical serialization of the variables —
+   * deliberately not prose, so invariant §8 has no second home for words.
    */
   private render(template: string, vars: Record<string, string>): string {
     if (!this.options.prompts) {
-      return `pending mail: ${vars['pendingMail'] ?? '0'}, pending tasks: ${vars['pendingTasks'] ?? '0'}`
+      return `${template} ${JSON.stringify(vars)}`
     }
     return this.options.prompts.render(path.join('hermes', template), vars)
   }

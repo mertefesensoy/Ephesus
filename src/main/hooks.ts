@@ -82,11 +82,18 @@ export interface HookReply {
 export interface HookServerOptions {
   /**
    * Called for every accepted post, drifted or not. A returned reply is passed
-   * back to the engine; returning nothing lets the turn end normally.
+   * back to the engine; returning nothing lets the turn end normally. May be
+   * async — the Stop decision consumes the inbox before replying (ADR-0013).
    */
-  onEvent(record: HookEventRecord): HookReply | void
+  onEvent(record: HookEventRecord): HookReply | void | Promise<HookReply | void>
   /** Called for every refused post. Wired to `log.jsonl` when the Agora lands (M2). */
   onRejected(rejection: HookRejection): void
+  /**
+   * Raised when `onEvent` itself throws or rejects. The engine still gets a
+   * plain `{ok:true}` (fail-open, SDD §10) — the failure is reported here so it
+   * is a visible degradation, never an unhandledRejection in main.
+   */
+  onEventError?(err: unknown): void
   /** Largest body the endpoint will read; anything larger is refused. */
   maxBodyBytes?: number
 }
@@ -210,11 +217,15 @@ export class HookServer {
 
     req.on('end', () => {
       if (aborted) return
-      this.accept(Buffer.concat(chunks).toString('utf8'), res)
+      // Nobody awaits this handler; its failure must be a reported degradation,
+      // never an unhandledRejection in the main process.
+      this.accept(Buffer.concat(chunks).toString('utf8'), res).catch((err: unknown) =>
+        this.options.onEventError?.(err)
+      )
     })
   }
 
-  private accept(body: string, res: http.ServerResponse): void {
+  private async accept(body: string, res: http.ServerResponse): Promise<void> {
     let raw: unknown
     try {
       raw = JSON.parse(body)
@@ -259,12 +270,19 @@ export class HookServer {
     const check = checkHookPayload(envelope.event, envelope.payload)
     if (check.warning && !this.warnings.includes(check.warning)) this.warnings.push(check.warning)
 
-    const reply = this.options.onEvent({
-      envelope,
-      known: check.known,
-      warning: check.warning,
-      receivedAt: Date.now()
-    })
+    let reply: HookReply | void = undefined
+    try {
+      reply = await this.options.onEvent({
+        envelope,
+        known: check.known,
+        warning: check.warning,
+        receivedAt: Date.now()
+      })
+    } catch (err) {
+      // Fail-open toward the agent (SDD §10): its turn ends normally. The
+      // harness-side failure is reported, never silently swallowed.
+      this.options.onEventError?.(err)
+    }
 
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, warning: check.warning, ...(reply ?? {}) }))

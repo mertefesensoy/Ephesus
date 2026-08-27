@@ -299,6 +299,70 @@ describe('hook server — fail-open for the agent (SDD §10)', () => {
   })
 })
 
+describe('hook server — async replies (ADR-0013 hand-over)', () => {
+  it('relays a reply the handler resolves asynchronously', async () => {
+    // decideOnStop consumes the inbox before replying, so onEvent may return a
+    // promise; the engine must still receive the decision in the response body.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-home-'))
+    homes.push(home)
+    const server = new HookServer({
+      onEvent: async () => {
+        await new Promise((resolve) => setImmediate(resolve))
+        return { decision: 'block' as const, reason: 'mail handed over' }
+      },
+      onRejected: () => {}
+    })
+    const endpoint = await server.start(home)
+    rigs.push({ server, endpoint, home, events: [], rejections: [] })
+    server.registerSpawn('agent.mason', 'spawn-token-1')
+
+    const delivery = await postHookEvent(endpoint, envelope({ event: 'stop', payload: {} }))
+
+    expect(delivery.delivered).toBe(true)
+    expect(JSON.parse(delivery.body ?? '{}')).toMatchObject({
+      ok: true,
+      decision: 'block',
+      reason: 'mail handed over'
+    })
+  })
+
+  it('fails open and reports when the handler itself throws', async () => {
+    // A harness-side failure must never fail the agent's hook post (SDD §10)
+    // and must never become an unhandledRejection — it is reported instead.
+    const seen: unknown[] = []
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-home-'))
+    homes.push(home)
+    const server = new HookServer({
+      onEvent: async () => {
+        throw new Error('handler blew up')
+      },
+      onRejected: () => {},
+      onEventError: (err) => seen.push(err)
+    })
+    const endpoint = await server.start(home)
+    rigs.push({ server, endpoint, home, events: [], rejections: [] })
+    server.registerSpawn('agent.mason', 'spawn-token-1')
+
+    const unhandled: unknown[] = []
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', capture)
+    try {
+      const delivery = await postHookEvent(endpoint, envelope({ event: 'stop', payload: {} }))
+      expect(delivery.delivered).toBe(true)
+      expect(JSON.parse(delivery.body ?? '{}')).toMatchObject({ ok: true })
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      process.off('unhandledRejection', capture)
+    }
+
+    expect(seen).toHaveLength(1)
+    expect((seen[0] as Error).message).toMatch(/handler blew up/)
+    expect(unhandled).toEqual([])
+  })
+})
+
 /** Posts a raw body, bypassing the client's envelope building. */
 async function postRaw(
   endpoint: string,
