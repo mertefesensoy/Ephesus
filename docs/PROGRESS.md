@@ -813,9 +813,29 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       refused — `no OS encryption backend available — refusing to store a credential
       in plaintext`, `health.available=false`, and **no store file was created**.
       ENGINEERING-STANDARDS §5's two documented-but-unenforced tripwires now run in
-      `check-invariants.cjs` (which also scans `test/` from this package on): a
-      credential read from `process.env` outside `src/main/watch/`|`herald/`, and a
-      secret-shaped string anywhere. Both proven to bite on planted probes.*
+      `check-invariants.cjs` (which also scans `test/` from this package on, for the
+      SECRET rules only): a credential read from `process.env` outside
+      `src/main/watch/`|`herald/`, and a secret-shaped string anywhere. Both proven to
+      bite on planted probes, and the git tripwire proven NOT to fire in `test/`.
+      **Design-conformance review at package close found ten issues; all ten are
+      fixed here** (final gate: typecheck PASS · lint PASS · invariants PASS ·
+      tests 644 passed / 2 skipped): the `secrets:` group is back to exactly SDD §5's
+      four channels (`list`/`health` had no consumer and widening a documented IPC
+      signature is a §8 must-ask, so the API-surface test now pins the documented set)
+      · the no-keychain refusal is *reported* through the existing degradation surface
+      at construction, not left in a `health()` field nobody reads — the same defect
+      the M2 close-out audit already ruled on · the broker memoizes decrypted values
+      (the filter ran a decrypt per PTY chunk per agent; a test now counts one decrypt
+      across 50 chunks) · grants resolve in `start()` rather than before the version
+      probe, so a credential stored while an install offer runs reaches the agent that
+      follows it · **the stream wiring moved to `pty-stream.ts` and is now tested** —
+      it was the one place redaction actually protects anything and deleting
+      `filter.push` had left all 633 tests green; 4 of the 8 new tests fail on exactly
+      that deletion · the tripwire widening over `test/` is scoped to the secret rules
+      · `delete` now appends `secret-rotated {removed:true}` and the `spawn` entry
+      carries grant NAMES (ENGINEERING-STANDARDS §4) · the NFR-8 test is renamed to
+      what it can prove, with real-cipher coverage carried to the live run · SDD §1.1's
+      `watch/` and `pty.ts` rows updated.*
 - [ ] **M3.2 Cost ledger + budgets** — adapter `TranscriptReader` facts folded
       into the append-only SQLite `cost_ledger(agent, session, model, day, …)`
       (SDD §4.6) with an idempotent fold cursor; **cumulative figures computed

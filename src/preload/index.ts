@@ -17,7 +17,7 @@ import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
 import type { LogEntry } from '../shared/log'
 import type { Registry } from '../shared/registry'
-import type { SecretStatus, SecretTest, SecretsHealth } from '../shared/secrets'
+import type { SecretStatus, SecretTest } from '../shared/secrets'
 import type { TaskLedger } from '../shared/tasks'
 
 // The single door between renderer and main (SDD §1, §5). Every method is a
@@ -85,9 +85,7 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.secretsStatus, { name }) as Promise<SecretStatus>,
     test: (name) => ipcRenderer.invoke(IpcChannels.secretsTest, { name }) as Promise<SecretTest>,
     delete: (name) =>
-      ipcRenderer.invoke(IpcChannels.secretsDelete, { name }) as Promise<SecretStatus>,
-    list: () => ipcRenderer.invoke(IpcChannels.secretsList) as Promise<readonly SecretStatus[]>,
-    health: () => ipcRenderer.invoke(IpcChannels.secretsHealth) as Promise<SecretsHealth>
+      ipcRenderer.invoke(IpcChannels.secretsDelete, { name }) as Promise<SecretStatus>
   },
   pty: {
     write: (id, data) => ipcRenderer.invoke(IpcChannels.ptyWrite, { id, data }) as Promise<void>,

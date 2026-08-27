@@ -45,7 +45,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 |---|---|---|
 | `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts` | 0009 |
 | `agents.ts` | `AgentManager`: spawn ordering (probe → token → identity → settings → process), FR-1.6 install offer, exit unwind (settings restored, token revoked) | 0009, 0010 |
-| `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; PATH resolution for spawn plans (`which.ts`); redaction filter on outbound streams | 0014, 0010 |
+| `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; PATH resolution for spawn plans (`which.ts`); the redaction filter on outbound streams, wired in `pty-stream.ts` (split out so it is testable without node-pty) | 0014, 0010 |
 | `avatars.ts` | `AvatarDirector`: hook events → §6 avatar snapshots, the walk clock (`arrive`) and the §6 timers | 0002 |
 | `commands.ts` | `CommandQueue`: FR-1.3 queue-until-idle, held text, two-write submit | — |
 | `prompts.ts` | `PromptStore`: harness-home-first prompt/template loading, seeded from the bundled copies | — |
@@ -60,7 +60,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
 | `herald/` | `seam.ts` (STT/TTS/Duplex interfaces), `policy.ts` (wake word, barge-in, repeat-back, failover), `elevenlabs.ts`, `openai-realtime.ts` | 0007 |
 | `harbor/` | `github.ts` (issues/PRs/CI via `gh`), `bridge.ts` (chat bridge), `webhooks.ts`, `hires.ts` (export/import) | — |
-| `watch/` | `gates.ts` (approval queue + policy), `budgets.ts` + `ledger.ts` (durable cost), `breaker.ts` (ladder), `telemetry.ts` (OTel spans, waterfall) | 0011 |
+| `watch/` | `gates.ts` (approval queue + policy), `budgets.ts` + `ledger.ts` (durable cost), `breaker.ts` (ladder), `telemetry.ts` (OTel spans, waterfall), `secrets.ts` + `cipher.ts` (write-only broker, OS-keychain seam) | 0011, 0010 |
 | `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning | 0012 |
 | `org.ts` | Departments, hire-template versioning, per-agent metrics, review/retro reports | — |
 | `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |

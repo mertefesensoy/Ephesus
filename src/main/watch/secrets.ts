@@ -32,9 +32,11 @@ export interface SecretBrokerOptions {
   /**
    * Appends `secret-rotated` to the book of record (SDD §4.3). The entry
    * carries the NAME and never the value — rotation must be auditable without
-   * the log becoming the read path the broker refuses to be.
+   * the log becoming the read path the broker refuses to be. Removal is the
+   * same security-posture change in the other direction (FR-11.4 names
+   * set/rotate/*delete*), so it is recorded too.
    */
-  onRotated?(name: string): void
+  onRotated?(name: string, change: 'set' | 'removed'): void
   /** Raised when the store could not be read or written (invariant §7). */
   onDegraded?(detail: string): void
 }
@@ -43,9 +45,29 @@ export class SecretBroker {
   private store: SecretStore = emptySecretStore
   /** Non-null when the store on disk failed to parse; it is never overwritten. */
   private loadFailure: string | null = null
+  /**
+   * The decrypted values, computed on demand and invalidated on every change.
+   *
+   * The redaction filter consults this on EVERY PTY chunk, for every agent. A
+   * decrypt-per-chunk would be N synchronous OS-crypto calls on the main
+   * thread at the PTY data rate (SDD §11's budget), and — worse for a
+   * write-only broker — a fresh plaintext copy of every credential on the heap
+   * just as often. Memoizing keeps the mid-stream property (a credential
+   * stored while an agent runs is masked in its live stream) because `set` and
+   * `delete` are the only things that can change the answer.
+   */
+  private plaintext: readonly string[] | null = null
 
   constructor(private readonly options: SecretBrokerOptions) {
     this.load()
+    // Invariant §7: a machine with no encryption backend must SAY so at boot.
+    // `health()` alone is a question nobody asks — the M2 close-out audit
+    // already ruled that a state with no consumer is not "visible".
+    if (this.loadFailure === null && !options.cipher.available()) {
+      options.onDegraded?.(
+        `no OS encryption backend (${options.cipher.backend()}) — credentials cannot be stored`
+      )
+    }
   }
 
   /**
@@ -69,6 +91,11 @@ export class SecretBroker {
     this.options.onDegraded?.(
       `secrets store unreadable, refusing to overwrite it: ${this.loadFailure ?? 'unknown'}`
     )
+  }
+
+  /** Drops the memoized plaintext; every mutation calls this. */
+  private invalidate(): void {
+    this.plaintext = null
   }
 
   private persist(): void {
@@ -131,8 +158,9 @@ export class SecretBroker {
         [name]: { cipher, lastRotated: new Date().toISOString() }
       }
     }
+    this.invalidate()
     this.persist()
-    this.options.onRotated?.(name)
+    this.options.onRotated?.(name, 'set')
     return this.status(name)
   }
 
@@ -142,7 +170,9 @@ export class SecretBroker {
     const secrets = { ...this.store.secrets }
     delete secrets[name]
     this.store = { ...this.store, secrets }
+    this.invalidate()
     this.persist()
+    this.options.onRotated?.(name, 'removed')
     return this.status(name)
   }
 
@@ -200,18 +230,23 @@ export class SecretBroker {
    * an agent is already running is masked in that agent's live stream too.
    */
   redactor(): RedactionFilter {
-    return createRedactor(() => {
-      const values: string[] = []
-      for (const record of Object.values(this.store.secrets)) {
-        try {
-          values.push(this.options.cipher.decrypt(record.cipher))
-        } catch {
-          // A blob we cannot decrypt is already surfaced by `test`/`grantsFor`;
-          // failing the whole filter here would stop masking the secrets that
-          // ARE readable, which is the wrong direction to fail in.
-        }
+    return createRedactor(() => this.maskableValues())
+  }
+
+  /** The memoized plaintext set the filter masks. Never leaves this module. */
+  private maskableValues(): readonly string[] {
+    if (this.plaintext !== null) return this.plaintext
+    const values: string[] = []
+    for (const record of Object.values(this.store.secrets)) {
+      try {
+        values.push(this.options.cipher.decrypt(record.cipher))
+      } catch {
+        // A blob we cannot decrypt is already surfaced by `test`/`grantsFor`;
+        // failing the whole filter here would stop masking the secrets that
+        // ARE readable, which is the wrong direction to fail in.
       }
-      return values
-    })
+    }
+    this.plaintext = values
+    return values
   }
 }

@@ -21,6 +21,14 @@ const ROOT = path.join(__dirname, '..')
 const SEARCH_DIRS = ['src', 'shims', 'scripts', 'test']
 
 /**
+ * `test/` is scanned for the SECRET rules only. ADR-0004's single-committer
+ * rule governs the running app's Agora, while TEST-STRATEGY §6 explicitly wants
+ * integration tests against "real fs and real git in temp dirs" — extending the
+ * git tripwire there would fail CI for a rule that was never about tests.
+ */
+const SECRET_RULES_ONLY = ['test']
+
+/**
  * The tripwire file itself carries the patterns it hunts for; scanning it would
  * be a guaranteed self-match.
  */
@@ -93,16 +101,17 @@ function walk(dir, out = []) {
 
 const failures = []
 for (const dir of SEARCH_DIRS) {
+  const appRules = !SECRET_RULES_ONLY.includes(dir)
   for (const file of walk(path.join(ROOT, dir))) {
     const rel = path.relative(ROOT, file)
     const text = fs.readFileSync(file, 'utf8')
     text.split('\n').forEach((line, i) => {
-      if (GIT_INVOCATION.test(line) && !GIT_ALLOWLIST.has(rel)) {
+      if (appRules && GIT_INVOCATION.test(line) && !GIT_ALLOWLIST.has(rel)) {
         failures.push(
           `${rel}:${i + 1}  git is invoked outside src/main/git.ts — ADR-0004 allows exactly one committer`
         )
       }
-      if (TRUNCATING_LOG_WRITE.test(line)) {
+      if (appRules && TRUNCATING_LOG_WRITE.test(line)) {
         failures.push(
           `${rel}:${i + 1}  truncating write to an append-only record — invariant §5 forbids rewriting it`
         )

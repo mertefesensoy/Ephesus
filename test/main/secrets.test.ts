@@ -36,16 +36,14 @@ function fakeCipher(over: Partial<SecretCipher> = {}): SecretCipher {
   }
 }
 
-function broker(over: Partial<Parameters<typeof makeBroker>[0]> = {}): SecretBroker {
-  return makeBroker(over)
-}
-
-function makeBroker(over: {
-  cipher?: SecretCipher
-  onRotated?: (name: string) => void
-  onDegraded?: (detail: string) => void
-  storePath?: string
-}): SecretBroker {
+function broker(
+  over: {
+    cipher?: SecretCipher
+    onRotated?: (name: string, change: 'set' | 'removed') => void
+    onDegraded?: (detail: string) => void
+    storePath?: string
+  } = {}
+): SecretBroker {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-secrets-'))
   homes.push(home)
   return new SecretBroker({
@@ -60,16 +58,15 @@ const VALUE = 'not-a-real-credential-0123456789'
 const OTHER = 'a-different-fake-value-987654321'
 
 describe('write-only API surface (S-SECRETS)', () => {
-  it('exposes no channel that reads a secret back', () => {
+  it("exposes exactly SDD §5's four channels, and none that reads a value", () => {
     const secretChannels = Object.values(IpcChannels).filter((channel) =>
       channel.startsWith('secrets:')
     )
-    // SDD §5: set/status/test/delete — plus list/health, which return names and
-    // storage state. Nothing that returns a value, and adding one fails here.
+    // Pinned to the DOCUMENTED set, not merely to "nothing that reads": adding
+    // a fifth channel widens a documented IPC signature, which BUILD-PROMPT §8
+    // makes a must-ask rather than an implementation detail.
     expect([...secretChannels].sort()).toEqual([
       'secrets:delete',
-      'secrets:health',
-      'secrets:list',
       'secrets:set',
       'secrets:status',
       'secrets:test'
@@ -97,7 +94,12 @@ describe('write-only API surface (S-SECRETS)', () => {
     }
   })
 
-  it('keeps plaintext out of the store file (NFR-8)', () => {
+  it('stores only what the cipher returned, never the raw value', () => {
+    // Named for what it can prove: the cipher here is a seam (base64), so this
+    // asserts the broker never writes the value it was handed. That the REAL
+    // cipher encrypts is `safeStorage`'s property, exercised in the live run
+    // recorded in PROGRESS and owed to E2E — vitest cannot load it (M0
+    // constraint 3).
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-secrets-'))
     homes.push(home)
     const storePath = path.join(home, 'secrets.enc')
@@ -129,12 +131,16 @@ describe('lifecycle', () => {
     expect(after.lastRotated).not.toBeNull()
   })
 
-  it('announces a rotation by name for the book of record', () => {
+  it('announces every change by name for the book of record', () => {
     const rotated: string[] = []
-    const store = broker({ onRotated: (name) => rotated.push(name) })
+    const store = broker({ onRotated: (name, change) => rotated.push(`${change}:${name}`) })
     store.set('API_KEY_FAKE', VALUE)
     store.set('API_KEY_FAKE', OTHER)
-    expect(rotated).toEqual(['API_KEY_FAKE', 'API_KEY_FAKE'])
+    // Removing a credential is the same security-posture change in the other
+    // direction (FR-11.4 names set/rotate/delete), so it is recorded too.
+    store.delete('API_KEY_FAKE')
+    store.delete('API_KEY_FAKE')
+    expect(rotated).toEqual(['set:API_KEY_FAKE', 'set:API_KEY_FAKE', 'removed:API_KEY_FAKE'])
   })
 
   it('deletes, and a deleted secret is gone from names and grants', () => {
@@ -181,11 +187,23 @@ describe('lifecycle', () => {
 })
 
 describe('degradation is visible (invariant §7)', () => {
-  it('refuses to store when the machine has no encryption backend', () => {
-    const store = broker({ cipher: fakeCipher({ available: () => false }) })
+  it('refuses to store when the machine has no encryption backend, and SAYS so at boot', () => {
+    const degradations: string[] = []
+    const store = broker({
+      cipher: fakeCipher({ available: () => false }),
+      onDegraded: (detail) => degradations.push(detail)
+    })
+    // Reported, not merely queryable: the M2 close-out audit already ruled that
+    // a health field with no consumer does not satisfy invariant §7.
+    expect(degradations.join(' ')).toContain('no OS encryption backend')
     expect(() => store.set('API_KEY_FAKE', VALUE)).toThrow(/refusing to store/)
     expect(store.health()).toMatchObject({ available: false })
-    expect(store.health().failure).toContain('no OS encryption backend')
+  })
+
+  it('does not cry degradation on a healthy machine', () => {
+    const degradations: string[] = []
+    broker({ onDegraded: (detail) => degradations.push(detail) })
+    expect(degradations).toEqual([])
   })
 
   it('refuses to overwrite a store it could not parse, and says so', () => {
@@ -277,6 +295,38 @@ describe('the redactor the broker builds', () => {
     expect(filter.push(`${VALUE}\r\n`)).toContain(VALUE)
     store.set('GH_TOKEN_FAKE', VALUE)
     expect(filter.push(`${VALUE}\r\n`)).toBe(`${SECRET_MASK}\r\n`)
+  })
+
+  it('stops masking a credential that was deleted', () => {
+    const store = broker()
+    store.set('GH_TOKEN_FAKE', VALUE)
+    const filter = store.redactor()
+    expect(filter.push(`${VALUE}\r\n`)).toBe(`${SECRET_MASK}\r\n`)
+    store.delete('GH_TOKEN_FAKE')
+    expect(filter.push(`${VALUE}\r\n`)).toContain(VALUE)
+  })
+
+  it('decrypts once per change, not once per chunk', () => {
+    // The filter runs on EVERY pty chunk for every agent. A decrypt per chunk
+    // would be N synchronous OS-crypto calls at the PTY data rate, and a fresh
+    // plaintext copy of every credential on the heap just as often.
+    let decrypts = 0
+    const store = broker({
+      cipher: fakeCipher({
+        decrypt: (payload) => {
+          decrypts += 1
+          return Buffer.from(payload, 'base64').toString('utf8')
+        }
+      })
+    })
+    store.set('GH_TOKEN_FAKE', VALUE)
+    const filter = store.redactor()
+    const before = decrypts
+    for (let i = 0; i < 50; i += 1) filter.push('ordinary output\r\n')
+    expect(decrypts - before).toBe(1)
+    // …and a change is still picked up.
+    store.set('VOICE_KEY_FAKE', OTHER)
+    expect(filter.push(`${OTHER}\r\n`)).toBe(`${SECRET_MASK}\r\n`)
   })
 })
 

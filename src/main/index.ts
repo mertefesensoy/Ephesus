@@ -26,6 +26,7 @@ import { HookServer } from './hooks'
 import { registerIpc } from './ipc'
 import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
+import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { safeStorageCipher } from './watch/cipher'
 import { SecretBroker } from './watch/secrets'
@@ -35,7 +36,7 @@ let secrets: SecretBroker | null = null
 // a credential stored while an agent is already running is masked in that
 // agent's live stream too.
 const ptyManager = new PtyManager({
-  redactor: () => secrets?.redactor() ?? { push: (chunk) => chunk, flush: () => '' }
+  redactor: () => secrets?.redactor() ?? PASS_THROUGH
 })
 let db: AppDb | null = null
 let agentManager: AgentManager | null = null
@@ -183,10 +184,10 @@ void app.whenReady().then(async () => {
   secrets = new SecretBroker({
     storePath: path.join(home.root, 'secrets.enc'),
     cipher: safeStorageCipher(),
-    onRotated: (name) => {
+    onRotated: (name, change) => {
       // The NAME, never the value — rotation is auditable without the book of
       // record becoming the read path the broker refuses to be (SDD §4.3).
-      agora?.appendLog({ kind: 'secret-rotated', name })
+      agora?.appendLog({ kind: 'secret-rotated', name, removed: change === 'removed' })
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (detail) => reportDegradation('secrets', detail)

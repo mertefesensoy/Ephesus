@@ -14,8 +14,7 @@ import {
   secretNamePayloadSchema,
   secretSetSchema,
   type SecretStatus,
-  type SecretTest,
-  type SecretsHealth
+  type SecretTest
 } from '../shared/secrets'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
@@ -73,10 +72,6 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.secretsDelete, (_ev, raw: unknown): SecretStatus =>
     secrets.delete(secretNamePayloadSchema.parse(raw).name)
   )
-  ipcMain.handle(IpcChannels.secretsList, (): readonly SecretStatus[] =>
-    secrets.names().map((name) => secrets.status(name))
-  )
-  ipcMain.handle(IpcChannels.secretsHealth, (): SecretsHealth => secrets.health())
 
   ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
   ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())

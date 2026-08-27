@@ -107,7 +107,13 @@ export interface AgentManagerOptions {
 interface LiveAgent {
   card: AgentCard
   readonly adapter: EngineAdapter
-  readonly cfg: AgentSpawnConfig
+  /**
+   * Rebuilt at every `start()` so credentials are resolved AT SPAWN
+   * (ADR-0010), not at hire. The difference is real: the install-offer path
+   * spawns, exits, and starts again, and a credential the Architect stored
+   * while watching that install must reach the agent that follows it.
+   */
+  cfg: AgentSpawnConfig
   hookPlan: HookPlan | null
 }
 
@@ -196,7 +202,11 @@ export class AgentManager {
       engineVersion: version,
       role: request.role,
       cwd: request.cwd,
-      hookFidelity: adapter.hooks
+      hookFidelity: adapter.hooks,
+      // ENGINEERING-STANDARDS §4: anything the harness writes into an agent's
+      // environment is logged. NAMES only — a value here would make the book
+      // of record the read path the broker refuses to be (ADR-0010).
+      envGrants: [...request.envGrants]
     })
 
     if (version === null) {
@@ -275,10 +285,9 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
-      // ADR-0010: least-privilege by construction. The broker is asked only for
-      // what THIS role declares, so an undeclared credential has no path into
-      // the spawn even if the broker holds it.
-      envGrants: this.resolveGrants(request.agentId, request.envGrants),
+      // Empty until `start()`. ADR-0010 injects credentials *at spawn*, and
+      // this config is built before the version probe has even run.
+      envGrants: {},
       identityPath: path.join(agentDir, 'identity.md'),
       protocolPath: path.join(this.options.agoraRoot, 'PROTOCOL.md')
     }
@@ -297,7 +306,13 @@ export class AgentManager {
       return {}
     }
     const { env, missing } = resolve(declared)
-    if (missing.length > 0) this.options.onGrantsMissing?.(agentId, missing)
+    if (missing.length > 0) {
+      this.options.onGrantsMissing?.(agentId, missing)
+      // Also in the book of record: a spawn that went out without a credential
+      // its role declares is an autonomous action a forensic reader must be
+      // able to reconstruct from log.jsonl alone (NFR-13).
+      this.options.onLogEvent?.({ kind: 'spawn', agentId, grantsMissing: [...missing] })
+    }
     // Re-scoped here rather than trusted: "undeclared vars never reach a spawn"
     // is the invariant, and it must hold at the boundary that builds the
     // environment, not only inside whichever resolver is wired in today.
@@ -367,6 +382,15 @@ export class AgentManager {
 
   private async start(agentId: string): Promise<void> {
     const agent = this.require(agentId)
+
+    // ADR-0010: least-privilege by construction, resolved HERE — the moment
+    // the process is actually about to exist. The broker is asked only for
+    // what this role declares, so an undeclared credential has no path into
+    // the spawn even if the broker holds it.
+    agent.cfg = {
+      ...agent.cfg,
+      envGrants: this.resolveGrants(agentId, agent.card.envGrants)
+    }
 
     this.options.hookServer.registerSpawn(agentId, agent.cfg.hookToken)
 

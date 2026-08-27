@@ -3,7 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { Registry } from './registry'
-import type { SecretStatus, SecretTest, SecretsHealth } from './secrets'
+import type { SecretStatus, SecretTest } from './secrets'
 import type { TaskLedger } from './tasks'
 import type { EphConfig } from './config'
 
@@ -30,15 +30,15 @@ export const IpcChannels = {
   agoraTasks: 'agora:tasks',
   agoraLog: 'agora:log',
   agoraHealth: 'agora:health',
-  // Write-only by construction (ADR-0010): there is deliberately no
-  // `secrets:get`, and the API-surface test in test/main/secrets.test.ts fails
-  // if one is ever added here.
+  // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
+  // there is deliberately no `secrets:get`, and the API-surface test in
+  // test/main/secrets.test.ts fails if a fifth channel is ever added here —
+  // whether it reads a value or not, since widening the documented IPC
+  // signature is a BUILD-PROMPT §8 must-ask, not an implementation detail.
   secretsSet: 'secrets:set',
   secretsStatus: 'secrets:status',
   secretsTest: 'secrets:test',
-  secretsDelete: 'secrets:delete',
-  secretsList: 'secrets:list',
-  secretsHealth: 'secrets:health'
+  secretsDelete: 'secrets:delete'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -171,10 +171,6 @@ export interface EphApi {
     /** Can the broker still retrieve this credential? ok|fail, never a value. */
     test: (name: string) => Promise<SecretTest>
     delete: (name: string) => Promise<SecretStatus>
-    /** The names held, so the UI can list credentials without reading them. */
-    list: () => Promise<readonly SecretStatus[]>
-    /** Storage health — a machine with no keychain must say so (invariant §7). */
-    health: () => Promise<SecretsHealth>
   }
   pty: {
     /**

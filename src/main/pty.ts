@@ -1,9 +1,9 @@
 import * as pty from 'node-pty'
 import type { WebContents } from 'electron'
-import { ptyDataChannel, ptyExitChannel } from '../shared/ipc'
 import type { RedactionFilter } from '../shared/redaction'
 import type { AgentSpawner } from './agents'
 import type { SpawnPlan } from './engines'
+import { attachRedactedStream, PASS_THROUGH, type PtySink } from './pty-stream'
 import { resolveExecutable } from './which'
 
 /**
@@ -12,11 +12,13 @@ import { resolveExecutable } from './which'
  * attached sink over the per-id channel `pty:data:<id>` — no buffering, no JSON
  * wrapping of the byte stream (SDD §11).
  *
- * The redaction filter (ADR-0010) attaches here, on the outbound edge: every
- * byte an engine produces passes through its pty's filter before it reaches the
+ * The redaction filter (ADR-0010) attaches on the outbound edge: every byte an
+ * engine produces passes through its pty's filter before it reaches the
  * renderer, so an agent that `echo $TOKEN`s — deliberately or because it was
  * prompt-injected into it — puts a visible mask on screen instead of a
- * credential.
+ * credential. That wiring lives in `pty-stream.ts`, which this module is the
+ * only production caller of, because a module importing node-pty cannot be
+ * imported by a test (M0 constraint 3).
  */
 export interface PtyManagerOptions {
   /**
@@ -27,18 +29,15 @@ export interface PtyManagerOptions {
   redactor?(): RedactionFilter
 }
 
-const PASS_THROUGH: RedactionFilter = { push: (chunk) => chunk, flush: () => '' }
-
 export class PtyManager implements AgentSpawner {
   private readonly ptys = new Map<string, pty.IPty>()
-  private readonly filters = new Map<string, RedactionFilter>()
-  private sink: WebContents | null = null
+  private sink: PtySink | null = null
   private readonly exitListeners: ((id: string, exitCode: number) => void)[] = []
 
   constructor(private readonly options: PtyManagerOptions = {}) {}
 
   /** Later PTY output flows to this renderer; call on window (re)creation. */
-  attachSink(sink: WebContents): void {
+  attachSink(sink: WebContents | PtySink): void {
     this.sink = sink
   }
 
@@ -48,21 +47,15 @@ export class PtyManager implements AgentSpawner {
 
   private track(id: string, proc: pty.IPty): void {
     this.ptys.set(id, proc)
-    const filter = this.options.redactor?.() ?? PASS_THROUGH
-    this.filters.set(id, filter)
-    proc.onData((data) => {
-      const safe = filter.push(data)
-      if (safe.length > 0) this.sink?.send(ptyDataChannel(id), safe)
-    })
-    proc.onExit(({ exitCode }) => {
-      this.ptys.delete(id)
-      // Whatever the filter was holding back (a partial secret at the stream's
-      // very end) is emitted here, or the last bytes of a run would vanish.
-      const tail = filter.flush()
-      if (tail.length > 0) this.sink?.send(ptyDataChannel(id), tail)
-      this.filters.delete(id)
-      this.sink?.send(ptyExitChannel(id), exitCode)
-      for (const listener of this.exitListeners) listener(id, exitCode)
+    attachRedactedStream({
+      id,
+      source: proc,
+      filter: this.options.redactor?.() ?? PASS_THROUGH,
+      sink: () => this.sink,
+      onExit: (exitCode) => {
+        this.ptys.delete(id)
+        for (const listener of this.exitListeners) listener(id, exitCode)
+      }
     })
   }
 
