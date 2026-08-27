@@ -8,7 +8,7 @@ import { writeFileAtomic } from './fsx'
  * directories plus `config.json`; deeper structure (agora repo contents,
  * odeon/, agents/) arrives with the milestones that own it.
  */
-export const HOME_DIRS = ['prompts', 'profiles', 'agora', 'index'] as const
+export const HOME_DIRS = ['prompts', 'profiles', 'agora', 'index', 'worktrees'] as const
 
 export interface HarnessHome {
   readonly root: string

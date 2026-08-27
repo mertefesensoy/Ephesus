@@ -17,6 +17,7 @@ import {
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis } from './artemis'
+import { ExecGitRunner, Worktrees } from './git'
 import { LedgerEndpoint } from './ledger'
 import { Library } from './library'
 import { RECALL_SCHEMA_VERSION } from '../shared/recall'
@@ -350,6 +351,12 @@ async function boot(): Promise<void> {
 
   // The Agora is a git repo committed only by this process (ADR-0004). It is
   // reconciled before anything can write to it.
+  // The one git path (ADR-0004) also owns worktree isolation, and is told which
+  // root it must never make a worktree of: the Agora's own.
+  const worktrees = new Worktrees({
+    runner: new ExecGitRunner(),
+    forbiddenRoot: path.join(home.root, 'agora')
+  })
   agora = new Agora({
     root: path.join(home.root, 'agora'),
     prompts,
@@ -687,6 +694,16 @@ async function boot(): Promise<void> {
     },
     // SDD §10: a dead agent's in-flight work goes back on the board.
     returnTasks: (agentId, because) => ledger?.returnTasksOf(agentId, because) ?? [],
+    // UC-01 alternate 2a. Every git call still happens in `git.ts` — this is
+    // the narrow slice of it the lifecycle is allowed to ask for (ADR-0004).
+    worktrees: {
+      pathFor: (agentId) => path.join(home.root, 'worktrees', agentId),
+      // ENGINEERING-STANDARDS §2's agent branch convention, minus the `agent.`
+      // id prefix so the branch reads `agent/mason` rather than `agent/agent.mason`.
+      branchFor: (agentId) => `agent/${agentId.replace(/^agent\./, '')}`,
+      create: (plan) => worktrees.create(plan),
+      remove: (repo, worktreePath) => worktrees.remove(repo, worktreePath)
+    },
     resolveGrants: (declared) =>
       secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
     onGrantsMissing: (agentId, missing) =>

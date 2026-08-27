@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { AgentCard, RespawnOffer, SpawnRequest } from '../shared/agents'
+import type { AgentCard, RespawnOffer, SpawnRequest, WorktreeInfo } from '../shared/agents'
 import type { AgentStatus, RegistryEntry } from '../shared/registry'
 import { assignSeat, type Seat } from '../shared/seats'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
@@ -70,6 +70,36 @@ export interface AgentMemory {
     readonly text: string
     readonly facts: { readonly totalSections: number }
   }
+}
+
+/**
+ * The slice of `git.ts`'s worktree support the lifecycle needs (UC-01 2a).
+ *
+ * Narrow on purpose: the manager asks for a working copy and gives it back. It
+ * knows nothing about branches, prune, or `--force` — and cannot be the place
+ * a second git path grows.
+ */
+export interface AgentWorktrees {
+  /** Where this agent's isolated checkout should live. */
+  pathFor(agentId: string): string
+  /** The branch it should sit on. */
+  branchFor(agentId: string): string
+  create(plan: { repo: string; path: string; branch: string }): Promise<
+    | {
+        readonly ok: true
+        readonly path: string
+        readonly branch: string
+        readonly created: boolean
+      }
+    | { readonly ok: false; readonly reason: string }
+  >
+  remove(
+    repo: string,
+    worktreePath: string
+  ): Promise<
+    | { readonly removed: true }
+    | { readonly removed: false; readonly reason: string; readonly changes: readonly string[] }
+  >
 }
 
 /** Contract: resolves the version string, or null when the binary is absent. */
@@ -175,6 +205,12 @@ export interface AgentManagerOptions {
    */
   readonly recallCommand?: string
   /**
+   * Git worktree isolation for a spawn that asks for it (UC-01 alternate 2a).
+   * Injected rather than imported so the lifecycle never runs git itself —
+   * ADR-0004 gives the app exactly one git path, and it is `git.ts`.
+   */
+  readonly worktrees?: AgentWorktrees
+  /**
    * Returns a dead agent's in-flight ledger tasks to `todo` (SDD §10) and
    * yields the ids that moved, for the respawn offer. Injected: the lifecycle
    * must not import the ledger endpoint, and a company with no ledger yet
@@ -212,6 +248,12 @@ interface LiveAgent {
    */
   cfg: AgentSpawnConfig
   hookPlan: HookPlan | null
+  /**
+   * The repository the hire named, kept even after `cwd` becomes an isolated
+   * worktree — removing a worktree is an operation on its *repo*, and by then
+   * the card no longer points at one.
+   */
+  readonly targetRepo: string
 }
 
 export class AgentManager {
@@ -304,8 +346,22 @@ export class AgentManager {
     // observed live before this reservation existed.
     const cfg = this.spawnConfig(request)
     const card = this.newCard(request, adapter, null)
-    this.agents.set(request.agentId, { card, adapter, cfg, hookPlan: null, sessionIds: [] })
+    this.agents.set(request.agentId, {
+      card,
+      adapter,
+      cfg,
+      hookPlan: null,
+      sessionIds: [],
+      targetRepo: request.cwd
+    })
     this.options.onChange?.(card)
+
+    // UC-01 alternate 2a. Before the process exists and before anything is
+    // written into a repository: an isolated spawn works in its own checkout,
+    // so two agents in one repo cannot fight over a working copy. A failure
+    // here is visible and the spawn continues in the target repo — isolation is
+    // a nicety, and refusing to hire over it would be worse than saying so.
+    if (request.worktree === true) await this.isolate(request.agentId, request.cwd)
 
     const spec = adapter.binary()
     const version = await this.probe(spec)
@@ -512,7 +568,8 @@ export class AgentManager {
       seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),
       exitCode: null,
-      respawnOffer: null
+      respawnOffer: null,
+      worktree: null
     }
   }
 
@@ -574,6 +631,10 @@ export class AgentManager {
     }
     agent.cfg = { ...agent.cfg, hookToken: randomBytes(32).toString('hex') }
     this.update(agentId, { lifecycle: 'starting', exitCode: null, respawnOffer: null })
+    // An isolated agent's clean worktree was removed when it died, so it needs
+    // one again — on the same branch, which is why `branchFor` is stable and
+    // `create` reuses an existing branch rather than failing on it.
+    if (agent.card.worktree !== null) await this.isolate(agentId, agent.targetRepo)
     await this.start(agentId, { resume: true })
     return this.card(agentId)
   }
@@ -675,6 +736,83 @@ export class AgentManager {
   }
 
   /**
+   * Gives this spawn its own worktree of the target repo (UC-01 alternate 2a).
+   *
+   * Everything downstream follows the card's `cwd`: the spawn plan, the grants,
+   * the settings install and the transcript directory all target the worktree
+   * rather than the Architect's own checkout. A worktree that cannot be made is
+   * reported and the spawn continues where it was going to — visible, and never
+   * a reason not to hire.
+   */
+  private async isolate(agentId: string, repo: string): Promise<void> {
+    const worktrees = this.options.worktrees
+    if (!worktrees) {
+      this.options.onGrantsMissing?.(agentId, [])
+      this.options.onLogEvent?.({
+        kind: 'spawn',
+        agentId,
+        worktree: null,
+        because: 'worktree isolation was requested but is not configured'
+      })
+      return
+    }
+    const outcome = await worktrees.create({
+      repo,
+      path: worktrees.pathFor(agentId),
+      branch: worktrees.branchFor(agentId)
+    })
+    if (!outcome.ok) {
+      this.options.onLogEvent?.({ kind: 'spawn', agentId, worktree: null, because: outcome.reason })
+      this.options.onExitError?.(agentId, new Error(outcome.reason))
+      return
+    }
+    const info: WorktreeInfo = {
+      path: outcome.path,
+      branch: outcome.branch,
+      branchCreated: outcome.created
+    }
+    const agent = this.agents.get(agentId)
+    if (agent) agent.cfg = { ...agent.cfg, cwd: outcome.path }
+    this.update(agentId, { worktree: info, cwd: outcome.path })
+    this.options.onLogEvent?.({
+      kind: 'spawn',
+      agentId,
+      worktree: outcome.path,
+      branch: outcome.branch,
+      branchCreated: outcome.created,
+      // The repo the worktree came from, so a reader can find the branch.
+      repo
+    })
+  }
+
+  /**
+   * Removes a clean worktree at unwind, and *reports* a dirty one.
+   *
+   * `--force` is never used (see `git.ts`): an agent that died with unpushed
+   * work leaves that work on disk for the Architect. Tidiness does not outrank
+   * somebody's afternoon.
+   */
+  private async releaseWorktree(agent: LiveAgent, repo: string): Promise<void> {
+    const worktree = agent.card.worktree
+    if (!worktree || !this.options.worktrees) return
+    const outcome = await this.options.worktrees.remove(repo, worktree.path)
+    this.options.onLogEvent?.({
+      kind: 'exit',
+      agentId: agent.card.agentId,
+      worktree: worktree.path,
+      branch: worktree.branch,
+      worktreeRemoved: outcome.removed,
+      ...(outcome.removed ? {} : { because: outcome.reason, changes: [...outcome.changes] })
+    })
+    if (!outcome.removed) {
+      // Visible, not just logged: a working copy left behind with somebody's
+      // uncommitted work in it is exactly the kind of thing that must be said
+      // out loud (invariant §7).
+      this.options.onExitError?.(agent.card.agentId, new Error(outcome.reason))
+    }
+  }
+
+  /**
    * SDD §6/§10: a ghost is archived once the grace period elapses. Driven from
    * the avatar clock, which owns the 30 s timer — one place decides when an
    * agent stops being a ghost, and the roster mirrors it (SDD §4.1 `status`).
@@ -744,6 +882,9 @@ export class AgentManager {
       settingsRestored: agent.card.settingsWritten.length
     })
     const respawnOffer = ranProcess ? this.offerRespawn(agent, exitCode) : null
+    // UC-01 2a: a clean isolated checkout goes away with the spawn; a dirty one
+    // stays, and the Architect is told.
+    await this.releaseWorktree(agent, agent.targetRepo)
     this.update(agentId, { lifecycle: 'exited', exitCode, settingsWritten: [], respawnOffer })
   }
 }

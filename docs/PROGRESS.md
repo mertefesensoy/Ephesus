@@ -1886,7 +1886,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1474 passed / 4
       skipped** (was 1443).
 
-- [ ] **M4.8 Worktree isolation option** — UC-01 alternate 2a: a spawn may
+- [x] **M4.8 Worktree isolation option** — UC-01 alternate 2a: a spawn may
       request its own git worktree of the target repo; worktree create/remove
       through `git.ts` (the one committer — no second git path); agent cwd,
       grants and settings install target the worktree; unwind removes a clean
@@ -1895,6 +1895,31 @@ triage).
       lifecycle on real git temp repos; dirty-worktree unwind refuses +
       reports; the invariant tripwire still passes. Risk: worktrees of the
       agent's TARGET repo, never of the Agora.*
+      *Landed 2026-08-27 (`feature/m4-8-worktree-isolation`).* `Worktrees` in
+      `git.ts` — the one module allowed to run git, so isolation cannot become a
+      second git path · `spawnRequestSchema.worktree?: boolean` ·
+      `AgentCard.worktree` (path, branch, whether the branch was created) ·
+      `~/.ephesus/worktrees/<agentId>/`, branch `agent/<name>` per
+      ENGINEERING-STANDARDS §2 · the cwd is replaced **before** anything is
+      written, so grants, settings and transcripts all follow it · a respawn
+      re-isolates onto the same branch.
+      Two rules are enforced in `git.ts` rather than trusted to callers:
+      **never the Agora** (a worktree of the company repo would put a second
+      working copy behind the single committer — refused for the Agora root and
+      anything under it) and **never destroy work** (`--force` is never passed;
+      a dirty worktree is kept, the changes are named, and the refusal is
+      reported, not just logged).
+      **Evidence:** 17 tests against **real git in real temp repositories** —
+      `agent/mason` created and checked out, the Architect's own repo left
+      `git status --porcelain` empty, the fake engine's settings landing in the
+      worktree and *not* in the target, a clean checkout released at exit
+      (`worktreeRemoved: true`), a dirty one kept with `unpushed.md` byte-intact
+      and `uncommitted change` reported, a respawn reusing the branch
+      (`branchCreated: false`), and a non-isolated spawn creating no worktree
+      directory at all. Invariant tripwire still passes (`invariants ok`).
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1491 passed / 4
+      skipped** (was 1474).
+
 - [ ] **M4.9 Recall smoke + exit demos + review** — the recall smoke test with
       known-answer queries green at every available rung (grep/FTS always;
       MemPalace where installed); the respawn-with-memory demo (kill a real

@@ -78,7 +78,14 @@ export const spawnRequestSchema = z
      * `registryEntrySchema.budget` is: an unbudgeted hire is legal and shows as
      * `unbudgeted` rather than as a zero the Watch would immediately breach.
      */
-    budget: budgetSchema.optional()
+    budget: budgetSchema.optional(),
+    /**
+     * SRS UC-01 alternate 2a: give this spawn its own git worktree of the
+     * target repo, so two agents in one repository cannot fight over a working
+     * copy. Optional and false by default — isolation is a choice the Architect
+     * makes per hire, not a default that would surprise them with a branch.
+     */
+    worktree: z.boolean().optional()
   })
   .strict()
 
@@ -137,4 +144,22 @@ export interface AgentCard {
   readonly exitCode: number | null
   /** Set when the process ended and coming back is possible; null while it runs. */
   readonly respawnOffer: RespawnOffer | null
+  /**
+   * The isolated worktree this agent works in, or null when it works directly
+   * in the target repo (UC-01 alternate 2a).
+   *
+   * On the card because everything the harness puts in an agent's environment
+   * is inspectable from it (ENGINEERING-STANDARDS §4) — a branch created in the
+   * Architect's repository is exactly the kind of thing that must not be a
+   * surprise.
+   */
+  readonly worktree: WorktreeInfo | null
+}
+
+/** Where an isolated spawn works, and on which branch (UC-01 alternate 2a). */
+export interface WorktreeInfo {
+  readonly path: string
+  readonly branch: string
+  /** True when the harness created the branch; false when it reused one. */
+  readonly branchCreated: boolean
 }
