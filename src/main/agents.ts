@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { AgentStatus, RegistryEntry } from '../shared/registry'
+import { assignSeat, type Seat } from '../shared/seats'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
 import type { EngineRegistry } from './engines'
 import { baseAgentEnv } from './engines/spawn-env'
@@ -22,6 +23,18 @@ import { writeFileAtomic } from './fsx'
  * lifecycle rules are testable without node-pty — which cannot load under the
  * Node test runner after `electron-rebuild` (DECISIONS-LOG).
  */
+
+/**
+ * Contract: whether a role owns the temple seat (SDD §4.1, ADR-0005).
+ *
+ * The roster's `orchestratorId` is set when Artemis is hired (M3.7); until then
+ * the role string is the only fact a spawn carries, and it is the same fact the
+ * floor already reads for her silhouette. One predicate, so the two cannot
+ * drift apart.
+ */
+export function isOrchestratorRole(role: string): boolean {
+  return role === 'orchestrator'
+}
 
 /** What the Watch needs about one spawn to fold and budget it (ADR-0011). */
 export interface BudgetedSpawn {
@@ -97,6 +110,13 @@ export interface AgentManagerOptions {
    */
   onExitError?(agentId: string, err: unknown): void
   /**
+   * Seats already taken, agent id → seat, usually read straight off the roster.
+   * Injected for the same reason the budget lookup is: seating is a property of
+   * the *company*, not of the spawns this manager happens to be holding, and an
+   * agent must keep its seat across a restart that has no live spawns at all.
+   */
+  rosterSeats?(): ReadonlyMap<string, Seat>
+  /**
    * Resolves the role's DECLARED secret grants to values (ADR-0010). Injected
    * as a function rather than as the broker, so this module never holds a
    * credential beyond the spawn config it hands to the adapter, and the
@@ -146,6 +166,8 @@ interface LiveAgent {
 
 export class AgentManager {
   private readonly agents = new Map<string, LiveAgent>()
+  /** Seats handed out this session; the roster is the durable copy. */
+  private readonly seats = new Map<string, Seat>()
   private readonly probe: VersionProber
 
   constructor(private readonly options: AgentManagerOptions) {
@@ -245,9 +267,8 @@ export class AgentManager {
       role: request.role,
       engine: adapter.id,
       capabilities: [...request.capabilities],
-      // Seats are assigned by the floor in M3 with Artemis's temple seat; until
-      // then every hire sits on the terraces.
-      seat: 'terrace',
+      seat: this.card(request.agentId).seat,
+      ...(isOrchestratorRole(request.role) ? { isOrchestrator: true } : {}),
       envGrants: [...request.envGrants],
       // The card already resolved the effective budget — request first, then
       // whatever the roster declared. Writing `request.budget` here would erase
@@ -325,7 +346,8 @@ export class AgentManager {
       role: agent.card.role,
       engine: agent.card.engine,
       capabilities: [...agent.card.capabilities],
-      seat: 'terrace',
+      seat: agent.card.seat,
+      ...(isOrchestratorRole(agent.card.role) ? { isOrchestrator: true } : {}),
       envGrants: [...agent.card.envGrants],
       ...(agent.card.dailyTokens === null
         ? {}
@@ -393,6 +415,24 @@ export class AgentManager {
     return scoped
   }
 
+  /**
+   * The seat this agent sits in, assigned once and remembered.
+   *
+   * The roster is the durable memory, but it is written *by* this call's
+   * result, so a second hire in the same tick would otherwise be handed the
+   * same number. The local map closes that window; the roster is what survives
+   * a restart.
+   */
+  private seatFor(agentId: string, role: string): Seat {
+    const held = this.seats.get(agentId)
+    if (held !== undefined) return held
+    const taken = new Map(this.options.rosterSeats?.() ?? [])
+    for (const [id, seat] of this.seats) taken.set(id, seat)
+    const seat = assignSeat({ agentId, isOrchestrator: isOrchestratorRole(role), taken })
+    this.seats.set(agentId, seat)
+    return seat
+  }
+
   private newCard(
     request: SpawnRequest,
     adapter: EngineAdapter,
@@ -413,6 +453,7 @@ export class AgentManager {
       dailyTokens:
         request.budget?.dailyTokens ?? this.options.rosterBudget?.(request.agentId) ?? null,
       capabilities: request.capabilities,
+      seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),
       exitCode: null
     }

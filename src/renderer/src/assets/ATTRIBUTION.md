@@ -32,19 +32,45 @@ Citizens remain procedural (never third-party — rule 3).
 ## Tileset drop (gitignored)
 
 ```
-src/renderer/src/assets/tileset/*.png
+src/renderer/src/assets/tileset/*.png          the sheet(s)
+src/renderer/src/assets/tileset/*.tiles.json   which tile paints what
 ```
 
-Sheets placed here are discovered at build time by
-`src/renderer/src/floor/tileset.ts` — no code change is needed to adopt them.
-With the directory empty, the floor draws procedural tiles and the status strip
-says `tileset: procedural (none installed)`.
+Both are discovered at build time by `src/renderer/src/floor/tileset.ts` — no
+code change is needed to adopt a pack.
+
+A sheet alone is not enough: every pack lays its tiles out differently, so the
+pack's layout ships **with the pack**, as a tile map validated by
+`src/shared/tileset.ts`. Hard-coding frame indices for a pack that is not in the
+tree would paint whatever happened to sit at those offsets.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "name": "Kenney Roguelike Indoors",   // credited in the floor's status strip
+  "sheet": "kenney-roguelike-indoors.png",
+  "tilePx": 16,                          // must divide the 32px world tile (§7)
+  "columns": 57,                          // sheet width in tiles
+  "spacing": 1,                           // grid gap, if the pack has one
+  "frames": {                             // any subset; unmapped tiles stay procedural
+    "wall": 0, "path": 1, "temple": 2, "seat": 3,
+    "floor-a": 10, "floor-b": 11,
+    "station": 20, "station:odeon": 21    // `station:<name>` overrides `station`
+  }
+}
+```
+
+Anything short of a sheet **and** a valid map for it leaves the floor
+procedural, and the status strip says which step is missing — no sheet, no tile
+map, an invalid map (with the reason), or a map naming a sheet that is not
+there. A tileset that quietly failed to load would look exactly like one nobody
+had installed yet.
 
 **Restore path for a fresh clone:** purchase or obtain the tileset named in the
-table above, unzip its 16×16 sheets into the drop directory, add its row here,
-and rebuild. The reference lineage in §7 is LimeZu's *Modern Interiors*; a
-Mediterranean/antiquity-compatible set is preferred if one is available on
-comparable terms.
+table above, unzip its 16×16 sheets into the drop directory, write its
+`*.tiles.json` map, add its row here, and rebuild. The reference lineage in §7
+is LimeZu's *Modern Interiors*; a Mediterranean/antiquity-compatible set is
+preferred if one is available on comparable terms.
 
 ## Pixel fonts drop (gitignored)
 

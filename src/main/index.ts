@@ -486,6 +486,18 @@ void app.whenReady().then(async () => {
         return null
       }
     },
+    rosterSeats: () => {
+      const seats = new Map<string, string>()
+      try {
+        for (const [agentId, entry] of Object.entries(agora?.registry().agents ?? {})) {
+          if (entry) seats.set(agentId, entry.seat)
+        }
+      } catch {
+        // A corrupt roster is a visible degradation elsewhere; seating falls
+        // back to this session's own assignments rather than refusing a hire.
+      }
+      return seats
+    },
     resolveGrants: (declared) =>
       secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
     onGrantsMissing: (agentId, missing) =>

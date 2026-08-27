@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 // CSP forbids eval (ENGINEERING-STANDARDS §5); this swaps Pixi's codegen for eval-free paths.
 import 'pixi.js/unsafe-eval'
-import { Application, Container, Graphics } from 'pixi.js'
+import { Application, Container, Graphics, ImageSource, Rectangle, Sprite, Texture } from 'pixi.js'
 import type { AvatarSnapshot } from '../../../shared/avatar'
 import {
   MS_PER_TILE,
@@ -9,9 +9,13 @@ import {
   ROOM_ROWS,
   STATION_TILES,
   TILE_PX,
-  deskTileFor,
+  floorPlan,
+  seatTile,
+  sharingDesks,
   walkDurationMs
 } from '../../../shared/floor'
+import { badgeFor, floorCensus, glyphPixels, GLYPH_H, GLYPH_W } from '../../../shared/badges'
+import { TEMPLE_SEAT, terraceSeat } from '../../../shared/seats'
 import type { AvatarUpdate } from '../../../shared/ipc'
 import { tokens } from '../tokens'
 import {
@@ -22,6 +26,7 @@ import {
   type CitizenPalette,
   type Silhouette
 } from './citizen'
+import { paintPlan, type PaintOp } from './painter'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
 
@@ -32,7 +37,6 @@ import { steppedProgress, STEPS_PER_TILE } from './walk'
  * the snapshots stop arriving, the floor stops — it has nothing of its own to
  * animate from, which is what "never invents motion" (SDD §10) means in code.
  */
-const WALL_PX = 3
 
 /** Status colors from UI-DESIGN §2.4, one per avatar phase. */
 const PHASE_COLOR: Readonly<Record<string, number>> = {
@@ -50,35 +54,33 @@ const PHASE_COLOR: Readonly<Record<string, number>> = {
   archived: tokens.statusGhost
 }
 
-function drawRoom(g: Graphics): void {
-  for (let cx = 0; cx < ROOM_COLS; cx++) {
-    for (let cy = 0; cy < ROOM_ROWS; cy++) {
-      const color = (cx + cy) % 2 === 0 ? tokens.worldTerraceA : tokens.worldTerraceB
-      g.rect(cx * TILE_PX, cy * TILE_PX, TILE_PX, TILE_PX).fill(color)
+/**
+ * Paints the room from `floorPlan()` — the same plan whether or not a pack is
+ * installed, so art changes how the floor looks and never what is on it.
+ *
+ * Fills go into one `Graphics`; blits become `Sprite`s over the shared sheet
+ * texture. Both come from the pure painter, so this function decides nothing.
+ */
+function drawRoom(
+  ops: readonly PaintOp[],
+  g: Graphics,
+  sheet: Texture | null,
+  into: Container
+): void {
+  for (const op of ops) {
+    if (op.op === 'fill') {
+      g.rect(op.x, op.y, op.w, op.h).fill(op.color)
+      continue
     }
+    if (!sheet) continue
+    const frame = new Rectangle(op.frame.x, op.frame.y, op.frame.w, op.frame.h)
+    const sprite = new Sprite(new Texture({ source: sheet.source, frame }))
+    sprite.x = op.x
+    sprite.y = op.y
+    // §7: integer scaling only, pixel-snap preserved.
+    sprite.scale.set(op.scale)
+    into.addChild(sprite)
   }
-  // Stone paths along the station rows (§2.5).
-  for (const row of [2, 7]) {
-    for (let cx = 0; cx < ROOM_COLS; cx++) {
-      g.rect(cx * TILE_PX, row * TILE_PX + 4, TILE_PX, TILE_PX - 8).fill(tokens.worldPath)
-    }
-  }
-  // Stations: 8-color tiles until the M1.5b tileset lands (UI-DESIGN §7).
-  for (const [station, tile] of Object.entries(STATION_TILES)) {
-    if (station === 'desk') continue
-    g.rect(tile.col * TILE_PX + 2, tile.row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4).fill(
-      tokens.worldWall
-    )
-    g.rect(tile.col * TILE_PX + 6, tile.row * TILE_PX + 6, TILE_PX - 12, TILE_PX - 12).fill(
-      tokens.gold
-    )
-  }
-  const w = ROOM_COLS * TILE_PX
-  const h = ROOM_ROWS * TILE_PX
-  g.rect(0, 0, w, WALL_PX).fill(tokens.worldWall)
-  g.rect(0, h - WALL_PX, w, WALL_PX).fill(tokens.worldWall)
-  g.rect(0, 0, WALL_PX, h).fill(tokens.worldWall)
-  g.rect(w - WALL_PX, 0, WALL_PX, h).fill(tokens.worldWall)
 }
 
 /**
@@ -110,8 +112,16 @@ function drawCitizen(
   }
   // Status badge, drawn OUTSIDE the sprite's five-colour budget: it is a UI
   // marker, and §8 requires status to be double-encoded rather than colour-only.
-  g.rect(10, -14, 12, 6).fill(PHASE_COLOR[opts.phase] ?? tokens.statusIdle)
-  g.rect(10, -14, 12, 1).fill(tokens.ink900)
+  // Hence the glyph: `alert` and `thinking` share a colour, `ghost` and
+  // `archived` share a colour, `blocked` and `stopped` share a colour — the
+  // shape is what tells them apart, and it is what a colour-blind reader has.
+  const badgeW = GLYPH_W * 2 + 6
+  const badgeH = GLYPH_H * 2 + 4
+  g.rect(10, -badgeH - 2, badgeW, badgeH).fill(PHASE_COLOR[opts.phase] ?? tokens.statusIdle)
+  g.rect(10, -badgeH - 2, badgeW, 1).fill(tokens.ink900)
+  for (const pixel of glyphPixels(badgeFor(opts.phase).glyph)) {
+    g.rect(13 + pixel.x * 2, -badgeH + pixel.y * 2, 2, 2).fill(tokens.ink900)
+  }
 }
 
 /** What the last frame drew, so an interrupted walk resumes from where it is. */
@@ -138,13 +148,16 @@ interface DrawState {
  */
 function positionFor(
   snapshot: AvatarSnapshot,
-  deskIndex: number,
+  seat: string,
   nowMs: number,
   drawn: DrawState | undefined
 ): DrawState & { frame: 0 | 1 | 2 | 3 } {
+  // `desk` is the agent's OWN desk — its seat (SDD §4.1). Until M3.6 it was the
+  // avatar's index in a Map, so a citizen changed desks whenever another agent
+  // was hired or exited.
   const tileOf = (station: string): { col: number; row: number } =>
     station === 'desk'
-      ? deskTileFor(deskIndex)
+      ? seatTile(seat)
       : (STATION_TILES[station as keyof typeof STATION_TILES] ?? STATION_TILES.desk)
 
   const to = tileOf(snapshot.station)
@@ -191,20 +204,40 @@ export function FloorCanvas(): ReactElement {
   const [initError, setInitError] = useState<string | null>(null)
   const [population, setPopulation] = useState(0)
   const avatarsRef = useRef<Map<string, AvatarSnapshot>>(new Map())
-  const rolesRef = useRef<Map<string, string>>(new Map())
-  const tileset = tilesetState()
+  const seatsRef = useRef<Map<string, { role: string; seat: string }>>(new Map())
+  const [census, setCensus] = useState(() => floorCensus([]))
+  const [overflow, setOverflow] = useState(0)
+  const [tileset] = useState(tilesetState)
+  const [sheetError, setSheetError] = useState<string | null>(null)
 
-  // Roles decide silhouettes (§7); the cards are the only place they live.
+  /**
+   * What the strip and the label say about the floor, recomputed from the two
+   * refs. The census is the floor's information content in words: a `<canvas>`
+   * is opaque to a screen reader, so without it §8's double encoding stops at
+   * the glyph (UI-DESIGN §8, NFR-15). Both counts are over the citizens who are
+   * actually on the floor, not over every card ever seen.
+   */
+  const refresh = useCallback((): void => {
+    const live = avatarsRef.current
+    setPopulation(live.size)
+    setCensus(floorCensus([...live.values()].map((snapshot) => snapshot.phase)))
+    setOverflow(sharingDesks([...live.keys()].map((id) => seatsRef.current.get(id)?.seat ?? '')))
+  }, [])
+
+  // Roles decide silhouettes (§7) and seats decide desks (§5); the cards are
+  // the only place either lives.
   useEffect(() => {
     const eph = window.eph
     if (!eph) return
+    const note = (card: { agentId: string; role: string; seat: string }): void => {
+      seatsRef.current.set(card.agentId, { role: card.role, seat: card.seat })
+      refresh()
+    }
     void eph.agents.list().then((cards) => {
-      for (const card of cards) rolesRef.current.set(card.agentId, card.role)
+      for (const card of cards) note(card)
     })
-    return eph.agents.onChange((card) => {
-      rolesRef.current.set(card.agentId, card.role)
-    })
-  }, [])
+    return eph.agents.onChange(note)
+  }, [refresh])
 
   // The floor's only input: snapshots from main (ADR-0002).
   useEffect(() => {
@@ -212,13 +245,13 @@ export function FloorCanvas(): ReactElement {
     if (!eph) return
     void eph.avatars.list().then((updates: readonly AvatarUpdate[]) => {
       for (const update of updates) avatarsRef.current.set(update.agentId, update.snapshot)
-      setPopulation(avatarsRef.current.size)
+      refresh()
     })
     return eph.avatars.onChange((update) => {
       avatarsRef.current.set(update.agentId, update.snapshot)
-      setPopulation(avatarsRef.current.size)
+      refresh()
     })
-  }, [])
+  }, [refresh])
 
   useEffect(() => {
     const host = hostRef.current
@@ -228,23 +261,56 @@ export function FloorCanvas(): ReactElement {
     let cleanup: (() => void) | null = null
 
     const app = new Application()
-    void app
-      .init({
+    // The sheet is loaded alongside the app so the room is painted once, from
+    // whatever is actually available. A sheet that fails to load leaves the
+    // floor procedural and says so, rather than blitting from a null texture.
+    //
+    // Decoded through the DOM rather than through Pixi's asset resolver: the
+    // resolver picks a parser from the URL's *extension*, and the bundler
+    // inlines a small sheet as a `data:` URL, which has none. Observed live —
+    // an installed pack fell back to procedural with a loader error. Nothing
+    // about a tileset should depend on the shape of the URL it arrived on.
+    const loadSheet = async (): Promise<Texture | null> => {
+      if (!tileset.sheetUrl) return null
+      try {
+        const image = new Image()
+        image.src = tileset.sheetUrl
+        await image.decode()
+        return new Texture({
+          // `nearest` is not a preference: §1.1 is pixel-snapped everywhere, and
+          // the §7 integer upscale is only integer if nothing interpolates it.
+          source: new ImageSource({ resource: image, scaleMode: 'nearest' })
+        })
+      } catch (err: unknown) {
+        setSheetError(err instanceof Error ? err.message : String(err))
+        return null
+      }
+    }
+    void Promise.all([
+      app.init({
         width: ROOM_COLS * TILE_PX,
         height: ROOM_ROWS * TILE_PX,
         background: tokens.marble200,
         antialias: false // pixel-snapped everything (§1.1)
-      })
-      .then(() => {
+      }),
+      loadSheet()
+    ])
+      .then(([, sheet]) => {
+        const map = sheet ? tileset.map : null
         if (cancelled) {
           app.destroy(true)
           return
         }
         host.appendChild(app.canvas)
 
+        const ops = paintPlan(floorPlan(), map)
         const room = new Graphics()
-        drawRoom(room)
+        const sheetTiles = new Container()
+        // Fills under blits: a partially-mapped pack paints its own tiles over
+        // the procedural floor rather than punching holes in it.
         app.stage.addChild(room)
+        app.stage.addChild(sheetTiles)
+        drawRoom(ops, room, sheet, sheetTiles)
 
         const citizens = new Container()
         app.stage.addChild(citizens)
@@ -263,15 +329,22 @@ export function FloorCanvas(): ReactElement {
               citizens.addChild(sprite)
             }
             const previous = drawStates.get(agentId)
-            const accent = ACCENTS[index % ACCENTS.length] ?? tokens.aegean
-            const pose = positionFor(snapshot, index, now, previous)
+            const card = seatsRef.current.get(agentId)
+            // A citizen with no card yet is seated on the terraces until one
+            // arrives — never in the temple, which is Artemis's alone.
+            const seat = card?.seat ?? terraceSeat(1)
+            const accent =
+              seat === TEMPLE_SEAT
+                ? tokens.terracotta
+                : (ACCENTS[index % ACCENTS.length] ?? tokens.aegean)
+            const pose = positionFor(snapshot, seat, now, previous)
             drawStates.set(agentId, pose)
             drawCitizen(sprite, {
               dx: pose.x - (previous?.x ?? pose.x),
               dy: pose.y - (previous?.y ?? pose.y),
               frame: pose.frame,
               walking: snapshot.walking,
-              silhouette: silhouetteFor(rolesRef.current.get(agentId) ?? ''),
+              silhouette: silhouetteFor(card?.role ?? ''),
               palette: {
                 outline: tokens.ink900,
                 hair: tokens.ink700,
@@ -318,11 +391,11 @@ export function FloorCanvas(): ReactElement {
       cancelled = true
       cleanup?.()
     }
-  }, [])
+  }, [tileset])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <div ref={hostRef} aria-label="Terraces floor" />
+      <div ref={hostRef} role="img" aria-label={census} />
       <span
         style={{
           fontFamily: 'var(--eph-face-data)',
@@ -332,7 +405,17 @@ export function FloorCanvas(): ReactElement {
       >
         {initError
           ? `floor unavailable: ${initError}`
-          : `floor: ${population} on the terraces · ${tileset.note}`}
+          : [
+              `floor: ${population} on the terraces`,
+              sheetError
+                ? `tileset: procedural (sheet failed to load — ${sheetError})`
+                : tileset.note,
+              // More hires than the block has desks: citizens share a seat, and
+              // that is said out loud rather than left to be noticed (§7).
+              overflow > 0 ? `${overflow} sharing a desk` : null
+            ]
+              .filter(Boolean)
+              .join(' · ')}
       </span>
     </div>
   )

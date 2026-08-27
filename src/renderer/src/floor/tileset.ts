@@ -1,3 +1,5 @@
+import { resolveTileset, type TilesetState } from '../../../shared/tileset'
+
 /**
  * Licensed tileset intake (UI-DESIGN §7).
  *
@@ -7,11 +9,13 @@
  * of the public repository. Both are handled by making the tileset *optional
  * and discovered*, never imported:
  *
- *  - drop the sheets into `src/renderer/src/assets/tileset/` (gitignored) and
- *    record them in `src/renderer/src/assets/ATTRIBUTION.md`;
+ *  - drop the sheets into `src/renderer/src/assets/tileset/` (gitignored)
+ *    together with a `*.tiles.json` map (`src/shared/tileset.ts`) and record
+ *    them in `src/renderer/src/assets/ATTRIBUTION.md`;
  *  - the floor picks them up on the next build with no code change;
- *  - with no sheets present the floor draws its own tiles and *says so* — a
- *    visible degraded state, not a silent one (invariant §7).
+ *  - anything short of a sheet *and* a valid map for it leaves the floor
+ *    drawing its own tiles, and *says which* of those was missing — a visible
+ *    degraded state, not a silent one (invariant §7).
  *
  * `import.meta.glob` is what makes that possible: a missing directory yields an
  * empty record instead of a build error, which a static `import` could not do.
@@ -23,22 +27,17 @@ const sheets = import.meta.glob('../assets/tileset/*.png', {
   import: 'default'
 }) as Record<string, string>
 
-export interface TilesetState {
-  /** True when at least one licensed sheet is installed. */
-  readonly installed: boolean
-  /** URLs of the installed sheets, in path order. */
-  readonly sheets: readonly string[]
-  /** What the UI should say about the floor's art source. */
-  readonly note: string
-}
+const maps = import.meta.glob('../assets/tileset/*.tiles.json', {
+  eager: true,
+  import: 'default'
+}) as Record<string, unknown>
 
+/**
+ * The resolution rules live in `src/shared/tileset.ts` so they can be tested
+ * without a build: this file is the only one that may name `import.meta.glob`,
+ * which does not exist under the Node test runner (the same split the pixel
+ * faces needed in M3.5).
+ */
 export function tilesetState(): TilesetState {
-  const paths = Object.keys(sheets).sort()
-  const urls = paths.map((path) => sheets[path]).filter((url): url is string => Boolean(url))
-  return {
-    installed: urls.length > 0,
-    sheets: urls,
-    note:
-      urls.length > 0 ? `tileset: ${urls.length} sheet(s)` : 'tileset: procedural (none installed)'
-  }
+  return resolveTileset(sheets, maps)
 }

@@ -102,6 +102,8 @@ export interface AgentCard {
   /** The role's daily token budget (ADR-0011), or null when unbudgeted. */
   readonly dailyTokens: number | null
   readonly capabilities: readonly string[]
+  /** Where this citizen sits (`temple`, `terrace-3` — SDD §4.1, `src/shared/seats.ts`). */
+  readonly seat: string
   readonly spawnedAt: string
   /** Exit code once the process is gone; null while it lives. */
   readonly exitCode: number | null

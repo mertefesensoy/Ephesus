@@ -764,9 +764,9 @@ rendering + the owed badge double-encoding ride the M3 floor-layout package.
 **Carried in from M1/M2 (each closes inside a package below):** the engine's
 Notification-hook/permission-dialog invisibility (M1 → gate choke point,
 M3.3) · `pendingTasksFor` always 0 (→ M3.8) · breaker pathology signal
-emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
+emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
 `agora/human/` queue with no UI (→ M3.4) · claude adapter's missing optional
-`resume` (→ M3.7) · badge color-only pairs and tilesheet rendering (→ M3.6).
+`resume` (→ M3.7) · badge color-only pairs and tilesheet rendering (closed M3.6).
 
 - [x] **M3.1 Secret broker + redaction filter** — write-only broker in main
       (`secrets:` IPC per SDD §5: `set/status/test/delete` — no call returns a
@@ -1160,7 +1160,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       **Owed forward:** S-BREAKER's "ledger `stalled`" clause needs Artemis's
       reassignment (M3.8) and its "brief mentions trip" clause needs the Odeon (M5);
       both are named in the suite rather than faked.*
-- [ ] **M3.6 Floor layout v2 — seats, temple, sheet rendering** — the floor
+- [x] **M3.6 Floor layout v2 — seats, temple, sheet rendering** — the floor
       layout: real seat assignment (terrace numbering per UI-DESIGN §5 —
       retires the every-hire-is-`terrace` placeholder, **closes the M2 carried
       item**), Artemis's reserved temple seat/room; rooms render from the
@@ -1174,6 +1174,73 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       truth, art is presentation); token/contrast checks stay green; badge
       encodings asserted distinct without color. Risk: art must not change the
       state model — snapshots of scene state, not pixels.*
+      *Evidence: `typecheck && lint && invariants && test` green — 1066 passed / 2
+      skipped (108 new). **The M2 carried item is closed**: `src/shared/seats.ts`
+      assigns `temple` or `terrace-<n>` as a pure function of the seats already
+      taken — no clock, no randomness, and no dependence on the order the roster is
+      read in. An agent **keeps** its seat (a respawn, a status mirror, a restart
+      replaying the roster), a vacated number is reused, and a seat that does not
+      parse — which is what every M1/M2 roster holds — is reassigned rather than
+      rejected, so no old roster becomes unreadable. Planting the old `seat:
+      'terrace'` back into `AgentManager` fails 8 tests in
+      `test/main/seating.test.ts`; before this package it failed none.
+      **The temple is reserved by the rule, not by everyone else's good behaviour**:
+      the orchestrator gets it however full the terraces are, a roster that seated
+      her elsewhere is corrected, and a worker holding `temple` is turned out of it.
+      **`floorPlan()` makes the floor's layout state**: typed cells with no colour,
+      no texture and no sheet in them. That is the seam ADR-0014 asks for — UI-DESIGN
+      §7's licensed tileset is exactly the thing that could quietly make art the
+      model (a station existing because a tile was drawn there), and with the plan in
+      front, a pack paints it and cannot change it. A pack ships its own
+      `*.tiles.json` map (validated in `src/shared/tileset.ts`, `station:<name>`
+      overriding `station`, `tilePx` required to divide the 32px world tile per §7's
+      integer-scale rule); an unmapped cell falls back to the procedural tile, so a
+      partial pack cannot punch holes in the floor. A sheet with no map, an invalid
+      map, or a map naming a missing sheet each leave the floor procedural **and say
+      which** — a tileset that quietly failed to load would look exactly like one
+      nobody had installed yet.
+      **Badges are double-encoded (§8)**: a 3×5 glyph beside the colour, distinct for
+      every phase — asserted the way a reader without colour sees the floor, using
+      the palette *only* to find the three pairs that collide (`alert`/`thinking`,
+      `ghost`/`archived`, `blocked`/`stopped`) and never to tell them apart. The
+      canvas also carries a census in words, because a `<canvas>` is opaque to a
+      screen reader and §8's double encoding would otherwise stop at the glyph.
+      LIVE RUN of the REAL app with four real `claude` 2.1.247 agents hired through
+      the real IPC, driven by the harness's own hook endpoint with tokens read from
+      each live agent's own `/proc/<pid>/environ`:
+      `card.seat = temple · terrace-1 · terrace-2 · terrace-3`, matched by
+      `registry.json` (`agent.artemis … isOrchestrator=true`), all distinct;
+      four phases on the floor at once —
+      `agent.mason: blocked at watch-post` (a real `notification` hook opened a real
+      gate), `agent.scribe: looping` (seven repeats tripped the real breaker to rung
+      1), `agent.runner: alert`, `agent.artemis: idle` — and
+      `aria-label: "Terraces floor: 4 on the terraces — 1 idle, 1 alert, 1 blocked at
+      a gate, 1 breaker tripped"`.
+      Screenshot: [`docs/demo/m3-floor-seats.png`](./demo/m3-floor-seats.png) — the
+      shipped procedural floor, Artemis in the marble temple precinct in her reserved
+      terracotta, Mason at the Watch post under an `X` badge, the looping scribe under
+      a ring and the alert runner under a `!`.
+      **The sheet path was then proven by installing a pack**, not by reasoning about
+      it: a synthetic 16×16 fixture pack (deliberately loud, not shipped — the drop is
+      gitignored) went into the drop, and the same run painted walls, paths, the
+      temple, desks, floor and stations from the sheet, with `station:odeon` picking
+      up its own frame while every other station used the generic one, and the strip
+      crediting the pack by name.
+      Screenshot: [`docs/demo/m3-floor-tileset.png`](./demo/m3-floor-tileset.png).
+      **Art did not change the state model**: the two runs produced identical seats,
+      identical phases and an identical census — which is the ADR-0014 property,
+      observed rather than asserted.
+      **A real production bug surfaced from that install and was fixed here**: the
+      sheet was loaded through Pixi's asset resolver, which picks a parser from the
+      URL's *extension* — and the bundler inlines a small sheet as a `data:` URL,
+      which has none. The installed pack fell back to procedural with a loader error.
+      It is now decoded through the DOM (`Image.decode()`) with
+      `scaleMode: 'nearest'`, since §7's integer upscale is only integer if nothing
+      interpolates it.
+      **Owed forward:** the floor's *rendering* stays E2E territory (this repo has no
+      DOM test project), so what pins the wiring is the live run above — the same
+      standing exception recorded for the approvals panel in M3.4. Contrast/token
+      checks stayed green untouched.*
 - [ ] **M3.7 Artemis lifecycle** — `artemis.ts`: auto-spawn at startup into
       the temple seat, `isOrchestrator` + `orchestratorId` per SDD §4.1;
       prompt/config assembly from `prompts/artemis/` (system prompt carries the
