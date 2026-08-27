@@ -1479,14 +1479,25 @@ were implemented to the doc rather than added to it.
    `agentId` branch, rather than adding a fourth literal (which would be a §8
    must-ask deviation from a normative schema). Promote it to `"ledger"` in §4.4
    if you would rather.
-2. **Branch topology.** Each package branch is cut from the previous package's
-   branch rather than from `main`: the packages are genuinely dependent (M3.5
-   consumes M3.2, M3.8 consumes M3.7, M3.9 consumes all) and `main` is protected
-   with no PR authorised. Nine branches are pushed and awaiting your merge call.
-3. **CI does not run on feature branches.** `.github/workflows/ci.yml` triggers
-   on `push: branches:[main]` and `pull_request` only, so "green" throughout this
-   run means the full CI job set run locally, byte for byte.
-4. **`mayDecide` has no production caller yet.** The plan assigns Artemis's proxy
+2. **Branch topology — resolved on the Architect's instruction.** Each package
+   branch was cut from the previous package's rather than from `main`, because
+   the packages are genuinely dependent (M3.5 consumes M3.2, M3.8 consumes M3.7,
+   M3.9 consumes all). The chain is linear, so on the Architect's instruction
+   `main` was **fast-forwarded** to the M3.9 tip and pushed — no merge commit, no
+   conflicts, all twelve branches contained. CI run
+   [41](https://github.com/mertefesensoy/ephesus/actions/runs/33068981836) is
+   green on `main` at `0652cf6`.
+3. **`main` is protected by policy, not by GitHub.** ENGINEERING-STANDARDS §2
+   says "`main` is protected: PRs only, CI green, one review", and this run
+   treated that as binding — but the direct push succeeded, so no branch
+   protection rule actually enforces it. A rule with no mechanical backing is
+   the class of thing this project does not otherwise tolerate; either turn on
+   the protection rule or soften §2 to say what is true.
+4. **CI does not run on feature branches.** `.github/workflows/ci.yml` triggers
+   on `push: branches:[main]` and `pull_request` only, so "green" on each package
+   during this run means the full CI job set run locally, byte for byte. CI has
+   now verified the whole chain in one run on `main`.
+5. **`mayDecide` has no production caller yet.** The plan assigns Artemis's proxy
    routing to M3.8 and the countersign surface to the Odeon (M5); M3.7 shipped the
    table, its validator and the enforcement hook every future caller goes through.
 
