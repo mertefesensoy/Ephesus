@@ -138,16 +138,19 @@ describe('recall smoke — the fts rung', () => {
 })
 
 describe('recall smoke — the mempalace rung', () => {
-  it('is reported when it cannot run here, never silently skipped', async () => {
+  it('is reported when it cannot run here, and fails loudly when misconfigured', async () => {
     const available = await mempalaceAvailable()
-    if (!available) {
-      // Not a failure: MemPalace is an optional external (ADR-0016 §6). But the
-      // fact that the top rung went untested is stated, so a green run is never
-      // mistaken for a run that covered it.
-      expect(MEMPALACE.length === 0 || !available).toBe(true)
+    if (MEMPALACE.length > 0) {
+      // EPH_MEMPALACE names a binary, so the rung MUST work: a configured-but-
+      // broken MemPalace passing silently would be the invisible degradation
+      // invariant §7 forbids. (The M4 close-out audit found the old assertion
+      // here was a tautology that could never fail.)
+      expect(available).toBe(true)
       return
     }
-    expect(available).toBe(true)
+    // Optional external absent (ADR-0016 §6): the untested top rung is visible
+    // as this suite's skip count, and the absence is asserted, not assumed.
+    expect(available).toBe(false)
   })
 
   it.runIf(MEMPALACE.length > 0)(

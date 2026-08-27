@@ -23,6 +23,7 @@ import type { Trigger } from './scheduler'
  */
 
 const REQUEST_PROMPT = path.join('library', 'reflect-request.md')
+const REQUEST_SUBJECT = path.join('library', 'reflect-request-subject.md')
 const ACCEPT_PROMPT = path.join('library', 'reflect-accept.md')
 const ACCEPT_SUBJECT = path.join('library', 'reflect-accept-subject.md')
 const REFUSE_PROMPT = path.join('library', 'reflect-refuse.md')
@@ -202,7 +203,7 @@ export class ReflectionJob {
       from: LIBRARY_ENDPOINT,
       to: agentId,
       act: 'request',
-      subject: 'condense your memory',
+      subject: this.options.prompts.render(REQUEST_SUBJECT, {}).trim().slice(0, 200),
       body,
       hops: 0,
       created_at: at.toISOString()

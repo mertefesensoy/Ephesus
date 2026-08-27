@@ -598,11 +598,16 @@ async function boot(): Promise<void> {
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
     library: (message) => {
       if (!reflection) {
+        // Read by an agent, so it is a prompt surface (invariant §8; the M4
+        // close-out audit found the literal).
         return {
           ok: false,
           reasons: ['no library endpoint'],
-          subject: 'memory not condensed',
-          body: 'The Library is not available in this harness.'
+          subject: prompts
+            .render(path.join('library', 'unavailable-subject.md'), {})
+            .trim()
+            .slice(0, 200),
+          body: prompts.render(path.join('library', 'unavailable.md'), {}).trim()
         }
       }
       const outcome = reflection.submit(message)

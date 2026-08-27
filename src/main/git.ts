@@ -162,6 +162,17 @@ export class Worktrees {
       return { ok: false, reason: `worktree refused: "${plan.repo}" is not a git repository` }
     }
     if (fs.existsSync(target)) {
+      // A worktree that survived a dirty unwind is the agent's kept work
+      // (UC-01 2a): respawning onto it is reuse, not failure — refusing here
+      // contradicted the card that still names it (M4 close-out audit).
+      const head = await this.options.runner.run(target, ['rev-parse', '--abbrev-ref', 'HEAD'])
+      const common = await this.options.runner.run(target, ['rev-parse', '--git-common-dir'])
+      const owned =
+        head.ok &&
+        head.stdout.trim() === plan.branch &&
+        common.ok &&
+        path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
+      if (owned) return { ok: true, path: target, branch: plan.branch, created: false }
       return { ok: false, reason: `worktree refused: "${plan.path}" already exists` }
     }
 

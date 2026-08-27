@@ -1976,7 +1976,7 @@ Every exit criterion was verified **by running it**.
 | Every scenario suite still green | `npx vitest run test/scenarios` | **76 passed** across 11 files (73 at M3 close + S-CRASH's 3) |
 | The whole gate | `npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm test` | green — **1506 passed / 5 skipped**, run **twice** with no flake, up from 1236 at M3 close |
 | Per-package CI green (the M3-close verdict made real) | GitHub Actions on every `feature/m4-*` push | runs **44–53**, all `success`: [44](https://github.com/mertefesensoy/ephesus/actions/runs/33075733612) · [45](https://github.com/mertefesensoy/ephesus/actions/runs/33076950842) · [46](https://github.com/mertefesensoy/ephesus/actions/runs/33078145285) · [47](https://github.com/mertefesensoy/ephesus/actions/runs/33079302409) · [48](https://github.com/mertefesensoy/ephesus/actions/runs/33080103288) · [49](https://github.com/mertefesensoy/ephesus/actions/runs/33080925749) · [50](https://github.com/mertefesensoy/ephesus/actions/runs/33081401238) · [51](https://github.com/mertefesensoy/ephesus/actions/runs/33082003210) · [52](https://github.com/mertefesensoy/ephesus/actions/runs/33082382431) · [53](https://github.com/mertefesensoy/ephesus/actions/runs/33082744361) |
-| Sole authorship | `node scripts/check-attribution.cjs` | `attribution ok (59 commit(s) reachable from HEAD)` |
+| Sole authorship | `node scripts/check-attribution.cjs` | `attribution ok` *(recorded as "59 commit(s)" at review — corrected at the close-out audit: 59 is main's pre-M4 count, so that line was produced on the wrong checkout; on the M4 tree the check passes at 71 commits, all Architect-authored)* |
 
 **Parity checkpoint (IMPLEMENTATION M4, and R8's "parity at M4 means the
 project is useful even if paused there").** The upstream inspiration's core
@@ -2037,10 +2037,216 @@ codex's needs one on hook trust · SDD §4.3's closed log-kind list has no
 four IPC channels widened the SDD §5 surface, documented in-commit per the
 M3.1 rule.
 
+### M4 close-out audit (2026-08-27) — verdict: DONE, with audit fixes landed
+
+The two-agent audit the M4 run recorded as owed, now run — the M0–M3 pattern:
+
+- **spec-verifier** (verification by execution): **M4 stands as DONE.** Every
+  executable exit criterion re-verified first-hand — gate green (typecheck ·
+  zero-warning lint · invariants, tripwire proven to bite) · full suite
+  **1506/5 twice with no flake** · 76/11 scenarios incl. a real-SIGKILL
+  S-CRASH · 72/2 adapter conformance with honestly-graded codex + gemini
+  (settings-absence genuinely asserted) · the recall smoke green at **all
+  three rungs including a freshly pip-installed real MemPalace 3.8.0** ·
+  worktrees on real git · token-gated fail-closed recall shim · zero debt
+  markers. Not re-runnable here: CI runs 44–53 (GitHub unreachable) and the
+  live respawn demo (its capture is internally consistent and honestly
+  caveated).
+- **doc-guardian** (design conformance): **M4 conforms.** Ladder visibility,
+  MemPalace discipline (no daemons, auto-save hooks off, palace out of the
+  Agora), NFR-7's nothing-destroyed property, honest adapter grades, the
+  single git path, S-CRASH per SDD §10 — all implemented as documented *and
+  asserted by the owed tests*. The ADR-0016 wings-per-target narrowing was
+  verified recorded, in code and log alike.
+
+**Findings FIXED at close (gate after fixes: typecheck PASS · lint PASS ·
+invariants PASS · tests 1508 passed / 5 skipped, run twice):**
+
+1. **Three LLM-facing prose literals in main** (invariant §8) — the
+   reflect-request subject and the library-unavailable reply now render from
+   `prompts/library/` (`reflect-request-subject.md`, `unavailable-subject.md`,
+   `unavailable.md`); Hermes's tests-only fallback went mechanical, matching
+   its own render() standard.
+2. **The recall smoke's reporting case was a tautology** — its assertion could
+   never fail. Now falsifiable both ways: `EPH_MEMPALACE` set-but-broken FAILS
+   the suite (a configured-but-dead rung is the invisible degradation
+   invariant §7 forbids); unset asserts the absence rather than assuming it.
+3. **Respawn onto a kept dirty worktree contradicted itself** — the unwind
+   rightly kept the work, but the respawn's `create()` refused the surviving
+   path, logging `worktree: null` while the card still named it. A path that
+   is the agent's own worktree on its own branch is now *reuse*; anything else
+   still refuses. Two regression tests.
+4. **`eph-recall` had grown a duplicate socket transport** — against M1.2's
+   single-client rule the record claimed. `hook-client.mjs` now exports the
+   one low-level `postJson` transport; hooks map it fail-open, recall maps it
+   fail-closed, and there is no second implementation to drift.
+5. **Evidence erratum corrected in place** — the exit table's
+   `attribution ok (59 commit(s))` was provably produced on pre-M4 `main`
+   (59 = the old tree's count; the M4 head is 71). The check passes on the
+   real tree; the line was the record-hygiene class the M3 audit named.
+6. **SDD §4.3 gains the `memory` log kind** (Architect verdict) and the four
+   Library IPC channels are **ratified** after channel-by-channel review.
+
+**Recorded, not fixed:** the codex commit also touched the shared conformance
+harness (+50/−18, disclosed in-commit — necessary to admit a no-settings
+adapter; TEST-STRATEGY §5's "only its adapter" reading is noted) · the
+declared-vs-demonstrated live check runs only against the fake engine, so for
+codex/gemini honesty reduces to "declares pty-heuristic + provably writes
+nothing" (real, but a coverage note) · nothing would catch an adapter writing
+outside the agent cwd (none does today).
+
+**Architect verdicts at this close (all in DECISIONS-LOG):** codex and gemini
+stay `pty-heuristic` — the harness never flips a trust default and never
+writes a tracked settings file; their hook wiring is owed to a local session
+where the Architect persists trust interactively · no-resume stands for both;
+the ResumeSupport plan-transform generalization is a recorded candidate for a
+future ADR-0009 annex · the agent↔task binding join lands in **M5.1**.
+
 ## M5 — The Odeon + Gymnasium v1
 
-- [ ] Package list derived at milestone start
-- [ ] M5 exit — S-DECKGATE, S-MEMO, S-BRIEF, S-MEETING, S-GYM pass; real retro report
+Plan drafted 2026-08-27 at M4 close (derived per BUILD-PROMPT §5 from
+IMPLEMENTATION M5 + ADR-0008/0015 + SDD §1.1 (odeon.ts, org.ts, gymnasium.ts,
+scheduler.ts) + §4.5 + §7.2/§7.3/§7.6 + TEST-STRATEGY §3). Execute in order;
+every package tests against the fake engine per-PR.
+
+**Architect verdicts folded into this plan (2026-08-27, in DECISIONS-LOG):**
+codex and gemini stay `pty-heuristic` — the harness never flips a trust
+default (`--dangerously-bypass-hook-trust`) and never writes a tracked
+settings file; their hook wiring is owed to a local session where the
+Architect persists trust interactively · no-resume stands for both (the
+ResumeSupport plan-transform generalization is a recorded candidate for a
+future ADR-0009 annex, not invented now) · the `memory` log kind is added to
+SDD §4.3 · the four Library IPC channels are ratified as documented.
+
+**Carried in from M3/M4 (each closes inside a package below):** the
+**agent↔task binding join** (→ M5.1 — nothing binds a live spawn to a ledger
+task, so `task.gates` is never populated in production and breaker rung 3
+cannot return a task `stalled` with its report) · Artemis's `mayDecide`
+first production caller (→ M5.3 memo triage) · the breaker's owed S-BREAKER
+clause "task returns `stalled` with the breaker report attached" (→ M5.1).
+**Owed to local sessions, not packages:** the Memory panel screenshot;
+codex/gemini hook wiring post-trust; a real-engine respawn demo.
+
+- [ ] **M5.1 The agent↔task binding join** — bind live spawns to ledger
+      tasks: an assignment `request` carries its `taskId` and the harness
+      records the binding (spawn → task) so the three consumers that were
+      blind get eyes: gate choke points submit `taskId` (SDD §4.2's
+      `task.gates` finally populated in production, and `status→done` refused
+      while a gate is open — for real this time); breaker rung 3 returns the
+      bound task to the ledger as `stalled` with the breaker report attached
+      (ADR-0011's owed clause); S-CRASH's task-return path uses the same
+      binding. Artemis reassignment of a `stalled` task via the ledger
+      endpoint.
+      *Docs: SDD §4.2, §7.1, ADR-0011 rung 3, the M3/M4 close-out audit
+      records. Tests: binding through the real assignment flow (two fakes);
+      gate→task.gates population asserted in production wiring, not test-only;
+      rung-3 stalled + report; done-refused-while-gated now reachable and
+      asserted end-to-end. Risk: the binding is harness bookkeeping — no new
+      agent-facing schema; the message already carries the task in its spec.*
+- [ ] **M5.2 Deck template + task-close gate + deck viewer** — FR-7.2,
+      S-DECKGATE: a `review:deck` task is *mechanically unclosable* until a
+      deck exists — the harness rejects `status→done` (the §4.2 guard's
+      `review` half, now load-bearing); single-file HTML deck from the
+      standard template (goal/built/decisions/trade-offs/evidence/open
+      questions — template in `prompts/odeon/`, evidence embedded not
+      linked); decks archive immutably at `odeon/decks/<taskId>-<ts>.html`
+      (append-only: never rewritten); deck viewer in-app; Architect comments
+      become follow-up tasks.
+      *Docs: ADR-0008 §2, FR-7.2, SDD §2, UC-05. Tests: close-refusal until
+      deck exists, immutability (a second deck is a new file), viewer stays a
+      projection; S-DECKGATE per TEST-STRATEGY §3. Risk: the deck is an
+      artifact an AGENT writes into its own outbox for the harness to
+      archive — agents never write `odeon/` (SDD §2).*
+- [ ] **M5.3 Memo policy engine + queues + verdict routing** — FR-7.3,
+      §7.3, S-MEMO: policy triggers (new dependency, public API/schema
+      change, security posture, spend) enforced at the existing gate layer —
+      the matching action is held until a memo exists and is verdict-ed; memo
+      schema per SDD §4.5 (`memo.md` structured body + `verdict.json`,
+      schemaVersion + validators); flow: agent files memo (outbox, like
+      everything else) → Artemis triage — **`mayDecide`'s first production
+      caller** (delegated classes: decide + countersign; else the Architect
+      queue with badge) → verdict returns as a Hermes message → memo archives
+      immutably; a rejected memo reverses the held action.
+      *Docs: ADR-0008 §3, SDD §4.5, §7.3, FR-7.3, UC-06. Tests: trigger
+      matching table-driven; delegated vs escalated split; countersignature
+      recorded on every delegated verdict (FR-5.5); rejection reverses;
+      archive immutable; S-MEMO per TEST-STRATEGY §3. Risk: memo-policy
+      granularity is the tuning knob (ADR-0008 consequence) — defaults stay
+      the four documented triggers, no invented ones.*
+- [ ] **M5.4 Briefing compiler + Briefs tab** — FR-7.1, §7.2, S-BRIEF: the
+      compiler assembles *facts* from Agora data only — ledger deltas, log
+      events, budget deltas, open gates/memos since the last brief — each
+      fact carrying source refs (log seq / task id / memo id); Artemis
+      renders facts → narrative under a template that forbids unref'd claims;
+      artifact `odeon/briefs/<ts>.md` (+refs, immutable); the scheduler gains
+      the standup trigger (its second client); the Briefs tab renders the
+      card (the Herald speaks it in M6 — card only here).
+      *Docs: ADR-0008 §1, FR-7.1, SDD §7.2, UC-04. Tests: every narrative
+      sentence carries a resolvable ref (S-BRIEF's core, incl. the ≤90 s at
+      configured wpm length budget as word-count math); facts-only compiler
+      pure and table-driven; seeded fixtures → deterministic fact set. Risk:
+      the compiler is mechanism (facts), Artemis is intelligence (prose) —
+      never let the harness write narrative or Artemis invent facts.*
+- [ ] **M5.5 Meeting driver + the Odeon room** — FR-7.4, UC-07, S-MEETING:
+      convene (attendees + agenda line); Artemis chairs; turn order enforced
+      by the driver — attendees receive the floor via Hermes `query` one at a
+      time, replies stream into the meeting panel; Architect interjection
+      grabs the floor; on close, minutes + action items written to the
+      blackboard (via the ledger endpoint — one scribe) and the ledger;
+      minutes at `odeon/minutes/<meetingId>.md`, immutable; the Odeon room on
+      the floor with attendee avatars gathering (SDD §6 station `odeon`,
+      already in the station map).
+      *Docs: ADR-0008 §4, FR-7.4, UC-07, UI-DESIGN §5. Tests: turn-order
+      enforcement (an out-of-turn reply is held, not lost), interjection
+      floor-grab, minutes/actions land via the endpoint, avatars gather;
+      S-MEETING per TEST-STRATEGY §3 (3 fakes). Risk: the driver enforces
+      order mechanically; the chair's judgment (who answers what) stays
+      Artemis's.*
+- [ ] **M5.6 Org layer v1 + the retro report** — FR-11.5 (v1 slice): the org
+      chart (from the registry — Artemis at the temple, workers by role);
+      hire templates as versioned files (`profiles/`-adjacent per SDD §4.1
+      `hire` refs) with a validator; per-agent metrics computed from
+      `log.jsonl` + the cost ledger only (tasks done, rework, escalation
+      rate, budget efficiency) into `metrics_rollup` (SDD §4.6); the
+      scheduled weekly **retro report** generated from those metrics + memo/
+      gate/breaker patterns — the exit criterion's "real retro report".
+      *Docs: FR-11.5, SDD §4.6, UC-12. Tests: metrics derived only from the
+      book of record (invariant §11's spirit — no in-memory counters);
+      template versioning; retro report's every claim ref'd like a brief.
+      Risk: metrics are per-agent judgments — compute mechanically, let the
+      org review (UC-12 full loop, M7-era) interpret; no auto-actions.*
+- [ ] **M5.7 Gymnasium v1** — ADR-0015, SDD §7.6, FR-12: `gymnasium.ts` —
+      proposal validation (a proposal without a falsifiable metric or a
+      rollback is invalid *by construction*, rejected pre-human), ledger
+      accessors (`agora/gymnasium/LEDGER.md` append-only, seeded at first run
+      from the repo's build-phase `docs/gymnasium/` archive — FR-12.6), gate
+      classification per the ADR-0015 authority table (stricter wins;
+      authority-widening proposals **mechanically refused regardless of
+      approver** — FR-12.3), metric-check scheduling (the scheduler's third
+      client), rollback driver (`regressed` ⇒ roll back per the proposal);
+      the `gym` IPC group per SDD §5 with **architect-only verdicts enforced
+      in the handler** (Artemis may rank/pre-screen, never verdict); the
+      standup brief gains its gym-slice section (extends M5.4); R3's budget
+      slice reported in the brief.
+      *Docs: ADR-0015 (normative), SDD §7.6, FR-12, UC-13. Tests: shape
+      enforcement (no metric ⇒ rejected before any human), non-architect
+      verdict refused at the handler, authority-widening refusal table,
+      landed-proposal metric miss ⇒ rollback + `regressed` row, ledger rows
+      append-only; S-GYM per TEST-STRATEGY §3. Risk: R1–R3 are the package —
+      nothing self-approves, the ledger is total, the slice is budgeted.*
+- [ ] **M5.8 Scenario suites + exit demos + review** — S-DECKGATE, S-MEMO,
+      S-BRIEF, S-MEETING, S-GYM (TEST-STRATEGY §3) as automated suites over
+      the seams M5.1–M5.7 built; then the exit demos: a `review:deck` task
+      refused `done` until its deck lands and the deck renders in-app; a
+      policy-triggered memo held, triaged, verdict-ed both ways; a compiled
+      brief whose every sentence resolves; a 3-agent meeting with enforced
+      turns and minutes; **a real weekly retro report generated from this
+      company's own records**.
+      *Docs: TEST-STRATEGY §3, SRS §6.3/§6.4. Risk: suites per-PR on fakes;
+      real-engine demos are exit-review territory.*
+- [ ] **M5 exit review** — S-DECKGATE, S-MEMO, S-BRIEF, S-MEETING, S-GYM
+      green in CI; the real retro report; PROGRESS + docs synced.
+
 
 ## M6 — The Herald
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
-import http from 'node:http'
 import process from 'node:process'
+import { postJson } from './hook-client.mjs'
 
 /**
  * `eph-recall` — the agent-facing recall CLI (ADR-0006 layer 2: "exposed to
@@ -98,43 +98,7 @@ export function renderAnswer(response) {
  * @returns {Promise<{ status: number | null, body: string, error: string | null }>}
  */
 export function postRecall(endpoint, request, timeoutMs = 10_000) {
-  return new Promise((resolve) => {
-    let settled = false
-    /** @param {{ status: number | null, body: string, error: string | null }} result */
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      resolve(result)
-    }
-    const body = JSON.stringify(request)
-    const req = http.request(
-      {
-        socketPath: endpoint,
-        path: RECALL_ENDPOINT_PATH,
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body)
-        }
-      },
-      (response) => {
-        let text = ''
-        response.setEncoding('utf8')
-        response.on('data', (chunk) => {
-          text += chunk
-        })
-        response.on('end', () =>
-          finish({ status: response.statusCode ?? 0, body: text, error: null })
-        )
-      }
-    )
-    req.setTimeout(timeoutMs, () => {
-      req.destroy()
-      finish({ status: null, body: '', error: `no answer within ${timeoutMs}ms` })
-    })
-    req.on('error', (err) => finish({ status: null, body: '', error: err.message }))
-    req.end(body)
-  })
+  return postJson(endpoint, RECALL_ENDPOINT_PATH, request, timeoutMs)
 }
 
 async function main() {

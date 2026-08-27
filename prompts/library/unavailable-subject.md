@@ -1,0 +1,1 @@
+memory not condensed

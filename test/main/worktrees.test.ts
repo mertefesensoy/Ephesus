@@ -210,3 +210,33 @@ describe('removing a worktree — never destroying work', () => {
     expect(state.clean).toBe(false)
   })
 })
+
+describe('respawning onto a surviving worktree (M4 close-out audit)', () => {
+  it("reuses the agent's own kept checkout instead of refusing it", async () => {
+    const r = rig()
+    const first = await r.worktrees.create(plan(r))
+    expect(first.ok).toBe(true)
+
+    // A dirty unwind kept the worktree; the respawn asks for the same plan.
+    // Refusing here contradicted the card that still names the checkout, and
+    // sent the spawn back to the shared repo while its work sat kept elsewhere.
+    const again = await r.worktrees.create(plan(r))
+    expect(again.ok).toBe(true)
+    if (again.ok) {
+      expect(again.path).toBe(plan(r).path)
+      expect(again.branch).toBe(plan(r).branch)
+      expect(again.created).toBe(false)
+    }
+  })
+
+  it("still refuses a path that exists but is not the agent's worktree", async () => {
+    const r = rig()
+    const target = plan(r)
+    fs.mkdirSync(target.path, { recursive: true })
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+  })
+})

@@ -82,6 +82,58 @@ function serialize(envelope) {
 }
 
 /**
+ * The one low-level socket transport every shim shares (M1.2's single-client
+ * rule, restored by the M4 close-out audit — eph-recall had grown a duplicate).
+ * Resolves — always — with the raw exchange; each caller maps it to its own
+ * contract (hooks fail open, recall fails closed).
+ *
+ * @param {string} endpoint
+ * @param {string} urlPath
+ * @param {object} payload
+ * @param {number} timeoutMs
+ * @returns {Promise<{ status: number | null, body: string, error: string | null }>}
+ */
+export function postJson(endpoint, urlPath, payload, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false
+    /** @param {{ status: number | null, body: string, error: string | null }} result */
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
+    const body = JSON.stringify(payload)
+    const req = http.request(
+      {
+        socketPath: endpoint,
+        path: urlPath,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(body)
+        }
+      },
+      (response) => {
+        let text = ''
+        response.setEncoding('utf8')
+        response.on('data', (chunk) => {
+          text += chunk
+        })
+        response.on('end', () =>
+          finish({ status: response.statusCode ?? 0, body: text, error: null })
+        )
+      }
+    )
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      finish({ status: null, body: '', error: `no answer within ${timeoutMs}ms` })
+    })
+    req.on('error', (err) => finish({ status: null, body: '', error: err.message }))
+    req.end(body)
+  })
+}
+
+/**
  * Posts one envelope to the harness endpoint.
  *
  * Contract: resolves — always. A refused connection, a missing socket, a

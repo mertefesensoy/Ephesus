@@ -122,38 +122,33 @@ milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-27, M4 close):** M0–M4 are COMPLETE — every
-> package landed with live-run evidence (M3's under real Electron/xvfb with real
-> `claude` 2.1.247 agents; M4's against real MemPalace 3.8.0, real
-> `codex-cli` 0.150.1 and real `gemini` 0.57.0), CI green at every milestone
-> close and — from M4 — on **every package branch**. M0–M3 were each audited at
-> close by execution + design-conformance review (verdicts in
-> `docs/PROGRESS.md`, including the M3 close-out audit's eleven landed fixes);
-> M4's exit review was verified by execution, and its two-agent close-out audit
-> is the one thing still owed.
-> **Resume at M5.1.** M4's nine packages all landed with live-run evidence and
-> per-package CI green (runs 44–51); the M4 verdict, its evidence table and the
-> parity checkpoint are in `docs/PROGRESS.md`. Derive the M5 package list at
-> milestone start per §5, and read the M4 verdict's "open for the Architect"
-> list first — several of its items are M5's to settle. Minor choices already made are in
-> `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
-> Standing Architect directives already folded into the docs: **MemPalace** is
-> the Library's recall/archive backend (ADR-0016; M4.3) — an *optional* external:
-> every package must run degraded (FTS → grep, visibly) without it, and if the
-> build environment cannot install Python/mempalace its live-run proof is owed to
-> a local session, recorded, never faked; the two extra engines are **codex +
-> gemini** (M4.6/M4.7) at honest hook grades, each an adapter-only diff; the
-> LimeZu tileset purchase remains pending and replaces the staged CC0 sheets with
-> zero code change; pixel fonts stay npm-sourced (`scripts/sync-fonts.cjs`).
-> Architect verdicts at M3 close (2026-08-27, in DECISIONS-LOG): `agent.ledger`
-> reserved-id addressing is ratified as the standing rule for harness-owned
-> endpoints (no §4.4 schema change); CI runs on `feature/**` and `fix/**` pushes
-> now, so per-package CI green is real; breaker rung 2 lowers the constrained
-> agent's budget (factor 0.5); the agent↔task binding join (`task.gates`
-> population, rung-3 `stalled` returns) is carried to M5 with the Odeon.
-> Item carried into M4 (closes in M4.1): `memory.md` continuity on respawn —
-> M3.7's resume re-injects identity and logs whether memory carried; nothing
-> writes or reads `memory.md` yet.
+> **Build state (updated 2026-08-27, M4 close-out audit):** M0–M4 are COMPLETE
+> and all five milestones are AUDITED at close by execution + design-conformance
+> review (verdicts in `docs/PROGRESS.md`; the M4 close-out audit landed six
+> fixes, among them prompts for the last prose literals, a falsifiable recall
+> smoke, worktree reuse on respawn, and one shared shim transport). Live-run
+> evidence throughout: M3 under real Electron/xvfb with real `claude` 2.1.247;
+> M4 against real MemPalace 3.8.0, real `codex-cli` 0.150.1 and real `gemini`
+> 0.57.0, with per-package CI green on every `feature/m4-*` push. The parity
+> checkpoint is reached: M5–M7 build the differentiator.
+> **Resume at M5.1.** The detailed M5 package plan (M5.1–M5.8: docs per
+> package, tests owed, risks, which carried item each package closes) is in
+> `docs/PROGRESS.md` — read it before coding. M5.1 is the **agent↔task binding
+> join** carried from the M3/M4 audits — build it FIRST; the deck gate (M5.2)
+> and the breaker's `stalled` return depend on it. Minor choices already made
+> are in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> Standing Architect directives already folded into the docs: codex and gemini
+> stay `pty-heuristic` — the harness never flips a trust default
+> (`--dangerously-bypass-hook-trust`) and never writes a tracked settings file;
+> their hook wiring is owed to a local session where the Architect persists
+> trust interactively; no-resume stands for both (the ResumeSupport
+> plan-transform generalization is a recorded future ADR-0009 annex candidate,
+> not to be invented mid-package); the `memory` log kind is in SDD §4.3; the
+> four Library IPC channels are Architect-ratified; MemPalace stays an
+> *optional* external with the visible FTS → grep ladder; the LimeZu tileset
+> purchase remains pending; pixel fonts stay npm-sourced.
+> Owed to local sessions (recorded, never faked): the Memory panel screenshot;
+> codex/gemini hook wiring post-trust; a real-engine respawn demo.
 > Dogfooding is ON (since M3 exit): Ephesus agents help build Ephesus.
 
 ### M0 packages (do these first)

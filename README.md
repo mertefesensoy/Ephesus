@@ -128,36 +128,39 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
-**M3 complete — a governed company.** Artemis auto-spawns into her temple and
-turns one Architect directive into ledger tasks, assignments, verification and
-a board update; credentials are write-only; every token of spend folds into a
-durable append-only ledger; destructive operations stop at deny-by-default
-gates packaged for a verdict; and runaway behaviour walks a steer → constrain
-→ stop breaker ladder instead of burning the night.
+**M4 complete — a company that remembers, on three engines.** Agents read
+their `memory.md` at spawn and append what they learn; a killed agent respawns
+with its memory re-injected and its tasks returned to the board (S-CRASH,
+proven with real SIGKILLed processes). Recall runs on a detect-and-degrade
+ladder — MemPalace (real 3.8.0) → SQLite FTS → plain grep — every rung green
+on known-answer queries and every degradation visible. Codex and gemini join
+claude as engine adapters at their honest demonstrated grades, and an agent
+can take a git worktree of its target repo without ever dirtying yours.
 
-![A destructive op held at the Watch, packaged for a verdict](./docs/demo/m3-uc08-gate.png)
+```
+3. SIGKILL mid-tool-call — exitCode=-1
+   offer: resumable=true memorySections=1 tasksReturned=["t-demo-1"]
+   ledger: t-demo-1=todo, back on the board
+4. respawn — the new process printed back the context it was handed,
+   containing its own sentence verbatim
+   log.jsonl: memoryCarried=true resumed=true
+```
 
-*Live UC-08: a real `claude` asked to `rm -rf build/` stalls behind its own
-permission dialog; the engine's `notification` hook turns the invisible stall
-into a packaged gate — what / why / blast radius / rollback — and the verdict
-travels back through the same `watch:approve` the button calls.*
-
-![Artemis's ledger and board after a delegated directive](./docs/demo/m3-uc02-ledger.png)
-
-*Live UC-02: one directive to Artemis became tasks, self-contained assignee
-requests, a verified result and a board entry by the one scribe — the whole
-chain reconstructible from `log.jsonl` alone.*
-
-Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md) (including the
-two-agent close-out audit); full record in
-[the M3 record](./docs/implementations/2026-08-27-m3-governed-company.md).
-**Dogfood has started**: from M3's exit, Ephesus agents help build Ephesus.
+The respawn-with-memory exit demo, captured to
+[`docs/demo/m4-respawn-recall.txt`](./docs/demo/m4-respawn-recall.txt) — real
+Agora, git, hook socket and child processes; the engine's words are scripted
+because nothing in that environment could authenticate, said plainly in the
+capture itself. **The parity checkpoint is reached**: the upstream
+inspiration's core loop is fully implemented as of M4; what remains is the
+differentiator. Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md)
+(including the two-agent close-out audit); full record in
+[the M4 record](./docs/implementations/2026-08-27-m4-library-and-breadth.md).
 
 The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
 reaches feature parity with the inspiration at M4, with the differentiating
 subsystems (Odeon, Herald, mission profiles, org layer) landing in M5–M7.
-Next: **M4 — the Library + engine breadth** (memory that survives respawn;
-codex and gemini join claude).
+Next: **M5 — the Odeon + Gymnasium v1** (the accountable company: briefs,
+decks, memos, meetings, and governed self-improvement).
 
 ## License & lineage
 

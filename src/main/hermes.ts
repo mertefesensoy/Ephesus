@@ -283,11 +283,14 @@ export class Hermes {
    * reply, and a refusal carries every reason so the next attempt can be right.
    */
   private submitToLibrary(proposal: Message): void {
+    // The prompt-less fallback (tests only — the app wires `library`, whose
+    // words render from prompts/library/) is a mechanical serialization,
+    // deliberately not prose, so invariant §8 has no second home for words.
     const outcome = this.options.library?.(proposal) ?? {
       ok: false,
       reasons: ['the library endpoint is not available'],
-      subject: 'memory not condensed',
-      body: 'The Library is not available in this harness.'
+      subject: 'library-unavailable',
+      body: JSON.stringify({ reasons: ['the library endpoint is not available'] })
     }
     this.replyFromHarness(
       proposal,

@@ -220,7 +220,7 @@ or `gates` is non-empty.
   "subject": "checkout test green", "msgId": "…", "conversation": "conv-7f3" }
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
-brief, deck, meeting, breaker, budget, orchestrator, remote, secret-rotated, profile,
+brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
 gym, error }`. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
