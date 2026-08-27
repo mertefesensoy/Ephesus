@@ -87,6 +87,21 @@ export interface AgentManagerOptions {
    * unhandled rejection here would kill the harness over one stuck file handle.
    */
   onExitError?(agentId: string, err: unknown): void
+  /**
+   * Resolves the role's DECLARED secret grants to values (ADR-0010). Injected
+   * as a function rather than as the broker, so this module never holds a
+   * credential beyond the spawn config it hands to the adapter, and the
+   * lifecycle stays testable without a keychain.
+   *
+   * Contract: returns only names present in `declared`; `missing` names a
+   * declared grant the broker does not hold, which the caller surfaces.
+   */
+  resolveGrants?(declared: readonly string[]): {
+    readonly env: Record<string, string>
+    readonly missing: readonly string[]
+  }
+  /** Raised when a spawn could not be given every credential its role declares. */
+  onGrantsMissing?(agentId: string, missing: readonly string[]): void
 }
 
 interface LiveAgent {
@@ -260,12 +275,38 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
-      // The broker (ADR-0010, M3) resolves grant names to values. Until it
-      // exists no value can reach an agent, which is the safe direction.
-      envGrants: {},
+      // ADR-0010: least-privilege by construction. The broker is asked only for
+      // what THIS role declares, so an undeclared credential has no path into
+      // the spawn even if the broker holds it.
+      envGrants: this.resolveGrants(request.agentId, request.envGrants),
       identityPath: path.join(agentDir, 'identity.md'),
       protocolPath: path.join(this.options.agoraRoot, 'PROTOCOL.md')
     }
+  }
+
+  /**
+   * Declared grants → values. A grant the broker cannot supply is a visible
+   * degradation, not a silent empty variable: an agent that spawns without the
+   * credential its role declares fails later, somewhere less obvious.
+   */
+  private resolveGrants(agentId: string, declared: readonly string[]): Record<string, string> {
+    if (declared.length === 0) return {}
+    const resolve = this.options.resolveGrants
+    if (!resolve) {
+      this.options.onGrantsMissing?.(agentId, declared)
+      return {}
+    }
+    const { env, missing } = resolve(declared)
+    if (missing.length > 0) this.options.onGrantsMissing?.(agentId, missing)
+    // Re-scoped here rather than trusted: "undeclared vars never reach a spawn"
+    // is the invariant, and it must hold at the boundary that builds the
+    // environment, not only inside whichever resolver is wired in today.
+    const scoped: Record<string, string> = {}
+    for (const name of declared) {
+      const value = env[name]
+      if (value !== undefined) scoped[name] = value
+    }
+    return scoped
   }
 
   private newCard(

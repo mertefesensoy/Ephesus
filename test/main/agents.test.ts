@@ -4,7 +4,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { spawnRequestSchema, type SpawnRequest } from '../../src/shared/agents'
-import { AgentManager, type AgentSpawner, type VersionProber } from '../../src/main/agents'
+import {
+  AgentManager,
+  type AgentManagerOptions,
+  type AgentSpawner,
+  type VersionProber
+} from '../../src/main/agents'
 import { EngineRegistry } from '../../src/main/engines'
 import type { SpawnPlan } from '../../src/main/engines'
 import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
@@ -76,9 +81,17 @@ interface Rig {
   readonly changes: string[]
 }
 
+interface RigOptions {
+  readonly probe?: VersionProber
+  readonly onExitError?: (agentId: string, err: unknown) => void
+  readonly resolveGrants?: AgentManagerOptions['resolveGrants']
+  readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
+}
+
 async function rig(
   probe: VersionProber = async () => '2.1.195',
-  onExitError?: (agentId: string, err: unknown) => void
+  onExitError?: (agentId: string, err: unknown) => void,
+  extra: RigOptions = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agents-'))
   temps.push(home)
@@ -105,6 +118,8 @@ async function rig(
     agoraRoot: path.join(home, 'agora'),
     probe,
     onExitError,
+    ...(extra.resolveGrants ? { resolveGrants: extra.resolveGrants } : {}),
+    ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -441,5 +456,82 @@ describe('AgentManager — concurrent spawn (regression: orphaned hook token)', 
       })
     )
     expect(delivery.delivered).toBe(true)
+  })
+})
+
+/**
+ * ADR-0010 at the lifecycle boundary: what the broker resolves is what the
+ * process gets, and nothing else. The broker itself is tested in
+ * test/main/secrets.test.ts; these cases are about the wiring — the place a
+ * credential would actually leak into a real spawn.
+ *
+ * Fixture values are scanner-neutral (M1-audit ruling).
+ */
+describe('secret grants reach the spawn, scoped (S-SECRETS)', () => {
+  const GRANTED = 'not-a-real-credential-0123456789'
+  const UNDECLARED = 'a-different-fake-value-987654321'
+
+  it('injects a declared grant into the process environment', async () => {
+    const { manager, spawner, request } = await rig(undefined, undefined, {
+      resolveGrants: (declared) => ({
+        env: Object.fromEntries(declared.map((name) => [name, GRANTED])),
+        missing: []
+      })
+    })
+    await manager.spawn(request)
+    expect(spawner.spawns[0]?.plan.env['GH_TOKEN']).toBe(GRANTED)
+  })
+
+  it('asks the broker only for what the role declared', async () => {
+    const asked: string[][] = []
+    const { manager, request } = await rig(undefined, undefined, {
+      resolveGrants: (declared) => {
+        asked.push([...declared])
+        return { env: {}, missing: [] }
+      }
+    })
+    await manager.spawn(request)
+    // The hire declares GH_TOKEN; the broker is never asked for anything else,
+    // which is what makes least-privilege structural rather than a check.
+    expect(asked).toEqual([['GH_TOKEN']])
+  })
+
+  it('never lets an undeclared credential into the environment', async () => {
+    const { manager, spawner, request } = await rig(undefined, undefined, {
+      // A broker that answers with MORE than it was asked for — the failure this
+      // guards against is a future broker bug, not a hypothetical.
+      resolveGrants: () => ({
+        env: { GH_TOKEN: GRANTED, VOICE_KEY_FAKE: UNDECLARED },
+        missing: []
+      })
+    })
+    await manager.spawn(request)
+    const env = spawner.spawns[0]?.plan.env ?? {}
+    expect(JSON.stringify(env)).not.toContain(UNDECLARED)
+    expect(Object.keys(env)).not.toContain('VOICE_KEY_FAKE')
+  })
+
+  it('reports a declared grant the broker could not supply', async () => {
+    const missing: { agentId: string; names: readonly string[] }[] = []
+    const { manager, spawner, request } = await rig(undefined, undefined, {
+      resolveGrants: () => ({ env: {}, missing: ['GH_TOKEN'] }),
+      onGrantsMissing: (agentId, names) => missing.push({ agentId, names })
+    })
+    await manager.spawn(request)
+    // Visible, not an empty variable the agent discovers three tool calls later.
+    expect(missing).toEqual([{ agentId: 'agent.mason', names: ['GH_TOKEN'] }])
+    expect(spawner.spawns[0]?.plan.env['GH_TOKEN']).toBeUndefined()
+  })
+
+  it('injects nothing, visibly, when no broker is wired at all', async () => {
+    const missing: readonly string[][] = []
+    const seen: string[][] = []
+    const { manager, spawner, request } = await rig(undefined, undefined, {
+      onGrantsMissing: (_agentId, names) => seen.push([...names])
+    })
+    await manager.spawn(request)
+    expect(spawner.spawns[0]?.plan.env['GH_TOKEN']).toBeUndefined()
+    expect(seen).toEqual([['GH_TOKEN']])
+    expect(missing).toEqual([])
   })
 })

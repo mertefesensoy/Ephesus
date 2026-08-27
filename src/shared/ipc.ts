@@ -3,6 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { Registry } from './registry'
+import type { SecretStatus, SecretTest, SecretsHealth } from './secrets'
 import type { TaskLedger } from './tasks'
 import type { EphConfig } from './config'
 
@@ -28,7 +29,16 @@ export const IpcChannels = {
   agoraRegistry: 'agora:registry',
   agoraTasks: 'agora:tasks',
   agoraLog: 'agora:log',
-  agoraHealth: 'agora:health'
+  agoraHealth: 'agora:health',
+  // Write-only by construction (ADR-0010): there is deliberately no
+  // `secrets:get`, and the API-surface test in test/main/secrets.test.ts fails
+  // if one is ever added here.
+  secretsSet: 'secrets:set',
+  secretsStatus: 'secrets:status',
+  secretsTest: 'secrets:test',
+  secretsDelete: 'secrets:delete',
+  secretsList: 'secrets:list',
+  secretsHealth: 'secrets:health'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -148,6 +158,23 @@ export interface EphApi {
     submit: (agentId: string, text: string) => Promise<CommandState>
     /** Subscribe to held-text changes. Returns an unsubscribe function. */
     onChange: (cb: (state: CommandState) => void) => () => void
+  }
+  /**
+   * Write-only credential management (ADR-0010, SDD §5). Every method here
+   * either takes a value or returns presence — none returns a stored value,
+   * and none ever will: "show me my key" is impossible by design, and the
+   * Architect re-pastes from the provider console when in doubt.
+   */
+  secrets: {
+    set: (name: string, value: string) => Promise<SecretStatus>
+    status: (name: string) => Promise<SecretStatus>
+    /** Can the broker still retrieve this credential? ok|fail, never a value. */
+    test: (name: string) => Promise<SecretTest>
+    delete: (name: string) => Promise<SecretStatus>
+    /** The names held, so the UI can list credentials without reading them. */
+    list: () => Promise<readonly SecretStatus[]>
+    /** Storage health — a machine with no keychain must say so (invariant §7). */
+    health: () => Promise<SecretsHealth>
   }
   pty: {
     /**

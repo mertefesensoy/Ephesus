@@ -8,12 +8,23 @@
  *    whole single-committer design exists to prevent.
  * 2. Invariant §5 — `log.jsonl` and the cost ledger are append-only. A truncating
  *    write to either is a rewrite of the book of record.
+ * 3. ENGINEERING-STANDARDS §5 / ADR-0010 — credentials reach code in exactly one
+ *    way. Nothing outside `watch/` and `herald/` reads a credential out of the
+ *    process environment, and no fixture anywhere carries a secret-shaped
+ *    string: the M1 audit found one (`ghp_…`) and renamed it, and a tripwire is
+ *    the only thing that keeps the next one out.
  */
 const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = path.join(__dirname, '..')
-const SEARCH_DIRS = ['src', 'shims', 'scripts']
+const SEARCH_DIRS = ['src', 'shims', 'scripts', 'test']
+
+/**
+ * The tripwire file itself carries the patterns it hunts for; scanning it would
+ * be a guaranteed self-match.
+ */
+const SELF = path.join('scripts', 'check-invariants.cjs')
 
 /**
  * Files allowed to invoke git, relative to the repo root. ADR-0004's rule is
@@ -30,6 +41,45 @@ const GIT_ALLOWLIST = new Set([
 
 const GIT_INVOCATION = /(execFile|execFileSync|exec|execSync|spawn|spawnSync)\s*\(\s*['"`]git['"`]/
 const TRUNCATING_LOG_WRITE = /writeFileSync\s*\([^)]*\b(log\.jsonl|cost_ledger|costLedger)\b/
+
+/**
+ * A credential read straight out of the environment. ADR-0010 routes every
+ * credential through the broker, so the only modules with a reason to touch one
+ * are the Watch (which owns the broker) and the Herald (which calls a voice
+ * provider from main). `EPH_*` harness variables are not credentials.
+ */
+const ENV_SECRET_READ = /process\.env\s*(\.\s*[A-Za-z_$][\w$]*|\[\s*['"`][^'"`]*['"`]\s*\])/g
+const SECRET_NAMED = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i
+/**
+ * `EPH_*` are the harness's own spawn-scoped variables (agent id, hook token,
+ * agent directory) — capabilities the harness mints and the shim is designed to
+ * read, declared in the spawn plan and inspectable from the agent card
+ * (ENGINEERING-STANDARDS §4). They are not credentials and the broker has
+ * nothing to do with them.
+ */
+const HARNESS_ENV = /EPH_/
+const ENV_SECRET_ALLOWED_DIRS = [
+  path.join('src', 'main', 'watch'),
+  path.join('src', 'main', 'herald')
+]
+
+/**
+ * Provider-issued credential prefixes. Deliberately prefix-anchored and
+ * length-bounded rather than entropy-based: a heuristic that fires on any long
+ * random-looking string would flag every hook token fixture in the suite, and a
+ * tripwire nobody trusts gets deleted.
+ */
+const SECRET_SHAPED = new RegExp(
+  [
+    'sk-[A-Za-z0-9_-]{16,}',
+    'gh[pousr]_[A-Za-z0-9]{16,}',
+    'github_pat_[A-Za-z0-9_]{20,}',
+    'xox[baprs]-[A-Za-z0-9-]{10,}',
+    'AKIA[0-9A-Z]{12,}',
+    'AIza[0-9A-Za-z_-]{30,}',
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  ].join('|')
+)
 
 function walk(dir, out = []) {
   if (!fs.existsSync(dir)) return out
@@ -55,6 +105,21 @@ for (const dir of SEARCH_DIRS) {
       if (TRUNCATING_LOG_WRITE.test(line)) {
         failures.push(
           `${rel}:${i + 1}  truncating write to an append-only record — invariant §5 forbids rewriting it`
+        )
+      }
+      if (rel === SELF) return
+      if (!ENV_SECRET_ALLOWED_DIRS.some((dir) => rel.startsWith(dir + path.sep))) {
+        for (const match of line.matchAll(ENV_SECRET_READ)) {
+          if (SECRET_NAMED.test(match[0]) && !HARNESS_ENV.test(match[0])) {
+            failures.push(
+              `${rel}:${i + 1}  credential read from process.env outside src/main/watch/ or src/main/herald/ — ADR-0010 routes every credential through the broker`
+            )
+          }
+        }
+      }
+      if (SECRET_SHAPED.test(line)) {
+        failures.push(
+          `${rel}:${i + 1}  secret-shaped string — ENGINEERING-STANDARDS §5 forbids one in code or fixtures`
         )
       }
     })

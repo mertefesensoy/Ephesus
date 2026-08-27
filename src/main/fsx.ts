@@ -8,13 +8,20 @@ import path from 'node:path'
  * process may read goes through here. rename() replaces existing targets on all
  * supported platforms (MOVEFILE_REPLACE_EXISTING semantics on Windows).
  */
-export function writeFileAtomic(filePath: string, data: string | Buffer): void {
+export function writeFileAtomic(
+  filePath: string,
+  data: string | Buffer,
+  options: { readonly mode?: number } = {}
+): void {
   const dir = path.dirname(filePath)
   const tmp = path.join(dir, `.${path.basename(filePath)}.${randomBytes(6).toString('hex')}.tmp`)
   // A Buffer is written verbatim: restoring a backed-up settings file must not
   // re-encode it (ADR-0009 uninstall restores byte-for-byte).
-  if (typeof data === 'string') fs.writeFileSync(tmp, data, 'utf8')
-  else fs.writeFileSync(tmp, data)
+  // `mode` is applied to the TEMP file, before the rename: a secret store that
+  // is world-readable for even the width of a chmod is a leak (ADR-0010).
+  const write = options.mode === undefined ? {} : { mode: options.mode }
+  if (typeof data === 'string') fs.writeFileSync(tmp, data, { encoding: 'utf8', ...write })
+  else fs.writeFileSync(tmp, data, write)
   try {
     fs.renameSync(tmp, filePath)
   } catch (err) {

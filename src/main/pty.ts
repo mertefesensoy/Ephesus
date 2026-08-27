@@ -1,6 +1,7 @@
 import * as pty from 'node-pty'
 import type { WebContents } from 'electron'
 import { ptyDataChannel, ptyExitChannel } from '../shared/ipc'
+import type { RedactionFilter } from '../shared/redaction'
 import type { AgentSpawner } from './agents'
 import type { SpawnPlan } from './engines'
 import { resolveExecutable } from './which'
@@ -9,13 +10,32 @@ import { resolveExecutable } from './which'
  * PtyManager (SDD §1.1, ADR-0014): owns every agent/shell PTY.
  * Contract: spawn/write/resize/kill by id; all output bytes are forwarded to the
  * attached sink over the per-id channel `pty:data:<id>` — no buffering, no JSON
- * wrapping of the byte stream (SDD §11). The redaction filter (ADR-0010) attaches
- * here when the secret broker lands in M3.
+ * wrapping of the byte stream (SDD §11).
+ *
+ * The redaction filter (ADR-0010) attaches here, on the outbound edge: every
+ * byte an engine produces passes through its pty's filter before it reaches the
+ * renderer, so an agent that `echo $TOKEN`s — deliberately or because it was
+ * prompt-injected into it — puts a visible mask on screen instead of a
+ * credential.
  */
+export interface PtyManagerOptions {
+  /**
+   * Builds the redaction filter for one stream (ADR-0010). Injected so the
+   * broker owns the values and this module never holds one; the default is a
+   * pass-through, which is what a harness with no broker yet gets.
+   */
+  redactor?(): RedactionFilter
+}
+
+const PASS_THROUGH: RedactionFilter = { push: (chunk) => chunk, flush: () => '' }
+
 export class PtyManager implements AgentSpawner {
   private readonly ptys = new Map<string, pty.IPty>()
+  private readonly filters = new Map<string, RedactionFilter>()
   private sink: WebContents | null = null
   private readonly exitListeners: ((id: string, exitCode: number) => void)[] = []
+
+  constructor(private readonly options: PtyManagerOptions = {}) {}
 
   /** Later PTY output flows to this renderer; call on window (re)creation. */
   attachSink(sink: WebContents): void {
@@ -28,11 +48,19 @@ export class PtyManager implements AgentSpawner {
 
   private track(id: string, proc: pty.IPty): void {
     this.ptys.set(id, proc)
+    const filter = this.options.redactor?.() ?? PASS_THROUGH
+    this.filters.set(id, filter)
     proc.onData((data) => {
-      this.sink?.send(ptyDataChannel(id), data)
+      const safe = filter.push(data)
+      if (safe.length > 0) this.sink?.send(ptyDataChannel(id), safe)
     })
     proc.onExit(({ exitCode }) => {
       this.ptys.delete(id)
+      // Whatever the filter was holding back (a partial secret at the stream's
+      // very end) is emitted here, or the last bytes of a run would vanish.
+      const tail = filter.flush()
+      if (tail.length > 0) this.sink?.send(ptyDataChannel(id), tail)
+      this.filters.delete(id)
       this.sink?.send(ptyExitChannel(id), exitCode)
       for (const listener of this.exitListeners) listener(id, exitCode)
     })

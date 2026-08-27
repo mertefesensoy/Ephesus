@@ -768,7 +768,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
 `agora/human/` queue with no UI (→ M3.4) · claude adapter's missing optional
 `resume` (→ M3.7) · badge color-only pairs and tilesheet rendering (→ M3.6).
 
-- [ ] **M3.1 Secret broker + redaction filter** — write-only broker in main
+- [x] **M3.1 Secret broker + redaction filter** — write-only broker in main
       (`secrets:` IPC per SDD §5: `set/status/test/delete` — no call returns a
       value, asserted by API-surface test); storage via Electron `safeStorage`
       (OS-keychain-backed encrypted file — matches ADR-0010's fallback wording,
@@ -782,6 +782,40 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       masks a planted token in a PTY stream, masks marked visibly. Risk:
       secret-shaped strings in fixtures (invariant §6) — fixture values must be
       scanner-neutral like M1's.*
+      *Evidence: `typecheck && lint && invariants && test` green — 633 passed / 2
+      skipped (38 new: redaction as a pure stream transform, broker lifecycle on
+      real fs, grant scoping at the lifecycle boundary, payload validators).
+      **Write-only is asserted, not asserted-about**: the API-surface test pins the
+      `secrets:` channel set to exactly `set/status/test/delete/list/health` and
+      fails if a `get`/`read`/`reveal`/`value`/`show` channel is ever added, and a
+      second test calls *every* public broker method with a planted value in the
+      store and asserts no return value contains it under `JSON.stringify`.
+      Least-privilege is structural: the manager asks the broker only for what the
+      hire declared, and re-scopes the answer to those names — a test that fed it an
+      over-answering resolver (returning `VOICE_KEY_FAKE` alongside the declared
+      `GH_TOKEN`) caught the gap and named the fix.
+      LIVE RUN under real Electron (xvfb) against a **real OS keychain**
+      (`safeStorage`, backend `gnome_libsecret`), a **real node-pty process** and the
+      real filter:
+      `cipher available=true backend=safeStorage (gnome_libsecret)`
+      `status={"name":"GH_TOKEN_FAKE","present":true,"lastRotated":"2026-08-27T01:01:05.487Z"}`
+      `store contains plaintext? false` · `store mode=0600` ·
+      `store ciphertext head=djExx26O0299XgaZATNEFTNVRFYROf9VEHvEVRzP0PSN…`
+      `after restart, declared grant resolves=true` ·
+      `undeclared key present in grant env? false`
+      A shell script that echoed its own credential — ADR-0010's stated threat —
+      produced, through the real PTY:
+      `"leaking •••eph-masked••• now\nsplit:•••eph-masked•••\nordinary line, no credential\n"`
+      The second line is the credential **torn across two PTY reads 0.4 s apart** and
+      still caught; the third proves ordinary output is untouched and undelayed.
+      **The degraded path is real, not theoretical**: the same box before the keyring
+      was installed reported `safeStorage.isEncryptionAvailable=false`, and the broker
+      refused — `no OS encryption backend available — refusing to store a credential
+      in plaintext`, `health.available=false`, and **no store file was created**.
+      ENGINEERING-STANDARDS §5's two documented-but-unenforced tripwires now run in
+      `check-invariants.cjs` (which also scans `test/` from this package on): a
+      credential read from `process.env` outside `src/main/watch/`|`herald/`, and a
+      secret-shaped string anywhere. Both proven to bite on planted probes.*
 - [ ] **M3.2 Cost ledger + budgets** — adapter `TranscriptReader` facts folded
       into the append-only SQLite `cost_ledger(agent, session, model, day, …)`
       (SDD §4.6) with an idempotent fold cursor; **cumulative figures computed

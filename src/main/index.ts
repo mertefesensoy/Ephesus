@@ -27,8 +27,16 @@ import { registerIpc } from './ipc'
 import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
 import { sweepInstalledSettings } from './settings-registry'
+import { safeStorageCipher } from './watch/cipher'
+import { SecretBroker } from './watch/secrets'
 
-const ptyManager = new PtyManager()
+let secrets: SecretBroker | null = null
+// The redaction filter reads through the broker on every chunk (ADR-0010), so
+// a credential stored while an agent is already running is masked in that
+// agent's live stream too.
+const ptyManager = new PtyManager({
+  redactor: () => secrets?.redactor() ?? { push: (chunk) => chunk, flush: () => '' }
+})
 let db: AppDb | null = null
 let agentManager: AgentManager | null = null
 let agora: Agora | null = null
@@ -169,6 +177,21 @@ void app.whenReady().then(async () => {
   const appRoot = app.getAppPath()
   const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
 
+  // The broker is constructed before anything can spawn: an agent must never
+  // start before the harness knows which credentials it is allowed to hand it
+  // (ADR-0010).
+  secrets = new SecretBroker({
+    storePath: path.join(home.root, 'secrets.enc'),
+    cipher: safeStorageCipher(),
+    onRotated: (name) => {
+      // The NAME, never the value — rotation is auditable without the book of
+      // record becoming the read path the broker refuses to be (SDD §4.3).
+      agora?.appendLog({ kind: 'secret-rotated', name })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onDegraded: (detail) => reportDegradation('secrets', detail)
+  })
+
   // Undo anything a force-killed run left in somebody else's repository. No
   // agent is live in a process that has just booted, so a recorded file can
   // only be a leftover (M1 carried item).
@@ -245,6 +268,13 @@ void app.whenReady().then(async () => {
         'agents',
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    resolveGrants: (declared) =>
+      secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
+    onGrantsMissing: (agentId, missing) =>
+      reportDegradation(
+        'secrets',
+        `${agentId} spawned without declared grant(s): ${missing.join(', ')}`
+      ),
     onRosterChange: (agentId, entry) => {
       if (!agora) return
       try {
@@ -291,6 +321,7 @@ void app.whenReady().then(async () => {
     avatars: avatarDirector,
     commands: commandQueue,
     agora,
+    secrets,
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),

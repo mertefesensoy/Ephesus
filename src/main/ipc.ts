@@ -10,12 +10,20 @@ import {
   type HooksState
 } from '../shared/ipc'
 import { ptyResizeSchema, ptyWriteSchema } from '../shared/pty'
+import {
+  secretNamePayloadSchema,
+  secretSetSchema,
+  type SecretStatus,
+  type SecretTest,
+  type SecretsHealth
+} from '../shared/secrets'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
 import type { AvatarDirector } from './avatars'
 import type { CommandQueue } from './commands'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
+import type { SecretBroker } from './watch/secrets'
 
 /** Cursor paging over the event log (SDD §5 `agora.log(afterSeq, limit)`). */
 const agoraLogSchema = z
@@ -39,6 +47,8 @@ export interface IpcDeps {
   readonly avatars: AvatarDirector
   readonly commands: CommandQueue
   readonly agora: Agora
+  /** The write-only credential broker (ADR-0010). */
+  readonly secrets: SecretBroker
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
@@ -46,7 +56,27 @@ export interface IpcDeps {
 }
 
 export function registerIpc(deps: IpcDeps): void {
-  const { ptyManager, agents, avatars, commands, agora } = deps
+  const { ptyManager, agents, avatars, commands, agora, secrets } = deps
+
+  // ADR-0010, write-only: `set` is the only channel that carries a value, and
+  // it carries it inward. Nothing below returns one.
+  ipcMain.handle(IpcChannels.secretsSet, (_ev, raw: unknown): SecretStatus => {
+    const { name, value } = secretSetSchema.parse(raw)
+    return secrets.set(name, value)
+  })
+  ipcMain.handle(IpcChannels.secretsStatus, (_ev, raw: unknown): SecretStatus =>
+    secrets.status(secretNamePayloadSchema.parse(raw).name)
+  )
+  ipcMain.handle(IpcChannels.secretsTest, (_ev, raw: unknown): SecretTest =>
+    secrets.test(secretNamePayloadSchema.parse(raw).name)
+  )
+  ipcMain.handle(IpcChannels.secretsDelete, (_ev, raw: unknown): SecretStatus =>
+    secrets.delete(secretNamePayloadSchema.parse(raw).name)
+  )
+  ipcMain.handle(IpcChannels.secretsList, (): readonly SecretStatus[] =>
+    secrets.names().map((name) => secrets.status(name))
+  )
+  ipcMain.handle(IpcChannels.secretsHealth, (): SecretsHealth => secrets.health())
 
   ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
   ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())
