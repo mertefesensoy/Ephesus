@@ -275,6 +275,31 @@ export function pendingTasksFor(ledger: TaskLedger, agentId: string): number {
 }
 
 /**
+ * Contract: the ledger with every task this agent had *in flight* returned to
+ * `todo`, plus the ids that moved. Pure; the input ledger is never mutated.
+ *
+ * SDD §10's crash row: "ledger tasks back to `todo` with a note". Only
+ * `in_progress` moves — a `blocked` task is waiting on something the crash did
+ * not change, and `review` is owed to the Odeon rather than to the assignee.
+ * The assignee is KEPT: the same row offers a respawn, and an unassigned task
+ * would quietly lose the fact that this agent is the one who knows about it.
+ */
+export function returnTasksOf(
+  ledger: TaskLedger,
+  agentId: string,
+  at: string
+): { readonly ledger: TaskLedger; readonly returned: readonly string[] } {
+  const returned: string[] = []
+  const tasks = ledger.tasks.map((task) => {
+    if (task.assignee !== agentId || task.status !== 'in_progress') return task
+    returned.push(task.id)
+    return { ...task, status: 'todo' as const, updatedAt: at }
+  })
+  if (returned.length === 0) return { ledger, returned }
+  return { ledger: { ...ledger, tasks }, returned }
+}
+
+/**
  * Contract: the ledger with `gateId` recorded against `taskId` (or removed).
  *
  * SDD §4.2's `gates` field has existed since M2 and nothing ever wrote it, so

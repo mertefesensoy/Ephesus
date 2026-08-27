@@ -68,6 +68,28 @@ obliges you to.
 You do not need to poll `inbox/` yourself; anything still sitting there simply
 has not been handed to you yet, and `inbox/.done/` is your read history.
 
+## How you remember
+
+Your agent directory holds two files that are yours: `identity.md`, which says
+who you are and is written for you, and `memory.md`, which is what you have
+chosen to remember and is written by you.
+
+`memory.md` is the only thing that survives you. Your process will end, your
+session will end, and the next time you are started you will be handed your
+identity, this protocol, and whatever is in `memory.md` — nothing else.
+
+- Append to it. Add a new section at the end, headed `## <YYYY-MM-DD> — <your
+  agent id>`, and write plainly underneath it.
+- Never edit or delete a section that is already there, including one you wrote
+  yourself. Correct an old belief by appending a new section that says so.
+- Write what a colleague arriving tomorrow would need: what you learned about
+  this codebase, a decision and why it went that way, something that surprised
+  you, a mistake and how you caught it. Not what you did step by step — the
+  event log already has that.
+
+If your memory grows too long to hand you all of it, you are told so and given
+the most recent part; the whole file is still on disk, in your agent directory.
+
 ## How you communicate
 
 - One message, one purpose. Say which of these it is: `request`, `inform`,

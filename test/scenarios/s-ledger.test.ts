@@ -63,7 +63,8 @@ function budgeted(
     cwd,
     envGrants: {},
     identityPath: path.join(company.agora.agentDir(agentId), 'identity.md'),
-    protocolPath: company.agora.pathOf('PROTOCOL.md')
+    protocolPath: company.agora.pathOf('PROTOCOL.md'),
+    memory: ''
   }
   return { agentId, adapter, cfg, dailyTokens, sessionIds: [company.sessionOf(agentId)] }
 }

@@ -43,6 +43,7 @@ import { buildEnvelope, postHookEvent } from '../../../shims/hook-client.mjs'
  *   { "kind": "wait",         "ms": 25 }
  *   { "kind": "read-inbox",   "consume": false }       echo inbox message ids
  *   { "kind": "write-outbox", "message": {...} }       atomic temp+rename write
+ *   { "kind": "append-memory","body": "...", "at": "2026-08-27" }  memory.md
  *   { "kind": "echo-env",     "name": "EPH_IDENTITY" }  prints an env var
  *   { "kind": "exit",         "code": 0 }
  *
@@ -61,6 +62,7 @@ const STEP_KINDS = [
   'wait',
   'read-inbox',
   'write-outbox',
+  'append-memory',
   'write-transcript',
   'echo-env',
   'exit'
@@ -70,7 +72,8 @@ const STEP_KINDS = [
  * @typedef {{ kind: string, text?: unknown, event?: unknown, payload?: unknown,
  *             ms?: unknown, consume?: unknown, message?: unknown, name?: unknown,
  *             code?: unknown, model?: unknown, inTokens?: unknown,
- *             outTokens?: unknown, costUsd?: unknown, at?: unknown }} Step
+ *             outTokens?: unknown, costUsd?: unknown, at?: unknown,
+ *             body?: unknown }} Step
  * @typedef {{ steps: Step[], onPrompt: Step[], onInterrupt: Step[] }} Script
  */
 
@@ -144,7 +147,16 @@ const agentId = process.env['EPH_AGENT_ID'] ?? 'agent.fake'
 const hookToken = process.env['EPH_HOOK_TOKEN'] ?? ''
 const hookEndpoint = process.env['EPH_HOOK_ENDPOINT'] ?? ''
 const agentDir = process.env['EPH_AGENT_DIR'] ?? ''
-const sessionId = process.env['EPH_FAKE_SESSION'] ?? null
+/**
+ * The session this run reports. `--resume <id>` wins over the environment: a
+ * resumed engine continues the session it was pointed at, which is the whole
+ * observable difference between a resume and a fresh start (ADR-0009).
+ */
+const resumeFlag = process.argv.indexOf('--resume')
+const sessionId =
+  (resumeFlag >= 0 ? process.argv[resumeFlag + 1] : undefined) ??
+  process.env['EPH_FAKE_SESSION'] ??
+  null
 
 /** @param {Step} step */
 async function runStep(step) {
@@ -220,6 +232,25 @@ async function runStep(step) {
       const file = path.join(outbox, `${id}.json`)
       writeFileAtomic(file, `${JSON.stringify(message, null, 2)}\n`)
       say(`outbox-wrote ${id}.json`)
+      return
+    }
+
+    case 'append-memory': {
+      // An agent remembering something, in its own directory, the way ADR-0006
+      // layer 1 says it does: a dated section appended to `memory.md`, prose,
+      // no schema. The harness never asked for it and never validates it — so a
+      // test that asserts recall is asserting on what an *agent* wrote.
+      if (!agentDir) {
+        say('memory-skipped (no EPH_AGENT_DIR)')
+        return
+      }
+      fs.mkdirSync(agentDir, { recursive: true })
+      const file = path.join(agentDir, 'memory.md')
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
+      const date = typeof step.at === 'string' ? step.at : new Date().toISOString().slice(0, 10)
+      const section = `\n## ${date} — ${agentId}\n\n${String(step.body ?? '')}\n`
+      writeFileAtomic(file, `${before.replace(/\s+$/, '')}\n${section}`)
+      say(`memory-appended ${date}`)
       return
     }
 

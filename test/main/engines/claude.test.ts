@@ -68,7 +68,8 @@ function rig(): Rig {
       cwd,
       envGrants: { GH_TOKEN: 'granted-value' },
       identityPath: path.join(agora, 'identity.md'),
-      protocolPath: path.join(root, 'agora', 'PROTOCOL.md')
+      protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
+      memory: ''
     }
   }
 }

@@ -238,11 +238,20 @@ function composeIdentity(cfg: AgentSpawnConfig, prompts: PromptStore): string {
     }
     return fs.readFileSync(file, 'utf8').trim()
   }
-  return prompts.render(IDENTITY_PROMPT, {
-    agentId: cfg.agentId,
-    identity: read(cfg.identityPath, 'identity.md'),
-    protocol: read(cfg.protocolPath, 'PROTOCOL.md')
-  })
+  return prompts
+    .render(IDENTITY_PROMPT, {
+      agentId: cfg.agentId,
+      identity: read(cfg.identityPath, 'identity.md'),
+      protocol: read(cfg.protocolPath, 'PROTOCOL.md'),
+      // Layer 1 of the Library (ADR-0006). Composed and budgeted in main and
+      // handed over on the spawn config, so a respawn carries what the agent
+      // wrote before it died — this is `memory survives process death and
+      // respawn` (FR-6.1) at the point it actually reaches the engine. Empty
+      // for a hire that has not written anything yet, which is why it is the
+      // last slot: nothing else has to move when it is absent.
+      memory: cfg.memory
+    })
+    .replace(/\n{3,}$/, '\n')
 }
 
 /** The `hooks` block this adapter merges into the engine's settings file. */

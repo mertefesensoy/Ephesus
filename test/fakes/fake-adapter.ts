@@ -49,6 +49,12 @@ export interface FakeAdapterOptions {
   readonly hooks?: EngineAdapter['hooks']
   /** Pretend the binary is absent, for the FR-1.6 path. */
   readonly missingBinary?: boolean
+  /**
+   * The session id this engine reports on its hooks. A real engine mints its
+   * own; the fake is told, so a scenario can assert that a resumed spawn came
+   * back into the SAME session rather than a fresh one.
+   */
+  readonly sessionId?: string
   readonly settingsRegistry?: SettingsRegistry
 }
 
@@ -90,7 +96,12 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
       }
       return fs.readFileSync(file, 'utf8').trim()
     }
-    return `${read(cfg.identityPath, 'identity.md')}\n\n${read(cfg.protocolPath, 'PROTOCOL.md')}`
+    // The memory layer arrives already composed on the spawn config (ADR-0006
+    // layer 1) — an adapter's job is to get it in front of the agent, never to
+    // decide how much of it there should be.
+    const memory = cfg.memory.trim()
+    const standing = `${read(cfg.identityPath, 'identity.md')}\n\n${read(cfg.protocolPath, 'PROTOCOL.md')}`
+    return memory.length > 0 ? `${standing}\n\n${memory}` : standing
   }
 
   const injections = (cfg: AgentSpawnConfig): readonly SettingsInjection[] => [
@@ -131,6 +142,7 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
           EPH_HOOK_TOKEN: cfg.hookToken,
           EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
           EPH_AGENT_DIR: path.dirname(cfg.identityPath),
+          ...(options.sessionId === undefined ? {} : { EPH_FAKE_SESSION: options.sessionId }),
           // A different mechanism from claude's `--append-system-prompt`, on
           // purpose: the suite must test the effect, not the mechanism.
           EPH_IDENTITY: identityOf(cfg)

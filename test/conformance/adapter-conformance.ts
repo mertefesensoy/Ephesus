@@ -96,7 +96,8 @@ export function conformanceRig(): ConformanceRig {
       cwd,
       envGrants: {},
       identityPath: path.join(agentDir, 'identity.md'),
-      protocolPath: path.join(root, 'agora', 'PROTOCOL.md')
+      protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
+      memory: ''
     }
   }
 }

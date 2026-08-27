@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { AgentCard, SpawnRequest } from '../shared/agents'
+import type { AgentCard, RespawnOffer, SpawnRequest } from '../shared/agents'
 import type { AgentStatus, RegistryEntry } from '../shared/registry'
 import { assignSeat, type Seat } from '../shared/seats'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
@@ -54,6 +54,22 @@ export interface AgentSpawner {
   has(id: string): boolean
   /** Fires when a pty exits; the manager unwinds the spawn from here. */
   onExit(cb: (id: string, exitCode: number) => void): void
+}
+
+/**
+ * The slice of the Library the lifecycle needs (ADR-0006 layer 1).
+ *
+ * `seed` is idempotent by contract — every spawn calls it, and a respawn must
+ * never overwrite what the agent wrote before it died.
+ */
+export interface AgentMemory {
+  /** Writes the seed header when the agent has no `memory.md`. Idempotent. */
+  seed(agentId: string): boolean
+  /** The budgeted memory layer for a spawn; empty when nothing is remembered. */
+  layer(agentId: string): {
+    readonly text: string
+    readonly facts: { readonly totalSections: number }
+  }
 }
 
 /** Contract: resolves the version string, or null when the binary is absent. */
@@ -142,6 +158,23 @@ export interface AgentManagerOptions {
   }
   /** Raised when a spawn could not be given every credential its role declares. */
   onGrantsMissing?(agentId: string, missing: readonly string[]): void
+  /**
+   * The Library's layer-1 seam (ADR-0006, FR-6.1). Injected rather than
+   * imported so the lifecycle stays testable without an Agora on disk, and so
+   * the manager never learns how a memory is budgeted — only that it has one.
+   *
+   * Optional because a manager with no Library is a legal (memory-less)
+   * configuration in tests; in the app it is always wired, and an agent with
+   * nothing written yet gets the same empty layer either way.
+   */
+  readonly memory?: AgentMemory
+  /**
+   * Returns a dead agent's in-flight ledger tasks to `todo` (SDD §10) and
+   * yields the ids that moved, for the respawn offer. Injected: the lifecycle
+   * must not import the ledger endpoint, and a company with no ledger yet
+   * simply returns nothing.
+   */
+  returnTasks?(agentId: string, because: string): readonly string[]
   /**
    * The daily budget already recorded for this hire in the roster (SDD §4.1),
    * consulted when the spawn request does not carry one.
@@ -391,7 +424,12 @@ export class AgentManager {
       // this config is built before the version probe has even run.
       envGrants: {},
       identityPath: path.join(agentDir, 'identity.md'),
-      protocolPath: path.join(this.options.agoraRoot, 'PROTOCOL.md')
+      protocolPath: path.join(this.options.agoraRoot, 'PROTOCOL.md'),
+      // Empty until `start()`, for the same reason `envGrants` is: the memory a
+      // spawn carries is whatever the agent had written by the moment the
+      // process actually starts, and this config is built before the version
+      // probe has even run.
+      memory: ''
     }
   }
 
@@ -466,7 +504,8 @@ export class AgentManager {
       capabilities: request.capabilities,
       seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),
-      exitCode: null
+      exitCode: null,
+      respawnOffer: null
     }
   }
 
@@ -477,10 +516,14 @@ export class AgentManager {
     this.options.onChange?.(agent.card)
   }
 
-  /** Materializes `identity.md` and `PROTOCOL.md` (SDD §2) for this agent. */
+  /** Materializes `identity.md`, `memory.md` and `PROTOCOL.md` (SDD §2). */
   private materializeIdentity(agent: LiveAgent): void {
     const card = agent.card
     fs.mkdirSync(path.dirname(agent.cfg.identityPath), { recursive: true })
+    // FR-6.1's "seeded at hire". Idempotent by the seam's contract, so this runs
+    // on every start and only ever writes for an agent that has no memory yet —
+    // a respawn must find exactly what the dead process left behind.
+    this.options.memory?.seed(card.agentId)
     const identity = this.options.prompts.render(path.join('agents', 'identity.md'), {
       name: card.name,
       agentId: card.agentId,
@@ -523,7 +566,7 @@ export class AgentManager {
       throw new Error(`agents: "${agentId}" is still running; stop it before respawning`)
     }
     agent.cfg = { ...agent.cfg, hookToken: randomBytes(32).toString('hex') }
-    this.update(agentId, { lifecycle: 'starting', exitCode: null })
+    this.update(agentId, { lifecycle: 'starting', exitCode: null, respawnOffer: null })
     await this.start(agentId, { resume: true })
     return this.card(agentId)
   }
@@ -548,7 +591,12 @@ export class AgentManager {
     // the spawn even if the broker holds it.
     agent.cfg = {
       ...agent.cfg,
-      envGrants: this.resolveGrants(agentId, agent.card.envGrants)
+      envGrants: this.resolveGrants(agentId, agent.card.envGrants),
+      // Layer 1 of the Library, resolved HERE for the same reason the grants
+      // are: this is the moment the process is about to exist, so what the agent
+      // carries is what it had actually written by then — including what it
+      // wrote in the session that just died (FR-6.1).
+      memory: this.options.memory?.layer(agentId).text ?? ''
     }
 
     this.options.hookServer.registerSpawn(agentId, agent.cfg.hookToken)
@@ -575,8 +623,12 @@ export class AgentManager {
           agentId,
           engine: agent.adapter.id,
           respawn: true,
-          // Whether memory actually carried over, not whether we hoped it would.
+          // Both continuity facts, separately, because they fail separately: the
+          // engine session (`--resume`, ADR-0009) and the company's own memory
+          // layer (`memory.md`, ADR-0006). M3.7 could only log the first and
+          // recorded it as `memoryCarried`; M4.1 makes the second true.
           resumed: resumeArgs.length > 0,
+          memoryCarried: agent.cfg.memory.length > 0,
           sessionId: resumeArgs.length > 0 ? (agent.sessionIds.at(-1) ?? null) : null,
           envGrants: [...agent.card.envGrants]
         })
@@ -615,10 +667,62 @@ export class AgentManager {
     await this.unwind(agentId, exitCode)
   }
 
+  /**
+   * SDD §6/§10: a ghost is archived once the grace period elapses. Driven from
+   * the avatar clock, which owns the 30 s timer — one place decides when an
+   * agent stops being a ghost, and the roster mirrors it (SDD §4.1 `status`).
+   */
+  archive(agentId: string): void {
+    const agent = this.agents.get(agentId)
+    if (!agent || agent.card.lifecycle !== 'exited') return
+    this.setRosterStatus(agentId, 'archived')
+  }
+
+  /**
+   * Everything SDD §10 owes when a spawn's process ends: the ledger tasks it
+   * had in flight go back to `todo`, and the card carries a respawn offer that
+   * says honestly what coming back would restore — the engine session (only if
+   * the adapter has `resume` AND the event plane saw a session) and how much
+   * memory is waiting (ADR-0006 layer 1).
+   *
+   * A deliberate kill takes the same path as a crash: nothing distinguishes
+   * them at the pty seam, both leave assigned work unworked, and `exitCode` is
+   * recorded so a reader can tell the difference without the harness guessing.
+   */
+  private offerRespawn(agent: LiveAgent, exitCode: number | null): RespawnOffer {
+    const agentId = agent.card.agentId
+    let tasksReturned: readonly string[] = []
+    try {
+      tasksReturned = this.options.returnTasks?.(agentId, 'agent-exit') ?? []
+    } catch (err) {
+      // A ledger that will not write must not also cost the Architect the
+      // respawn offer; the failure is reported and the offer still stands.
+      this.options.onExitError?.(agentId, err)
+    }
+    const offer: RespawnOffer = {
+      resumable: agent.adapter.resume !== undefined && agent.sessionIds.length > 0,
+      memorySections: this.options.memory?.layer(agentId).facts.totalSections ?? 0,
+      tasksReturned
+    }
+    this.options.onLogEvent?.({
+      kind: 'ghost',
+      agentId,
+      exitCode,
+      engine: agent.card.engine,
+      resumable: offer.resumable,
+      memorySections: offer.memorySections,
+      tasksReturned: [...tasksReturned]
+    })
+    return offer
+  }
+
   /** Restores the repo and revokes the token. Safe to call more than once. */
   private async unwind(agentId: string, exitCode: number | null = null): Promise<void> {
     const agent = this.agents.get(agentId)
     if (!agent) return
+    // A spawn that threw before the process existed unwinds through here too;
+    // only an agent that actually ran has work to return or a session to resume.
+    const ranProcess = agent.card.lifecycle === 'running'
     if (agent.hookPlan) {
       await agent.hookPlan.uninstall()
       agent.hookPlan = null
@@ -632,6 +736,7 @@ export class AgentManager {
       engine: agent.card.engine,
       settingsRestored: agent.card.settingsWritten.length
     })
-    this.update(agentId, { lifecycle: 'exited', exitCode, settingsWritten: [] })
+    const respawnOffer = ranProcess ? this.offerRespawn(agent, exitCode) : null
+    this.update(agentId, { lifecycle: 'exited', exitCode, settingsWritten: [], respawnOffer })
   }
 }

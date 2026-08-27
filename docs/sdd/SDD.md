@@ -129,9 +129,12 @@ Defined normatively in ADR-0009. Runtime notes:
   (e.g. writing hook shims into `<cwd>/.claude/settings.local.json`, backed up, with
   uninstall).
 - **Identity injection:** at spawn the adapter arranges for `identity.md` +
-  `PROTOCOL.md` context to reach the agent (engine-native context file, `--append-system-prompt`,
-  or first-prompt injection — adapter's choice, conformance-tested for effect not
-  mechanism).
+  `PROTOCOL.md` + the agent's **memory layer** to reach the agent (engine-native
+  context file, `--append-system-prompt`, or first-prompt injection — adapter's
+  choice, conformance-tested for effect not mechanism). The memory layer arrives
+  on `AgentSpawnConfig.memory` as text the Library has already composed and
+  budgeted (ADR-0006 layer 1): an adapter never decides how much of a long
+  `memory.md` a spawn can carry.
 - **Hook fidelity grades** (`native` | `wrapper` | `pty-heuristic`) surface on the agent
   card and scale down floor detail and breaker sensitivity (ADR-0011, 0014).
 - `TranscriptReader` yields token/cost facts folded into the ledger (FR-11.2).
@@ -402,7 +405,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 
 | Failure | Behavior |
 |---|---|
-| Agent process crash | ghost → archive; ledger tasks back to `todo` with note; respawn offer (resume if engine supports) |
+| Agent process crash | ghost → archive; ledger tasks back to `todo` with note (the note is a `task`/`returned` entry in `log.jsonl` — `tasks.json` carries no notes field); respawn offer on the agent card (`resumable` only where the adapter has `resume` *and* the event plane saw a session; `memorySections` from ADR-0006 layer 1) |
 | Harness crash | On start: committer reconciles uncommitted Agora files; cursors prevent re-processing; PTYs are gone — agents relisted as `ghost`, resumable ones offered |
 | Hook socket down | Engine shims fail-open (agent unaffected); floor freezes with a visible "events stale" banner, never invents motion |
 | Message to dead agent | bounce `refuse` + log (FR-3.4) |

@@ -1617,7 +1617,7 @@ whether memory carried, but nothing writes or reads `memory.md` yet (→ M4.1).
 close-out audit) · Artemis's `mayDecide` first production caller (→ M5 memo
 triage).
 
-- [ ] **M4.1 Memory protocol core + respawn-with-memory** — FR-6.1 live:
+- [x] **M4.1 Memory protocol core + respawn-with-memory** — FR-6.1 live:
       per-agent `memory.md` (append-only dated sections, atomic writes) seeded
       at hire; the spawn context grows the memory layer (identity + PROTOCOL +
       memory per the injection budget); agents append learnings through their
@@ -1633,6 +1633,27 @@ triage).
       resume where supported). Risk: memory.md is agent-written prose — no
       schema imposed at write time (ADR-0006); validators only guard the
       harness-owned framing.*
+      *Landed 2026-08-27 (`feature/m4-1-memory-protocol`).* `src/shared/memory.ts`
+      (read-time sections, harness framing, injection budget) ·
+      `src/main/library.ts` (seed at hire, append-only atomic writes, the budgeted
+      layer) · `prompts/library/` (seed header, layer wrapper, elision notice) ·
+      `PROTOCOL.md` gains "How you remember" (SDD §2's agent-facing contract) ·
+      `AgentSpawnConfig.memory` composed in main and injected by the adapter ·
+      `AgentCard.respawnOffer` · `LedgerEndpoint.returnTasksOf` ·
+      avatar `archived` mirrored into the roster.
+      **Evidence (live run, real child processes SIGKILLed):**
+      `npx vitest run test/scenarios/s-crash.test.ts` — 3 passed. The killed
+      agent's own `memory.md` section ("The checkout test is flaky because the
+      fixture seeds two carts.") comes back inside the respawned process's
+      context, reported by the agent itself via `echo-env EPH_IDENTITY`; log
+      shows `ghost {exitCode:-1, resumable:true, memorySections:1,
+      tasksReturned:["t-crash-001"]}`, `task {event:"returned", from:
+      "in_progress", to:"todo", because:"agent-exit"}`, and `spawn
+      {respawn:true, resumed:true, memoryCarried:true, sessionId:"sess-mason-1"}`;
+      ledger row back to `todo`; roster + avatar both `archived`.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1268 passed / 2
+      skipped** (was 1236).
+
 - [ ] **M4.2 Library core + degradation ladder** — `src/main/library.ts`:
       recall over layer 1 + the knowledge shelf with the ADR-0006 ladder built
       first: SQLite FTS keyword search (app-local, derived state) degrading to

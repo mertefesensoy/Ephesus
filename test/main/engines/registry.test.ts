@@ -44,7 +44,8 @@ const spawnConfig: AgentSpawnConfig = {
   cwd: '/tmp/eph/repo',
   envGrants: { GH_TOKEN: 'granted' },
   identityPath: '/tmp/eph/agora/agents/agent.test/identity.md',
-  protocolPath: '/tmp/eph/agora/PROTOCOL.md'
+  protocolPath: '/tmp/eph/agora/PROTOCOL.md',
+  memory: ''
 }
 
 describe('EngineRegistry (ADR-0009, SDD §1.1)', () => {

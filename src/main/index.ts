@@ -18,6 +18,7 @@ import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { LedgerEndpoint } from './ledger'
+import { Library } from './library'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
@@ -61,6 +62,7 @@ let agentManager: AgentManager | null = null
 let agora: Agora | null = null
 let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
+let library: Library | null = null
 let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
@@ -107,6 +109,10 @@ const avatarDirector = new AvatarDirector({
     // The queue flushes off the same snapshots the floor draws, so held text
     // goes out exactly when the avatar says the agent is free (FR-1.3).
     commandQueue.observe(agentId, snapshot)
+    // SDD §6/§10 `ghost ──30s──► archived`: the avatar clock owns the timer, and
+    // the roster mirrors it, so the two planes cannot disagree about when an
+    // agent stopped being a ghost.
+    if (snapshot.phase === 'archived') agentManager?.archive(agentId)
   }
 })
 
@@ -493,6 +499,14 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('agora', detail)
   })
 
+  // The Library (ADR-0006). M4.1 wires layer 1 — the markdown ground truth every
+  // spawn carries and every agent appends to.
+  library = new Library({
+    agoraRoot: agora.pathOf(),
+    prompts,
+    onDegraded: (detail) => reportDegradation('library', detail)
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
@@ -572,6 +586,14 @@ async function boot(): Promise<void> {
       }
       return seats
     },
+    // ADR-0006 layer 1: what an agent remembers reaches its next spawn through
+    // the Library, budgeted there rather than by whichever adapter runs it.
+    memory: {
+      seed: (agentId) => library?.seed(agentId) ?? false,
+      layer: (agentId) => library?.layer(agentId) ?? { text: '', facts: { totalSections: 0 } }
+    },
+    // SDD §10: a dead agent's in-flight work goes back on the board.
+    returnTasks: (agentId, because) => ledger?.returnTasksOf(agentId, because) ?? [],
     resolveGrants: (declared) =>
       secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
     onGrantsMissing: (agentId, missing) =>

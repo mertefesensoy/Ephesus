@@ -62,6 +62,16 @@ export interface AgentSpawnConfig {
   readonly identityPath: string
   /** Absolute path to the agent-facing `agora/PROTOCOL.md` (SDD §2). */
   readonly protocolPath: string
+  /**
+   * The Library's memory layer for this spawn, already composed and budgeted
+   * (ADR-0006 layer 1, FR-6.1) — empty when the agent has written nothing yet.
+   *
+   * Text rather than a path, and resolved in main exactly as `envGrants` are:
+   * deciding *how much* of a long memory a spawn can carry is the Library's
+   * judgement, and an adapter that re-derived it would make that judgement
+   * engine-specific (NFR-12).
+   */
+  readonly memory: string
 }
 
 /**

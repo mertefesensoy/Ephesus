@@ -87,6 +87,24 @@ export type SpawnRequest = z.infer<typeof spawnRequestSchema>
 export const agentIdPayloadSchema = z.object({ agentId: agentIdSchema }).strict()
 
 /**
+ * What coming back would restore, offered when a spawn's process ends
+ * (SDD §10's crash row: "respawn offer (resume if engine supports)").
+ *
+ * Every field is a fact, not a hope: an offer that promised a resumed session
+ * for an engine with no `resume`, or memory for an agent that never wrote any,
+ * would be the silent-fallback failure invariant §7 forbids — just moved into
+ * the UI.
+ */
+export interface RespawnOffer {
+  /** The adapter has `resume` AND the event plane saw a session to resume. */
+  readonly resumable: boolean
+  /** Dated sections waiting in `memory.md` (ADR-0006 layer 1). */
+  readonly memorySections: number
+  /** Ledger task ids this exit put back to `todo` (SDD §10). */
+  readonly tasksReturned: readonly string[]
+}
+
+/**
  * What the agent card shows (SDD §5 `agents.card`). Two rules shape it:
  * everything the harness writes into an agent's environment is inspectable
  * here (ENGINEERING-STANDARDS §4, "no hidden side effects for agents"), and no
@@ -117,4 +135,6 @@ export interface AgentCard {
   readonly spawnedAt: string
   /** Exit code once the process is gone; null while it lives. */
   readonly exitCode: number | null
+  /** Set when the process ended and coming back is possible; null while it runs. */
+  readonly respawnOffer: RespawnOffer | null
 }

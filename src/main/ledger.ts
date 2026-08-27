@@ -3,6 +3,7 @@ import {
   applyProposal,
   parseProposal,
   pendingTasksFor,
+  returnTasksOf,
   withGate,
   type AppliedOp
 } from '../shared/ledger'
@@ -147,6 +148,41 @@ export class LedgerEndpoint {
       gateId
     })
     this.options.onChange?.()
+  }
+
+  /**
+   * Returns a dead agent's in-flight tasks to `todo` (SDD §10's crash row).
+   *
+   * Contract: returns the ids that moved, so the caller can put them in the
+   * respawn offer. The *note* SDD §10 asks for goes to `log.jsonl` and not into
+   * the task: `taskSchema` is strict and has no notes field, and widening a
+   * normative schema to record a crash would be a §8 deviation. The book of
+   * record is where every other harness fact about an agent already lives, and
+   * NFR-13 asks for exactly this — the action reconstructible from the log.
+   *
+   * This is not the agent↔task binding join (carried to M5): it reads the
+   * ledger's own `assignee`, which has been written since M2, and learns
+   * nothing about which spawn was working which task.
+   */
+  returnTasksOf(agentId: string, because: string): readonly string[] {
+    const at = this.now().toISOString()
+    const { ledger, returned } = returnTasksOf(this.tasks(), agentId, at)
+    if (returned.length === 0) return returned
+    this.options.store.writeTasks(ledger)
+    this.options.store.commitSoon(`ledger: ${returned.length} task(s) returned by ${agentId}`)
+    for (const taskId of returned) {
+      this.options.onLogEvent?.({
+        kind: 'task',
+        event: 'returned',
+        taskId,
+        assignee: agentId,
+        from: 'in_progress',
+        to: 'todo',
+        because
+      })
+    }
+    this.options.onChange?.()
+    return returned
   }
 
   private refuse(message: Message, reasons: readonly string[]): SubmitOutcome {
