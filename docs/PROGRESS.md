@@ -685,7 +685,8 @@ Independent two-agent audit at milestone close, the M0/M1 pattern:
 
 **Findings FIXED at close (each with named regression tests; gate after fixes:
 typecheck PASS · lint PASS · invariants PASS · tests 595 passed / 2 skipped,
-run twice · scenarios 26/26):**
+run twice · scenarios 26/26 · CI green on the fix commit `fec795e`, run
+33027718917):**
 
 1. **The periodic sweep timer still carried the close-out's own harness-killer**
    (`setInterval(() => void this.sweep(), …)`) — the close-out fix guarded the
