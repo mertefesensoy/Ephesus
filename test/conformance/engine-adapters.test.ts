@@ -8,6 +8,7 @@ import { HOOK_EVENTS, HOOK_ENVELOPE_SCHEMA_VERSION } from '../../src/shared/hook
 import { HOOK_SUPPORT_RANK, type HookSupport } from '../../src/shared/engines'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
+import { CodexAdapter } from '../../src/main/engines/codex'
 import { PromptStore } from '../../src/main/prompts'
 import { conformanceRig, runAdapterConformance } from './adapter-conformance'
 import { FAKE_SETTINGS_REL, makeFakeAdapter } from '../fakes/fake-adapter'
@@ -132,6 +133,20 @@ runAdapterConformance({
       JSON.stringify({ type: 'user', sessionId: 's-1', message: { content: 'hi' } })
     ]
   }
+})
+
+runAdapterConformance({
+  name: 'codex',
+  make: () =>
+    new CodexAdapter({
+      prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS)
+    }),
+  // Nothing: this adapter writes no settings, which is the strongest possible
+  // answer to ADR-0009's hygiene rule and the honest one for `pty-heuristic`.
+  settingsRel: [],
+  wiresEveryEvent: false
+  // No `transcriptSample`: the adapter declares no transcript reader, so the
+  // table skips those cases rather than inventing a format for it.
 })
 
 // ── the behavioral half, per-PR against the fake engine ──────────────────────

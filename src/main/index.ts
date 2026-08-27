@@ -32,6 +32,7 @@ import { Hermes } from './hermes'
 import { initHome } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
+import { CodexAdapter } from './engines/codex'
 import { engines } from './engines'
 import { HookServer, type HookEventRecord } from './hooks'
 import { registerIpc } from './ipc'
@@ -498,6 +499,10 @@ async function boot(): Promise<void> {
       settingsRegistry: db
     })
   )
+  // ADR-0009's roster grows by an adapter and one registration; nothing in core
+  // learns anything (NFR-12). Codex declares `pty-heuristic` and the agent card
+  // says so — see the adapter's own comment for why.
+  engines.register(new CodexAdapter({ prompts }))
   // ADR-0013: the block cap is env-configurable; an invalid value can never
   // silently disable the cap — it is refused visibly and the default holds.
   const envCap = blockCapFromEnv(process.env)

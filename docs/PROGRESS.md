@@ -1812,7 +1812,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1413 passed / 2
       skipped** (was 1388).
 
-- [ ] **M4.6 Codex adapter** — `src/main/engines/codex.ts` at its honest hook
+- [x] **M4.6 Codex adapter** — `src/main/engines/codex.ts` at its honest hook
       grade (declared = demonstrated — the M1.7 grade-honesty case must bite);
       spawn plan, settings/config hygiene with backup + uninstall, interrupt
       key, version probe, install offer, transcript reader against fixtures.
@@ -1822,6 +1822,38 @@ triage).
       behavioral cases on the fake-engine rig patterns; live spawn is
       nightly/local territory. Risk: grading up — if codex demonstrates only
       wrapper-grade events it ships as `wrapper`, and the card says so.*
+      *Landed 2026-08-27 (`feature/m4-6-codex-adapter`).* `src/main/engines/codex.ts`
+      plus one registration line and one conformance subject — no core diff.
+      Written against a **real `codex-cli 0.150.1`** installed and run here.
+      **It declares `pty-heuristic`, and that is the honest grade.** Codex 0.150.1
+      does have a hook plane (`PreToolUse`/`PostToolUse`/`SessionStart`/
+      `SessionEnd`/`Stop`/`SubagentStop`/`PreCompact`/`PostCompact`/
+      `UserPromptSubmit`/`Notification`/`TurnStart`/`TurnEnd` are all in the
+      binary), but two things stand between an installed hook file and an event
+      reaching the harness: Codex refuses to run hooks without *persisted trust*
+      — its only override is `--dangerously-bypass-hook-trust`, and the harness
+      will not lower a permission default on the Architect's behalf (that is a §8
+      must-ask) — and the hook file's schema could not be confirmed against the
+      real CLI, so writing a guessed config into the Architect's repo would be
+      the improvisation §7 forbids. So the adapter writes **nothing**, claims no
+      events, and the agent card says so. It also declares **no `resume`** (see
+      the must-ask below) and **no transcripts** (no credentials here, so the
+      session format is unverified; inventing one would fold invented numbers
+      into the append-only ledger).
+      **Evidence (live, against the real binary):** `codex --version` →
+      `codex-cli 0.150.1`, `parseVersion → 0.150.1` · install offer
+      `npm install -g @openai/codex` · plan
+      `["codex","--cd","<cwd>"]` + identity/protocol/memory as the first prompt
+      (SDD §3's first-prompt injection) · the real `--help` confirms `--cd`,
+      `[PROMPT]` and `--dangerously-bypass-hook-trust` exist · install leaves the
+      cwd byte-identical, uninstall is safe twice · `settings: []`.
+      Conformance: the full table, at `wiresEveryEvent: false`. The suite's two
+      *installer* hygiene cases became conditional (an adapter may legitimately
+      install nothing) and a new assertion holds the other half — an adapter that
+      declares no settings must write none.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1443 passed / 3
+      skipped** (was 1413).
+
 - [ ] **M4.7 Gemini adapter** — `src/main/engines/gemini.ts`, same contract,
       same honesty bar, same adapter-only-diff rule.
       *Docs/Tests/Risk: as M4.6.*

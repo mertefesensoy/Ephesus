@@ -267,29 +267,45 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
         }
       })
 
-      it('backs up a pre-existing file and restores it byte-for-byte', async () => {
-        const rig = conformanceRig()
-        const target = path.join(rig.cwd, subject.settingsRel[0] ?? '')
-        const original = '{\r\n  "mine": true\r\n}\r\n'
-        fs.mkdirSync(path.dirname(target), { recursive: true })
-        fs.writeFileSync(target, original, 'utf8')
-        const before = fs.readFileSync(target)
+      /**
+       * An adapter may legitimately install nothing — that is what a
+       * `pty-heuristic` engine with no verifiable hook file looks like, and it
+       * is the strongest possible answer to the hygiene rule. The two cases
+       * below are about *what an installer leaves behind*, so they apply only
+       * to adapters that install something; the third holds for everyone.
+       */
+      const installsSettings = subject.settingsRel.length > 0
 
-        const plan = subject.make().wireHooks(rig.cfg)
-        await plan.install()
-        expect(fs.readFileSync(target).equals(before)).toBe(false)
+      it.runIf(installsSettings)(
+        'backs up a pre-existing file and restores it byte-for-byte',
+        async () => {
+          const rig = conformanceRig()
+          const target = path.join(rig.cwd, subject.settingsRel[0] ?? '')
+          const original = '{\r\n  "mine": true\r\n}\r\n'
+          fs.mkdirSync(path.dirname(target), { recursive: true })
+          fs.writeFileSync(target, original, 'utf8')
+          const before = fs.readFileSync(target)
 
-        await plan.uninstall()
-        expect(fs.readFileSync(target).equals(before)).toBe(true)
-      })
+          const plan = subject.make().wireHooks(rig.cfg)
+          await plan.install()
+          expect(fs.readFileSync(target).equals(before)).toBe(false)
 
-      it('leaves nothing behind when there was nothing before', async () => {
+          await plan.uninstall()
+          expect(fs.readFileSync(target).equals(before)).toBe(true)
+        }
+      )
+
+      it('leaves the agent cwd exactly as it found it', async () => {
         const rig = conformanceRig()
         const plan = subject.make().wireHooks(rig.cfg)
         const before = fs.readdirSync(rig.cwd)
 
         await plan.install()
-        expect(fs.readdirSync(rig.cwd)).not.toEqual(before)
+        // Both halves are claims the suite checks: an installer must actually
+        // install, and an adapter that declares no settings must actually write
+        // nothing — "wrote nothing" is not taken on trust either.
+        if (installsSettings) expect(fs.readdirSync(rig.cwd)).not.toEqual(before)
+        else expect(fs.readdirSync(rig.cwd)).toEqual(before)
 
         await plan.uninstall()
         expect(fs.readdirSync(rig.cwd)).toEqual(before)
