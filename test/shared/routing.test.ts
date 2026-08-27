@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEDGER_ENDPOINT } from '../../src/shared/reserved'
+import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../../src/shared/reserved'
 import {
   BROADCAST,
   HUMAN,
@@ -264,5 +264,32 @@ describe('mail for the Architect reaches Artemis (FR-3.7, ADR-0005)', () => {
     // available, so with no orchestrator it queues rather than bouncing.
     const route = routeMessage(toHuman(), { knownAgents: ['agent.mason'], orchestratorId: null })
     expect(route).toEqual({ kind: 'deliver', to: [HUMAN_QUEUE] })
+  })
+})
+
+describe('the library endpoint (ADR-0006 layer 3)', () => {
+  it('takes a propose from any agent — it can only act on the sender', () => {
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'propose' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: LIBRARY_ENDPOINT })
+  })
+
+  it('needs no orchestrator, unlike the ledger', () => {
+    const route = routeMessage(
+      message({ from: 'agent.iris', to: LIBRARY_ENDPOINT, act: 'propose' }),
+      { knownAgents: ['agent.iris'], orchestratorId: null }
+    )
+    expect(route.kind).toBe('endpoint')
+  })
+
+  it('bounces anything that is not a propose', () => {
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'inform' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route.kind).toBe('bounce')
+    if (route.kind === 'bounce') expect(route.reason).toContain('library endpoint takes')
   })
 })

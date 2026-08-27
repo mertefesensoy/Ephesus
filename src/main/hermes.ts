@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
-import { HERMES_SENDER, LEDGER_ENDPOINT } from '../shared/reserved'
+import { HERMES_SENDER, LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../shared/reserved'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
@@ -91,6 +91,21 @@ export interface HermesOptions {
    * endpoint and reports the answer, exactly as it carries mail to a mailbox.
    */
   ledger?(message: Message): { readonly ok: boolean; readonly reasons?: readonly string[] }
+  /**
+   * The Library's reflection endpoint (ADR-0006 layer 3). Same shape as the
+   * ledger's and injected for the same reason: the router carries the message
+   * and reports the answer without learning what a memory is.
+   *
+   * It supplies its own reply prose because the two endpoints say different
+   * things — the ledger's prompts are `prompts/hermes/`, the Library's are
+   * `prompts/library/` (invariant §8 either way).
+   */
+  library?(message: Message): {
+    readonly ok: boolean
+    readonly reasons?: readonly string[]
+    readonly subject: string
+    readonly body: string
+  }
   /** Renders the block reason and the wake nudge — both are prompt surfaces. */
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
@@ -213,32 +228,74 @@ export class Hermes {
   }
 
   /**
-   * Writes a harness-authored reply straight into the recipient's inbox.
+   * Delivers a message the harness itself wrote, straight into the recipient's
+   * inbox.
    *
    * Straight in, like a bounce: the harness has no outbox, and an outbox
-   * carries only its owner's mail.
+   * carries only its owner's mail. It logs the same `delivery` entry the router
+   * logs, which is what keeps NFR-13 true for harness-authored mail — a
+   * reflection request, or an endpoint's answer, has to be reconstructible from
+   * `log.jsonl` like any other message.
    */
+  deliverFromHarness(message: Message): void {
+    const target = path.join(this.mailboxDir(message.to), 'inbox', `${message.id}.json`)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    writeFileAtomic(target, `${JSON.stringify(message, null, 2)}\n`)
+    this.agora.appendLog({
+      kind: 'delivery',
+      msgId: message.id,
+      from: message.from,
+      to: message.to,
+      act: message.act,
+      subject: message.subject,
+      conversation: message.conversation,
+      hops: message.hops
+    })
+  }
+
+  /** A harness endpoint's reply to the agent that wrote to it. */
   private replyFromHarness(
     original: Message,
     act: 'agree' | 'refuse',
     subject: string,
-    body: string
+    body: string,
+    from: string = LEDGER_ENDPOINT
   ): void {
-    const reply = composeMessage({
-      id: makeMessageId(new Date(), `lgr${Math.random().toString(36).slice(2, 8)}`),
-      conversation: original.conversation,
-      in_reply_to: original.id,
-      from: LEDGER_ENDPOINT,
-      to: original.from,
-      act,
-      subject: subject.slice(0, 200),
-      body,
-      hops: replyHops(original),
-      created_at: new Date().toISOString()
-    })
-    const target = path.join(this.mailboxDir(original.from), 'inbox', `${reply.id}.json`)
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    writeFileAtomic(target, `${JSON.stringify(reply, null, 2)}\n`)
+    this.deliverFromHarness(
+      composeMessage({
+        id: makeMessageId(new Date(), `end${Math.random().toString(36).slice(2, 8)}`),
+        conversation: original.conversation,
+        in_reply_to: original.id,
+        from,
+        to: original.from,
+        act,
+        subject: subject.slice(0, 200),
+        body,
+        hops: replyHops(original),
+        created_at: new Date().toISOString()
+      })
+    )
+  }
+
+  /**
+   * Hands a condensation to the Library endpoint and answers its author
+   * (ADR-0006 layer 3). Same contract as the ledger's: `propose` obligates a
+   * reply, and a refusal carries every reason so the next attempt can be right.
+   */
+  private submitToLibrary(proposal: Message): void {
+    const outcome = this.options.library?.(proposal) ?? {
+      ok: false,
+      reasons: ['the library endpoint is not available'],
+      subject: 'memory not condensed',
+      body: 'The Library is not available in this harness.'
+    }
+    this.replyFromHarness(
+      proposal,
+      outcome.ok ? 'agree' : 'refuse',
+      outcome.subject,
+      outcome.body,
+      LIBRARY_ENDPOINT
+    )
   }
 
   /**
@@ -436,11 +493,13 @@ export class Hermes {
     }
 
     if (route.kind === 'endpoint') {
-      // SDD §7.1: not delivered to a mailbox — handed to the harness, which
-      // validates it and writes `tasks.json` through the single committer.
-      // Artemis gets an answer either way: a proposal that vanished silently
-      // would leave her believing work exists that does not.
-      this.submitToLedger(parsed.message)
+      // Not delivered to a mailbox — handed to the harness, which validates it
+      // and writes through the single committer. The sender gets an answer
+      // either way: a proposal that vanished silently would leave Artemis
+      // believing work exists that does not, or an agent believing its memory
+      // was condensed when it was not.
+      if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
+      else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }
     }

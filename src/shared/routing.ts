@@ -1,4 +1,4 @@
-import { LEDGER_ENDPOINT } from './reserved'
+import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -114,6 +114,20 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
       }
     }
     return { kind: 'endpoint', endpoint: LEDGER_ENDPOINT }
+  }
+
+  if (message.to === LIBRARY_ENDPOINT) {
+    // ADR-0006 layer 3. Unlike the ledger, ANY agent may write here — but only
+    // about its own memory, which is why there is no writer check: the endpoint
+    // condenses `message.from`'s memory and nobody else's, so an agent writing
+    // here can only ever act on itself.
+    if (message.act !== 'propose') {
+      return {
+        kind: 'bounce',
+        reason: `the library endpoint takes "propose" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: LIBRARY_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

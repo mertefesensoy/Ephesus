@@ -1734,7 +1734,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1349 passed / 2
       skipped** (was 1329).
 
-- [ ] **M4.4 Reflection job + memory archive** — ADR-0006 layer 3: a minimal
+- [x] **M4.4 Reflection job + memory archive** — ADR-0006 layer 3: a minimal
       `scheduler.ts` (cron-like trigger table; reflection is its first client,
       standups join in M5) fires condensation when `memory.md` crosses the
       size threshold: compact core + everything condensed appended to
@@ -1751,6 +1751,30 @@ triage).
       memory), prompt-surface separation, scheduler tick idempotency. Risk:
       the job must degrade when no agent is available — deferred, visibly,
       never dropped.*
+      *Landed 2026-08-27 (`feature/m4-4-reflection-archive`).*
+      `src/main/scheduler.ts` (interval table, idempotent ticks: at most one
+      firing per interval, never re-entered while running) ·
+      `src/shared/reflection.ts` (threshold plan, condensation wire format, the
+      `nothingDestroyed` check) · `src/main/reflection.ts` (the job) ·
+      `Library.condense()` — the **one** method allowed to rewrite `memory.md`,
+      and only because the archive is written first and the union is verified ·
+      `agent.library` joins the reserved ids, routed like `agent.ledger` ·
+      `Hermes.deliverFromHarness` logs harness-authored mail as `delivery`, so
+      reflection needs no new log kind (NFR-13's trail is the three messages) ·
+      prompts in `prompts/library/`.
+      **Evidence (live run: real Agora + git, real router, a real fake-engine
+      process writing the reply into its own outbox):**
+      `memory.md 32 640 chars, plan due=true` → the harness delivered
+      `from=agent.library to=agent.mason act=request "condense your memory"`
+      (it asked; it did not summarize) → the agent process wrote its `propose`
+      to `agent.library` → the router carried it to the endpoint →
+      `memory.md 14 327 chars`, `archive ["2026-08-27-001.md"]`, core present,
+      newest section kept, oldest archived, **`nothingDestroyed → {ok:true}`** →
+      the agent was answered `act=agree "memory condensed — 7 section(s)
+      archived to 2026-08-27-001.md"`. `log.jsonl` carries both deliveries.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1388 passed / 2
+      skipped** (was 1350).
+
 - [ ] **M4.5 Knowledge shelf + Memory panel** — `agora/knowledge/`
       Architect-registered reference docs (register/list via IPC, files
       through the single committer); the Memory panel tab (UI-DESIGN §4):

@@ -1,6 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  archiveFileName,
+  nothingDestroyed,
+  planReflection,
+  type ReflectionPlan
+} from '../shared/reflection'
+import {
   grepRecall,
   inScope,
   RECALL_DEFAULT_LIMIT,
@@ -95,6 +101,8 @@ export interface IndexSyncReport {
 }
 
 const SEED_PROMPT = path.join('library', 'memory-seed.md')
+const CONDENSED_PROMPT = path.join('library', 'memory-condensed.md')
+const ARCHIVE_HEADER_PROMPT = path.join('library', 'memory-archive-header.md')
 const LAYER_PROMPT = path.join('library', 'memory-layer.md')
 const ELIDED_PROMPT = path.join('library', 'memory-elided.md')
 
@@ -108,6 +116,8 @@ export interface LibraryOptions {
    * this project treats as unforgivable — the caller surfaces this.
    */
   onDegraded?(detail: string): void
+  /** Reflection's size threshold and keep count (ADR-0006 layer 3); test seams. */
+  readonly reflection?: { readonly threshold?: number; readonly keep?: number }
   /**
    * The rungs above grep, best first. Absent or unavailable rungs are stepped
    * over *visibly*; grep is implemented here and can never be unavailable, so
@@ -232,6 +242,103 @@ export class Library {
       text: this.options.prompts.render(LAYER_PROMPT, { memory: facts.text, notice }).trim(),
       facts
     }
+  }
+
+  /**
+   * What reflection would do to this agent's memory right now (ADR-0006 layer
+   * 3). Pure and inspectable — the scheduler asks every tick.
+   */
+  reflectionPlan(agentId: string): ReflectionPlan {
+    return planReflection(this.read(agentId), this.options.reflection ?? {})
+  }
+
+  /** Dated archive files, newest last (SDD §2 `memory-archive/`). */
+  archiveFiles(agentId: string): readonly string[] {
+    try {
+      return fs
+        .readdirSync(this.archiveDir(agentId))
+        .filter((name) => name.endsWith('.md'))
+        .sort()
+    } catch {
+      return []
+    }
+  }
+
+  /** Every archived section, for the "nothing was destroyed" check and the UI. */
+  archiveText(agentId: string): string {
+    return this.archiveFiles(agentId)
+      .map((name) => readOrNull(path.join(this.archiveDir(agentId), name)) ?? '')
+      .join('\n')
+  }
+
+  /**
+   * Applies one condensation: the archive is written first, then `memory.md` is
+   * rewritten as preamble + core + the kept sections.
+   *
+   * **This is the one method allowed to rewrite `memory.md`**, and it is allowed
+   * only because nothing is lost: ADR-0006 layer 3 is "a compact core + dated
+   * archive of what was condensed", and NFR-7's "nothing is destroyed" is
+   * *checked here*, not assumed — the archive is a verbatim copy, and
+   * `nothingDestroyed` verifies every old section survives before the new
+   * memory is committed. A failed check writes nothing and throws.
+   *
+   * Order matters: archive first. A crash between the two writes leaves a
+   * duplicated section, which is recoverable; the other order loses one.
+   */
+  condense(
+    agentId: string,
+    core: string,
+    at: Date = this.now()
+  ): { readonly archive: string; readonly condensed: number } {
+    const plan = this.reflectionPlan(agentId)
+    if (!plan.due) {
+      throw new Error(`library: ${agentId} has nothing to condense — ${plan.because}`)
+    }
+    const before = this.read(agentId)
+
+    let seq = this.archiveFiles(agentId).filter((name) =>
+      name.startsWith(at.toISOString().slice(0, 10))
+    ).length
+    let archiveName = archiveFileName(at, seq + 1)
+    while (fs.existsSync(path.join(this.archiveDir(agentId), archiveName))) {
+      seq += 1
+      archiveName = archiveFileName(at, seq + 1)
+    }
+
+    const header = this.options.prompts.render(ARCHIVE_HEADER_PROMPT, {
+      agentId,
+      date: at.toISOString().slice(0, 10),
+      count: String(plan.condensing.length)
+    })
+    const archiveBody = `${header.trim()}\n\n${plan.condensing.map((s) => s.text).join('\n\n')}\n`
+    fs.mkdirSync(this.archiveDir(agentId), { recursive: true })
+    writeFileAtomic(path.join(this.archiveDir(agentId), archiveName), archiveBody)
+
+    const condensedSection = this.options.prompts.render(CONDENSED_PROMPT, {
+      date: at.toISOString().slice(0, 10),
+      author: agentId,
+      core: core.trim(),
+      count: String(plan.condensing.length),
+      archive: archiveName
+    })
+    const parts = [
+      ...(plan.preamble === null ? [] : [plan.preamble.text]),
+      condensedSection.trim(),
+      ...plan.keeping.map((section) => section.text)
+    ]
+    const next = `${parts.join('\n\n')}\n`
+
+    const check = nothingDestroyed(before, next, this.archiveText(agentId) + archiveBody)
+    if (!check.ok) {
+      // The archive is already on disk, so nothing is lost — but the rewrite is
+      // refused, because a memory that dropped a section is the one outcome
+      // NFR-7 forbids outright.
+      throw new Error(
+        `library: refusing to condense ${agentId} — ${String(check.missing.length)} section(s) would be lost: ${check.missing.join(', ')}`
+      )
+    }
+    writeFileAtomic(this.memoryPath(agentId), next)
+    return { archive: archiveName, condensed: plan.condensing.length }
   }
 
   /** `agora/knowledge` — the shelf the Architect registers docs into (FR-6.4). */

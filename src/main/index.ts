@@ -19,6 +19,8 @@ import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { LedgerEndpoint } from './ledger'
 import { Library } from './library'
+import { ReflectionJob } from './reflection'
+import { Scheduler } from './scheduler'
 import { FtsIndex } from './library-fts'
 import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
@@ -66,6 +68,14 @@ let agora: Agora | null = null
 let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
 let library: Library | null = null
+let reflection: ReflectionJob | null = null
+const scheduler = new Scheduler({
+  onError: (triggerId, err) =>
+    reportDegradation(
+      'scheduler',
+      `${triggerId} failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+})
 let hermes: Hermes | null = null
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
@@ -553,10 +563,36 @@ async function boot(): Promise<void> {
     reportDegradation('library', `recall on the ${recallRung.rung} rung — ${recallRung.degraded}`)
   }
 
+  // ADR-0006 layer 3. The harness never summarizes: it asks the agent whose
+  // memory it is, as a normal turn on a harness prompt, and applies the answer
+  // the agent proposes back to `agent.library` (ADR-0005 rejects the alternative
+  // outright).
+  reflection = new ReflectionJob({
+    library,
+    prompts,
+    reachableAgents: () => hermes?.knownAgents() ?? [],
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    onDegraded: (detail) => reportDegradation('library', detail)
+  })
+  scheduler.add(reflection.trigger())
+  scheduler.start()
+
   hermes = new Hermes({
     agora,
     prompts,
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
+    library: (message) => {
+      if (!reflection) {
+        return {
+          ok: false,
+          reasons: ['no library endpoint'],
+          subject: 'memory not condensed',
+          body: 'The Library is not available in this harness.'
+        }
+      }
+      const outcome = reflection.submit(message)
+      return { ...outcome, ...reflection.replyText(message.from, outcome) }
+    },
     // FR-3.7/ADR-0005: with Artemis hired, `to:"human"` reaches the Architect's
     // proxy rather than piling up in a queue nobody reads. Read per call, so a
     // respawn or a hire mid-run is picked up without restarting the router.
@@ -852,6 +888,7 @@ app.on('window-all-closed', () => {
     .finally(() => {
       avatarDirector.stop()
       hermes?.stop()
+      scheduler.stop()
       budgetWatcher?.stop()
       ptyManager.killAll()
       hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
@@ -861,6 +898,7 @@ app.on('window-all-closed', () => {
   if (!agentManager) {
     avatarDirector.stop()
     hermes?.stop()
+    scheduler.stop()
     budgetWatcher?.stop()
     ptyManager.killAll()
     hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
