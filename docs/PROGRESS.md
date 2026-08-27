@@ -1439,8 +1439,59 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       because the `claude` binaries in this environment are unauthenticated and sit
       at a login prompt. Their messages are written into their real outboxes and
       routed exactly as composed ones would be.*
-- [ ] **M3 exit review** — UC-02 + UC-08 demo evidence; S-GATE, S-BREAKER,
+- [x] **M3 exit review** — UC-02 + UC-08 demo evidence; S-GATE, S-BREAKER,
       S-LEDGER, S-SECRETS green in CI; PROGRESS + docs synced.
+
+### M3 verdict — DONE (2026-08-27)
+
+Every exit criterion was verified **by running it**, not by reading code.
+
+| IMPLEMENTATION §M3 exit criterion | How it was verified | Result |
+|---|---|---|
+| UC-02 — a real directive fans out through Artemis | Live run of the real app; Artemis auto-spawned as `claude` 2.1.247 into the temple, a real worker hired beside her | decompose → `t-uc02-a`/`t-uc02-b` filed · assignee `request` delivered · `done` reported back · `verified + closed: status=done resultRef=run#8842` · board updated by the one scribe. Chain in `log.jsonl`: `create → create → board → update → board` |
+| UC-08 — a destructive op stops at a gate | Live run; real `notification` hook, token read from the live worker's own `/proc/<pid>/environ`; approved through the same `watch:approve` the button calls | held `kind=tool-permission because=no-rule` with all four packaging fields · `{"ok":true,"reason":null}` · queue drained to 0. Chain in `log.jsonl`: `gate opened … channel=local` → `gate approved … repeatBack=false`. Screenshot: [`m3-uc08-exit.png`](./demo/m3-uc08-exit.png) |
+| S-GATE passes | `npx vitest run test/scenarios/s-gate.test.ts` | 17 passed |
+| S-BREAKER passes | `npx vitest run test/scenarios/s-breaker.test.ts` | 9 passed |
+| S-LEDGER passes | `npx vitest run test/scenarios/s-ledger.test.ts` | 13 passed |
+| S-SECRETS passes | `npx vitest run test/scenarios/s-secrets.test.ts` | 13 passed |
+| The whole gate | `npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm test` | green — **1233 passed / 2 skipped**, up from 595 at M2 close |
+| Sole authorship | `node scripts/check-attribution.cjs` | `attribution ok (57 commit(s) reachable from HEAD)` |
+
+**Carried items, all closed where the plan assigned them:** the engine's
+permission-dialog invisibility (M3.3) · `agora/human/` with no UI (M3.4) · the
+breaker pathology signal emitted but unconsumed (M3.5) · every seat `terrace`,
+tilesheet rendering and badge colour-only pairs (M3.6) · the claude adapter's
+missing `resume` (M3.7) · `pendingTasksFor` always 0 (M3.8). The M2 close-out's
+recorded **bounce-`from` schema gap** is closed too (M3.8), with reserved agent
+ids rather than a schema change.
+
+**Debt sweep:** no `TODO`/`FIXME`/`XXX` markers anywhere in `src/`, `shims/` or
+`scripts/`. One doc drift found and fixed in this review: `src/main/ledger.ts`
+was missing from the SDD §1.1 module map. SDD §2 (`authority.json`), §4.3
+(`orchestrator` log kind) and §1.1 (`ledger.ts`) were updated as the packages
+landed; SDD §5 already specified `agora: board()` and `state:tasks`, so those
+were implemented to the doc rather than added to it.
+
+**Open for the Architect (not blocking):**
+1. **The ledger endpoint's address.** SDD §7.1 names a "harness ledger endpoint"
+   but no address, and §4.4's `to` domain is `agentId | "broadcast" | "human"`.
+   It is addressed as the reserved agent id `agent.ledger`, using the documented
+   `agentId` branch, rather than adding a fourth literal (which would be a §8
+   must-ask deviation from a normative schema). Promote it to `"ledger"` in §4.4
+   if you would rather.
+2. **Branch topology.** Each package branch is cut from the previous package's
+   branch rather than from `main`: the packages are genuinely dependent (M3.5
+   consumes M3.2, M3.8 consumes M3.7, M3.9 consumes all) and `main` is protected
+   with no PR authorised. Nine branches are pushed and awaiting your merge call.
+3. **CI does not run on feature branches.** `.github/workflows/ci.yml` triggers
+   on `push: branches:[main]` and `pull_request` only, so "green" throughout this
+   run means the full CI job set run locally, byte for byte.
+4. **`mayDecide` has no production caller yet.** The plan assigns Artemis's proxy
+   routing to M3.8 and the countersign surface to the Odeon (M5); M3.7 shipped the
+   table, its validator and the enforcement hook every future caller goes through.
+
+**Dogfood starts here** (IMPLEMENTATION §M3): from this milestone on, Ephesus
+agents help build Ephesus.
 
 ## M4 — The Library + engine breadth
 

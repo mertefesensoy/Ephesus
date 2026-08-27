@@ -55,6 +55,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `eventlog.ts` | `log.jsonl` appender/reader: seq recovery, append-only writes, tolerance of a torn tail from a killed harness | 0004 |
 | `settings-registry.ts` | Durable record of settings files written into an agent's repo, so a force-killed harness can undo them on the next boot | 0009 |
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
+| `ledger.ts` | The task-ledger endpoint (§7.1): validates Artemis's `propose` acts and writes `tasks.json` and `board.md` through the single committer — agents never touch either file | 0005, 0004 |
 | `artemis.ts` | Orchestrator lifecycle: auto-spawn, reserved seat, respawn-with-memory, prompt/config assembly, delegated-authority table | 0005 |
 | `library.ts` | Memory read/write helpers, MemPalace driver (`eph recall`, archive ingestion), FTS/grep fallback, reflection scheduler, knowledge shelf | 0006, 0016 |
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
