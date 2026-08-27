@@ -1,0 +1,43 @@
+════════════════════════════════════════════════════════════════════
+  M4 EXIT DEMO — kill an agent mid-task; it comes back remembering
+════════════════════════════════════════════════════════════════════
+
+Real Agora with real git · real hook socket · real child processes ·
+real files. The engine is the fake engine — a real spawnable CLI — 
+because no real engine can authenticate in this environment. Its
+WORDS are scripted; every mechanism around them is the shipped one.
+
+1. Artemis files t-demo-1 and puts it in flight
+   ledger: ["t-demo-1=in_progress"]
+
+2. Mason spawns (lifecycle=running) and writes down what it learned:
+   "The checkout suite is flaky because the fixture seeds two carts. Reset the cart table between cases, not between files."
+
+3. SIGKILL, mid-tool-call. exitCode=-1
+   respawn offer: resumable=true memorySections=1 tasksReturned=["t-demo-1"]
+   ledger: ["t-demo-1=todo"]   (back on the board)
+
+4. Respawned. The NEW process prints back the context it was handed:
+   │ ## Your memory
+   │ 
+   │ The sections below are your own long-term memory, in the order you wrote them.
+   │ Treat them as things you already know, not as a document to summarise back.
+   │ 
+   │ ## 2026-08-27 — agent.mason
+   │ 
+   │ The checkout suite is flaky because the fixture seeds two carts. Reset the cart table between cases, not between files.
+   │ 
+
+   log.jsonl: memoryCarried=true resumed=true sessionId=sess-mason-demo
+
+5. It asks what the company knows — recall on the mempalace rung:
+   [mempalace] "when is staging wiped"
+     -> agent.iris: th an entry: what you did step by step — the event log already has that. ## 2026-08-27 — agent.iris The staging database
+   [mempalace] "what must happen before a release goes live"
+     -> knowledge: # Release runbook Tag the commit, wait for CI, then promote staging to production.
+
+────────────────────────────────────────────────────────────────────
+An agent was killed mid-task. Its work went back on the board. It came
+back on the same engine session, holding what it had written down, and
+able to ask the rest of the company what it knows.
+────────────────────────────────────────────────────────────────────

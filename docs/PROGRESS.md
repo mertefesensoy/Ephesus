@@ -1920,7 +1920,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1491 passed / 4
       skipped** (was 1474).
 
-- [ ] **M4.9 Recall smoke + exit demos + review** — the recall smoke test with
+- [x] **M4.9 Recall smoke + exit demos + review** — the recall smoke test with
       known-answer queries green at every available rung (grep/FTS always;
       MemPalace where installed); the respawn-with-memory demo (kill a real
       agent mid-task, respawn, it demonstrably recalls — M3.7's
@@ -1929,6 +1929,35 @@ triage).
       recorded (IMPLEMENTATION: the upstream inspiration's core loop reached).
       *Docs: IMPLEMENTATION M4 exit, TEST-STRATEGY §3/§5. Risk: suites per-PR
       on the fake engine; real-engine runs are exit-review territory.*
+      *Landed 2026-08-27 (`feature/m4-9-recall-smoke-exit`).*
+      `test/conformance/recall-smoke.test.ts` — one fixture corpus, five
+      known-answer queries plus a known-*un*answer, run against **every rung the
+      machine can offer**. grep and fts always; the MemPalace rung runs when
+      `EPH_MEMPALACE` names a real binary and, when it does not, the suite
+      *says so* rather than skipping quietly — an optional external that
+      silently skipped its own smoke test would be the invisible degradation
+      invariant §7 forbids.
+      **Recall smoke, live, at all three rungs** (`EPH_MEMPALACE` pointed at the
+      real MemPalace 3.8.0 installed here): **16 passed** — every query green on
+      `grep`, on `fts`, and on `mempalace`.
+      **Respawn-with-memory demo:** [`m4-respawn-recall.txt`](./demo/m4-respawn-recall.txt).
+      Real Agora + git, real hook socket, real child processes, real files; the
+      engine is the fake engine (a real spawnable CLI) because nothing in this
+      environment can authenticate a real one — its *words* are scripted, every
+      mechanism around them is the shipped one, said plainly rather than implied
+      (the M3.9 rule). The run: Artemis files `t-demo-1` and puts it
+      `in_progress` → Mason spawns and writes down what it learned → **SIGKILL
+      mid-tool-call** (`exitCode=-1`) → offer `resumable=true memorySections=1
+      tasksReturned=["t-demo-1"]`, ledger back to `todo` → respawn, and the
+      **new process prints back the context it was handed**, containing its own
+      sentence verbatim → `log.jsonl: memoryCarried=true resumed=true
+      sessionId=sess-mason-demo` → it then asks the company two questions in its
+      own words and gets answers on the `mempalace` rung from a colleague's
+      memory and from the knowledge shelf.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1506 passed / 5
+      skipped** (the fifth skip is the MemPalace rung's smoke case, which runs
+      only when `EPH_MEMPALACE` is set — reported, per above, never silent).
+
 - [ ] **M4 exit review** — respawn-with-memory demo evidence; recall smoke
       green; codex + gemini conform at honest grades; S-CRASH green in CI;
       PROGRESS + docs synced.
