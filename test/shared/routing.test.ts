@@ -158,6 +158,17 @@ describe('special addresses (FR-3.7)', () => {
     ).toEqual({ kind: 'deliver', to: ['agent.artemis'] })
   })
 
+  it('never delivers the proxy her own to:human mail — it queues for the Architect', () => {
+    // Artemis is the human's proxy (FR-3.7); if SHE mails the human, routing
+    // back to her own inbox would swallow the escalation (M3 audit, N4).
+    expect(
+      routeMessage(message({ from: 'agent.artemis', to: HUMAN }), {
+        ...roster,
+        orchestratorId: 'agent.artemis'
+      })
+    ).toEqual({ kind: 'deliver', to: [HUMAN_QUEUE] })
+  })
+
   it('queues to:human for the Architect when there is no proxy yet', () => {
     // Losing a message addressed to the human would be the worst outcome
     // available, so it queues rather than bouncing.

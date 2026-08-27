@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # feature/fix branches run CI too (Architect verdict, M3 close): the /goal
+    # loop's per-package "CI green" is a real run, not a local re-enactment.
+    branches: [main, 'feature/**', 'fix/**']
   pull_request:
 
 jobs:

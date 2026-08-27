@@ -128,43 +128,36 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
-**M2 complete — a company of two.** The company planes are real: shared state
-in a git-backed Agora with exactly one committer, a Hermes postal service
-between agent mailboxes, and the Stop-hook autonomy loop that keeps an agent
-working while it has mail and stops it when it doesn't. The M2 exit demo is a
-*behaviour*, not a screen — two real Claude Code agents completing a
-collaboration with nobody watching:
+**M3 complete — a governed company.** Artemis auto-spawns into her temple and
+turns one Architect directive into ledger tasks, assignments, verification and
+a board update; credentials are write-only; every token of spend folds into a
+durable append-only ledger; destructive operations stop at deny-by-default
+gates packaged for a verdict; and runaway behaviour walks a steer → constrain
+→ stop breaker ladder instead of burning the night.
 
-```
-VERIFY A REQUESTED B after 21s
-VERIFY request act: request | requires_reply: true
-VERIFY watchdog woke: agent.b
-VERIFY B INFORMED BACK after 35s
-VERIFY reply act: inform | in_reply_to: 2026-08-27T09-50-00-000Z-c7d2
-VERIFY reply body: Week 34 checkout totals from checkout-totals.txt: 1281 orders,
-                   3 failures.
-VERIFY log: 1:spawn 2:delivery 3:hook 4:spawn 5:hook 6:exit 7:delivery
-```
+![A destructive op held at the Watch, packaged for a verdict](./docs/demo/m3-uc08-gate.png)
 
-One Architect instruction started it; after that nobody typed anything — the
-wake watchdog decided agent.b needed waking and supplied the words. The last
-line is the same run reconstructed from `log.jsonl` alone. Evidence trail in
-[`docs/PROGRESS.md`](./docs/PROGRESS.md); full record in
-[the M2 record](./docs/implementations/2026-08-27-m2-company-planes.md).
-*(A screenshot of the Activity tab is owed from the next local run; the M1
-capture below still shows the live floor.)*
+*Live UC-08: a real `claude` asked to `rm -rf build/` stalls behind its own
+permission dialog; the engine's `notification` hook turns the invisible stall
+into a packaged gate — what / why / blast radius / rollback — and the verdict
+travels back through the same `watch:approve` the button calls.*
 
-![A real Claude Code editing a file while its avatar works at the shelf](./docs/demo/m1-uc03-working.png)
+![Artemis's ledger and board after a delegated directive](./docs/demo/m3-uc02-ledger.png)
 
-*Live UC-03 (M1): the engine's authentic TUI streams into the agent terminal
-(right) as it edits a file; the same hook events drive its avatar's walk to
-the shelf station on the floor (left).*
+*Live UC-02: one directive to Artemis became tasks, self-contained assignee
+requests, a verified result and a board entry by the one scribe — the whole
+chain reconstructible from `log.jsonl` alone.*
+
+Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md) (including the
+two-agent close-out audit); full record in
+[the M3 record](./docs/implementations/2026-08-27-m3-governed-company.md).
+**Dogfood has started**: from M3's exit, Ephesus agents help build Ephesus.
 
 The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
 reaches feature parity with the inspiration at M4, with the differentiating
-subsystems (Odeon, Herald, mission profiles, org layer) landing in M3–M7.
-Next: **M3 — Artemis + the Watch** (a governed company; dogfood starts at its
-exit).
+subsystems (Odeon, Herald, mission profiles, org layer) landing in M5–M7.
+Next: **M4 — the Library + engine breadth** (memory that survives respawn;
+codex and gemini join claude).
 
 ## License & lineage
 

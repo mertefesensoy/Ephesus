@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { app, BrowserWindow, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, screen, shell } from 'electron'
 import type { AgentCard } from '../shared/agents'
 import type { AvatarSnapshot } from '../shared/avatar'
 import type { CommandState } from '../shared/commands'
@@ -71,6 +71,15 @@ let hookFailure: string | null = null
  * give-up is a visible UI state (invariant §7) — `console.warn` alone is a
  * developer console the Architect never sees.
  */
+/**
+ * Agents whose budget is tightened by breaker rung 2 (ADR-0011 "lower its
+ * remaining budget"). Consulted when the budget watcher reads its agents; the
+ * ledger itself is never touched (append-only, invariant §5).
+ */
+const constrainedBudgets = new Set<string>()
+/** While constrained, an agent runs on this fraction of its daily budget. */
+const CONSTRAINED_BUDGET_FACTOR = 0.5
+
 const RUNTIME_HEALTH_LIMIT = 50
 const runtimeHealth: { at: number; source: string; detail: string }[] = []
 function reportDegradation(source: string, detail: string): void {
@@ -130,11 +139,17 @@ const hookServer = new HookServer({
     // M2 this event was unmapped, so an agent stalled behind a permission
     // dialog was invisible — the floor simply stopped moving (M1 carried item).
     if (envelope.event === 'notification') {
+      // Engines repeat `notification` while one dialog stands; reporting each
+      // repeat floods the 50-entry health buffer (M3 close-out audit). One
+      // report per blocked episode: only the event that OPENS the wait.
+      const alreadyBlocked = gates?.isBlocked(envelope.agentId) ?? false
       chokePoints?.submitNotification(envelope.agentId, envelope.payload)
       // Whether or not the policy would ever permit it, the engine is stalled
       // behind a dialog the harness cannot answer — the M1 carried item is
       // about that being *visible*, not about who may allow it (invariant §7).
-      reportDegradation('gates', `${envelope.agentId} is waiting on a human decision`)
+      if (!alreadyBlocked) {
+        reportDegradation('gates', `${envelope.agentId} is waiting on a human decision`)
+      }
     }
 
     // The autonomy hinge (ADR-0013): a finished turn continues only if the
@@ -239,7 +254,20 @@ function createWindow(): void {
   }
 }
 
-void app.whenReady().then(async () => {
+app
+  .whenReady()
+  .then(() => boot())
+  .catch((err: unknown) => {
+    // Boot is fire-and-forget by nature, so its failure must be a visible
+    // failure — never an unhandled rejection (the M2/M3 audit class, found at
+    // this exact call by the M3 close-out audit).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    console.error(`boot failed: ${detail}`)
+    dialog.showErrorBox('Ephesus failed to start', detail)
+    app.quit()
+  })
+
+async function boot(): Promise<void> {
   const home = initHome()
   db = new AppDb(home.dbPath)
   // A stored ledger row that fails validation on read is dropped and reported,
@@ -380,7 +408,14 @@ void app.whenReady().then(async () => {
           reportDegradation('breaker', `stop failed for ${agentId}: ${String(err)}`)
         }
       },
-      avatar: (agentId, event) => avatarDirector.apply(agentId, event)
+      avatar: (agentId, event) => avatarDirector.apply(agentId, event),
+      // ADR-0011 rung 2: "lower its remaining budget". The set is consulted by
+      // the budget watcher's agents() below, so the constraint lifts with the
+      // rung and never touches the append-only ledger itself.
+      constrainBudget: (agentId, constrained) => {
+        if (constrained) constrainedBudgets.add(agentId)
+        else constrainedBudgets.delete(agentId)
+      }
     },
     // Invariant §8: the corrective sentence is config, not a literal here.
     steerText: (hit) =>
@@ -487,11 +522,12 @@ void app.whenReady().then(async () => {
         subject: message.subject,
         conversation: message.conversation
       }),
-    onBounced: ({ original, reason }) => {
-      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`)
-      // Trip signal #3: recurring hop-cap escalations on one conversation.
-      if (reason.includes('hop')) breaker?.noteHopCap(original.from, original.conversation)
-    },
+    onBounced: ({ original, reason }) =>
+      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
+    // Trip signal #3: recurring hop-cap escalations on one conversation. A hop
+    // cap is a DIVERT, not a bounce — the M3 close-out audit found the old
+    // bounce-side sniff unreachable (no bounce reason mentions hops).
+    onDiverted: ({ from, conversation }) => breaker?.noteHopCap(from, conversation),
     onSweepError: (err: unknown) =>
       reportDegradation(
         'hermes',
@@ -613,7 +649,14 @@ void app.whenReady().then(async () => {
   // minute for a figure nobody reads that often (SDD §11).
   budgetWatcher = new BudgetWatcher({
     ledger: costLedger,
-    agents: () => agentManager?.liveSpawns() ?? [],
+    agents: () =>
+      (agentManager?.liveSpawns() ?? []).map((spawn) =>
+        // Rung 2's tightened envelope (ADR-0011): a constrained agent runs on
+        // half its daily budget until the breaker recovers it.
+        constrainedBudgets.has(spawn.agentId) && spawn.dailyTokens !== null
+          ? { ...spawn, dailyTokens: Math.floor(spawn.dailyTokens * CONSTRAINED_BUDGET_FACTOR) }
+          : spawn
+      ),
     onBudgetChange: (agentId, verdict) => {
       // Only transitions reach the book of record; a breached agent must not
       // turn log.jsonl into a metronome (SDD §4.3 kind `budget`).
@@ -727,7 +770,7 @@ void app.whenReady().then(async () => {
   const orchestratorEngine = engines.list()[0]?.id
   if (orchestratorEngine) void artemis.start(orchestratorEngine)
   else reportDegradation('artemis', 'no engine adapter registered; not hired')
-})
+}
 
 app.on('window-all-closed', () => {
   // Unwind spawns before the ptys die, so every settings file the harness wrote
@@ -740,7 +783,7 @@ app.on('window-all-closed', () => {
       hermes?.stop()
       budgetWatcher?.stop()
       ptyManager.killAll()
-      void hookServer.stop()
+      hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
       void agora?.drained().finally(() => db?.close())
       if (process.platform !== 'darwin') app.quit()
     })
@@ -749,7 +792,7 @@ app.on('window-all-closed', () => {
     hermes?.stop()
     budgetWatcher?.stop()
     ptyManager.killAll()
-    void hookServer.stop()
+    hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
     db?.close()
     if (process.platform !== 'darwin') app.quit()
   }

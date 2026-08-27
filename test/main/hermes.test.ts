@@ -43,6 +43,7 @@ interface Rig {
   readonly home: string
   send(from: string, message: Message): string
   inbox(agentId: string): readonly string[]
+  outbox(agentId: string): readonly string[]
   done(agentId: string): readonly string[]
 }
 
@@ -55,6 +56,7 @@ async function rig(
     nudge?: (agentId: string, text: string) => void
     onPathology?: (agentId: string, blocks: number) => void
     onSweepError?: (err: unknown) => void
+    onDiverted?: (record: { from: string; conversation: string; reason: string }) => void
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-hermes-'))
@@ -83,6 +85,10 @@ async function rig(
     },
     inbox(agentId) {
       const dir = path.join(agora.agentDir(agentId), 'inbox')
+      return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
+    },
+    outbox(agentId) {
+      const dir = path.join(agora.agentDir(agentId), 'outbox')
       return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
     },
     done(agentId) {
@@ -505,6 +511,58 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     expect(r.inbox('agent.c')).toHaveLength(1)
     // Never back to the sender.
     expect(r.inbox('agent.a')).toEqual([])
+  })
+
+  it('signals the breaker on a hop-cap diversion — divert, not bounce (trip #3)', async () => {
+    // The M3 close-out audit found trip signal #3 wired to onBounced, which a
+    // divert never fires: the breaker was blind to its hop-cap signal. The
+    // divert path now notifies, exactly once per message however often the
+    // sweep re-visits it.
+    const diverted: { from: string; conversation: string; reason: string }[] = []
+    const r = await rig({ onDiverted: (record) => diverted.push(record) })
+    const sent = message({ hops: DEFAULT_HOP_CAP })
+    r.send('agent.a', sent)
+
+    await r.hermes.sweep()
+    await r.hermes.sweep()
+
+    expect(diverted).toHaveLength(1)
+    expect(diverted[0]).toMatchObject({ from: 'agent.a', conversation: sent.conversation })
+    expect(diverted[0]?.reason).toContain('hop cap')
+  })
+
+  it('holds only the paused recipient of a broadcast, and never re-delivers the rest', async () => {
+    // The M3 close-out audit found a paused recipient held the ENTIRE
+    // broadcast, and every sweep re-delivered the others — duplicate delivery
+    // log entries drumming until the pause lifted (the metronome pattern).
+    const r = await rig()
+    r.hermes.ensureMailbox('agent.c')
+    r.hermes.setPaused('agent.c', true)
+    const sent = message({ to: 'broadcast', act: 'inform' })
+    r.send('agent.a', sent)
+
+    await r.hermes.sweep()
+    await r.hermes.sweep()
+    await r.hermes.sweep()
+
+    // agent.b got its copy exactly once; agent.c is held, message not lost.
+    expect(r.inbox('agent.b')).toHaveLength(1)
+    expect(r.inbox('agent.c')).toEqual([])
+    const deliveries = r.agora
+      .readLog()
+      .filter((e) => e['kind'] === 'delivery' && e['msgId'] === sent.id)
+    expect(deliveries).toHaveLength(1)
+    // The hold itself is in the log once, not once per sweep.
+    const holds = r.agora
+      .readLog()
+      .filter((e) => e['kind'] === 'breaker' && e['action'] === 'delivery-held')
+    expect(holds).toHaveLength(1)
+
+    // Pause lifts: the held copy arrives, the outbox finally drains.
+    r.hermes.setPaused('agent.c', false)
+    await r.hermes.sweep()
+    expect(r.inbox('agent.c')).toHaveLength(1)
+    expect(r.outbox('agent.a')).toEqual([])
   })
 
   it('diverts a message at the hop cap instead of delivering it', async () => {

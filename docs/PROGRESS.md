@@ -1394,7 +1394,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (closed M3.6) ·
       the fake engine; real-`claude` demos are exit-review territory.*
       *Evidence: `typecheck && lint && invariants && test` green — 1233 passed / 2
       skipped (26 new). **All four named suites are automated and run per-PR**:
-      S-GATE (17 cases, M3.3) and S-BREAKER (9, M3.5) landed with their packages;
+      S-GATE (12 cases, M3.3 — corrected at the close-out audit) and S-BREAKER (9, M3.5) landed with their packages;
       **S-LEDGER** (13) and **S-SECRETS** (13) land here. 73 scenario cases in all.
       **S-LEDGER** folds transcripts a REAL spawned `fake-engine` wrote, in its own
       format and its own directory, read by the adapter's own `TranscriptReader` —
@@ -1450,7 +1450,7 @@ Every exit criterion was verified **by running it**, not by reading code.
 |---|---|---|
 | UC-02 — a real directive fans out through Artemis | Live run of the real app; Artemis auto-spawned as `claude` 2.1.247 into the temple, a real worker hired beside her | decompose → `t-uc02-a`/`t-uc02-b` filed · assignee `request` delivered · `done` reported back · `verified + closed: status=done resultRef=run#8842` · board updated by the one scribe. Chain in `log.jsonl`: `create → create → board → update → board` |
 | UC-08 — a destructive op stops at a gate | Live run; real `notification` hook, token read from the live worker's own `/proc/<pid>/environ`; approved through the same `watch:approve` the button calls | held `kind=tool-permission because=no-rule` with all four packaging fields · `{"ok":true,"reason":null}` · queue drained to 0. Chain in `log.jsonl`: `gate opened … channel=local` → `gate approved … repeatBack=false`. Screenshot: [`m3-uc08-exit.png`](./demo/m3-uc08-exit.png) |
-| S-GATE passes | `npx vitest run test/scenarios/s-gate.test.ts` | 17 passed |
+| S-GATE passes | `npx vitest run test/scenarios/s-gate.test.ts` | 12 passed *(recorded as "17" at review — corrected at the close-out audit: the suite has always had 12 cases; "17" conflated the seventeen M3.3 review findings. The same paragraph's total of 73 scenario cases was and is correct)* |
 | S-BREAKER passes | `npx vitest run test/scenarios/s-breaker.test.ts` | 9 passed |
 | S-LEDGER passes | `npx vitest run test/scenarios/s-ledger.test.ts` | 13 passed |
 | S-SECRETS passes | `npx vitest run test/scenarios/s-secrets.test.ts` | 13 passed |
@@ -1504,10 +1504,222 @@ were implemented to the doc rather than added to it.
 **Dogfood starts here** (IMPLEMENTATION §M3): from this milestone on, Ephesus
 agents help build Ephesus.
 
+### M3 close-out audit (2026-08-27) — verdict: DONE, with audit fixes landed
+
+Independent two-agent audit at milestone close, the M0/M1/M2 pattern:
+
+- **spec-verifier** (verification by execution): **M3 stands as DONE.** The
+  whole gate reproduces exactly — typecheck · zero-warning lint · all four new
+  invariant-tripwire classes proven to bite on planted probes (git, ledger
+  UPDATE, env credential read, secret-shaped string) · full suite green
+  **twice** with no flake · all four M3 suites and all five M2 suites pass on
+  real process/fs/git seams · secrets write-only by construction and by pinned
+  API-surface test · ledger append-only in code and by tripwire · gates deny
+  by default · breaker ladder and Artemis wiring production-real. The
+  UC-02/UC-08 live demos are not re-runnable in the audit environment; their
+  records and the seven `docs/demo/m3-*.png` captures were checked for
+  internal consistency (`m3-uc08-exit.png` matches the recorded gate
+  packaging byte-for-byte).
+- **doc-guardian** (design conformance): **substantially conforms** — the
+  priority invariants hold structurally, DECISIONS-LOG discipline called
+  exemplary — with three seam violations, five deviations and five nits, all
+  handled below. Its diagnosis: joins *between* subsystems are where the
+  per-module tests go blind (the same root cause named at the M2 close).
+
+**Findings FIXED at close (gate after fixes: typecheck PASS · lint PASS ·
+invariants PASS · tests 1236 passed / 2 skipped, run twice · scenarios 73/73):**
+
+1. **Breaker trip signal #3 was dead wiring** — recurring hop-cap escalations
+   were sniffed from `onBounced`, but a hop cap is a *divert*, not a bounce,
+   so `noteHopCap` was unreachable. Hermes now raises `onDiverted` from the
+   divert path (once per message), wired to the breaker, with a
+   divert-not-bounce regression test.
+2. **The paused-broadcast metronome** — rung 2 held an *entire* broadcast and
+   re-delivered the already-served recipients every sweep, drumming duplicate
+   `delivery` and `delivery-held` log entries. Delivery is now per-recipient:
+   served copies are single-shot, the held copy waits, the hold is logged
+   once, and the outbox drains when the last recipient is served.
+3. **ADR-0011 rung 2 now lowers the budget** (Architect verdict: implement
+   now) — `constrainBudget` joins `BreakerEffects`; a constrained agent runs
+   on half its daily budget (`CONSTRAINED_BUDGET_FACTOR = 0.5`) until
+   recovery lifts it, via the budget watcher's agent view — the append-only
+   ledger is never touched. (Read-only tools remain excused: "where the
+   engine supports it", and the reference engine cannot mid-session.)
+4. **The M2 fire-and-forget class recurred at the boot path** —
+   `void app.whenReady().then(async …)` wrapped the whole boot (including the
+   native SQLite open) with no handler. Boot is now a named `boot()` with a
+   `.catch` that shows an error box and quits — a visible failure, never an
+   unhandled rejection. The two `void hookServer.stop()` shutdown calls got
+   handlers too.
+5. **Ledger-endpoint reply prose moved to prompts** (invariant §8) — the
+   `agree`/`refuse` framing renders from `prompts/hermes/ledger-*.md`; the
+   refusal reasons stay data, serialised into the `{{reasons}}` slot.
+6. **Artemis could mail herself the Architect's escalations** — `to:"human"`
+   from the orchestrator now routes to the `agora/human/` queue, never back
+   into her own inbox (the proxy cannot proxy for herself), with a routing
+   test.
+7. **The notification-hook degradation flooded the health buffer** — engines
+   repeat `notification` while one dialog stands; the report now fires once
+   per blocked episode instead of once per event.
+8. **The spend-gate packaging promised mechanics that do not exist** —
+   "approving raises the ceiling for today only" was false; the prompt now
+   states the real mechanics (deny refuses the request, approve proceeds,
+   ceiling unchanged).
+9. **Three orphaned prompt files removed** (`gate-held/approved/denied.md`) —
+   written for an agent-facing notification path that has no code; they
+   return with the path that loads them.
+10. **Evidence errata corrected in place** — the exit table's S-GATE
+    "17 passed" (the suite has always had 12; the total of 73 was correct)
+    and the M3.9 prose; the UC-02 task-id mismatch (`t-uc02-a/b` in the
+    record vs `t-uc02-1/2` in the screenshot) is noted as two demo runs.
+11. **`watch:dismiss` documented** — the channel now appears in SDD §5 beside
+    `humanQueue()`, with its DECISIONS-LOG entry (it had widened the
+    documented IPC surface with no doc trail).
+
+**Carried to M5, recorded with an owner (Architect verdict):** the
+**agent↔task binding join** — nothing binds a live spawn to a ledger task, so
+(a) `task.gates` is never populated in production (the M3.8 record overstated
+this; every real `GateSubmission` carries `taskId: null`) and (b) rung 3
+cannot return a task as `stalled` with the breaker report (ADR-0011). Both
+land with the Odeon (M5), where task-close gates make the join load-bearing.
+
+**Recorded, not fixed:** SDD §5's `breaker:trip` push is unimplemented (the
+Watch panel polls at 3 s — arrives with a later Watch pass) · reduced
+pty-heuristic protection surfaces in the Watch panel rather than on the agent
+card (placement) · the real SQLite `AppDb` has no vitest coverage (Electron-ABI
+constraint; covered by the recorded M3.2 live run) · renderer one-shot IPC
+calls without `.catch` fall back to the bridge banner (the polling surfaces
+all catch).
+
 ## M4 — The Library + engine breadth
 
-- [ ] Package list derived at milestone start
-- [ ] M4 exit — respawn-with-memory; recall smoke test; two extra engines conform
+Plan drafted 2026-08-27 at M3 close (derived per BUILD-PROMPT §5 from
+IMPLEMENTATION M4 + ADR-0006/0016/0009 + SDD §1.1 (library.ts, scheduler.ts,
+engines/) + §2 (`index/`, knowledge/, memory files) + TEST-STRATEGY §3
+(S-CRASH) and §5). Execute in order; every package tests against the fake
+engine per-PR.
+
+**Architect decisions folded into this plan (2026-08-27, in DECISIONS-LOG):**
+the two extra engines are **codex + gemini** (ADR-0009 roster, honest hook
+grades — `wrapper`/`pty-heuristic` as demonstrated, never aspirational) · the
+`agent.ledger` reserved-id addressing is RATIFIED as the standing rule for
+harness-owned endpoints (no §4.4 schema change) · CI now runs on `feature/**`
+and `fix/**` pushes, so "CI green per package" is real from M4.1 on ·
+MemPalace remains an *optional external* (ADR-0016): every package must run
+degraded without it, and its live-run proof may be owed to a local session if
+the build environment cannot install Python/mempalace — the degradation
+ladder is the tested surface either way.
+
+**Carried in from M3 (each closes inside a package below):** `memory.md`
+continuity on respawn — M3.7's resume re-injects identity/protocol and *logs*
+whether memory carried, but nothing writes or reads `memory.md` yet (→ M4.1).
+**Not this milestone's:** the agent↔task binding join (→ M5, see the M3
+close-out audit) · Artemis's `mayDecide` first production caller (→ M5 memo
+triage).
+
+- [ ] **M4.1 Memory protocol core + respawn-with-memory** — FR-6.1 live:
+      per-agent `memory.md` (append-only dated sections, atomic writes) seeded
+      at hire; the spawn context grows the memory layer (identity + PROTOCOL +
+      memory per the injection budget); agents append learnings through their
+      own directory (the ratified grant already covers it).
+      Respawn-with-memory completes M3.7: a killed agent's respawn carries
+      engine-native resume AND re-injected `memory.md`. Crash lifecycle per
+      SDD §10: SIGKILL → `ghost` → archive, ledger tasks back to `todo` with a
+      note, respawn offer — **S-CRASH (TEST-STRATEGY §3) is implementable
+      here** with the fake engine.
+      *Docs: ADR-0006 layer 1, FR-6.1, SDD §2, §10, TEST-STRATEGY §3 S-CRASH.
+      Tests: append discipline (never rewrites, dated sections), injection
+      snapshot, S-CRASH integration (ghost→archive, tasks→todo, respawn offer,
+      resume where supported). Risk: memory.md is agent-written prose — no
+      schema imposed at write time (ADR-0006); validators only guard the
+      harness-owned framing.*
+- [ ] **M4.2 Library core + degradation ladder** — `src/main/library.ts`:
+      recall over layer 1 + the knowledge shelf with the ADR-0006 ladder built
+      first: SQLite FTS keyword search (app-local, derived state) degrading to
+      plain grep, each state *visible* (Memory panel state + the agora:health
+      pattern); `eph-recall` agent-facing CLI shim (the eph-hook single-client
+      discipline) returning scored snippets; mtime-gated incremental indexing.
+      *Docs: ADR-0006 layers 1–2, ADR-0016 §5, SDD §1.1 library.ts, NFR-7.
+      Tests: known-answer queries against fixtures at every ladder rung (the
+      recall smoke test's deterministic floor); mtime gating (unchanged files
+      not re-mined); degraded states visibly distinct. Risk: FTS lives in
+      app-local SQLite — native module stays behind the storage seam
+      (M0 constraint 3); vitest never imports it.*
+- [ ] **M4.3 MemPalace driver** — ADR-0016: `library.ts` drives a local
+      MemPalace subprocess with engine-CLI discipline (version probe, visible
+      install offer per FR-1.6, no hidden daemons); wings/rooms/drawers
+      mapping (one wing per agent, one per target); store root
+      `~/.ephesus/index/` (derived, disposable, outside the Agora repo);
+      scoped recall behind the same `eph-recall` surface; absent/broken → the
+      M4.2 ladder, visibly; engine-side MemPalace auto-save hooks stay OFF
+      (one writer path — ADR-0016 consequence).
+      *Docs: ADR-0016 (normative), ADR-0006 ladder, SDD §2. Tests: driver
+      against a scripted fake `mempalace` CLI (the fake-engine pattern — no
+      Python in CI); the no-Python path degrades visibly; the store root is
+      never committed to the Agora. Risk: MemPalace is optional — if the
+      environment cannot `pip install mempalace`, the live-run proof is owed
+      to a local session and recorded as such, never faked.*
+- [ ] **M4.4 Reflection job + memory archive** — ADR-0006 layer 3: a minimal
+      `scheduler.ts` (cron-like trigger table; reflection is its first client,
+      standups join in M5) fires condensation when `memory.md` crosses the
+      size threshold: compact core + everything condensed appended to
+      `memory-archive/` dated files — bounded memory, nothing destroyed
+      (NFR-7); condensation prompts in `prompts/library/` (they shape what the
+      company forgets — policy as text, ADR-0006 consequence); archive events
+      → log; MemPalace archives what reflection condenses (when present).
+      Condensation runs as a normal agent turn on a harness prompt — never a
+      second model runtime in main (ADR-0005's mechanism/intelligence split;
+      the option "harness calls a model API directly" is explicitly rejected
+      there).
+      *Docs: ADR-0006 layer 3, ADR-0016 §3, NFR-7, SDD §1.1 scheduler.ts.
+      Tests: threshold trigger, archive completeness (core ∪ archive ⊇ old
+      memory), prompt-surface separation, scheduler tick idempotency. Risk:
+      the job must degrade when no agent is available — deferred, visibly,
+      never dropped.*
+- [ ] **M4.5 Knowledge shelf + Memory panel** — `agora/knowledge/`
+      Architect-registered reference docs (register/list via IPC, files
+      through the single committer); the Memory panel tab (UI-DESIGN §4):
+      per-agent memory view, recall search over `eph-recall`'s same path, the
+      ladder state chip (mempalace | fts | grep — degradation visible),
+      archive browser. SDD §5's `agora: memory(id)` lands here.
+      *Docs: ADR-0006 layer 2, SDD §5, UI-DESIGN §4. Tests: renderer stays a
+      projection; shelf writes only via main; panel states track the ladder.
+      Risk: inventing UI — the panel is the documented Memory panel, nothing
+      more.*
+- [ ] **M4.6 Codex adapter** — `src/main/engines/codex.ts` at its honest hook
+      grade (declared = demonstrated — the M1.7 grade-honesty case must bite);
+      spawn plan, settings/config hygiene with backup + uninstall, interrupt
+      key, version probe, install offer, transcript reader against fixtures.
+      **Adapter-only diff** (TEST-STRATEGY §5: any core diff fails the
+      import-boundary lint).
+      *Docs: ADR-0009, TEST-STRATEGY §5. Tests: the full conformance table +
+      behavioral cases on the fake-engine rig patterns; live spawn is
+      nightly/local territory. Risk: grading up — if codex demonstrates only
+      wrapper-grade events it ships as `wrapper`, and the card says so.*
+- [ ] **M4.7 Gemini adapter** — `src/main/engines/gemini.ts`, same contract,
+      same honesty bar, same adapter-only-diff rule.
+      *Docs/Tests/Risk: as M4.6.*
+- [ ] **M4.8 Worktree isolation option** — UC-01 alternate 2a: a spawn may
+      request its own git worktree of the target repo; worktree create/remove
+      through `git.ts` (the one committer — no second git path); agent cwd,
+      grants and settings install target the worktree; unwind removes a clean
+      worktree and *reports* a dirty one.
+      *Docs: SRS UC-01 2a, ADR-0004, SDD §3 SpawnPlan. Tests: worktree
+      lifecycle on real git temp repos; dirty-worktree unwind refuses +
+      reports; the invariant tripwire still passes. Risk: worktrees of the
+      agent's TARGET repo, never of the Agora.*
+- [ ] **M4.9 Recall smoke + exit demos + review** — the recall smoke test with
+      known-answer queries green at every available rung (grep/FTS always;
+      MemPalace where installed); the respawn-with-memory demo (kill a real
+      agent mid-task, respawn, it demonstrably recalls — M3.7's
+      `memoryCarried` log fact now true); S-CRASH green in CI; conformance
+      suite green for fake + claude + codex + gemini; the parity checkpoint
+      recorded (IMPLEMENTATION: the upstream inspiration's core loop reached).
+      *Docs: IMPLEMENTATION M4 exit, TEST-STRATEGY §3/§5. Risk: suites per-PR
+      on the fake engine; real-engine runs are exit-review territory.*
+- [ ] **M4 exit review** — respawn-with-memory demo evidence; recall smoke
+      green; codex + gemini conform at honest grades; S-CRASH green in CI;
+      PROGRESS + docs synced.
 
 ## M5 — The Odeon + Gymnasium v1
 

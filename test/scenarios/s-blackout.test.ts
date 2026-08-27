@@ -68,6 +68,7 @@ async function restartOver(home: string): Promise<Company> {
       effects: {
         steer: () => {},
         pauseDeliveries: () => {},
+        constrainBudget: () => {},
         interrupt: () => {},
         stop: () => {},
         avatar: () => {}

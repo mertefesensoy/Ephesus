@@ -85,7 +85,13 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
     // FR-3.7/ADR-0005: Artemis is the Architect's proxy. Only what she judges
     // critical continues to the Architect's own queue — and that judgement is
     // hers, made by flipping `needs_human`, not a rule in this function.
-    return { kind: 'deliver', to: [ctx.orchestratorId ?? HUMAN_QUEUE] }
+    // The proxy cannot proxy for herself: Artemis mailing the human goes to
+    // the Architect's queue, never back into her own inbox (M3 audit, N4).
+    const proxy = ctx.orchestratorId
+    return {
+      kind: 'deliver',
+      to: [proxy !== null && message.from !== proxy ? proxy : HUMAN_QUEUE]
+    }
   }
 
   if (message.to === LEDGER_ENDPOINT) {

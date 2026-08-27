@@ -13,6 +13,7 @@ import { Breaker, fingerprint, type BreakerEffects } from '../../src/main/watch/
 interface Recorded {
   readonly steers: string[]
   readonly paused: boolean[]
+  constrained: boolean[]
   readonly interrupts: string[]
   readonly stops: string[]
   readonly avatars: string[]
@@ -24,11 +25,20 @@ function rig(over: { budget?: () => 'ok' | 'breached'; fidelity?: string } = {})
   rec: Recorded
   tick(ms?: number): void
 } {
-  const rec: Recorded = { steers: [], paused: [], interrupts: [], stops: [], avatars: [], logs: [] }
+  const rec: Recorded = {
+    steers: [],
+    paused: [],
+    constrained: [],
+    interrupts: [],
+    stops: [],
+    avatars: [],
+    logs: []
+  }
   let now = 1_700_000_000_000
   const effects: BreakerEffects = {
     steer: (_id, text) => rec.steers.push(text),
     pauseDeliveries: (_id, paused) => rec.paused.push(paused),
+    constrainBudget: (_id, constrained) => rec.constrained.push(constrained),
     interrupt: (id) => rec.interrupts.push(id),
     stop: (id) => rec.stops.push(id),
     avatar: (_id, event) =>
@@ -95,6 +105,8 @@ describe('climbing the ladder', () => {
     tick(DWELL)
     expect(breaker.evaluate('agent.mason')).toBe(2)
     expect(rec.paused).toEqual([true])
+    // ADR-0011's second constraint: the budget envelope tightens with the rung.
+    expect(rec.constrained).toEqual([true])
     // Still no process touched: work is preserved at rungs 1 and 2.
     expect(rec.interrupts).toEqual([])
     expect(rec.stops).toEqual([])
@@ -159,6 +171,7 @@ describe('recovery', () => {
     tick(DEFAULT_THRESHOLDS.repeatWindowMs + 1)
     expect(breaker.evaluate('agent.mason')).toBe(0)
     expect(rec.paused).toEqual([true, false])
+    expect(rec.constrained).toEqual([true, false])
     expect(rec.avatars.at(-1)).toBe('recover')
     expect(rec.logs.at(-1)).toMatchObject({ action: 'recover', rung: 0 })
   })
@@ -228,6 +241,7 @@ describe('span capture (FR-11.6)', () => {
       effects: {
         steer: () => {},
         pauseDeliveries: () => {},
+        constrainBudget: () => {},
         interrupt: () => {},
         stop: () => {},
         avatar: () => {}

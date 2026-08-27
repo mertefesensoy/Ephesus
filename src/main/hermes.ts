@@ -81,6 +81,11 @@ export interface HermesOptions {
   /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
   onBounced?(record: BounceRecord): void
   /**
+   * Notified for each hop-cap diversion — the breaker's trip signal #3 reads
+   * this (ADR-0011); a divert is not a bounce, so `onBounced` never sees it.
+   */
+  onDiverted?(record: { from: string; conversation: string; reason: string }): void
+  /**
    * The harness's ledger endpoint (SDD §7.1). Injected rather than imported so
    * the router never learns what a task is — it carries the message to the
    * endpoint and reports the answer, exactly as it carries mail to a mailbox.
@@ -144,6 +149,10 @@ export class Hermes {
   private readonly blocks = new Map<string, number>()
   /** Agents already nudged for their current pending mail — "exactly once". */
   private readonly nudged = new Set<string>()
+  /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
+  private readonly heldLogged = new Set<string>()
+  /** Diverted msgIds already logged and signalled — one divert, one record. */
+  private readonly divertNotified = new Set<string>()
   /** Agents whose deliveries the breaker is holding (rung 2, ADR-0011). */
   private readonly paused = new Set<string>()
 
@@ -187,15 +196,19 @@ export class Hermes {
       reasons: ['the ledger endpoint is not available']
     }
     const reasons = outcome.reasons ?? []
+    // Invariant §8: the endpoint's answer is read by an LLM, so its words are
+    // a prompt surface — rendered from prompts/hermes/, never literals here.
+    // The reasons themselves are data, serialised mechanically into the slot.
+    const vars = {
+      subject: proposal.subject,
+      reasons: reasons.map((r) => `- ${r}`).join('\n')
+    }
+    const kind = outcome.ok ? 'agree' : 'refuse'
     this.replyFromHarness(
       proposal,
-      outcome.ok ? 'agree' : 'refuse',
-      outcome.ok
-        ? `ledger: accepted "${proposal.subject}"`
-        : `ledger: refused "${proposal.subject}"`,
-      outcome.ok
-        ? 'The proposal was applied to the ledger.'
-        : `The proposal was not applied. Nothing changed.\n\n${reasons.map((r) => `- ${r}`).join('\n')}`
+      kind,
+      this.render(`ledger-${kind}-subject.md`, vars).trim().slice(0, 200),
+      this.render(`ledger-${kind}.md`, vars).trim()
     )
   }
 
@@ -434,7 +447,13 @@ export class Hermes {
 
     const message = parsed.message
     const recipients = route.kind === 'divert' ? [route.to] : route.to
-    if (route.kind === 'divert') {
+    if (route.kind === 'divert' && !this.divertNotified.has(message.id)) {
+      this.divertNotified.add(message.id)
+      this.options.onDiverted?.({
+        from: message.from,
+        conversation: message.conversation,
+        reason: route.reason
+      })
       // The message still gets delivered — to the adjudicator, not the
       // addressee. Escalation, not a drop (FR-3.3).
       this.agora.appendLog({
@@ -450,22 +469,37 @@ export class Hermes {
     }
 
     const records: DeliveryRecord[] = []
+    let anyHeld = false
 
     for (const recipient of recipients) {
-      // Breaker rung 2 (ADR-0011 "pause its Hermes inbox deliveries"). The
-      // message stays in the outbox and is delivered when the pause lifts —
-      // constraining an agent must never lose its mail.
+      // Breaker rung 2 (ADR-0011 "pause ITS Hermes inbox deliveries"). The
+      // message stays in the outbox and reaches this recipient when the pause
+      // lifts — constraining an agent must never lose its mail, and must never
+      // hold a co-recipient's copy hostage (M3 close-out audit, D4).
       if (this.paused.has(recipient)) {
-        this.agora.appendLog({
-          kind: 'breaker',
-          agentId: recipient,
-          action: 'delivery-held',
-          msgId: message.id
-        })
-        return { kind: 'skipped' }
+        anyHeld = true
+        const key = `${message.id}:${recipient}`
+        if (!this.heldLogged.has(key)) {
+          this.heldLogged.add(key)
+          this.agora.appendLog({
+            kind: 'breaker',
+            agentId: recipient,
+            action: 'delivery-held',
+            msgId: message.id
+          })
+        }
+        continue
+      }
+      const target = path.join(this.mailboxDir(recipient), 'inbox', `${message.id}.json`)
+      // A partially-held message is re-swept until the pause lifts; recipients
+      // already served must not be delivered or logged twice.
+      if (
+        fs.existsSync(target) ||
+        fs.existsSync(path.join(path.dirname(target), DONE_DIR, `${message.id}.json`))
+      ) {
+        continue
       }
       await this.options.faults?.('before-deliver')
-      const target = path.join(this.mailboxDir(recipient), 'inbox', `${message.id}.json`)
       fs.mkdirSync(path.dirname(target), { recursive: true })
       // Atomic: the recipient (and the Stop-hook drain) may read this directory
       // at any moment, so a half-written file must never be visible.
@@ -485,6 +519,7 @@ export class Hermes {
 
       const record: DeliveryRecord = { message, deliveredTo: target }
       records.push(record)
+      this.heldLogged.delete(`${message.id}:${recipient}`)
       this.options.onDelivered?.(record)
       // SDD §9's second gate choke point. The message is delivered either way —
       // escalation never swallows mail (FR-3.3) — but a `needs_human` flag also
@@ -494,8 +529,10 @@ export class Hermes {
     }
 
     await this.options.faults?.('before-drain-outbox')
-    this.drainOutbox(file)
-    return { kind: 'delivered', records }
+    // A message with a held recipient stays in the outbox for the next sweep;
+    // the existsSync guard above keeps the served recipients single-shot.
+    if (!anyHeld) this.drainOutbox(file)
+    return anyHeld && records.length === 0 ? { kind: 'skipped' } : { kind: 'delivered', records }
   }
 
   private reject(file: string, reason: string): { kind: 'rejected'; record: RejectionRecord } {

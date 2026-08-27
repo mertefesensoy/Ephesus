@@ -189,6 +189,8 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
         breakerActs.push(`pause:${agentId}:${String(paused)}`)
         hermes.setPaused(agentId, paused)
       },
+      constrainBudget: (agentId, constrained) =>
+        breakerActs.push(`constrain-budget:${agentId}:${String(constrained)}`),
       interrupt: (agentId) => breakerActs.push(`interrupt:${agentId}`),
       stop: (agentId) => breakerActs.push(`stop:${agentId}`),
       avatar: (agentId, event) =>

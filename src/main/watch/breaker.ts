@@ -39,6 +39,13 @@ export interface BreakerEffects {
   steer(agentId: string, text: string): void
   /** Rung 2: pause this agent's Hermes deliveries. */
   pauseDeliveries(agentId: string, paused: boolean): void
+  /**
+   * Rung 2's second constraint (ADR-0011 "lower its remaining budget"):
+   * tighten the agent's budget envelope while constrained; recovery lifts it.
+   * (Read-only tool restriction is the excused third — "where the engine
+   * supports it", and the reference engine cannot mid-session.)
+   */
+  constrainBudget(agentId: string, constrained: boolean): void
   /** Rung 3: the engine's cancel key, then a stop. */
   interrupt(agentId: string): void
   stop(agentId: string): void
@@ -241,6 +248,7 @@ export class Breaker {
     if (rung === 0) {
       // Recovery undoes rung 2's constraints; nothing undoes a rung-3 stop.
       this.options.effects.pauseDeliveries(agentId, false)
+      this.options.effects.constrainBudget(agentId, false)
       this.options.effects.avatar(agentId, { kind: 'breaker-recover' })
       return
     }
@@ -254,6 +262,7 @@ export class Breaker {
     }
     if (rung === 2 && actions.constrain) {
       this.options.effects.pauseDeliveries(agentId, true)
+      this.options.effects.constrainBudget(agentId, true)
     }
     if (rung === 3 && actions.stop) {
       // Graceful first: the engine's own cancel key, then the process.
