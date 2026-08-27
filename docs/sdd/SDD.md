@@ -78,6 +78,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
   config.json                # app config (no secrets)
   secrets.enc                # broker store (0600): ciphertext only, never plaintext,
                              #  never in the Agora or SQLite (ADR-0010, NFR-8)
+  gate-policy.json           # the Watch's gate policy (SDD §9). Absent or unreadable
+                             #  ⇒ deny-all: it can only ever loosen, never tighten
   events.sock                # hook socket (0600)
   db.sqlite                  # app-local + cost ledger
   prompts/                   # versioned text assets: artemis system prompt, block-reason

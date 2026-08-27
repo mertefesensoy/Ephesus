@@ -114,7 +114,7 @@ describe('S-GATE — deny-by-default for destructive ops (FR-11.1)', () => {
     // The absence of a rule is a refusal — a policy written for spend does not
     // quietly authorise destruction.
     const eph = await company(
-      policy([{ kind: 'spend', autonomy: 'autonomous', maxSpendCents: 100 }])
+      policy([{ kind: 'spend', autonomy: 'autonomous', maxSpendTokens: 100 }])
     )
     expect(
       eph.gates.submit({
@@ -140,14 +140,39 @@ describe('S-GATE — the remote approval path tags `remote` (NFR-9)', () => {
     expect(outcome.decision.because).toBe('channel')
   })
 
-  it('tags the verdict with the channel it arrived on', async () => {
+  it('refuses a remote APPROVAL the policy never admitted, and keeps the gate open', async () => {
     const eph = await company()
     const outcome = eph.gates.submit({
       kind: 'destructive',
       agentId: 'agent.mason',
       packaging: { what: 'w', why: 'y', blastRadius: 'b', rollback: 'r' }
     })
-    eph.gates.decide(outcome.held ? outcome.gate.id : '', 'approved', { channel: 'remote' })
+    // NFR-9 binds on the APPROVAL, not only on the request. A gate held under
+    // deny-by-default matched no rule by definition, so checking the channel
+    // only on the way in left the clause binding on nothing at all.
+    const refused = eph.gates.decide(outcome.held ? outcome.gate.id : '', 'approved', {
+      channel: 'remote'
+    })
+    expect(refused.ok).toBe(false)
+    expect(eph.gates.list()).toHaveLength(1)
+  })
+
+  it('tags the verdict with the channel, once the policy admits that channel', async () => {
+    const eph = await company(
+      policy([{ kind: 'needs-human', autonomy: 'supervised', channels: ['local', 'remote'] }])
+    )
+    const outcome = eph.gates.submit({
+      kind: 'needs-human',
+      agentId: 'agent.mason',
+      // Held because the profile composes down to `manual`, not because the
+      // channel is closed — so the remote verdict below is admissible.
+      profileAutonomy: 'manual',
+      packaging: { what: 'w', why: 'y', blastRadius: 'b', rollback: 'r' }
+    })
+    expect(outcome.held).toBe(true)
+    expect(
+      eph.gates.decide(outcome.held ? outcome.gate.id : '', 'approved', { channel: 'remote' }).ok
+    ).toBe(true)
     const settled = eph.agora
       .readLog(0, 500)
       .filter((e) => e.kind === 'gate' && e['event'] === 'approved')

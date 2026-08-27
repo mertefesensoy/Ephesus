@@ -31,7 +31,7 @@ import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { BudgetWatcher } from './watch/budgets'
 import { safeStorageCipher } from './watch/cipher'
-import { GateManager, loadGatePolicy, packageNotification } from './watch/gates'
+import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 
@@ -39,8 +39,12 @@ let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
 let gates: GateManager | null = null
+/** SDD §9's choke points, wired once (see `wireGateChokePoints`). */
+let chokePoints: ReturnType<typeof wireGateChokePoints> | null = null
 /** The composed gate policy, reloaded from disk on every evaluation. */
 let gatePolicyPath = ''
+/** Last reported policy warning, so a re-read does not re-report it. */
+let lastPolicyWarning: string | null = null
 // The redaction filter reads through the broker on every chunk (ADR-0010), so
 // a credential stored while an agent is already running is masked in that
 // agent's live stream too.
@@ -116,7 +120,11 @@ const hookServer = new HookServer({
     // M2 this event was unmapped, so an agent stalled behind a permission
     // dialog was invisible — the floor simply stopped moving (M1 carried item).
     if (envelope.event === 'notification') {
-      openNotificationGate(envelope.agentId, envelope.payload)
+      chokePoints?.submitNotification(envelope.agentId, envelope.payload)
+      // Whether or not the policy would ever permit it, the engine is stalled
+      // behind a dialog the harness cannot answer — the M1 carried item is
+      // about that being *visible*, not about who may allow it (invariant §7).
+      reportDegradation('gates', `${envelope.agentId} is waiting on a human decision`)
     }
 
     // The autonomy hinge (ADR-0013): a finished turn continues only if the
@@ -139,11 +147,6 @@ const hookServer = new HookServer({
       `event handler failed: ${err instanceof Error ? err.message : String(err)}`
     )
 })
-
-/** SDD §9 choke point 1 — the engine is waiting on a human (M1 carried item). */
-function openNotificationGate(agentId: string, payload: unknown): void {
-  gates?.submit({ kind: 'tool-permission', agentId, packaging: packageNotification(payload) })
-}
 
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
@@ -258,8 +261,14 @@ void app.whenReady().then(async () => {
     policy: () => {
       const loaded = loadGatePolicy(gatePolicyPath)
       // A policy that cannot be read is a visible degradation, not a silent
-      // deny — the Architect has to know why everything is suddenly held.
-      if (loaded.warning) reportDegradation('gates', loaded.warning)
+      // deny — the Architect has to know why everything is suddenly held. But
+      // only on CHANGE: the policy is re-read on every evaluation, and
+      // re-reporting would evict every other entry from the bounded health
+      // buffer, which is the opposite of invariant §7.
+      if (loaded.warning !== lastPolicyWarning) {
+        lastPolicyWarning = loaded.warning
+        if (loaded.warning) reportDegradation('gates', loaded.warning)
+      }
       return loaded.policy
     },
     onLogEvent: (draft) => {
@@ -268,7 +277,10 @@ void app.whenReady().then(async () => {
       agora?.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
     },
     onOpen: (gate) => {
-      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, gate)
+      // The id, not the gate: this channel is a nudge and the panel re-reads
+      // `watch:approvals`. Sending the whole gate would make it a second copy
+      // of the queue that could disagree with main.
+      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, gate.id)
       // The avatar waves at the Watch post while a gate is open (SDD §6). The
       // transition was implemented and regression-tested in M1; this is the
       // package that finally makes it reachable in the running app.
@@ -281,7 +293,17 @@ void app.whenReady().then(async () => {
         avatarDirector.apply(gate.agentId, { kind: 'gate-verdict' })
       }
       mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
-    }
+    },
+    // Invariant §8: the words a refusal shows are a prompt surface.
+    refusalReason: (because) => prompts.read(path.join('watch', `refusal-${because}.md`)).trim()
+  })
+
+  // SDD §9's three choke points, wired in ONE place so the scenario rig
+  // exercises the shipped path instead of a copy of it.
+  chokePoints = wireGateChokePoints({
+    gates,
+    prompts,
+    onError: (detail) => reportDegradation('gates', detail)
   })
 
   // The durable cost ledger (ADR-0011). Its storage is the app-local SQLite
@@ -322,20 +344,14 @@ void app.whenReady().then(async () => {
       reportDegradation('autonomy', `${agentId} has been continued ${blocks} times this session`)
       agora?.appendLog({ kind: 'breaker', agentId, signal: 'stop-loop', blocks, rung: 1 })
     },
-    onNeedsHuman: ({ message }) => {
+    onNeedsHuman: ({ message }) =>
       // SDD §9 choke point 2. The message was delivered either way; this puts
       // the decision behind it in front of the Architect (UC-08 step 2).
-      gates?.submit({
-        kind: 'needs-human',
-        agentId: message.from,
-        packaging: {
-          what: message.subject,
-          why: `${message.from} flagged this for a human decision`,
-          blastRadius: `the conversation ${message.conversation} and any work waiting on it`,
-          rollback: 'denying returns the question to the agent unanswered'
-        }
-      })
-    },
+      chokePoints?.submitNeedsHuman({
+        from: message.from,
+        subject: message.subject,
+        conversation: message.conversation
+      }),
     onBounced: ({ original, reason }) =>
       reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
     onSweepError: (err: unknown) =>
@@ -459,19 +475,11 @@ void app.whenReady().then(async () => {
       // SDD §9 choke point 3: spend is a harness-mediated action, so continuing
       // past a budget is the Architect's call, not the agent's.
       if (verdict.state === 'breached' || verdict.state === 'projected-breach') {
-        gates?.submit({
-          kind: 'spend',
+        chokePoints?.submitSpend(
           agentId,
-          spendCents: verdict.spent,
-          packaging: {
-            what: `continue spending beyond ${agentId}'s daily budget`,
-            why: `${verdict.spent} tokens spent today; the budget ${
-              verdict.state === 'breached' ? 'is exhausted' : 'is projected to be exhausted'
-            }`,
-            blastRadius: `further spend on ${agentId}'s current work, billed to your provider account`,
-            rollback: 'denying stops the agent; approving raises the ceiling for today only'
-          }
-        })
+          verdict.spent,
+          verdict.state === 'breached' ? 'is exhausted' : 'is projected to be exhausted'
+        )
       }
     },
     onDegraded: (detail) => reportDegradation('budgets', detail)

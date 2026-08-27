@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
-import { effectivePolicy, GateManager } from '../../src/main/watch/gates'
+import {
+  effectivePolicy,
+  GateManager,
+  loadGatePolicy,
+  notificationMessage,
+  parsePackaging,
+  wireGateChokePoints
+} from '../../src/main/watch/gates'
+import { PromptStore } from '../../src/main/prompts'
 import { canCloseTask, type Task } from '../../src/shared/tasks'
 
 /**
@@ -88,7 +99,7 @@ describe('holding an action (UC-08)', () => {
     expect(logs[1]).toMatchObject({ kind: 'gate', gateId, channel: 'local' })
   })
 
-  it('mints distinct ids for concurrent gates', () => {
+  it('coalesces repeated submissions for one agent and kind', () => {
     const gates = manager(DENY_ALL)
     const ids = new Set(
       Array.from({ length: 20 }, () => {
@@ -100,8 +111,53 @@ describe('holding an action (UC-08)', () => {
         return outcome.held ? outcome.gate.id : ''
       })
     )
-    // A shared clock must not collapse two gates into one id.
-    expect(ids.size).toBe(20)
+    // Engines emit notifications repeatedly; a gate per event would bury the
+    // queue and turn log.jsonl into a metronome.
+    expect(ids.size).toBe(1)
+    expect(gates.list()).toHaveLength(1)
+  })
+
+  it('keeps the first packaging when it coalesces', () => {
+    const gates = manager(DENY_ALL)
+    const first = gates.submit({
+      kind: 'destructive',
+      agentId: 'agent.mason',
+      packaging: PACKAGING
+    })
+    gates.submit({
+      kind: 'destructive',
+      agentId: 'agent.mason',
+      packaging: { ...PACKAGING, what: 'something else entirely' }
+    })
+    // The Architect is being asked about the first one; swapping the question
+    // under them mid-decision would be worse than a duplicate.
+    expect(gates.list()[0]?.packaging.what).toBe(PACKAGING.what)
+    expect(gates.list()[0]?.id).toBe(first.held ? first.gate.id : '')
+  })
+
+  it('does not coalesce across agents or kinds', () => {
+    const gates = manager(DENY_ALL)
+    gates.submit({ kind: 'destructive', agentId: 'agent.mason', packaging: PACKAGING })
+    gates.submit({ kind: 'destructive', agentId: 'agent.scribe', packaging: PACKAGING })
+    gates.submit({ kind: 'needs-human', agentId: 'agent.mason', packaging: PACKAGING })
+    expect(gates.list()).toHaveLength(3)
+  })
+
+  it('mints distinct ids under a shared clock', () => {
+    const gates = manager(DENY_ALL)
+    const ids = new Set(
+      Array.from({ length: 200 }, (_unused, index) => {
+        const outcome = gates.submit({
+          kind: 'destructive',
+          agentId: `agent.a${String(index)}`,
+          packaging: PACKAGING
+        })
+        return outcome.held ? outcome.gate.id : ''
+      })
+    )
+    // 16 bits of suffix gave ~0.3% collision odds across twenty, and a
+    // collision silently overwrote a still-open gate after `onOpen` had fired.
+    expect(ids.size).toBe(200)
   })
 })
 
@@ -174,12 +230,34 @@ describe('verdicts', () => {
     expect(confirmed.ok).toBe(true)
   })
 
-  it('records which channel the verdict arrived on', () => {
-    const logs: Record<string, unknown>[] = []
-    const gates = manager(DENY_ALL, { logs })
+  it('refuses a remote approval the policy never admitted (NFR-9)', () => {
+    const gates = manager(DENY_ALL)
     const outcome = gates.submit({
       kind: 'destructive',
       agentId: 'agent.mason',
+      packaging: PACKAGING
+    })
+    const gateId = outcome.held ? outcome.gate.id : ''
+    // NFR-9 constrains the APPROVAL side. A gate held under deny-by-default
+    // matched no rule by definition, so checking the channel only on the way in
+    // left the clause binding on nothing at all.
+    const refused = gates.decide(gateId, 'approved', { channel: 'remote' })
+    expect(refused.ok).toBe(false)
+    expect(gates.list()).toHaveLength(1)
+  })
+
+  it('records the channel of a verdict the policy DOES admit', () => {
+    const remotePolicy: GatePolicy = {
+      schemaVersion: GATE_SCHEMA_VERSION,
+      autonomy: 'autonomous',
+      rules: [{ kind: 'needs-human', autonomy: 'supervised', channels: ['local', 'remote'] }]
+    }
+    const logs: Record<string, unknown>[] = []
+    const gates = manager(remotePolicy, { logs })
+    const outcome = gates.submit({
+      kind: 'needs-human',
+      agentId: 'agent.mason',
+      profileAutonomy: 'manual',
       packaging: PACKAGING
     })
     gates.decide(outcome.held ? outcome.gate.id : '', 'approved', { channel: 'remote' })
@@ -250,5 +328,158 @@ describe('effectivePolicy', () => {
 
   it('keeps the rules the global policy declared', () => {
     expect(effectivePolicy(ALLOW_DESTRUCTIVE, 'supervised').rules).toEqual(ALLOW_DESTRUCTIVE.rules)
+  })
+})
+
+describe('loadGatePolicy — a policy the harness cannot read never permits', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  })
+  function tempDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-policy-'))
+    dirs.push(dir)
+    return dir
+  }
+
+  it('is deny-all with no warning when there is no policy file', () => {
+    // An Ephesus that has never been configured holds everything, silently —
+    // "you have not configured a policy" is not a degradation.
+    const loaded = loadGatePolicy(path.join(tempDir(), 'gate-policy.json'))
+    expect(loaded.policy.rules).toEqual([])
+    expect(loaded.policy.autonomy).toBe('manual')
+    expect(loaded.warning).toBeNull()
+  })
+
+  it('is deny-all WITH a warning when the file is not JSON', () => {
+    const file = path.join(tempDir(), 'gate-policy.json')
+    fs.writeFileSync(file, '{ not json')
+    const loaded = loadGatePolicy(file)
+    expect(loaded.policy).toEqual(DENY_ALL)
+    expect(loaded.warning).toContain('unreadable')
+  })
+
+  it('is deny-all WITH a warning naming the field when the schema is wrong', () => {
+    const file = path.join(tempDir(), 'gate-policy.json')
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, autonomy: 'yolo', rules: [] }))
+    const loaded = loadGatePolicy(file)
+    expect(loaded.policy).toEqual(DENY_ALL)
+    expect(loaded.warning).toContain('autonomy')
+  })
+
+  it('loads a valid policy', () => {
+    const file = path.join(tempDir(), 'gate-policy.json')
+    fs.writeFileSync(file, JSON.stringify(ALLOW_DESTRUCTIVE))
+    expect(loadGatePolicy(file)).toEqual({ policy: ALLOW_DESTRUCTIVE, warning: null })
+  })
+
+  it('never widens on a partial file', () => {
+    // Half a policy is not half an allowance.
+    const file = path.join(tempDir(), 'gate-policy.json')
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, autonomy: 'autonomous' }))
+    expect(loadGatePolicy(file).policy.rules).toEqual([])
+  })
+})
+
+describe('the choke-point wiring (SDD §9), shared with production', () => {
+  const prompts = new PromptStore(
+    path.join(os.tmpdir(), `eph-prompts-${String(process.pid)}`),
+    path.join(process.cwd(), 'prompts')
+  )
+
+  function rig(): { gates: GateManager; wired: ReturnType<typeof wireGateChokePoints> } {
+    const gates = manager(DENY_ALL)
+    return { gates, wired: wireGateChokePoints({ gates, prompts }) }
+  }
+
+  it('packages an engine permission prompt from prompts/, not from code', () => {
+    const { gates, wired } = rig()
+    wired.submitNotification('agent.mason', { message: 'Claude needs permission to run rm -rf /' })
+    const gate = gates.list()[0]
+    expect(gate?.kind).toBe('tool-permission')
+    expect(gate?.packaging.what).toContain('rm -rf /')
+    // The other three fields come from the template; none is empty, and none
+    // is a string literal in a .ts file (invariant §8).
+    expect(gate?.packaging.why.length).toBeGreaterThan(0)
+    expect(gate?.packaging.blastRadius.length).toBeGreaterThan(0)
+    expect(gate?.packaging.rollback.length).toBeGreaterThan(0)
+  })
+
+  it('still packages one when the engine said nothing', () => {
+    const { gates, wired } = rig()
+    wired.submitNotification('agent.mason', {})
+    expect(gates.list()).toHaveLength(1)
+    expect(gates.list()[0]?.packaging.what.length).toBeGreaterThan(0)
+  })
+
+  it('packages a needs_human message', () => {
+    const { gates, wired } = rig()
+    wired.submitNeedsHuman({
+      from: 'agent.mason',
+      subject: 'drop the staging database',
+      conversation: 'conv-7'
+    })
+    const gate = gates.list()[0]
+    expect(gate?.kind).toBe('needs-human')
+    expect(gate?.packaging.what).toContain('staging database')
+    expect(gate?.packaging.blastRadius).toContain('conv-7')
+  })
+
+  it('packages a budget breach (choke point 3)', () => {
+    const { gates, wired } = rig()
+    wired.submitSpend('agent.mason', 1_234_567, 'is exhausted')
+    const gate = gates.list()[0]
+    expect(gate?.kind).toBe('spend')
+    expect(gate?.packaging.why).toContain('1234567')
+    expect(gate?.packaging.why).toContain('is exhausted')
+  })
+
+  it('reports a template it could not use instead of losing the gate silently', () => {
+    const gates = manager(DENY_ALL)
+    const errors: string[] = []
+    const wired = wireGateChokePoints({
+      gates,
+      prompts: { render: () => 'what: only one field' },
+      onError: (detail) => errors.push(detail)
+    })
+    wired.submitNotification('agent.mason', { message: 'hi' })
+    expect(gates.list()).toEqual([])
+    expect(errors.join(' ')).toContain('could not be gated')
+  })
+})
+
+describe('parsePackaging', () => {
+  it('reads the four fields', () => {
+    expect(parsePackaging('what: w\nwhy: y\nblastRadius: b\nrollback: r\n', 'test')).toEqual({
+      what: 'w',
+      why: 'y',
+      blastRadius: 'b',
+      rollback: 'r'
+    })
+  })
+
+  it('joins a wrapped line, so a long blast radius can wrap in the file', () => {
+    const parsed = parsePackaging(
+      'what: w\nwhy: y\nblastRadius: every row\n  of production data\nrollback: r\n',
+      'test'
+    )
+    expect(parsed.blastRadius).toBe('every row of production data')
+  })
+
+  it('throws naming the template when a field is missing', () => {
+    expect(() => parsePackaging('what: w\nwhy: y\n', 'watch/x.md')).toThrow(/watch\/x\.md/)
+  })
+})
+
+describe('notificationMessage', () => {
+  it.each([
+    ['a message', { message: '  needs permission  ' }, 'needs permission'],
+    ['no message', {}, null],
+    ['an empty message', { message: '   ' }, null],
+    ['a non-string message', { message: 42 }, null],
+    ['not an object', 'hello', null],
+    ['null', null, null]
+  ])('reads %s', (_name, payload, expected) => {
+    expect(notificationMessage(payload)).toBe(expected)
   })
 })

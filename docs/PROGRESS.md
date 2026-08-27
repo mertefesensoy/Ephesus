@@ -945,16 +945,19 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       and the verdict is tagged `remote`; a voice approval is refused until repeat-back
       — and refusing is *not* denying, so the gate stays open (scripted-STT stub at
       the policy seam, per the Architect decision; the Herald plugs in here in M6).
-      **All three SDD §9 choke points are wired and proven.** (1) The engine's
+      **All three SDD §9 choke points are wired and proven** (choke point 3's proof
+      landed with the review fixes below, not in the package commit). (1) The engine's
       `Notification` hook is mapped — a real fake-engine process emitting it opens a
       packaged gate, **closing the M1 carried item** where an agent stalled behind a
       permission dialog was invisible to the harness. (2) A real `needs_human` message
       is delivered *and* gated — escalation never swallows mail (FR-3.3). (3) A budget
       breach files a `spend` gate.
-      Open gates now populate `task.gates`, so M2.2's `status→done` guard bites for the
-      first time; the avatar's `gate-opened`/`gate-verdict` edges (implemented in M1,
-      unreachable until now) are driven, and only the LAST gate on an agent walks it
-      back to its desk.
+      The avatar's `gate-opened`/`gate-verdict` edges (implemented in M1, unreachable
+      until now) are driven, and only the LAST gate on an agent walks it back to its
+      desk. **`task.gates` is NOT yet populated** — the first draft of this entry
+      claimed it was, and review found no production call site that passes a `taskId`,
+      because no task assignment flow exists before M3.8. The M2.2 `status→done` guard
+      is still unfed; **M3.8 feeds it**, where tasks become real.
       LIVE RUN under real Electron (xvfb) against a real harness home and real Agora:
       `no policy file: autonomy=manual rules=0` — an unconfigured Ephesus holds
       everything · `corrupt policy: autonomy=manual rules=0 warning="gate-policy.json
@@ -963,7 +966,46 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       held=true because=no-rule` · `profile asks autonomous under a supervised global:
       held=true because=autonomy` · `notification hook → gate: held=true what="Claude
       needs permission to use Bash"`. The chain read back out of `log.jsonl` alone
-      (NFR-13): `seq=4 opened kind=tool-permission` → `seq=5 approved`.*
+      (NFR-13): `seq=4 opened kind=tool-permission` → `seq=5 approved`.
+      **Design-conformance review at package close found seventeen issues; all
+      seventeen are fixed in `fix/m3-3-gate-policy`** (final gate: typecheck PASS ·
+      lint PASS · invariants PASS · tests 832 passed / 2 skipped). Five were serious:
+      (1) **NFR-9 bound on nothing.** `requiresRepeatBack` was read off the *hold
+      reason*, which under deny-by-default is almost always `no-rule` — so the flag was
+      false on exactly the destructive ops the clause protects, and `decide()` never
+      consulted `rule.channels` at all. A voice approval with no repeat-back, and a
+      remote approval of a gate the policy never opened to remote, both sailed through
+      — and S-GATE asserted the second as *correct*. NFR-9 constrains the approval
+      side; `checkVerdictChannel` now polices it, `repeatBackRequired` derives from the
+      gate's own facts, and destructive ops always require repeat-back by voice.
+      (2) **A rule at `autonomy: 'manual'` permitted.** The file's own contract says a
+      manual rule permits nothing, and the rank comparison let `manual === manual` fall
+      through to allow — so ADR-0012's tightening had no floor.
+      (3) **`task.gates` was never populated** though the entry above claimed it was;
+      corrected, and assigned to M3.8.
+      (4) **Invariant §8 was violated by the very commit that claimed to satisfy it:**
+      the three `prompts/watch/*.md` files were added and never loaded, while the
+      packaging prose sat inline in `.ts`. The packaging now renders from
+      `prompts/watch/packaging-*.md` through a `field: value` template.
+      (5) **The scenario rig re-implemented the production wiring** character-for-
+      character, so S-GATE stayed green with the production choke points deleted — the
+      same defect class the M3.1 review caught. `wireGateChokePoints` is now the single
+      implementation both `index.ts` and the rig call; **disabling it fails 6 tests
+      across both suites, verified by planting exactly that defect.**
+      Also fixed: `tool-permission` is never permittable (a policy that "allowed" it
+      would silently restore the invisible stall the M1 carried item was about — there
+      is no harness action to permit); repeated notifications coalesce per
+      (agent, kind) instead of burying the queue; gate ids carry 64 bits of suffix, not
+      16 (a shared clock gave ~0.3% collision odds across twenty, and a collision
+      silently overwrote a still-open gate); duplicate rules for one kind are refused
+      by the schema *and* resolved strictest-first by the matcher; the spend cap is
+      named `maxSpendTokens` because the ledger reports tokens and a cents field was
+      being compared against a token count; `gate:open` carries the id rather than the
+      whole gate, matching its own documented contract; the policy warning reports on
+      *change* rather than on every evaluation, which was evicting every other entry
+      from the bounded health buffer; `gate-policy.json` is documented in SDD §2; and
+      `loadGatePolicy`, which carried the headline safety claim on a manual run alone,
+      now has five tests.*
 - [x] **M3.4 Approvals UI + the human queue (+ the FR-11.2 spend strip)** — the Watch approvals surface
       (UI-DESIGN §4): `watch: approvals()/approve(gateId, v)` IPC + `gate:open`
       push; renders each gate's packaging (what/why/blast radius/rollback);

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { agentIdSchema } from './agents'
 
 /**
  * The Watch's gate policy (SDD §9, FR-11.1, ADR-0011/0012, UC-08).
@@ -80,8 +81,15 @@ export const gateRuleSchema = z
      * `manual` a rule permits nothing — it exists to describe the class.
      */
     autonomy: autonomyLevelSchema,
-    /** Optional cap for `spend` rules, in whole US cents. */
-    maxSpendCents: z.number().int().nonnegative().optional(),
+    /**
+     * Optional cap for `spend` rules, in TOKENS.
+     *
+     * Tokens, not currency: the durable ledger reports tokens (the engine
+     * reports no per-message cost, ADR-0011/M3.2), so a cents field would be
+     * compared against a token count and the knob would be silently
+     * meaningless. It becomes a currency cap when an engine reports one.
+     */
+    maxSpendTokens: z.number().int().nonnegative().optional(),
     /** Channels this rule permits through; omitted means local only (NFR-9). */
     channels: z.array(sourceChannelSchema).min(1).optional(),
     /**
@@ -99,7 +107,17 @@ export const gatePolicySchema = z
     schemaVersion: z.literal(GATE_SCHEMA_VERSION),
     /** The company-wide ceiling. A profile may only go lower (ADR-0012). */
     autonomy: autonomyLevelSchema,
-    rules: z.array(gateRuleSchema).max(64)
+    rules: z
+      .array(gateRuleSchema)
+      .max(64)
+      // Two rules for one kind would let array order decide which applies —
+      // the "which one wins" ambiguity deny-by-default exists to avoid. The
+      // matcher takes the strictest anyway; refusing the file as well means an
+      // Architect who wrote two by accident is told, not quietly overruled.
+      .refine(
+        (rules) => new Set(rules.map((rule) => rule.kind)).size === rules.length,
+        'gate policy: one rule per kind'
+      )
   })
   .strict()
 
@@ -128,12 +146,46 @@ export function parseGatePolicy(
   return { ok: false, reason: `${where}: ${issue?.message ?? 'invalid gate policy'}` }
 }
 
+/**
+ * Contract: the STRICTEST rule for a kind, not the first one written. A policy
+ * with two rules for one kind would otherwise let array order decide, which is
+ * precisely the "which one wins" ambiguity deny-by-default exists to avoid.
+ * Strictest means: highest autonomy floor, then the lowest spend cap, then the
+ * narrowest channel set, then repeat-back required if any rule requires it.
+ */
+export function strictestRuleFor(policy: GatePolicy, kind: GateKind): GateRule | null {
+  const matching = policy.rules.filter((rule) => rule.kind === kind)
+  const first = matching[0]
+  if (first === undefined) return null
+  return matching.reduce((strictest, rule) => ({
+    kind,
+    autonomy:
+      AUTONOMY_RANK[rule.autonomy] > AUTONOMY_RANK[strictest.autonomy]
+        ? rule.autonomy
+        : strictest.autonomy,
+    ...(rule.maxSpendTokens === undefined && strictest.maxSpendTokens === undefined
+      ? {}
+      : { maxSpendTokens: Math.min(rule.maxSpendTokens ?? 0, strictest.maxSpendTokens ?? 0) }),
+    ...(rule.channels === undefined || strictest.channels === undefined
+      ? {}
+      : {
+          channels: strictest.channels.filter((channel) => rule.channels?.includes(channel)) as [
+            SourceChannel,
+            ...SourceChannel[]
+          ]
+        }),
+    ...(rule.requireRepeatBack === true || strictest.requireRepeatBack === true
+      ? { requireRepeatBack: true }
+      : {})
+  }))
+}
+
 /** What the harness asks the policy about. */
 export interface GateRequest {
   readonly kind: GateKind
   readonly agentId: string
-  /** Cents at stake, for `spend`. */
-  readonly spendCents?: number
+  /** Tokens at stake, for `spend`. */
+  readonly spendTokens?: number
   /** How the request arrived; defaults to `local`. */
   readonly channel?: SourceChannel
   /** The profile's autonomy level, if the agent belongs to one (ADR-0012). */
@@ -172,9 +224,23 @@ export function evaluateGate(
   const channel: SourceChannel = request.channel ?? 'local'
   const effective = composeAutonomy(policy.autonomy, request.profileAutonomy ?? policy.autonomy)
 
-  const rule = policy.rules.find((candidate) => candidate.kind === request.kind)
+  // The engine's own permission dialog is never permittable, whatever the
+  // policy says. "Allow" is not a meaningful verdict here: the harness has no
+  // action to permit — the engine is blocked on a human, and letting the
+  // policy answer it would silently restore the invisible stall that the
+  // M1 carried item was about (invariant §7).
+  if (request.kind === 'tool-permission') return { allow: false, because: 'no-rule' }
+
+  const rule = strictestRuleFor(policy, request.kind)
   if (!rule) return { allow: false, because: 'no-rule' }
 
+  // `manual` means "I approve this by hand" (FR-11.1). A rule at `manual`
+  // permits nothing — it exists to describe the class — and this is also where
+  // ADR-0012's tightening has to bottom out: a profile that composes down to
+  // `manual` must not still be permitting.
+  if (rule.autonomy === 'manual' || effective === 'manual') {
+    return { allow: false, because: 'autonomy' }
+  }
   // The rule's own floor and the composed ceiling both have to be cleared.
   if (AUTONOMY_RANK[effective] < AUTONOMY_RANK[rule.autonomy]) {
     return { allow: false, because: 'autonomy' }
@@ -192,11 +258,11 @@ export function evaluateGate(
   }
 
   if (rule.kind === 'spend') {
-    const cap = rule.maxSpendCents
+    const cap = rule.maxSpendTokens
     // A spend rule with no cap caps nothing, which would be an allowance
     // nobody wrote. An uncapped spend rule permits nothing.
     if (cap === undefined) return { allow: false, because: 'spend-cap' }
-    if ((request.spendCents ?? Number.POSITIVE_INFINITY) > cap) {
+    if ((request.spendTokens ?? Number.POSITIVE_INFINITY) > cap) {
       return { allow: false, because: 'spend-cap' }
     }
   }
@@ -240,7 +306,7 @@ export const openGateSchema = z
     schemaVersion: z.literal(GATE_SCHEMA_VERSION),
     id: gateIdSchema,
     kind: gateKindSchema,
-    agentId: z.string().min(1).max(128),
+    agentId: agentIdSchema,
     /** Why the policy held it — the machine-readable reason, not prose. */
     because: z.string().min(1).max(64),
     channel: sourceChannelSchema,
@@ -275,3 +341,52 @@ export const gateApproveSchema = z
   .strict()
 
 export type GateApprove = z.infer<typeof gateApproveSchema>
+
+/**
+ * Whether a gate's approval must be repeated back before it counts (NFR-9:
+ * "voice approval of destructive ops requires repeat-back").
+ *
+ * Derived from the gate's OWN facts, not from why it was held. The first draft
+ * read it off the hold reason, which under deny-by-default is almost always
+ * `no-rule` — so the flag was false on exactly the destructive ops the clause
+ * exists to protect, and a voice approval sailed straight through.
+ */
+export function repeatBackRequired(policy: GatePolicy, kind: GateKind): boolean {
+  if (kind === 'destructive') return true
+  return strictestRuleFor(policy, kind)?.requireRepeatBack === true
+}
+
+export type VerdictCheck =
+  { readonly ok: true } | { readonly ok: false; readonly because: 'channel' | 'repeat-back' }
+
+/**
+ * Contract: whether a VERDICT may be taken over this channel.
+ *
+ * NFR-9 constrains the approval side, not only the request side: "remote
+ * approvals require the bridge's authenticated channel; voice approval of
+ * destructive ops requires repeat-back". A gate held under deny-by-default
+ * still has to be *approved* through a channel the policy admits — otherwise
+ * the whole clause binds on nothing, since a held gate matched no rule by
+ * definition.
+ *
+ * `local` is always admissible: the Architect at their own keyboard is the
+ * baseline every other channel is measured against.
+ */
+export function checkVerdictChannel(
+  policy: GatePolicy,
+  kind: GateKind,
+  context: { readonly channel: SourceChannel; readonly repeatBackConfirmed?: boolean }
+): VerdictCheck {
+  if (context.channel !== 'local') {
+    const admitted = strictestRuleFor(policy, kind)?.channels ?? ['local']
+    if (!admitted.includes(context.channel)) return { ok: false, because: 'channel' }
+  }
+  if (
+    context.channel === 'voice' &&
+    repeatBackRequired(policy, kind) &&
+    context.repeatBackConfirmed !== true
+  ) {
+    return { ok: false, because: 'repeat-back' }
+  }
+  return { ok: true }
+}

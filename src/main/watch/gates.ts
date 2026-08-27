@@ -1,14 +1,18 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
+import path from 'node:path'
 import {
+  checkVerdictChannel,
   composeAutonomy,
   denyAllPolicy,
   evaluateGate,
   GATE_SCHEMA_VERSION,
   openGateSchema,
   parseGatePolicy,
+  repeatBackRequired,
   type GateDecision,
   type GatePackaging,
+  gatePackagingSchema,
   type GatePolicy,
   type GateRequest,
   type GateVerdict,
@@ -44,6 +48,12 @@ export interface GateManagerOptions {
   onSettled?(gate: OpenGate, verdict: GateVerdict): void
   /** Injected for deterministic ids and timestamps in tests. */
   now?(): Date
+  /**
+   * Renders the prose shown when a verdict is refused (invariant §8). Injected
+   * so the words live in `prompts/watch/`, never here; the fallback is the
+   * machine-readable tag itself, which is data rather than prose.
+   */
+  refusalReason?(because: 'channel' | 'repeat-back'): string
 }
 
 /** What a caller asks for when it needs an action gated. */
@@ -75,7 +85,8 @@ export class GateManager {
    * deny-by-default has to mean to be worth anything.
    */
   submit(submission: GateSubmission, context: { repeatBackConfirmed?: boolean } = {}): GateOutcome {
-    const decision = evaluateGate(this.options.policy(), submission, context)
+    const policy = this.options.policy()
+    const decision = evaluateGate(policy, submission, context)
     if (decision.allow) {
       this.options.onLogEvent?.({
         kind: 'gate',
@@ -88,6 +99,15 @@ export class GateManager {
       return { held: false, decision }
     }
 
+    // One open gate per (agent, kind). Engines emit notifications repeatedly —
+    // idle reminders as well as permission dialogs — and a gate per event would
+    // bury the queue and turn `log.jsonl` into a metronome. The FIRST packaging
+    // is kept: it is the one the Architect is being asked about.
+    const existing = this.list().find(
+      (open) => open.agentId === submission.agentId && open.kind === submission.kind
+    )
+    if (existing) return { held: true, gate: existing, decision }
+
     const gate = openGateSchema.parse({
       schemaVersion: GATE_SCHEMA_VERSION,
       id: this.mintId(),
@@ -97,9 +117,11 @@ export class GateManager {
       channel: submission.channel ?? 'local',
       packaging: submission.packaging,
       taskId: submission.taskId ?? null,
-      // The policy decides whether repeat-back is required; the surface that
-      // takes the approval performs it (the Herald's seam, M6).
-      requiresRepeatBack: decision.because === 'repeat-back',
+      // From the gate's OWN facts, not from why it was held: under
+      // deny-by-default the reason is almost always `no-rule`, so reading it
+      // off `because` left the flag false on exactly the destructive ops
+      // NFR-9's clause exists to protect.
+      requiresRepeatBack: repeatBackRequired(policy, submission.kind),
       openedAt: this.now().toISOString()
     })
     this.open.set(gate.id, gate)
@@ -162,13 +184,24 @@ export class GateManager {
         reason: already ? `gate ${gateId} was already ${already}` : `no open gate ${gateId}`
       }
     }
-    if (
-      verdict === 'approved' &&
-      gate.requiresRepeatBack &&
-      (context.channel ?? 'local') === 'voice' &&
-      context.repeatBackConfirmed !== true
-    ) {
-      return { ok: false, reason: 'voice approval of this action requires repeat-back' }
+    if (verdict === 'approved') {
+      // NFR-9 binds on the APPROVAL, not only on the request: a gate held under
+      // deny-by-default matched no rule by definition, so checking the channel
+      // only on the way in left the clause binding on nothing.
+      const admissible = checkVerdictChannel(this.options.policy(), gate.kind, {
+        channel: context.channel ?? 'local',
+        ...(context.repeatBackConfirmed === undefined
+          ? {}
+          : { repeatBackConfirmed: context.repeatBackConfirmed })
+      })
+      if (!admissible.ok) {
+        // Refusing is not denying: the gate stays open, because "we could not
+        // take that verdict" and "no" are different answers.
+        return {
+          ok: false,
+          reason: this.options.refusalReason?.(admissible.because) ?? admissible.because
+        }
+      }
     }
 
     this.open.delete(gateId)
@@ -196,7 +229,10 @@ export class GateManager {
 
   private mintId(): string {
     const stamp = this.now().toISOString().replace(/[:.]/g, '-').toLowerCase()
-    return `g-${stamp}-${randomBytes(2).toString('hex')}`
+    // 64 bits, not 16: two gates minted in the same millisecond used to have a
+    // ~0.3% chance of colliding across twenty, and a collision silently
+    // overwrote a still-open gate after its `onOpen` had already fired.
+    return `g-${stamp}-${randomBytes(8).toString('hex')}`
   }
 }
 
@@ -245,28 +281,160 @@ export function loadGatePolicy(policyPath: string): {
   }
 }
 
+/** Contract: the engine's own words about what it is waiting for, if any. */
+export function notificationMessage(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const message = (payload as Record<string, unknown>)['message']
+  if (typeof message !== 'string') return null
+  const trimmed = message.trim()
+  return trimmed.length > 0 ? trimmed.slice(0, 2000) : null
+}
+
 /**
- * Packages an engine's own permission prompt as a UC-08 gate (SDD §9 choke
- * point 1).
+ * Parses a packaging template into the four UC-08 fields.
  *
- * The engine tells us only that it is waiting and, usually, roughly what
- * about. The rest of UC-08's four fields are supplied honestly rather than
- * invented: the blast radius of an action the engine has NOT performed is
- * exactly "whatever it was about to do", and the rollback for a refusal is
- * that it never happens. Claiming more than the engine said would be the
- * harness making up a risk assessment.
+ * The templates live in `prompts/watch/` because every word in them is read by
+ * a human deciding whether to allow a destructive act — a prompt surface as
+ * much as a block reason is (invariant §8). The format is deliberately the
+ * dullest thing that works: one `field: value` per line, so a template cannot
+ * grow a syntax the Architect has to learn before editing it.
+ *
+ * Contract: throws when a field is missing. A gate filed with a blank blast
+ * radius is worse than a gate that failed to file — the schema refuses it
+ * anyway, and failing here names the template instead of the payload.
  */
-export function packageNotification(payload: unknown): GatePackaging {
-  const message =
-    typeof payload === 'object' &&
-    payload !== null &&
-    typeof (payload as Record<string, unknown>)['message'] === 'string'
-      ? ((payload as Record<string, unknown>)['message'] as string).trim()
-      : ''
-  return {
-    what: message.length > 0 ? message.slice(0, 2000) : 'the engine is waiting on a human decision',
-    why: 'the engine asked for permission and will not proceed without an answer',
-    blastRadius: 'whatever the engine was about to do; it has not done it yet',
-    rollback: 'denying the gate leaves the action unperformed'
+export function parsePackaging(rendered: string, source: string): GatePackaging {
+  const fields: Record<string, string> = {}
+  let current: string | null = null
+  for (const line of rendered.split('\n')) {
+    const match = /^(what|why|blastRadius|rollback):\s*(.*)$/.exec(line)
+    if (match?.[1] !== undefined) {
+      current = match[1]
+      fields[current] = match[2] ?? ''
+    } else if (current !== null && line.trim().length > 0) {
+      // A continuation line, so a long blast radius can wrap in the file.
+      fields[current] = `${fields[current] ?? ''} ${line.trim()}`.trim()
+    }
   }
+  const parsed = gatePackagingSchema.safeParse(fields)
+  if (!parsed.success) {
+    throw new Error(
+      `gates: ${source} is not a usable packaging template: ${
+        parsed.error.issues[0]?.path.join('.') ?? 'unknown'
+      } ${parsed.error.issues[0]?.message ?? ''}`
+    )
+  }
+  return parsed.data
+}
+
+/** The event-plane slice the choke points subscribe to. */
+export interface ChokePointHooks {
+  /** Fires for every `notification` hook event (SDD §9 choke point 1). */
+  onNotification(cb: (agentId: string, payload: unknown) => void): void
+}
+
+/** The Hermes slice the choke points subscribe to (SDD §9 choke point 2). */
+export interface ChokePointMail {
+  onNeedsHuman(cb: (message: NeedsHumanMessage) => void): void
+}
+
+export interface NeedsHumanMessage {
+  readonly from: string
+  readonly subject: string
+  readonly conversation: string
+}
+
+/** Renders a packaging template from `prompts/watch/` (invariant §8). */
+export interface PackagingRenderer {
+  render(relPath: string, vars: Record<string, string>): string
+}
+
+/**
+ * Wires SDD §9's choke points onto a gate manager.
+ *
+ * This exists in ONE place because the alternative was found by review: the
+ * wiring lived inline in `src/main/index.ts` and was copied character-for-
+ * character into the scenario rig, so S-GATE would have stayed green with the
+ * production wiring deleted. Both callers now go through here, and the
+ * scenarios exercise the shipped code path.
+ *
+ * Returns the submit functions the caller drives directly (spend has no event
+ * source of its own — the budget watcher calls it).
+ */
+export function wireGateChokePoints(deps: {
+  readonly gates: GateManager
+  readonly prompts: PackagingRenderer
+  readonly hooks?: ChokePointHooks
+  readonly mail?: ChokePointMail
+  /** Raised when a choke point could not file its gate (invariant §7). */
+  onError?(detail: string): void
+}): {
+  submitNotification(agentId: string, payload: unknown): void
+  submitNeedsHuman(message: NeedsHumanMessage): void
+  submitSpend(agentId: string, spentTokens: number, state: string): void
+} {
+  const guard = (what: string, run: () => void): void => {
+    try {
+      run()
+    } catch (err) {
+      deps.onError?.(
+        `${what} could not be gated: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+
+  const submitNotification = (agentId: string, payload: unknown): void =>
+    guard('an engine permission prompt', () => {
+      const message =
+        notificationMessage(payload) ??
+        deps.prompts.render(path.join('watch', 'notification-unspecified.md'), {}).trim()
+      deps.gates.submit({
+        kind: 'tool-permission',
+        agentId,
+        packaging: parsePackaging(
+          deps.prompts.render(path.join('watch', 'packaging-notification.md'), { message }),
+          'watch/packaging-notification.md'
+        )
+      })
+    })
+
+  const submitNeedsHuman = (message: NeedsHumanMessage): void =>
+    guard('a needs_human message', () => {
+      deps.gates.submit({
+        kind: 'needs-human',
+        agentId: message.from,
+        packaging: parsePackaging(
+          deps.prompts.render(path.join('watch', 'packaging-needs-human.md'), {
+            subject: message.subject,
+            from: message.from,
+            conversation: message.conversation
+          }),
+          'watch/packaging-needs-human.md'
+        )
+      })
+    })
+
+  const submitSpend = (agentId: string, spentTokens: number, state: string): void =>
+    guard('a budget breach', () => {
+      deps.gates.submit({
+        kind: 'spend',
+        agentId,
+        // Tokens, not cents: `maxSpendCents` compares dollars, and handing it a
+        // token count would make the policy knob silently meaningless. A spend
+        // gate with no amount is held by the cap check either way, which is the
+        // safe direction until the ledger reports a currency figure.
+        packaging: parsePackaging(
+          deps.prompts.render(path.join('watch', 'packaging-spend.md'), {
+            agentId,
+            spent: String(spentTokens),
+            state
+          }),
+          'watch/packaging-spend.md'
+        )
+      })
+    })
+
+  deps.hooks?.onNotification(submitNotification)
+  deps.mail?.onNeedsHuman(submitNeedsHuman)
+  return { submitNotification, submitNeedsHuman, submitSpend }
 }
