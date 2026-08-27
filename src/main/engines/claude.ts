@@ -12,8 +12,83 @@ import type {
   HookPlan,
   KeySequence,
   SettingsInjection,
-  SpawnPlan
+  SpawnPlan,
+  TranscriptReader,
+  UsageFact
 } from './types'
+
+/**
+ * Claude Code writes one JSONL transcript per session under
+ * `~/.claude/projects/<slugged cwd>/<sessionId>.jsonl`, and slugs the cwd by
+ * replacing every path separator with a dash. Verified against a real
+ * transcript rather than assumed.
+ */
+export function claudeTranscriptDir(cwd: string): string {
+  const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
+  const slug = path.resolve(cwd).replace(/[\\/.:]/g, '-')
+  return path.join(home, '.claude', 'projects', slug)
+}
+
+/**
+ * Folds Claude Code's transcript into usage facts (ADR-0009 `transcripts`,
+ * FR-11.2).
+ *
+ * Only `assistant` lines carrying a `message.usage` object are facts. Cache
+ * reads and cache writes are counted as input tokens because that is what they
+ * are — tokens the provider billed on the way in; leaving them out would
+ * under-report spend, which is the exact bug class ADR-0011 exists to close.
+ *
+ * The engine reports no per-message cost, so `costUsd` is null and the figure
+ * stays a token figure. Deriving dollars would need a price table this
+ * milestone has no source for, and a guessed price is worse than an honest
+ * "not reported" (invariant §7).
+ */
+const claudeTranscripts: TranscriptReader = {
+  transcriptDir: (cfg) => claudeTranscriptDir(cfg.cwd),
+  read: async (filePath) => {
+    if (!fs.existsSync(filePath)) return []
+    const facts: UsageFact[] = []
+    for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
+      if (line.trim().length === 0) continue
+      let raw: unknown
+      try {
+        raw = JSON.parse(line)
+      } catch {
+        // A torn final line from a killed engine yields no fact, never a
+        // guessed one (ADR-0009's "unrecognized lines are skipped").
+        continue
+      }
+      const fact = claudeUsageFact(raw)
+      if (fact) facts.push(fact)
+    }
+    return facts
+  }
+}
+
+/** Contract: one fact, or null for any line that is not a usage-bearing one. */
+export function claudeUsageFact(raw: unknown): UsageFact | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const row = raw as Record<string, unknown>
+  if (row['type'] !== 'assistant') return null
+  const sessionId = row['sessionId']
+  const message = row['message']
+  if (typeof sessionId !== 'string' || typeof message !== 'object' || message === null) return null
+  const msg = message as Record<string, unknown>
+  const model = msg['model']
+  const usage = msg['usage']
+  if (typeof model !== 'string' || typeof usage !== 'object' || usage === null) return null
+  const u = usage as Record<string, unknown>
+  const num = (key: string): number => {
+    const value = u[key]
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
+  }
+  const outTokens = num('output_tokens')
+  const inTokens =
+    num('input_tokens') + num('cache_creation_input_tokens') + num('cache_read_input_tokens')
+  // A line with a usage object but no tokens at all is not a fact worth a row.
+  if (inTokens === 0 && outTokens === 0) return null
+  return { sessionId, model, inTokens, outTokens, costUsd: null }
+}
 
 /**
  * The Claude Code adapter — the reference engine (ADR-0009: the only adapter
@@ -313,6 +388,8 @@ export class ClaudeAdapter implements EngineAdapter {
   interrupt(): KeySequence {
     return { label: 'Escape', bytes: ESCAPE_KEY }
   }
+
+  readonly transcripts: TranscriptReader = claudeTranscripts
 
   private settingsInjections(cfg: AgentSpawnConfig): readonly SettingsInjection[] {
     const settingsPath = path.join(cfg.cwd, CLAUDE_SETTINGS_REL)

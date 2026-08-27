@@ -28,10 +28,14 @@ import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
 import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
+import { BudgetWatcher } from './watch/budgets'
 import { safeStorageCipher } from './watch/cipher'
+import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 
 let secrets: SecretBroker | null = null
+let costLedger: CostLedger | null = null
+let budgetWatcher: BudgetWatcher | null = null
 // The redaction filter reads through the broker on every chunk (ADR-0010), so
 // a credential stored while an agent is already running is masked in that
 // agent's live stream too.
@@ -93,6 +97,10 @@ const hookServer = new HookServer({
     if (warning) console.warn(`hook drift [${envelope.agentId}/${envelope.event}]: ${warning}`)
     else if (!known) console.warn(`hook unknown [${envelope.agentId}]: ${envelope.event}`)
     avatarDirector.handleHook(record)
+    // The ledger learns which session a spawn is running under from the same
+    // event plane the floor reads (ADR-0002) — the attribution key that lets
+    // "session" and "cumulative" be told apart without a running total.
+    if (envelope.sessionId) costLedger?.noteSession(envelope.agentId, envelope.sessionId)
 
     // The autonomy hinge (ADR-0013): a finished turn continues only if the
     // guards allow it. Returning nothing lets the turn end normally.
@@ -218,6 +226,15 @@ void app.whenReady().then(async () => {
   const reconciled = await agora.reconcile()
   if (reconciled.sha) console.info(`agora reconciled at ${reconciled.sha.slice(0, 8)}`)
 
+  // The durable cost ledger (ADR-0011). Its storage is the app-local SQLite
+  // file, so every figure survives a restart by construction — there is no
+  // in-memory counter to zero (invariant §11).
+  costLedger = new CostLedger({
+    store: db,
+    onFoldRestart: (source) =>
+      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`)
+  })
+
   engines.register(
     new ClaudeAdapter({
       prompts,
@@ -303,6 +320,10 @@ void app.whenReady().then(async () => {
     },
     onChange: (card: AgentCard) => {
       mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
+      if (card.lifecycle === 'exited') {
+        costLedger?.clearSession(card.agentId)
+        budgetWatcher?.forget(card.agentId)
+      }
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
         avatarDirector.add(card.agentId)
         hermes?.ensureMailbox(card.agentId)
@@ -316,6 +337,34 @@ void app.whenReady().then(async () => {
   ptyManager.onExit((id) => avatarDirector.handleExit(id))
   avatarDirector.start()
 
+  // Spend is folded on a timer, not per hook: it is not a real-time quantity,
+  // and a fold per tool call would re-read every transcript dozens of times a
+  // minute for a figure nobody reads that often (SDD §11).
+  budgetWatcher = new BudgetWatcher({
+    ledger: costLedger,
+    agents: () => agentManager?.liveSpawns() ?? [],
+    onBudgetChange: (agentId, verdict) => {
+      // Only transitions reach the book of record; a breached agent must not
+      // turn log.jsonl into a metronome (SDD §4.3 kind `budget`).
+      agora?.appendLog({
+        kind: 'budget',
+        agentId,
+        state: verdict.state,
+        spent: verdict.spent,
+        remaining: verdict.remaining,
+        projected: verdict.projected,
+        because: verdict.because
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`budget ${verdict.state} for ${agentId}`)
+      if (verdict.state !== 'ok') {
+        reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
+      }
+    },
+    onDegraded: (detail) => reportDegradation('budgets', detail)
+  })
+  budgetWatcher.start()
+
   registerIpc({
     ptyManager,
     agents: agentManager,
@@ -323,6 +372,11 @@ void app.whenReady().then(async () => {
     commands: commandQueue,
     agora,
     secrets,
+    budgets: () =>
+      (agentManager?.list() ?? [])
+        .filter((card) => card.lifecycle !== 'exited')
+        .map((card) => costLedger?.spendFor(card.agentId, card.dailyTokens))
+        .filter((spend): spend is NonNullable<typeof spend> => spend !== undefined),
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),
@@ -349,6 +403,7 @@ app.on('window-all-closed', () => {
     .finally(() => {
       avatarDirector.stop()
       hermes?.stop()
+      budgetWatcher?.stop()
       ptyManager.killAll()
       void hookServer.stop()
       void agora?.drained().finally(() => db?.close())
@@ -357,6 +412,7 @@ app.on('window-all-closed', () => {
   if (!agentManager) {
     avatarDirector.stop()
     hermes?.stop()
+    budgetWatcher?.stop()
     ptyManager.killAll()
     void hookServer.stop()
     db?.close()

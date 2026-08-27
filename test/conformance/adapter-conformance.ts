@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ENGINE_IDS, HOOK_SUPPORTS, HOOK_SUPPORT_RANK } from '../../src/shared/engines'
 import { HOOK_EVENTS } from '../../src/shared/hooks'
-import type { AgentSpawnConfig, EngineAdapter } from '../../src/main/engines'
+import type { AgentSpawnConfig, EngineAdapter, UsageFact } from '../../src/main/engines'
 
 /**
  * The engine-adapter conformance suite (TEST-STRATEGY §5, NFR-12).
@@ -34,6 +34,26 @@ export interface ConformanceSubject {
   readonly settingsRel: readonly string[]
   /** True when the adapter is expected to wire every harness hook event. */
   readonly wiresEveryEvent: boolean
+  /**
+   * A sample of THIS engine's transcript format, plus the facts it must yield.
+   * Required when the adapter declares `transcripts`.
+   *
+   * Every engine writes its own format (NFR-12), so the suite cannot supply
+   * the lines itself — asserting one shape across all adapters would demand
+   * that Claude Code parse the fake engine's JSON, which is a conformance
+   * failure invented by the test. What conformance actually owns is the
+   * *behaviour* around the lines: a missing file yields nothing, a malformed
+   * line yields nothing, and a good line yields exactly what it said
+   * (ADR-0009: "unrecognized lines are skipped, never guessed at").
+   */
+  readonly transcriptSample?: {
+    /** Well-formed lines in this engine's own format. */
+    readonly goodLines: readonly string[]
+    /** The facts `goodLines` must produce, in order. */
+    readonly expected: readonly UsageFact[]
+    /** Lines this engine must ignore: junk, and a well-formed non-fact. */
+    readonly ignoredLines: readonly string[]
+  }
 }
 
 const temps: string[] = []
@@ -123,35 +143,29 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
           expect(adapter.transcripts).toBeUndefined()
           return
         }
+        const sample = subject.transcriptSample
+        if (!sample) {
+          throw new Error(
+            `${subject.name} declares transcripts but supplies no transcriptSample — the suite cannot assert a format it does not know`
+          )
+        }
         const rig = conformanceRig()
         const dir = adapter.transcripts.transcriptDir(rig.cfg)
         expect(path.isAbsolute(dir)).toBe(true)
 
+        // A transcript that is not there yields no facts, not an error: an
+        // engine that has not written one yet is the normal early state.
         expect(await adapter.transcripts.read(path.join(rig.root, 'nope.jsonl'))).toEqual([])
 
         const file = path.join(rig.root, 'transcript.jsonl')
-        fs.writeFileSync(
-          file,
-          [
-            JSON.stringify({
-              sessionId: 's-1',
-              model: 'test-model',
-              inTokens: 10,
-              outTokens: 20,
-              costUsd: 0.5
-            }),
-            'not json at all',
-            JSON.stringify({ sessionId: 's-2', model: 'test-model' }),
-            ''
-          ].join('\n'),
-          'utf8'
-        )
-        const facts = await adapter.transcripts.read(file)
-        // The malformed line and the incomplete row yield nothing; the good row
-        // yields exactly what it said.
-        expect(facts).toEqual([
-          { sessionId: 's-1', model: 'test-model', inTokens: 10, outTokens: 20, costUsd: 0.5 }
-        ])
+        fs.writeFileSync(file, [...sample.goodLines, ...sample.ignoredLines, ''].join('\n'), 'utf8')
+        // Exactly the declared facts: the ignored lines contribute nothing, and
+        // nothing is invented to stand in for them.
+        expect(await adapter.transcripts.read(file)).toEqual(sample.expected)
+
+        const junkOnly = path.join(rig.root, 'junk.jsonl')
+        fs.writeFileSync(junkOnly, [...sample.ignoredLines, ''].join('\n'), 'utf8')
+        expect(await adapter.transcripts.read(junkOnly)).toEqual([])
       })
     })
 

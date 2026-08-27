@@ -8,6 +8,15 @@ import { engineIdSchema, type EngineId, type HookSupport } from './engines'
  * else — it holds no authoritative agent state.
  */
 
+/**
+ * A role's spending allowance (ADR-0011, registry §4.1 `budget`). It lives
+ * here rather than in `registry.ts` because `registry.ts` already imports this
+ * module for `agentIdSchema` — defining it there and importing it back would
+ * be a cycle, and a cycle in a module zod initializes at import time is not a
+ * style problem but a crash.
+ */
+export const budgetSchema = z.object({ dailyTokens: z.number().int().nonnegative() }).strict()
+
 /** Registry-style agent ids: `agent.mason`. Kept short and filesystem-safe. */
 export const agentIdSchema = z
   .string()
@@ -53,7 +62,13 @@ export const spawnRequestSchema = z
     envGrants: z
       .array(z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'env grant: an environment variable name'))
       .max(32)
-      .default([])
+      .default([]),
+    /**
+     * The role's daily token budget (ADR-0011, FR-11.2). Optional exactly as
+     * `registryEntrySchema.budget` is: an unbudgeted hire is legal and shows as
+     * `unbudgeted` rather than as a zero the Watch would immediately breach.
+     */
+    budget: budgetSchema.optional()
   })
   .strict()
 
@@ -84,6 +99,8 @@ export interface AgentCard {
   readonly settingsWritten: readonly string[]
   /** Names only — never values. */
   readonly envGrants: readonly string[]
+  /** The role's daily token budget (ADR-0011), or null when unbudgeted. */
+  readonly dailyTokens: number | null
   readonly capabilities: readonly string[]
   readonly spawnedAt: string
   /** Exit code once the process is gone; null while it lives. */

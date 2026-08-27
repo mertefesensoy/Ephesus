@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { agentIdSchema } from './agents'
+import { agentIdSchema, budgetSchema } from './agents'
 import { engineIdSchema, hookSupportSchema } from './engines'
 
 /**
@@ -27,7 +27,8 @@ export const agentStatusSchema = z.enum(AGENT_STATUSES)
 
 export type AgentStatus = z.infer<typeof agentStatusSchema>
 
-export const budgetSchema = z.object({ dailyTokens: z.number().int().nonnegative() }).strict()
+/** Re-exported so `registry.budget` reads from the schema it validates with. */
+export { budgetSchema }
 
 export const hireSchema = z
   .object({ template: z.string().min(1).max(64), version: z.number().int().positive() })

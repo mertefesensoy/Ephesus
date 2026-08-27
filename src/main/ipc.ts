@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
+import type { AgentSpend } from '../shared/cost'
 import {
   IpcChannels,
   type AgoraHealth,
@@ -48,6 +49,8 @@ export interface IpcDeps {
   readonly agora: Agora
   /** The write-only credential broker (ADR-0010). */
   readonly secrets: SecretBroker
+  /** Per-agent spend, folded from the durable ledger (ADR-0011). */
+  budgets(): readonly AgentSpend[]
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
@@ -72,6 +75,8 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.secretsDelete, (_ev, raw: unknown): SecretStatus =>
     secrets.delete(secretNamePayloadSchema.parse(raw).name)
   )
+
+  ipcMain.handle(IpcChannels.watchBudgets, (): readonly AgentSpend[] => deps.budgets())
 
   ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
   ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())

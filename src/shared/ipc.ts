@@ -3,6 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { Registry } from './registry'
+import type { AgentSpend } from './cost'
 import type { SecretStatus, SecretTest } from './secrets'
 import type { TaskLedger } from './tasks'
 import type { EphConfig } from './config'
@@ -38,7 +39,8 @@ export const IpcChannels = {
   secretsSet: 'secrets:set',
   secretsStatus: 'secrets:status',
   secretsTest: 'secrets:test',
-  secretsDelete: 'secrets:delete'
+  secretsDelete: 'secrets:delete',
+  watchBudgets: 'watch:budgets'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -171,6 +173,15 @@ export interface EphApi {
     /** Can the broker still retrieve this credential? ok|fail, never a value. */
     test: (name: string) => Promise<SecretTest>
     delete: (name: string) => Promise<SecretStatus>
+  }
+  /** The Watch (SDD §5 `watch:`). Budgets land in M3.2; gates/breaker follow. */
+  watch: {
+    /**
+     * Per-agent spend, session and cumulative side by side (ADR-0011). Every
+     * figure is folded from the durable ledger at call time — there is no
+     * in-memory counter for a restart to zero (invariant §11).
+     */
+    budgets: () => Promise<readonly AgentSpend[]>
   }
   pty: {
     /**

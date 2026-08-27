@@ -134,6 +134,27 @@ export class AgentManager {
     return [...this.agents.values()].map((agent) => agent.card)
   }
 
+  /**
+   * The spawns the Watch folds transcripts for (ADR-0011). Exposes the adapter
+   * and its spawn config because that is what `TranscriptReader.transcriptDir`
+   * takes — the Watch never learns anything engine-specific itself (NFR-12).
+   */
+  liveSpawns(): readonly {
+    readonly agentId: string
+    readonly adapter: EngineAdapter
+    readonly cfg: AgentSpawnConfig
+    readonly dailyTokens: number | null
+  }[] {
+    return [...this.agents.values()]
+      .filter((agent) => agent.card.lifecycle === 'running')
+      .map((agent) => ({
+        agentId: agent.card.agentId,
+        adapter: agent.adapter,
+        cfg: agent.cfg,
+        dailyTokens: agent.card.dailyTokens
+      }))
+  }
+
   card(agentId: string): AgentCard {
     const agent = this.agents.get(agentId)
     if (!agent) throw new Error(`agents: no agent "${agentId}"`)
@@ -189,6 +210,7 @@ export class AgentManager {
       // then every hire sits on the terraces.
       seat: 'terrace',
       envGrants: [...request.envGrants],
+      ...(request.budget ? { budget: request.budget } : {}),
       profile: null,
       target: request.cwd,
       status: 'idle',
@@ -261,6 +283,9 @@ export class AgentManager {
       capabilities: [...agent.card.capabilities],
       seat: 'terrace',
       envGrants: [...agent.card.envGrants],
+      ...(agent.card.dailyTokens === null
+        ? {}
+        : { budget: { dailyTokens: agent.card.dailyTokens } }),
       profile: null,
       target: agent.card.cwd,
       status,
@@ -341,6 +366,7 @@ export class AgentManager {
       ptyId: request.agentId,
       settingsWritten: [],
       envGrants: request.envGrants,
+      dailyTokens: request.budget?.dailyTokens ?? null,
       capabilities: request.capabilities,
       spawnedAt: new Date().toISOString(),
       exitCode: null

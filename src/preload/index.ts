@@ -15,6 +15,7 @@ import {
 } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
+import type { AgentSpend } from '../shared/cost'
 import type { LogEntry } from '../shared/log'
 import type { Registry } from '../shared/registry'
 import type { SecretStatus, SecretTest } from '../shared/secrets'
@@ -86,6 +87,9 @@ const eph: EphApi = {
     test: (name) => ipcRenderer.invoke(IpcChannels.secretsTest, { name }) as Promise<SecretTest>,
     delete: (name) =>
       ipcRenderer.invoke(IpcChannels.secretsDelete, { name }) as Promise<SecretStatus>
+  },
+  watch: {
+    budgets: () => ipcRenderer.invoke(IpcChannels.watchBudgets) as Promise<readonly AgentSpend[]>
   },
   pty: {
     write: (id, data) => ipcRenderer.invoke(IpcChannels.ptyWrite, { id, data }) as Promise<void>,

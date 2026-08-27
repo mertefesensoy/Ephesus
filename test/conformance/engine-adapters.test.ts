@@ -60,7 +60,23 @@ runAdapterConformance({
   name: 'fake engine',
   make: () => makeFakeAdapter({ scriptPath: scriptFile(FULL_LIFECYCLE_SCRIPT) }),
   settingsRel: [FAKE_SETTINGS_REL],
-  wiresEveryEvent: true
+  wiresEveryEvent: true,
+  // The fake's format: one usage fact per line, as its adapter documents.
+  transcriptSample: {
+    goodLines: [
+      JSON.stringify({
+        sessionId: 's-1',
+        model: 'test-model',
+        inTokens: 10,
+        outTokens: 20,
+        costUsd: 0.5
+      })
+    ],
+    expected: [
+      { sessionId: 's-1', model: 'test-model', inTokens: 10, outTokens: 20, costUsd: 0.5 }
+    ],
+    ignoredLines: ['not json at all', JSON.stringify({ sessionId: 's-2', model: 'test-model' })]
+  }
 })
 
 runAdapterConformance({
@@ -71,7 +87,35 @@ runAdapterConformance({
       hookShimPath: path.join(tempDir(), 'shims', 'eph-hook.mjs')
     }),
   settingsRel: [CLAUDE_SETTINGS_REL],
-  wiresEveryEvent: true
+  wiresEveryEvent: true,
+  // Claude Code's format, captured from a real transcript: usage lives under
+  // `message.usage` on `assistant` lines, and cache tokens are input tokens.
+  transcriptSample: {
+    goodLines: [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-1',
+        requestId: 'req_1',
+        message: {
+          model: 'claude-opus-5',
+          usage: {
+            input_tokens: 2,
+            cache_creation_input_tokens: 8,
+            cache_read_input_tokens: 0,
+            output_tokens: 20
+          }
+        }
+      })
+    ],
+    expected: [
+      { sessionId: 's-1', model: 'claude-opus-5', inTokens: 10, outTokens: 20, costUsd: null }
+    ],
+    ignoredLines: [
+      'not json at all',
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
+      JSON.stringify({ type: 'user', sessionId: 's-1', message: { content: 'hi' } })
+    ]
+  }
 })
 
 // ── the behavioral half, per-PR against the fake engine ──────────────────────

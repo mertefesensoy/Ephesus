@@ -836,7 +836,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       carries grant NAMES (ENGINEERING-STANDARDS §4) · the NFR-8 test is renamed to
       what it can prove, with real-cipher coverage carried to the live run · SDD §1.1's
       `watch/` and `pty.ts` rows updated.*
-- [ ] **M3.2 Cost ledger + budgets** — adapter `TranscriptReader` facts folded
+- [x] **M3.2 Cost ledger + budgets** — adapter `TranscriptReader` facts folded
       into the append-only SQLite `cost_ledger(agent, session, model, day, …)`
       (SDD §4.6) with an idempotent fold cursor; **cumulative figures computed
       only from the ledger** (invariant §11 — the restart-reset bug class is
@@ -850,6 +850,34 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       claude reader against fixtures. Risk: better-sqlite3 is Electron-ABI —
       ledger logic stays behind a storage interface, vitest never imports the
       native module (M0 constraint 3).*
+      *Evidence: `typecheck && lint && invariants && test` green — 689 passed / 2
+      skipped (45 new: folding math table-driven, fold-cursor idempotency, budget
+      projection boundaries, ledger restart survival, the claude reader against
+      real-format fixtures).
+      LIVE RUN under real Electron (xvfb) against **real better-sqlite3** and a
+      **real 315-fact Claude Code transcript** — the two things vitest cannot load:
+      `real claude transcript: 315 usage facts, session 9465d79e…, model claude-opus-5`
+      `run 1: rows=157 in=25617375 out=113771 session=157 budget=ok`
+      `after re-reading the same transcript twice more: rows=157 (unchanged? true)`
+      `run 2 (fresh process, same db): cumulative rows=157 in=25617375 out=113771`
+      `cumulative SURVIVED restart? true` · `session figure reset? true`
+      `after folding the full transcript post-restart: rows=315 (expected 315)`
+      `no double-count across the restart? true`
+      `with a 1000-token budget: state=breached because=over`
+      That is **S-LEDGER's core claim proven on the real storage**: the cumulative
+      figure survived a process restart, the session figure reset because the session
+      genuinely ended, and the DURABLE fold cursor stopped the fresh process from
+      re-counting the 157 facts it re-read. The upstream bug this closes returned zero
+      on that fourth line.
+      Two real breakages surfaced and were fixed rather than worked around: adding
+      `budgetSchema` to `agents.ts` created an **import cycle** with `registry.ts` that
+      broke zod initialization across 15 suites (the schema now lives in `agents.ts`,
+      the direction `registry.ts` already imports); and the **conformance suite
+      hardcoded the fake engine's transcript format for every adapter** — it would have
+      demanded that Claude Code parse the fake's JSON, a conformance failure invented
+      by the test (NFR-12). Each subject now supplies a sample in its own format and
+      the suite asserts the *behaviour* ADR-0009 actually specifies: a missing file
+      yields nothing, junk yields nothing, and a good line yields exactly what it said.*
 - [ ] **M3.3 Gate core — deny-by-default + the three choke points** —
       `watch/gates.ts` + pure policy matcher in `src/shared/`: deny-by-default
       evaluation; profile autonomy can only *loosen* up to global maxima
