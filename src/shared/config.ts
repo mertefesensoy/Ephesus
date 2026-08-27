@@ -9,7 +9,15 @@ export const CONFIG_SCHEMA_VERSION = 1
 
 export const configSchema = z
   .object({
-    schemaVersion: z.literal(CONFIG_SCHEMA_VERSION)
+    schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
+    /**
+     * Where MemPalace lives, when it is not simply `mempalace` on PATH
+     * (ADR-0016 — an *optional* external, commonly installed into a virtualenv
+     * or with pipx). Optional, so an existing `config.json` stays valid without
+     * a migration: absent means "use the name on PATH", which is what every
+     * global install gives you.
+     */
+    mempalaceCommand: z.string().min(1).max(4096).optional()
   })
   .strict()
 

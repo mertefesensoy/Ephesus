@@ -1689,7 +1689,7 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1329 passed / 2
       skipped** (was 1268).
 
-- [ ] **M4.3 MemPalace driver** — ADR-0016: `library.ts` drives a local
+- [x] **M4.3 MemPalace driver** — ADR-0016: `library.ts` drives a local
       MemPalace subprocess with engine-CLI discipline (version probe, visible
       install offer per FR-1.6, no hidden daemons); wings/rooms/drawers
       mapping (one wing per agent, one per target); store root
@@ -1703,6 +1703,37 @@ triage).
       never committed to the Agora. Risk: MemPalace is optional — if the
       environment cannot `pip install mempalace`, the live-run proof is owed
       to a local session and recorded as such, never faked.*
+      *Landed 2026-08-27 (`feature/m4-3-mempalace-driver`).*
+      `src/main/library-mempalace.ts` drives the real MemPalace 3.x CLI
+      (`--palace` global, `mine --wing`, `search --wing --results`) under
+      ADR-0009's subprocess discipline · one wing per agent + one for the shelf
+      (ADR-0016 §2) · palace root `~/.ephesus/index/`, outside the Agora ·
+      `MEMPALACE_HOOKS_AUTO_SAVE=0` and `MEMPALACE_HOOKS_DAEMON=0` on **every**
+      invocation and `--daemon`/`--background` never passed (ADR-0016's one
+      writer path) · `config.json` grows an optional `mempalaceCommand` ·
+      `RecallIndex.sync/search` became async, since a rung may now be a
+      subprocess. `test/fakes/fake-mempalace/` is a scripted fake CLI speaking
+      the real surface, so CI never needs Python.
+      **Evidence (live run against real MemPalace 3.8.0, installed here via
+      `pip install mempalace` in a venv):** probe
+      `{"version":"3.8.0","because":"available"}` · ladder
+      `{"rung":"mempalace","degraded":null}` · reindex `{mined:3,skipped:0}` then
+      `{mined:0,skipped:3}` · **semantic** answers the keyword rungs cannot give
+      — *"what must happen before a release goes live"* returned the release
+      runbook (score 41.9) and *"why is checkout unreliable"* returned
+      agent.mason's flaky-checkout memory, neither query sharing the words that
+      matched · `--scope agent.iris` pushed down as `--wing` · palace on disk
+      (`chroma.sqlite3`, `mempalace_embedder.json`, …) with `index/` **not**
+      inside `agora/` · the agent's own `eph-recall` answered
+      `recall: 1 result(s) … [mempalace]`.
+      One honest limit found by that run: MemPalace files whole documents as
+      drawers, so the top rung's granularity is a *file* where the keyword rungs
+      return a passage; the snippet is bounded and windowed around the query
+      (`snippetOf` was improved in this package to open where the most distinct
+      terms are — the live run showed it opening on `is` in the boilerplate).
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1349 passed / 2
+      skipped** (was 1329).
+
 - [ ] **M4.4 Reflection job + memory archive** — ADR-0006 layer 3: a minimal
       `scheduler.ts` (cron-like trigger table; reflection is its first client,
       standups join in M5) fires condensation when `memory.md` crosses the

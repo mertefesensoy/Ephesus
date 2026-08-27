@@ -20,6 +20,7 @@ import { Artemis } from './artemis'
 import { LedgerEndpoint } from './ledger'
 import { Library } from './library'
 import { FtsIndex } from './library-fts'
+import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
@@ -513,16 +514,40 @@ async function boot(): Promise<void> {
   // The Library (ADR-0006). Layer 1 is the markdown ground truth every spawn
   // carries; layer 2 is recall, on the best rung that will answer — MemPalace
   // (M4.3) above SQLite FTS above plain grep, every step down visible.
-  const fts = openFtsStore(path.join(home.root, 'index'))
+  const indexRoot = path.join(home.root, 'index')
+  const fts = openFtsStore(indexRoot)
   if (fts.store === null) reportDegradation('library', fts.because)
+  // ADR-0016: MemPalace is an OPTIONAL external. It is probed, never installed
+  // from here — a missing one degrades the ladder visibly and offers its
+  // install command, exactly as a missing engine binary does (FR-1.6).
+  // Local, not a module handle: nothing outside this block reads it yet, and a
+  // module-level variable nobody consumes is the dead-wiring class the M3
+  // close-out audit named. The Memory panel promotes it when it can re-probe.
+  const mempalace = new MemPalaceIndex({
+    palaceRoot: indexRoot,
+    agoraRoot: agora.pathOf(),
+    command: home.config.mempalaceCommand ?? MEMPALACE_BINARY,
+    onDegraded: (detail) => reportDegradation('library', detail)
+  })
   library = new Library({
     agoraRoot: agora.pathOf(),
     prompts,
-    indexes: [new FtsIndex({ store: fts.store, because: fts.because })],
+    indexes: [mempalace, new FtsIndex({ store: fts.store, because: fts.because })],
     onDegraded: (detail) => reportDegradation('library', detail)
   })
+  const probe = await mempalace.probe()
+  if (probe.version === null) reportDegradation('library', probe.because)
   // Mtime-gated, so a boot with an unchanged corpus re-mines nothing (ADR-0006).
-  library.reindex()
+  // Not awaited: mining embeds, which takes seconds, and no boot step depends on
+  // it — recall answers on whatever rung is ready when it is asked.
+  void library
+    .reindex()
+    .catch((err: unknown) =>
+      reportDegradation(
+        'library',
+        `reindex failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+    )
   const recallRung = library.rung()
   if (recallRung.degraded !== null) {
     reportDegradation('library', `recall on the ${recallRung.rung} rung — ${recallRung.degraded}`)

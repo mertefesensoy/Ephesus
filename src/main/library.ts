@@ -70,9 +70,15 @@ export interface RecallIndex {
    * a document whose `mtimeMs`/`size` are unchanged is not re-mined
    * (ADR-0006 "mtime-gated incremental mining").
    */
-  sync(docs: readonly IndexableDoc[]): IndexSyncReport
-  /** Contract: hits ordered best-first, or null when this rung just failed. */
-  search(query: string, scope: string | null, limit: number): readonly RecallHit[] | null
+  sync(docs: readonly IndexableDoc[]): Promise<IndexSyncReport>
+  /**
+   * Contract: hits ordered best-first, or null when this rung just failed.
+   *
+   * Asynchronous because a rung may be a local subprocess (ADR-0016 drives
+   * MemPalace as one). A semantic search takes seconds; doing it synchronously
+   * would freeze the main process and, with it, every agent's terminal.
+   */
+  search(query: string, scope: string | null, limit: number): Promise<readonly RecallHit[] | null>
 }
 
 /** A corpus document plus the stat facts the mtime gate compares. */
@@ -291,13 +297,13 @@ export class Library {
    * reported and stepped over — a broken index must cost recall its quality,
    * never its availability (SDD §10 "recall index corrupt → delete + rebuild").
    */
-  reindex(): ReadonlyMap<RecallRung, IndexSyncReport> {
+  async reindex(): Promise<ReadonlyMap<RecallRung, IndexSyncReport>> {
     const docs = this.corpus()
     const reports = new Map<RecallRung, IndexSyncReport>()
     for (const index of this.options.indexes ?? []) {
       if (!index.available()) continue
       try {
-        reports.set(index.rung, index.sync(docs))
+        reports.set(index.rung, await index.sync(docs))
       } catch (err) {
         this.options.onDegraded?.(`recall: ${index.rung} index sync failed — ${reason(err)}`)
       }
@@ -340,7 +346,11 @@ export class Library {
    * why it was not a higher one — an agent that got the keyword answer has to
    * know it did not get the semantic one.
    */
-  recall(query: string, scope: string | null = null, limit = RECALL_DEFAULT_LIMIT): RecallResponse {
+  async recall(
+    query: string,
+    scope: string | null = null,
+    limit = RECALL_DEFAULT_LIMIT
+  ): Promise<RecallResponse> {
     const stepped: string[] = []
     for (const index of this.options.indexes ?? []) {
       if (!index.available()) {
@@ -349,7 +359,7 @@ export class Library {
       }
       let hits: readonly RecallHit[] | null
       try {
-        hits = index.search(query, scope, limit)
+        hits = await index.search(query, scope, limit)
       } catch (err) {
         hits = null
         this.options.onDegraded?.(`recall: ${index.rung} search failed — ${reason(err)}`)

@@ -91,7 +91,7 @@ export class FtsIndex implements RecallIndex {
    * the timestamp is rare but a truncation that preserves the size is rarer
    * still, and the pair costs nothing.
    */
-  sync(docs: readonly IndexableDoc[]): IndexSyncReport {
+  async sync(docs: readonly IndexableDoc[]): Promise<IndexSyncReport> {
     const store = this.options.store
     if (!store) return { mined: 0, skipped: 0, removed: 0 }
 
@@ -129,7 +129,11 @@ export class FtsIndex implements RecallIndex {
     return { mined, skipped, removed }
   }
 
-  search(query: string, scope: string | null, limit: number): readonly RecallHit[] | null {
+  async search(
+    query: string,
+    scope: string | null,
+    limit: number
+  ): Promise<readonly RecallHit[] | null> {
     const store = this.options.store
     if (!store) return null
     const terms = recallTerms(query)

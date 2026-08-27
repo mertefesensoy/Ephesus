@@ -143,13 +143,25 @@ describe('snippetOf', () => {
     expect(snippetOf('short', ['short'])).toBe('short')
   })
 
-  it('windows a long passage around the first match and marks the cut', () => {
+  it('windows a long passage around the match and marks the cut', () => {
     const text = `${'x '.repeat(600)}NEEDLE${' y'.repeat(600)}`
     const snippet = snippetOf(text, ['needle'])
     expect(snippet).toContain('NEEDLE')
     expect(snippet.startsWith('…')).toBe(true)
     expect(snippet.endsWith('…')).toBe(true)
     expect(snippet.length).toBeLessThan(text.length)
+  })
+
+  it('opens where the most distinct terms are, not on the first stopword hit', () => {
+    // `is` matches in the boilerplate; the sentence that answers is far away.
+    const text = [
+      'This file is your long-term memory.',
+      'x'.repeat(1_200),
+      'The checkout suite is flaky because the fixture seeds two carts.'
+    ].join('\n')
+    const snippet = snippetOf(text, ['is', 'checkout', 'flaky'])
+    expect(snippet).toContain('checkout suite is flaky')
+    expect(snippet).not.toContain('long-term memory')
   })
 })
 

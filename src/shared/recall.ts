@@ -199,17 +199,49 @@ function countOccurrences(haystack: string, needle: string): number {
   }
 }
 
-/** Contract: `text` around its first matching term, bounded and whole-lined. */
+/** How many term occurrences are considered when choosing a snippet window. */
+const SNIPPET_CANDIDATES = 200
+
+/**
+ * Contract: the window of `text` that answers best, bounded and whole-lined.
+ *
+ * "Best" is the window containing the most *distinct* query terms, earliest
+ * wins on a tie. Windowing on the first match instead was wrong in a way only a
+ * live run showed: in "why is checkout unreliable", `is` matches in the second
+ * line of any document, so every snippet opened on the file's boilerplate while
+ * the sentence that actually answered sat outside the window.
+ */
 export function snippetOf(text: string, terms: readonly string[]): string {
   if (text.length <= RECALL_SNIPPET_CHARS) return text
   const haystack = text.toLowerCase()
-  let first = -1
+
+  const candidates: number[] = []
   for (const term of terms) {
-    const at = haystack.indexOf(term)
-    if (at >= 0 && (first < 0 || at < first)) first = at
+    let from = 0
+    for (;;) {
+      const at = haystack.indexOf(term, from)
+      if (at < 0 || candidates.length >= SNIPPET_CANDIDATES) break
+      candidates.push(at)
+      from = at + term.length
+    }
   }
-  const start = first < 0 ? 0 : Math.max(0, first - Math.floor(RECALL_SNIPPET_CHARS / 3))
+  candidates.sort((a, b) => a - b)
+
+  let start = 0
+  let best = -1
+  for (const at of candidates) {
+    const from = Math.max(0, at - Math.floor(RECALL_SNIPPET_CHARS / 3))
+    const window = haystack.slice(from, from + RECALL_SNIPPET_CHARS)
+    const distinct = terms.filter((term) => window.includes(term)).length
+    if (distinct > best) {
+      best = distinct
+      start = from
+    }
+  }
+
   const cut = text.slice(start, start + RECALL_SNIPPET_CHARS)
+  // Opening mid-line reads as a truncation bug; opening at the next line break
+  // costs a few characters and reads as a quotation.
   const head = start > 0 ? cut.slice(cut.indexOf('\n') + 1) : cut
   return `${start > 0 ? '…' : ''}${head.trimEnd()}…`
 }
