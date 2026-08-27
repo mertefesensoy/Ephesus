@@ -15,8 +15,18 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..')
 const SEARCH_DIRS = ['src', 'shims', 'scripts']
 
-/** Files allowed to invoke git, relative to the repo root. */
-const GIT_ALLOWLIST = new Set([path.join('src', 'main', 'git.ts')])
+/**
+ * Files allowed to invoke git, relative to the repo root. ADR-0004's rule is
+ * about the Agora: the running app has exactly one committer, `src/main/git.ts`.
+ * The two development-repo tools below run outside the app process against this
+ * repository itself (arming hooks, scanning commit attribution) and can never
+ * touch a harness home — name new exceptions here explicitly or not at all.
+ */
+const GIT_ALLOWLIST = new Set([
+  path.join('src', 'main', 'git.ts'),
+  path.join('scripts', 'arm-hooks.cjs'),
+  path.join('scripts', 'check-attribution.cjs')
+])
 
 const GIT_INVOCATION = /(execFile|execFileSync|exec|execSync|spawn|spawnSync)\s*\(\s*['"`]git['"`]/
 const TRUNCATING_LOG_WRITE = /writeFileSync\s*\([^)]*\b(log\.jsonl|cost_ledger|costLedger)\b/
