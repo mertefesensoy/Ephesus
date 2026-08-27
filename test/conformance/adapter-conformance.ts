@@ -97,7 +97,8 @@ export function conformanceRig(): ConformanceRig {
       envGrants: {},
       identityPath: path.join(agentDir, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
-      memory: ''
+      memory: '',
+      recallCommand: ''
     }
   }
 }
@@ -208,6 +209,30 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
         expect(plan.env['GRANTED_TOKEN']).toBe('granted-value')
         // A secret that was never granted must not appear anywhere in the plan.
         expect(JSON.stringify(plan)).not.toContain('UNGRANTED')
+      })
+
+      it('carries the memory layer the Library composed, unchanged', () => {
+        const rig = conformanceRig()
+        const cfg = { ...rig.cfg, memory: '## Your memory\n\nThe kiln fires at 1280C.' }
+        const haystack = planHaystack(subject.make(), cfg)
+
+        // ADR-0006 layer 1 reaches the agent whichever mechanism the adapter
+        // uses, and the adapter neither trims it nor decides how much of it to
+        // carry — the Library already did (NFR-12).
+        expect(haystack).toContain('The kiln fires at 1280C.')
+      })
+
+      it('hands the agent the recall command, and nothing when there is none', () => {
+        const rig = conformanceRig()
+        const withRecall = subject
+          .make()
+          .spawnArgs({ ...rig.cfg, recallCommand: 'node /shims/eph-recall.mjs' })
+        expect(withRecall.env['EPH_RECALL']).toBe('node /shims/eph-recall.mjs')
+
+        // An empty command must not become an empty variable: `$EPH_RECALL q`
+        // would then run `q` (ADR-0006 layer 2 absent is a state, not a trap).
+        const without = subject.make().spawnArgs({ ...rig.cfg, recallCommand: '' })
+        expect(without.env['EPH_RECALL']).toBeUndefined()
       })
 
       it('makes identity injection observable in the plan (effect, not mechanism)', () => {

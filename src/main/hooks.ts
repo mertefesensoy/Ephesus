@@ -8,6 +8,12 @@ import {
   parseHookEnvelope,
   type HookEnvelope
 } from '../shared/hooks'
+import {
+  RECALL_ENDPOINT_PATH,
+  recallRequestSchema,
+  type RecallRequest,
+  type RecallResponse
+} from '../shared/recall'
 
 /**
  * The hook endpoint (SDD §1.1 `hooks.ts`, FR-2.1–2.3). Engine shims POST
@@ -94,6 +100,15 @@ export interface HookServerOptions {
    * is a visible degradation, never an unhandledRejection in main.
    */
   onEventError?(err: unknown): void
+  /**
+   * Answers an agent's `eph-recall` query (ADR-0006 layer 2). Optional: a
+   * harness with no Library configured answers 503 and the shim says so, rather
+   * than returning an empty result an agent would read as "nothing known".
+   *
+   * It lives on this server because it needs exactly what this server already
+   * owns: the one 0600 socket and the per-spawn token registry.
+   */
+  onRecall?(request: RecallRequest): RecallResponse | Promise<RecallResponse>
   /** Largest body the endpoint will read; anything larger is refused. */
   maxBodyBytes?: number
 }
@@ -188,7 +203,8 @@ export class HookServer {
   }
 
   private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
-    if (req.method !== 'POST' || req.url !== HOOK_ENDPOINT_PATH) {
+    const recall = req.method === 'POST' && req.url === RECALL_ENDPOINT_PATH
+    if (!recall && (req.method !== 'POST' || req.url !== HOOK_ENDPOINT_PATH)) {
       this.reject(res, {
         reason: `unexpected ${req.method ?? 'request'} ${req.url ?? ''}`,
         agentId: null,
@@ -219,9 +235,9 @@ export class HookServer {
       if (aborted) return
       // Nobody awaits this handler; its failure must be a reported degradation,
       // never an unhandledRejection in the main process.
-      this.accept(Buffer.concat(chunks).toString('utf8'), res).catch((err: unknown) =>
-        this.options.onEventError?.(err)
-      )
+      const body = Buffer.concat(chunks).toString('utf8')
+      const done = recall ? this.answerRecall(body, res) : this.accept(body, res)
+      done.catch((err: unknown) => this.options.onEventError?.(err))
     })
   }
 
@@ -286,5 +302,68 @@ export class HookServer {
 
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: true, warning: check.warning, ...(reply ?? {}) }))
+  }
+
+  /**
+   * `POST /recall` — the agent-facing recall query (ADR-0006 layer 2).
+   *
+   * Authenticated exactly like a hook post: the per-spawn token, checked on
+   * every request. Unlike a hook, this one does **not** fail open. A hook that
+   * cannot be delivered costs the agent nothing; a recall that quietly answers
+   * "nothing found" when the Library is down would have the agent conclude the
+   * company knows nothing (invariant §7). So every failure here answers with a
+   * reason the shim prints.
+   */
+  private async answerRecall(body: string, res: http.ServerResponse): Promise<void> {
+    let raw: unknown
+    try {
+      raw = JSON.parse(body)
+    } catch {
+      this.reject(res, { reason: 'body is not valid JSON', agentId: null, status: 400 })
+      return
+    }
+
+    const parsed = recallRequestSchema.safeParse(raw)
+    if (!parsed.success) {
+      this.reject(res, {
+        reason: `malformed recall request — ${parsed.error.issues[0]?.message ?? 'invalid'}`,
+        agentId: null,
+        status: 400
+      })
+      return
+    }
+
+    const request = parsed.data
+    const expected = this.tokens.get(request.agentId)
+    if (expected === undefined || expected !== request.token) {
+      this.reject(res, {
+        reason: `recall refused for agent "${request.agentId}"`,
+        agentId: request.agentId,
+        status: 401
+      })
+      return
+    }
+
+    const answer = this.options.onRecall
+    if (!answer) {
+      this.reject(res, { reason: 'no library configured', agentId: request.agentId, status: 503 })
+      return
+    }
+
+    let response: RecallResponse
+    try {
+      response = await answer(request)
+    } catch (err) {
+      this.options.onEventError?.(err)
+      this.reject(res, {
+        reason: `recall failed: ${err instanceof Error ? err.message : String(err)}`,
+        agentId: request.agentId,
+        status: 500
+      })
+      return
+    }
+
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(response))
   }
 }

@@ -19,6 +19,8 @@ import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { LedgerEndpoint } from './ledger'
 import { Library } from './library'
+import { FtsIndex } from './library-fts'
+import { openFtsStore } from './library-fts-sqlite'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { CommandQueue } from './commands'
@@ -171,6 +173,15 @@ const hookServer = new HookServer({
   },
   onRejected: ({ agentId, status, reason }) => {
     console.warn(`hook rejected [${agentId ?? 'unknown-agent'}] ${status}: ${reason}`)
+  },
+  /**
+   * `eph-recall` (ADR-0006 layer 2). It answers on the hook socket because that
+   * is where the per-spawn token registry already lives; the Library decides
+   * which rung answers, and the answer carries that fact to the agent.
+   */
+  onRecall: (request) => {
+    if (!library) throw new Error('recall: the Library is not up yet')
+    return library.recall(request.query, request.scope, request.limit)
   },
   onEventError: (err) =>
     reportDegradation(
@@ -499,13 +510,23 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('agora', detail)
   })
 
-  // The Library (ADR-0006). M4.1 wires layer 1 — the markdown ground truth every
-  // spawn carries and every agent appends to.
+  // The Library (ADR-0006). Layer 1 is the markdown ground truth every spawn
+  // carries; layer 2 is recall, on the best rung that will answer — MemPalace
+  // (M4.3) above SQLite FTS above plain grep, every step down visible.
+  const fts = openFtsStore(path.join(home.root, 'index'))
+  if (fts.store === null) reportDegradation('library', fts.because)
   library = new Library({
     agoraRoot: agora.pathOf(),
     prompts,
+    indexes: [new FtsIndex({ store: fts.store, because: fts.because })],
     onDegraded: (detail) => reportDegradation('library', detail)
   })
+  // Mtime-gated, so a boot with an unchanged corpus re-mines nothing (ADR-0006).
+  library.reindex()
+  const recallRung = library.rung()
+  if (recallRung.degraded !== null) {
+    reportDegradation('library', `recall on the ${recallRung.rung} rung — ${recallRung.degraded}`)
+  }
 
   hermes = new Hermes({
     agora,
@@ -586,6 +607,9 @@ async function boot(): Promise<void> {
       }
       return seats
     },
+    // ADR-0006 layer 2: how an agent asks what the company knows. Harness-owned
+    // and engine-independent, so every adapter merely forwards it.
+    recallCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-recall.mjs')}`,
     // ADR-0006 layer 1: what an agent remembers reaches its next spawn through
     // the Library, budgeted there rather than by whichever adapter runs it.
     memory: {

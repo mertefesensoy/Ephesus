@@ -69,7 +69,8 @@ function rig(): Rig {
       envGrants: { GH_TOKEN: 'granted-value' },
       identityPath: path.join(agora, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
-      memory: ''
+      memory: '',
+      recallCommand: ''
     }
   }
 }

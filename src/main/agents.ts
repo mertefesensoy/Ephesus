@@ -169,6 +169,12 @@ export interface AgentManagerOptions {
    */
   readonly memory?: AgentMemory
   /**
+   * The `eph-recall` invocation handed to every spawn as `EPH_RECALL`
+   * (ADR-0006 layer 2). Harness-owned and engine-independent, which is why it
+   * is composed here rather than in each adapter's deps.
+   */
+  readonly recallCommand?: string
+  /**
    * Returns a dead agent's in-flight ledger tasks to `todo` (SDD §10) and
    * yields the ids that moved, for the respawn offer. Injected: the lifecycle
    * must not import the ledger endpoint, and a company with no ledger yet
@@ -429,7 +435,8 @@ export class AgentManager {
       // spawn carries is whatever the agent had written by the moment the
       // process actually starts, and this config is built before the version
       // probe has even run.
-      memory: ''
+      memory: '',
+      recallCommand: this.options.recallCommand ?? ''
     }
   }
 

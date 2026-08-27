@@ -389,7 +389,10 @@ export class ClaudeAdapter implements EngineAdapter {
         ...cfg.envGrants,
         EPH_AGENT_ID: cfg.agentId,
         EPH_HOOK_TOKEN: cfg.hookToken,
-        EPH_HOOK_ENDPOINT: cfg.hookEndpoint
+        EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
+        // The Library's agent-facing surface (ADR-0006 layer 2). Harness-owned
+        // and identical for every engine, so the adapter only forwards it.
+        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand })
       },
       settings: this.settingsInjections(cfg)
     }

@@ -72,6 +72,14 @@ export interface AgentSpawnConfig {
    * engine-specific (NFR-12).
    */
   readonly memory: string
+  /**
+   * The command an agent runs to search the company's memory
+   * (`eph-recall`, ADR-0006 layer 2), e.g. `node /…/shims/eph-recall.mjs`.
+   * Adapters export it to the agent as `EPH_RECALL`; empty when the harness has
+   * no recall surface wired, in which case `PROTOCOL.md`'s instruction to use
+   * it is the thing that must not be printed.
+   */
+  readonly recallCommand: string
 }
 
 /**

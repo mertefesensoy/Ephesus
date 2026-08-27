@@ -90,6 +90,27 @@ identity, this protocol, and whatever is in `memory.md` — nothing else.
 If your memory grows too long to hand you all of it, you are told so and given
 the most recent part; the whole file is still on disk, in your agent directory.
 
+## How to look something up
+
+To search everything the company remembers — every agent's memory, everything
+that has been archived, and the Architect's knowledge shelf — run:
+
+```
+$EPH_RECALL "what you want to know"
+```
+
+Add `--scope <agent id>` to search one colleague's memory, `--scope knowledge`
+to search the shelf only, and `--limit <n>` for more or fewer results.
+
+Every answer names the rung it came from and says so plainly if search is
+degraded — `mempalace` is a meaning-based search, `fts` and `grep` are keyword
+searches that will only find the words you actually typed. If it says degraded,
+try the words a colleague would have written rather than the concept.
+
+An answer of "nothing matched" is an answer. `recall unavailable` is not: it
+means the search itself failed, and you should say so rather than conclude the
+company knows nothing.
+
 ## How you communicate
 
 - One message, one purpose. Say which of these it is: `request`, `inform`,

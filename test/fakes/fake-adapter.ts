@@ -142,6 +142,7 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
           EPH_HOOK_TOKEN: cfg.hookToken,
           EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
           EPH_AGENT_DIR: path.dirname(cfg.identityPath),
+          ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
           ...(options.sessionId === undefined ? {} : { EPH_FAKE_SESSION: options.sessionId }),
           // A different mechanism from claude's `--append-system-prompt`, on
           // purpose: the suite must test the effect, not the mechanism.

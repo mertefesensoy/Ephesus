@@ -1652,9 +1652,10 @@ triage).
       {respawn:true, resumed:true, memoryCarried:true, sessionId:"sess-mason-1"}`;
       ledger row back to `todo`; roster + avatar both `archived`.
       Gate: typecheck PASS · lint PASS · invariants PASS · **1268 passed / 2
-      skipped** (was 1236).
+      skipped** (was 1236). CI green on the branch:
+      [run 44](https://github.com/mertefesensoy/ephesus/actions/runs/33075733612).
 
-- [ ] **M4.2 Library core + degradation ladder** — `src/main/library.ts`:
+- [x] **M4.2 Library core + degradation ladder** — `src/main/library.ts`:
       recall over layer 1 + the knowledge shelf with the ADR-0006 ladder built
       first: SQLite FTS keyword search (app-local, derived state) degrading to
       plain grep, each state *visible* (Memory panel state + the agora:health
@@ -1666,6 +1667,28 @@ triage).
       not re-mined); degraded states visibly distinct. Risk: FTS lives in
       app-local SQLite — native module stays behind the storage seam
       (M0 constraint 3); vitest never imports it.*
+      *Landed 2026-08-27 (`feature/m4-2-library-ladder`).* `src/shared/recall.ts`
+      (the grep rung — ADR-0006's transparency floor — passage splitting,
+      deterministic scoring, the wire format) · `src/main/library.ts` grows
+      `corpus()`, `reindex()`, `rung()`, `recall()` · `src/main/library-fts.ts`
+      (mtime gate, scope, scoring, behind the `FtsStore` seam) +
+      `library-fts-sqlite.ts` (real FTS5 in `index/fts.sqlite`, never imported by
+      vitest) · `shims/eph-recall.mjs` answering on the hook socket's new
+      `POST /recall` · `PROTOCOL.md` gains "How to look something up" ·
+      `EPH_RECALL` reaches every spawn, conformance-tested.
+      **Evidence (live run, real SQLite FTS5, real socket, real spawned shim):**
+      first reindex `{mined:3,skipped:0,removed:0}` → second
+      `{mined:0,skipped:3,removed:0}` → after one edit
+      `{mined:1,skipped:2,removed:0}` (the mtime gate, working) · four
+      known-answer queries answered on the `fts` rung with `degraded:null`,
+      including a `--scope knowledge` and a `--scope agent.mason` query · the
+      agent's own `eph-recall` printed `recall: 1 result(s) … [fts]` · the index
+      was then deleted mid-run (SDD §10's repair path) and the same query came
+      back `[grep]` with `recall degraded: fts: keyword index deleted` — the step
+      down is visible to the agent, not just to the Architect.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1329 passed / 2
+      skipped** (was 1268).
+
 - [ ] **M4.3 MemPalace driver** — ADR-0016: `library.ts` drives a local
       MemPalace subprocess with engine-CLI discipline (version probe, visible
       install offer per FR-1.6, no hidden daemons); wings/rooms/drawers

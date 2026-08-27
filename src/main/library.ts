@@ -1,6 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  grepRecall,
+  inScope,
+  RECALL_DEFAULT_LIMIT,
+  RECALL_SCHEMA_VERSION,
+  type RecallDoc,
+  type RecallHit,
+  type RecallResponse,
+  type RecallRung
+} from '../shared/recall'
+import {
   composeMemoryEntry,
   memoryEntrySchema,
   parseMemorySections,
@@ -34,6 +44,49 @@ import type { PromptStore } from './prompts'
 export const MEMORY_FILE = 'memory.md'
 /** SDD §2: `agora/agents/<id>/memory-archive/` — reflection's output (M4.4). */
 export const MEMORY_ARCHIVE_DIR = 'memory-archive'
+/** SDD §2: `agora/knowledge/` — the Architect-registered shelf (FR-6.4). */
+export const KNOWLEDGE_DIR = 'knowledge'
+
+/**
+ * One rung of the recall ladder, as an implementation.
+ *
+ * The FTS rung lives behind this seam because it is SQLite, and SQLite is
+ * Electron-ABI after `electron-rebuild` — vitest cannot import it
+ * (BUILD-PROMPT §10.3). The seam is also what ADR-0016 re-points at MemPalace
+ * in M4.3 without the Library learning anything new.
+ */
+export interface RecallIndex {
+  /** Which rung this is, for the state the UI shows. */
+  readonly rung: RecallRung
+  /**
+   * Contract: whether this rung can answer right now. False is a normal,
+   * *visible* state — a missing index degrades, it does not throw.
+   */
+  available(): boolean
+  /** Why it cannot answer, when `available()` is false. */
+  unavailableBecause(): string
+  /**
+   * Brings the index up to date with the corpus. Contract: mtime-gated —
+   * a document whose `mtimeMs`/`size` are unchanged is not re-mined
+   * (ADR-0006 "mtime-gated incremental mining").
+   */
+  sync(docs: readonly IndexableDoc[]): IndexSyncReport
+  /** Contract: hits ordered best-first, or null when this rung just failed. */
+  search(query: string, scope: string | null, limit: number): readonly RecallHit[] | null
+}
+
+/** A corpus document plus the stat facts the mtime gate compares. */
+export interface IndexableDoc extends RecallDoc {
+  readonly mtimeMs: number
+  readonly size: number
+}
+
+/** What one incremental sync actually did — the mtime gate, observable. */
+export interface IndexSyncReport {
+  readonly mined: number
+  readonly skipped: number
+  readonly removed: number
+}
 
 const SEED_PROMPT = path.join('library', 'memory-seed.md')
 const LAYER_PROMPT = path.join('library', 'memory-layer.md')
@@ -49,6 +102,12 @@ export interface LibraryOptions {
    * this project treats as unforgivable — the caller surfaces this.
    */
   onDegraded?(detail: string): void
+  /**
+   * The rungs above grep, best first. Absent or unavailable rungs are stepped
+   * over *visibly*; grep is implemented here and can never be unavailable, so
+   * the ladder always has a bottom (ADR-0006's transparency floor).
+   */
+  readonly indexes?: readonly RecallIndex[]
   now?(): Date
 }
 
@@ -168,8 +227,181 @@ export class Library {
       facts
     }
   }
+
+  /** `agora/knowledge` — the shelf the Architect registers docs into (FR-6.4). */
+  knowledgeDir(): string {
+    return path.join(this.options.agoraRoot, KNOWLEDGE_DIR)
+  }
+
+  /**
+   * Everything the company knows, as documents (ADR-0006 layers 1–2): every
+   * agent's `memory.md`, everything reflection has archived, and the knowledge
+   * shelf. Deterministic order, because every rung is fed from here and the
+   * smoke test's known answers depend on it.
+   *
+   * Contract: never throws. A directory that will not list contributes nothing
+   * and is reported — "the company knows nothing" and "we cannot read what the
+   * company knows" are different facts (invariant §7).
+   */
+  corpus(): readonly IndexableDoc[] {
+    const docs: IndexableDoc[] = []
+    const add = (file: string, source: RecallDoc['source'], scope: string): void => {
+      const text = readOrNull(file)
+      if (text === null) {
+        this.options.onDegraded?.(`recall: ${file} unreadable`)
+        return
+      }
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(file)
+      } catch {
+        return
+      }
+      docs.push({ ref: file, source, scope, text, mtimeMs: stat.mtimeMs, size: stat.size })
+    }
+
+    const agentsRoot = path.join(this.options.agoraRoot, 'agents')
+    // No agents directory yet: a company before its first hire knows nothing,
+    // which is a true answer and not a degradation.
+    let agentIds: readonly string[]
+    try {
+      agentIds = fs
+        .readdirSync(agentsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+    } catch {
+      agentIds = []
+    }
+    for (const agentId of agentIds) {
+      const memory = this.memoryPath(agentId)
+      if (fs.existsSync(memory)) add(memory, 'memory', agentId)
+      for (const file of listFiles(this.archiveDir(agentId))) add(file, 'archive', agentId)
+    }
+    for (const file of listFiles(this.knowledgeDir())) {
+      add(file, 'knowledge', path.basename(file, '.md'))
+    }
+    return docs
+  }
+
+  /**
+   * Brings every configured index up to date, mtime-gated.
+   *
+   * Contract: returns each rung's report. An index that throws while syncing is
+   * reported and stepped over — a broken index must cost recall its quality,
+   * never its availability (SDD §10 "recall index corrupt → delete + rebuild").
+   */
+  reindex(): ReadonlyMap<RecallRung, IndexSyncReport> {
+    const docs = this.corpus()
+    const reports = new Map<RecallRung, IndexSyncReport>()
+    for (const index of this.options.indexes ?? []) {
+      if (!index.available()) continue
+      try {
+        reports.set(index.rung, index.sync(docs))
+      } catch (err) {
+        this.options.onDegraded?.(`recall: ${index.rung} index sync failed — ${reason(err)}`)
+      }
+    }
+    return reports
+  }
+
+  /**
+   * The rung recall would answer on right now, and why it is not higher.
+   *
+   * This is the state the Memory panel shows and `agora:health` reports. It is
+   * computed rather than remembered, so it can never claim a rung that has since
+   * gone away.
+   */
+  rung(): { readonly rung: RecallRung; readonly degraded: string | null } {
+    const reasons: string[] = []
+    for (const index of this.options.indexes ?? []) {
+      if (index.available()) {
+        return { rung: index.rung, degraded: reasons.length === 0 ? null : reasons.join('; ') }
+      }
+      reasons.push(`${index.rung}: ${index.unavailableBecause()}`)
+    }
+    return {
+      rung: 'grep',
+      // Grep is the floor, and reaching it with no reason recorded would be the
+      // silent fallback this codebase treats as unforgivable.
+      degraded:
+        reasons.length === 0
+          ? 'no recall index configured — keyword search over markdown'
+          : reasons.join('; ')
+    }
+  }
+
+  /**
+   * Answers one recall query on the best rung that will answer it.
+   *
+   * Contract: always answers. Every rung above grep may be absent, broken or
+   * simply fail this query; grep is computed here from the markdown itself and
+   * has nothing left to fall back to. The response says which rung answered and
+   * why it was not a higher one — an agent that got the keyword answer has to
+   * know it did not get the semantic one.
+   */
+  recall(query: string, scope: string | null = null, limit = RECALL_DEFAULT_LIMIT): RecallResponse {
+    const stepped: string[] = []
+    for (const index of this.options.indexes ?? []) {
+      if (!index.available()) {
+        stepped.push(`${index.rung}: ${index.unavailableBecause()}`)
+        continue
+      }
+      let hits: readonly RecallHit[] | null
+      try {
+        hits = index.search(query, scope, limit)
+      } catch (err) {
+        hits = null
+        this.options.onDegraded?.(`recall: ${index.rung} search failed — ${reason(err)}`)
+      }
+      if (hits === null) {
+        stepped.push(`${index.rung}: search failed`)
+        continue
+      }
+      return {
+        schemaVersion: RECALL_SCHEMA_VERSION,
+        query,
+        rung: index.rung,
+        hits: [...hits],
+        degraded: stepped.length === 0 ? null : stepped.join('; ')
+      }
+    }
+
+    const docs = this.corpus().filter((doc) => inScope(doc, scope))
+    return {
+      schemaVersion: RECALL_SCHEMA_VERSION,
+      query,
+      rung: 'grep',
+      hits: [...grepRecall(docs, query, limit)],
+      degraded:
+        stepped.length === 0
+          ? 'no recall index configured — keyword search over markdown'
+          : stepped.join('; ')
+    }
+  }
 }
 
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Reads a file, or null when it will not read. Never throws. */
+function readOrNull(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function listFiles(dir: string): readonly string[] {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => path.join(dir, entry.name))
+      .sort()
+  } catch {
+    return []
+  }
 }

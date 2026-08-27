@@ -57,7 +57,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
 | `ledger.ts` | The task-ledger endpoint (§7.1): validates Artemis's `propose` acts and writes `tasks.json` and `board.md` through the single committer — agents never touch either file | 0005, 0004 |
 | `artemis.ts` | Orchestrator lifecycle: auto-spawn, reserved seat, respawn-with-memory, prompt/config assembly, delegated-authority table | 0005 |
-| `library.ts` | Memory read/write helpers, MemPalace driver (`eph recall`, archive ingestion), FTS/grep fallback, reflection scheduler, knowledge shelf | 0006, 0016 |
+| `library.ts` | Memory read/write helpers, the corpus, the recall ladder and its visible state, MemPalace driver (`eph-recall`, archive ingestion), reflection scheduler, knowledge shelf. `library-fts.ts` holds the FTS rung's behaviour (mtime gate, scoring, scope) and `library-fts-sqlite.ts` its SQLite FTS5 storage, split so the native module stays out of the test runner | 0006, 0016 |
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
 | `herald/` | `seam.ts` (STT/TTS/Duplex interfaces), `policy.ts` (wake word, barge-in, repeat-back, failover), `elevenlabs.ts`, `openai-realtime.ts` | 0007 |
 | `harbor/` | `github.ts` (issues/PRs/CI via `gh`), `bridge.ts` (chat bridge), `webhooks.ts`, `hires.ts` (export/import) | — |
@@ -83,7 +83,9 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  ⇒ deny-all: it can only ever loosen, never tighten
   authority.json             # Artemis's delegated-authority table (FR-5.5). Absent or
                              #  unreadable ⇒ no delegated authority: everything escalates
-  events.sock                # hook socket (0600)
+  events.sock                # hook socket (0600) — also answers `POST /recall`
+                             #  for the agent-facing `eph-recall` CLI (ADR-0006
+                             #  layer 2): one socket, one per-spawn token registry
   db.sqlite                  # app-local + cost ledger
   prompts/                   # versioned text assets: artemis system prompt, block-reason
                              # template, reflection prompts, herald persona & phrase book
@@ -111,7 +113,11 @@ The hook socket is `0600` with a per-spawn token in each payload.
       outbox/                # agent-written, router-drained
       cursor.json            # { lastProcessed }
   index/                     # MemPalace store root (Library layer 2 + company archive,
-                             #  ADR-0016; derived state — disposable/rebuildable)
+                             #  ADR-0016) and `fts.sqlite`, the SQLite FTS5 keyword
+                             #  rung below it. All derived state — disposable and
+                             #  rebuildable from markdown, which is why it is NOT in
+                             #  db.sqlite: SDD §10 repairs a corrupt index by deleting
+                             #  it, and db.sqlite holds the append-only cost ledger
 ```
 
 Rules: agents write only inside their own `agents/<id>/` and their assigned worktrees;
@@ -238,6 +244,8 @@ radius / Rollback**. Verdict:
 ### 4.6 SQLite (app-local, never agent-visible)
 `window_state`, `command_history`, `cost_ledger(agent, session, model, day, in_tokens,
 out_tokens, cost_usd, source)` (append-only; ADR-0011), `metrics_rollup` (org layer).
+The recall keyword index is deliberately *not* here — it lives in `index/fts.sqlite`
+(§2), because it is derived state a repair may delete and this file is not.
 
 ---
 
