@@ -9,6 +9,7 @@ import { HOOK_SUPPORT_RANK, type HookSupport } from '../../src/shared/engines'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
 import { CodexAdapter } from '../../src/main/engines/codex'
+import { GeminiAdapter } from '../../src/main/engines/gemini'
 import { PromptStore } from '../../src/main/prompts'
 import { conformanceRig, runAdapterConformance } from './adapter-conformance'
 import { FAKE_SETTINGS_REL, makeFakeAdapter } from '../fakes/fake-adapter'
@@ -147,6 +148,16 @@ runAdapterConformance({
   wiresEveryEvent: false
   // No `transcriptSample`: the adapter declares no transcript reader, so the
   // table skips those cases rather than inventing a format for it.
+})
+
+runAdapterConformance({
+  name: 'gemini',
+  make: () =>
+    new GeminiAdapter({
+      prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS)
+    }),
+  settingsRel: [],
+  wiresEveryEvent: false
 })
 
 // ── the behavioral half, per-PR against the fake engine ──────────────────────

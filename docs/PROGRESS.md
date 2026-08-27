@@ -1854,9 +1854,38 @@ triage).
       Gate: typecheck PASS · lint PASS · invariants PASS · **1443 passed / 3
       skipped** (was 1413).
 
-- [ ] **M4.7 Gemini adapter** — `src/main/engines/gemini.ts`, same contract,
+- [x] **M4.7 Gemini adapter** — `src/main/engines/gemini.ts`, same contract,
       same honesty bar, same adapter-only-diff rule.
       *Docs/Tests/Risk: as M4.6.*
+      *Landed 2026-08-27 (`feature/m4-7-gemini-adapter`).* `src/main/engines/gemini.ts`
+      plus one registration line and one conformance subject — no core diff.
+      Written against a **real `gemini` 0.57.0** installed and run here, plus its
+      own bundled hook documentation. **It declares `pty-heuristic`, for a
+      different documented reason than codex's.** Gemini has the best-documented
+      hook plane in the roster after Claude Code's (`SessionStart`, `SessionEnd`,
+      `BeforeAgent`, `AfterAgent`, `BeforeModel`, `AfterModel`,
+      `BeforeToolSelection`, `BeforeTool`, `AfterTool`, `PreCompress`,
+      `Notification`, with a published config shape), but its project settings
+      live at `.gemini/settings.json` — a **tracked** file, which ADR-0009
+      forbids the harness writing ("only ever… local/gitignored variants"; the
+      only `settings.local.json` in the CLI is the *Claude Code* file its
+      `hooks migrate` command reads) — and project hooks are untrusted by
+      default, with `--skip-trust` as the only override. Both are §8 must-asks,
+      not implementation details, so the adapter writes nothing and claims
+      nothing. It declares **no `resume`** (its `--resume` takes `"latest"` or an
+      index, never a session id; `--resume latest` in a shared repo would reopen
+      another agent's session — the cross-attribution bug M3 removed from the
+      ledger) and **no transcripts** (no credentials here).
+      **Evidence (live, against the real binary):** `gemini --version` → `0.57.0`,
+      `parseVersion → 0.57.0` · install offer `npm install -g @google/gemini-cli`
+      · plan `["gemini", <identity+protocol+memory>]` running in the agent cwd ·
+      the real `--help` confirms `[query..]`, `--skip-trust`, `--resume` and
+      `gemini hooks` exist · install leaves the cwd byte-identical, uninstall is
+      safe twice · `settings: []` · never passes `--skip-trust`, `--yolo`,
+      `--approval-mode` or `-p`.
+      Gate: typecheck PASS · lint PASS · invariants PASS · **1474 passed / 4
+      skipped** (was 1443).
+
 - [ ] **M4.8 Worktree isolation option** — UC-01 alternate 2a: a spawn may
       request its own git worktree of the target repo; worktree create/remove
       through `git.ts` (the one committer — no second git path); agent cwd,
