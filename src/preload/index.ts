@@ -3,6 +3,7 @@ import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
+  GATE_OPEN_CHANNEL,
   IpcChannels,
   LOG_APPEND_CHANNEL,
   ptyDataChannel,
@@ -16,6 +17,8 @@ import {
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
 import type { AgentSpend } from '../shared/cost'
+import type { OpenGate } from '../shared/gates'
+import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { Registry } from '../shared/registry'
 import type { SecretStatus, SecretTest } from '../shared/secrets'
@@ -89,7 +92,20 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.secretsDelete, { name }) as Promise<SecretStatus>
   },
   watch: {
-    budgets: () => ipcRenderer.invoke(IpcChannels.watchBudgets) as Promise<readonly AgentSpend[]>
+    budgets: () => ipcRenderer.invoke(IpcChannels.watchBudgets) as Promise<readonly AgentSpend[]>,
+    approvals: () => ipcRenderer.invoke(IpcChannels.watchApprovals) as Promise<readonly OpenGate[]>,
+    approve: (gateId, verdict, context) =>
+      ipcRenderer.invoke(IpcChannels.watchApprove, { gateId, verdict, context }) as Promise<{
+        ok: boolean
+        reason: string | null
+      }>,
+    humanQueue: () =>
+      ipcRenderer.invoke(IpcChannels.watchHumanQueue) as Promise<readonly Message[]>,
+    onGateChange: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(GATE_OPEN_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(GATE_OPEN_CHANNEL, listener)
+    }
   },
   pty: {
     write: (id, data) => ipcRenderer.invoke(IpcChannels.ptyWrite, { id, data }) as Promise<void>,

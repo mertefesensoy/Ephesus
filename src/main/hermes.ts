@@ -541,6 +541,32 @@ export class Hermes {
     return woken
   }
 
+  /**
+   * The Architect's own queue at `agora/human/` (FR-3.7): `to:"human"` mail
+   * before Artemis exists, plus hop-cap diversions.
+   *
+   * It accumulated with no reader from M2 until the approvals surface landed —
+   * mail addressed to the human that the human could not see. Contract: never
+   * throws, and skips a file it cannot parse rather than failing the whole
+   * queue; one bad message must not hide the rest.
+   */
+  humanQueue(): readonly Message[] {
+    const inbox = path.join(this.mailboxDir(HUMAN_QUEUE), 'inbox')
+    if (!fs.existsSync(inbox)) return []
+    const messages: Message[] = []
+    for (const name of fs.readdirSync(inbox).sort()) {
+      if (!name.endsWith('.json')) continue
+      try {
+        const parsed = parseMessage(JSON.parse(fs.readFileSync(path.join(inbox, name), 'utf8')))
+        if (parsed.ok) messages.push(parsed.message)
+      } catch {
+        // Unreadable file: the sweep already parked and reported malformed
+        // mail; a reader's job is to read what is there.
+      }
+    }
+    return messages
+  }
+
   /** Unread messages waiting for an agent. */
   pendingMailCount(agentId: string): number {
     const inbox = path.join(this.mailboxDir(agentId), 'inbox')

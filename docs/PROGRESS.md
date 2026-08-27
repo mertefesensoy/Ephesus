@@ -964,7 +964,7 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       held=true because=autonomy` · `notification hook → gate: held=true what="Claude
       needs permission to use Bash"`. The chain read back out of `log.jsonl` alone
       (NFR-13): `seq=4 opened kind=tool-permission` → `seq=5 approved`.*
-- [ ] **M3.4 Approvals UI + the human queue (+ the FR-11.2 spend strip)** — the Watch approvals surface
+- [x] **M3.4 Approvals UI + the human queue (+ the FR-11.2 spend strip)** — the Watch approvals surface
       (UI-DESIGN §4): `watch: approvals()/approve(gateId, v)` IPC + `gate:open`
       push; renders each gate's packaging (what/why/blast radius/rollback);
       the M2 `agora/human/` diverted-mail queue surfaces in the same view
@@ -984,6 +984,40 @@ emitted but unconsumed (→ M3.5) · every seat `terrace` (→ M3.6) ·
       queue drains visibly; both spend figures render from the ledger. Risk:
       inventing UI beyond the spec — the surface is the documented approvals
       queue plus the two figures FR-11.2 names.*
+      *Evidence: `typecheck && lint && invariants && test` green — 794 passed / 2
+      skipped (16 new: the `watch:approve` validator, main-is-the-authority cases,
+      and the human queue on real files).
+      LIVE RUN of the REAL app under xvfb — a real `claude` **2.1.247** spawned
+      through the real IPC, and the whole UC-08 chain driven end to end with nothing
+      reconstructed:
+      `env the harness injected: EPH_AGENT_ID EPH_HOOK_ENDPOINT EPH_HOOK_TOKEN` ·
+      `harness-wired Notification command: node "<repo>/shims/eph-hook.mjs" --event
+      notification --session-field session_id` — **the M1 carried item, visible in the
+      agent's own settings file**. That exact command was then executed verbatim, with
+      the live agent's own environment read from its process, and the gate arrived:
+      `what: Claude needs your permission to run: rm -rf /var/lib/production-data` ·
+      `why: the engine asked for permission and will not proceed without an answer` ·
+      `blast radius: whatever the engine was about to do; it has not done it yet` ·
+      `rollback: denying the gate leaves the action unperformed` ·
+      `held: kind=tool-permission because=no-rule channel=local` ·
+      `avatar: phase=blocked station=watch-post` — the SDD §6 edge, reachable in the
+      running app for the first time. **APPROVE was then clicked in the real UI**:
+      `approvals now: 0` · `avatar after verdict: phase=idle` ·
+      `log seq=2 gate opened kind=tool-permission` / `log seq=3 gate approved`.
+      An earlier attempt posted the same hook with no token and got
+      `delivered=false status=400` — per-spawn token validation, incidentally proven.
+      Screenshot: [`docs/demo/m3-uc08-gate.png`](./demo/m3-uc08-gate.png) — the
+      approvals post with all four packaging fields *above* the controls (UI-DESIGN
+      §4), the spend table with session and cumulative side by side (FR-11.2), the
+      Architect's diverted-mail queue (**closing the M2 carried item** — mail
+      addressed to the human that the human could not see), the status strip reading
+      `⚠ gates: 1 waiting on you`, and a real `claude` TUI live in the panel beside it.
+      **Owed forward, stated rather than implied:** the panel's *rendering* is asserted
+      by that screenshot, not by an automated test — there is no Playwright harness in
+      the repo yet, and adding one is a dependency decision. What IS automated is the
+      property that matters: main is the authority (a stale gate id, a second verdict,
+      a malformed payload are each refused) and the queue reads and drains on real
+      files. Carried to M3.9's S-GATE/E2E work.*
 - [ ] **M3.5 Circuit-breaker ladder + span capture** — `watch/breaker.ts` per
       ADR-0011: tool-call spans (agent, tool, duration, outcome) recorded from
       hook events (the span model FR-11.6 needs later; no waterfall UI yet —

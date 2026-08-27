@@ -4,6 +4,7 @@ import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
+import { WatchPanel } from './WatchPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
 
 type BridgeState =
@@ -39,7 +40,9 @@ export function App(): ReactElement {
    * offering a tab for a subsystem that has not been built would be inventing
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
-  const [tab, setTab] = useState<'floor' | 'activity'>('floor')
+  const [tab, setTab] = useState<'floor' | 'activity' | 'watch'>('floor')
+  /** Open gates, for the status strip's badge count (UI-DESIGN §4). */
+  const [openGates, setOpenGates] = useState<number | null>(null)
   // A newly spawned agent is selected only when nothing is: an agent appearing
   // must never yank the Architect's attention off the one they are watching.
   const onAgentSeen = useCallback((agentId: string) => {
@@ -67,6 +70,16 @@ export function App(): ReactElement {
         .state()
         .then((state) => {
           if (!cancelled) setHooks(state)
+        })
+        .catch(() => {
+          /* the bridge banner already reports a dead bridge */
+        })
+      // The status strip counts open gates (UI-DESIGN §4). It rides the same
+      // slow poll so the badge is right even when the push was missed.
+      eph.watch
+        .approvals()
+        .then((gates) => {
+          if (!cancelled) setOpenGates(gates.length)
         })
         .catch(() => {
           /* the bridge banner already reports a dead bridge */
@@ -170,6 +183,16 @@ export function App(): ReactElement {
           )}
         </span>
         <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+          {openGates !== null && openGates === 0 && (
+            <span style={{ color: 'var(--eph-status-success)' }}>● gates: none open</span>
+          )}
+          {openGates !== null && openGates > 0 && (
+            <span style={{ color: 'var(--eph-status-blocked)' }}>
+              ⚠ gates: {openGates} waiting on you
+            </span>
+          )}
+        </span>
+        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
           {health === null && 'agora: …'}
           {health !== null && agoraIssues(health).length === 0 && (
             <span style={{ color: 'var(--eph-status-success)' }}>● agora: ok</span>
@@ -186,7 +209,7 @@ export function App(): ReactElement {
         </span>
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
-        {(['floor', 'activity'] as const).map((name) => (
+        {(['floor', 'activity', 'watch'] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -201,12 +224,15 @@ export function App(): ReactElement {
             }}
           >
             {name.toUpperCase()}
+            {name === 'watch' && openGates !== null && openGates > 0 ? ` ${String(openGates)}` : ''}
           </button>
         ))}
       </nav>
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: '8px' }}>
         {/* App shell (UI-DESIGN §4): floor left (dominant), context stack right. */}
-        {tab === 'floor' ? <FloorCanvas /> : <ActivityPanel />}
+        {tab === 'floor' && <FloorCanvas />}
+        {tab === 'activity' && <ActivityPanel />}
+        {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
       </div>
       {/* UI-DESIGN §4 app shell: bottom = command bar. */}

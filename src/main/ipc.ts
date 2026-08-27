@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import type { AgentSpend } from '../shared/cost'
+import { gateApproveSchema, type OpenGate } from '../shared/gates'
+import type { Message } from '../shared/message'
 import {
   IpcChannels,
   type AgoraHealth,
@@ -23,6 +25,7 @@ import type { AvatarDirector } from './avatars'
 import type { CommandQueue } from './commands'
 import { getHome } from './config'
 import type { PtyManager } from './pty'
+import type { GateManager } from './watch/gates'
 import type { SecretBroker } from './watch/secrets'
 
 /** Cursor paging over the event log (SDD §5 `agora.log(afterSeq, limit)`). */
@@ -51,6 +54,10 @@ export interface IpcDeps {
   readonly secrets: SecretBroker
   /** Per-agent spend, folded from the durable ledger (ADR-0011). */
   budgets(): readonly AgentSpend[]
+  /** The Watch's approval queue (SDD §9, UC-08). */
+  readonly gates: GateManager
+  /** Mail Hermes diverted to `agora/human/` (FR-3.7). */
+  humanQueue(): readonly Message[]
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
@@ -77,6 +84,18 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.watchBudgets, (): readonly AgentSpend[] => deps.budgets())
+
+  ipcMain.handle(IpcChannels.watchApprovals, (): readonly OpenGate[] => deps.gates.list())
+
+  ipcMain.handle(IpcChannels.watchHumanQueue, (): readonly Message[] => deps.humanQueue())
+
+  ipcMain.handle(IpcChannels.watchApprove, (_ev, raw: unknown) => {
+    // The verdict is validated in main like every other renderer payload: the
+    // renderer holds no gate state and cannot invent a gate id (invariant §2).
+    const { gateId, verdict, context } = gateApproveSchema.parse(raw)
+    const result = deps.gates.decide(gateId, verdict, context ?? {})
+    return { ok: result.ok, reason: result.ok ? null : result.reason }
+  })
 
   ipcMain.handle(IpcChannels.agoraRegistry, () => agora.registry())
   ipcMain.handle(IpcChannels.agoraTasks, () => agora.tasks())

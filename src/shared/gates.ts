@@ -254,3 +254,24 @@ export const openGateSchema = z
   .strict()
 
 export type OpenGate = z.infer<typeof openGateSchema>
+
+/**
+ * The `watch:approve` payload (SDD §5). It lives here with the other gate
+ * validators rather than inline in `ipc.ts`, so the shape the renderer must
+ * satisfy is defined next to the types it validates (ENGINEERING-STANDARDS §3).
+ */
+export const gateApproveSchema = z
+  .object({
+    gateId: gateIdSchema,
+    verdict: gateVerdictSchema,
+    context: z
+      .object({
+        channel: sourceChannelSchema.optional(),
+        repeatBackConfirmed: z.boolean().optional()
+      })
+      .strict()
+      .optional()
+  })
+  .strict()
+
+export type GateApprove = z.infer<typeof gateApproveSchema>

@@ -485,6 +485,8 @@ void app.whenReady().then(async () => {
     commands: commandQueue,
     agora,
     secrets,
+    gates,
+    humanQueue: () => hermes?.humanQueue() ?? [],
     // Exited agents are INCLUDED: their cumulative figure is precisely what the
     // durable ledger exists to preserve, and hiding it behind a liveness filter
     // would put it out of reach of the only IPC that can show it (FR-11.2).

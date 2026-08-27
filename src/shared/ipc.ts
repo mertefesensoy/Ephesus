@@ -4,6 +4,8 @@ import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { Registry } from './registry'
 import type { AgentSpend } from './cost'
+import type { GateVerdict, OpenGate, SourceChannel } from './gates'
+import type { Message } from './message'
 import type { SecretStatus, SecretTest } from './secrets'
 import type { TaskLedger } from './tasks'
 import type { EphConfig } from './config'
@@ -40,7 +42,10 @@ export const IpcChannels = {
   secretsStatus: 'secrets:status',
   secretsTest: 'secrets:test',
   secretsDelete: 'secrets:delete',
-  watchBudgets: 'watch:budgets'
+  watchBudgets: 'watch:budgets',
+  watchApprovals: 'watch:approvals',
+  watchApprove: 'watch:approve',
+  watchHumanQueue: 'watch:human-queue'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -182,7 +187,7 @@ export interface EphApi {
     test: (name: string) => Promise<SecretTest>
     delete: (name: string) => Promise<SecretStatus>
   }
-  /** The Watch (SDD §5 `watch:`). Budgets land in M3.2; gates/breaker follow. */
+  /** The Watch (SDD §5 `watch:`). Breaker state follows in M3.5. */
   watch: {
     /**
      * Per-agent spend, session and cumulative side by side (ADR-0011). Every
@@ -190,6 +195,27 @@ export interface EphApi {
      * in-memory counter for a restart to zero (invariant §11).
      */
     budgets: () => Promise<readonly AgentSpend[]>
+    /** Gates waiting on the Architect, oldest first (UC-08). */
+    approvals: () => Promise<readonly OpenGate[]>
+    /**
+     * Records a verdict. Resolves with the refusal reason when the verdict
+     * could not be taken — a voice approval that was never repeated back is
+     * refused without denying the gate (NFR-9).
+     */
+    approve: (
+      gateId: string,
+      verdict: GateVerdict,
+      context?: { channel?: SourceChannel; repeatBackConfirmed?: boolean }
+    ) => Promise<{ readonly ok: boolean; readonly reason: string | null }>
+    /**
+     * Mail Hermes diverted to the Architect's own queue at `agora/human/`
+     * (FR-3.7): `to:"human"` before Artemis exists, plus hop-cap diversions.
+     * It accumulated with no reader from M2 until this surface; the approvals
+     * post is where the Architect actually looks.
+     */
+    humanQueue: () => Promise<readonly Message[]>
+    /** Subscribe to "a gate opened or closed"; the view then re-reads. */
+    onGateChange: (cb: () => void) => () => void
   }
   pty: {
     /**

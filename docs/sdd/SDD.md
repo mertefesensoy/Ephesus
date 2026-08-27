@@ -246,7 +246,7 @@ agora:    registry() tasks() board() log(afterSeq, limit) memory(id)
 hermes:   threads(filter) compose(msgDraft)          // human-authored mail goes via Artemis
 odeon:    briefs() decks() memos(queue) verdict(memoId, v) convene(meeting) meetingSay(text)
 herald:   pttStart() pttStop() speakBrief(id) config()
-watch:    approvals() approve(gateId, v) budgets() waterfall(id) breakerState()
+watch:    approvals() approve(gateId, v) budgets() humanQueue() waterfall(id) breakerState()
 harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
 profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
 org:      chart() metrics(agentId) reviews() applyReview(changeSet)
