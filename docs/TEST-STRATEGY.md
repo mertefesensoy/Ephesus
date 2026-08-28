@@ -101,6 +101,15 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   enables; records produced under autonomy carry the mode tag; a rung-3 breaker stop
   on gym/stoa work auto-reverts to `directed` and lands on the ledger; no agent-side
   path (Hermes message, hook, proposal) can change the mode.
+- **S-RECURSE** (SRS 6.10, FR-9.5/FR-10.5): the Recursive Improvement profile over a
+  fixture clone of the company's own repo and a scripted `gh` seam — activation in
+  `directed` refused naming the missing §6.9 evidence; an approved fixture proposal
+  yields an `agent/` branch and a PR under the company identity whose body cites its
+  GYM and RB ids; commits carry company authorship + the agent co-author trailer and
+  no Architect or vendor identity; no code path can merge or push `main` (asserted by
+  API surface, the S-SECRETS pattern); the researcher role's spawn plan carries no
+  GitHub grant while the improver's does; revoking the broker token fails delivery
+  visibly and nothing else.
 
 ## 4. E2E specifics (Electron + Playwright)
 

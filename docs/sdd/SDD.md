@@ -453,6 +453,25 @@ revert to `directed`: always one ungated architect action; breaker rung 3 on gym
 work reverts automatically and lands on the ledger (FR-14.5)
 ```
 
+### 7.8 Recursive Improvement delivery (UC-16, ADR-0019/0020)
+```
+architect activates the Recursive Improvement profile
+  ─► profiles.ts checks company mode — `directed` ⇒ refusal naming §6.9's missing
+       evidence; `improving` ⇒ triggers armed (deactivation / mode revert disarms)
+architect presents a repo URL on the Stoa panel ─► watchlist entry (FR-13.1 unchanged)
+stoa cadence ─► brief (§7.7) ─► Artemis ranks ─► proposal filed ─► architect verdict (§7.6)
+verdict approve
+  ─► improver takes the task in its own worktree, branch agent/<name>/<topic> (git.ts)
+  ─► commits authored as the COMPANY identity + per-agent co-author trailer
+       (token: broker env-grant to the improver role only — ADR-0010, NFR-17)
+  ─► PR opened via harbor/github.ts under the company account, body citing
+       GYM-<NNN> + RB-<NNN> ─► log.jsonl (remote-tagged) ─► architect's queue
+architect merges ─► ledger row `landed` ─► metric check booked (§7.6 unchanged)
+architect rejects ─► revision on the SAME branch (ENGINEERING-STANDARDS §7)
+Mechanically absent: any agent merge path — the account holds write, main is
+PR-and-review protected, so the host enforces what the harness promises.
+```
+
 ---
 
 ## 8. The Herald — component design (ADR-0007)
@@ -498,7 +517,9 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   from the gym ledger + log only; the scheduler consults the mode before firing
   the Stoa/Gymnasium cadences; a rung-3 breaker stop attributable to gym/stoa
   work reverts the mode (FR-14.5). Researcher spawns get read-only checkouts and
-  no secret grants — enforced here, not by convention (NFR-17).
+  no secret grants — enforced here, not by convention (NFR-17). The Recursive
+  Improvement profile (FR-9.5) activates only in `improving`, and the company
+  GitHub token (FR-10.5) is a broker grant declared only by improver roles.
 
 ---
 

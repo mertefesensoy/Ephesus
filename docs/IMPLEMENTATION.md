@@ -134,13 +134,19 @@ scripted; a full day driven by voice without touching the keyboard for status.
 Profile schema + loader + activation UI. **Skeleton Crew** built-in profile (health
 watcher, CI babysitter, dependency updates, incident playbooks + severity
 escalation). **Front Office** built-in profile (issue/PR triage, reply drafting with
-autonomy levels, docs/changelog sync, release-prep checklist). GitHub ingestion via
+autonomy levels, docs/changelog sync, release-prep checklist). **Recursive
+Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa and modes):
+researcher + improver roles, mode-gated activation, delivery as PRs under the
+company identity (FR-10.5, ADR-0020 — machine account, broker-held token, the
+attribution carve-out in `check-attribution.cjs` lands here). GitHub ingestion via
 `gh`. Chat bridge (remote conversation, briefs, approvals; `remote` tagging).
 Shareable hires/profiles (export/import, human-confirmed). Packaging: signed builds
 for macOS/Windows/Linux, one-click update check.
 
 **Exit:** **The one-hour company test (SRS §6.1) passes on a real repo.** S-PROFILE
-passes; a real overnight run produces a truthful morning brief on the phone. The
+and S-RECURSE pass; the recursive test (SRS §6.10) lands one real chain — URL on
+the Stoa panel → brief → approved proposal → company-identity PR → Architect
+merge; a real overnight run produces a truthful morning brief on the phone. The
 Gymnasium and Stoa cadence triggers are live under company-mode governance
 (ADR-0018 — they fire autonomously only in `improving`, which the proof gate
 §6.9 must first unlock), and the two-week gymnasium acceptance test
@@ -172,6 +178,8 @@ bridges · multi-machine crews.
 | R12 | Prompt injection / hostile content in a watched source steers the researcher | Medium | High | ADR-0017 R2: content is data; read-only, no-secrets researcher spawns enforced by the Watch (NFR-17); adversarial S-STOA plants an injection per run; nothing from a source lands ungated (FR-13.4) |
 | R13 | License/IP contamination from studied repositories | Low | High | Patterns not code (FR-13.5); license recorded at registration, `unverified` refuses pattern intake; verbatim/derived intake demands memo + attribution (ENGINEERING-STANDARDS §5) |
 | R14 | Autonomy enabled before the loop is trustworthy, or left on through a failure | Low | High | ADR-0018: proof gate refuses the first enable until §6.9 evidence exists; mode is architect-only, always visible, mode-tagged records; breaker rung 3 auto-reverts (FR-14.5) |
+| R15 | Recursive Improvement floods the Architect with PRs, or review decays into rubber-stamping | Medium | Medium | One scoped change per proposal (FR-12.2) bounds PR size; Artemis ranks before anything is implemented; the gym budget slice (FR-12.5) bounds volume; PR throughput + time-in-review become org-panel health metrics reviewed in retros (UC-12) |
+| R16 | Company GitHub credential leaks or the account is misused | Low | High | ADR-0020: fine-grained PAT, broker write-only, env-grant to improver roles only; account holds write not admin; `main` PR-and-review protected so the host blocks merges; every remote act logged; one broker action revokes |
 
 ## Dependency order (what blocks what)
 

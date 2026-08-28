@@ -37,14 +37,23 @@ ephesus/docs/                                             # this suite; ADRs app
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
   `chore:`). Subject ≤ 72 chars, imperative. An agent author identifies itself in the
   commit trailer (`Agent: mason`), never impersonates the Architect.
-- **Attribution:** the Architect is the git author *and* committer of every commit. No
-  commit carries a Claude/Anthropic identity — not in `author`, not in `committer`, not
-  in a `Co-Authored-By:` or `Claude-Session:` trailer. GitHub resolves
-  `noreply@anthropic.com` to a real account and files the commit on this repository's
-  contributor graph, where a history rewrite unlinks the commit but does not withdraw
-  the credit. Enforced by `scripts/check-attribution.cjs`: locally via `.githooks/`
-  (armed by `postinstall`), and over the whole history by the CI attribution job.
-  Agent identity belongs in the `Agent:` trailer above, which names no account.
+- **Attribution:** the Architect is the git author *and* committer of every commit
+  the Architect makes, and no commit anywhere carries a Claude/Anthropic identity —
+  not in `author`, not in `committer`, not in a `Co-Authored-By:` or
+  `Claude-Session:` trailer. GitHub resolves `noreply@anthropic.com` to a real
+  account and files the commit on this repository's contributor graph, where a
+  history rewrite unlinks the commit but does not withdraw the credit. Enforced by
+  `scripts/check-attribution.cjs`: locally via `.githooks/` (armed by
+  `postinstall`), and over the whole history by the CI attribution job. Agent
+  identity belongs in the `Agent:` trailer above, which names no account.
+  **Run-phase exception (ADR-0020, GYM-004):** commits the running company makes on
+  `agent/*` branches are authored and committed as the **company machine account**,
+  with the acting agent co-authoring itself
+  (`Co-authored-by: <Name> (agent.<id>) <machine-account+agent.<id>@users.noreply.github.com>`).
+  The company account never authors on `main` except through an Architect-merged
+  PR, never impersonates the Architect, and the no-vendor-identity rule applies to
+  it unchanged. The attribution check gains exactly this carve-out when FR-10.5
+  lands (M7) — until then the original rule is the enforced one.
 - **PRs carry evidence.** Every PR shows its change working: screenshots for UI, a
   terminal capture for behavior, test output for logic. "No visible surface" changes
   show the passing test that proves them. (Rule inherited from upstream's

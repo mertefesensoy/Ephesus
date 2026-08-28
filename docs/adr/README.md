@@ -24,3 +24,5 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0016](./ADR-0016-mempalace-archival.md) | MemPalace as the Library's recall index and the company archive | accepted |
 | [ADR-0017](./ADR-0017-stoa-research-department.md) | The Stoa: a research department that feeds the Gymnasium external evidence | accepted |
 | [ADR-0018](./ADR-0018-company-modes-proof-gate.md) | Company modes: standing self-improvement is earned through a proof gate | accepted |
+| [ADR-0019](./ADR-0019-recursive-improvement-profile.md) | Recursive Improvement: the self-improvement mission as a third built-in profile | accepted |
+| [ADR-0020](./ADR-0020-company-github-identity.md) | A company GitHub identity: agents co-author as themselves, never as the Architect | accepted |

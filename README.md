@@ -60,11 +60,15 @@ What makes it different from its inspiration:
    milestone produces a short slide review; Artemis delivers spoken standup briefings; and
    you can convene a live meeting with any subset of agents. See
    [`docs/sdd/SDD.md §7`](./docs/sdd/SDD.md) (the Odeon).
-2. **Mission profiles.** Two first-class, pre-wired company configurations:
+2. **Mission profiles.** Three first-class, pre-wired company configurations:
    - **Skeleton Crew** — a standing crew per app you own: health watching, CI
      babysitting, dependency updates, incident response with escalation to you.
    - **Front Office** — the outward face of a project: issue/PR triage, drafted replies,
      docs and changelog upkeep, release preparation.
+   - **Recursive Improvement** — the self-improvement mission as a switchable crew
+     (ADR-0019): you present repositories by URL, the Stoa studies them, approved
+     proposals come back as pull requests from the company's own GitHub identity
+     (ADR-0020) — and you merge.
 3. **A voice-first chief of staff.** The Herald gives Artemis a refined, Jarvis-style
    spoken presence: wake word, barge-in, briefings on demand, approvals by voice.
 4. **A real org.** Departments, roles, hiring templates, agent performance reviews, and
