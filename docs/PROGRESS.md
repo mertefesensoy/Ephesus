@@ -2888,7 +2888,7 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       LLM-judged half — "is this applicability mapping honest?" and "does the
       prose match the file it cites?" — needs a rubric-scoring model over a
       real researcher run. The deterministic half runs in CI today.*
-- [ ] **M5b.5 Floor art intake (the purchased packs)** — drop the LimeZu
+- [x] **M5b.5 Floor art intake (the purchased packs)** — drop the LimeZu
       **Modern Interiors v41.4** and **Modern Office Revamped** 16×16 sheets
       into the gitignored tileset drop; author their `*.tiles.json` layout
       maps (validated by `src/shared/tileset.ts`); retire the interim Kenney
@@ -2900,6 +2900,33 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       stay green; tile-map validator on both packs; scene-state assertions
       unchanged (art is presentation). Risk: the sheets NEVER enter the repo
       (licence forbids redistribution of the asset itself); characters stay
+      *Evidence: the floor paints from the purchased pack —
+      `docs/demo/m5b-floor-limezu.png` is a live Electron capture showing
+      LimeZu walls, a cream/marble floor, tan paths and an indigo temple block,
+      with the required credit on the status strip: `tileset: LimeZu Modern
+      Interiors (Room Builder 16x16) — LimeZu — limezu.itch.io`. Two sheets in
+      the gitignored drop (`Room_Builder_16x16` and the office
+      `Room_Builder_Office_16x16`); the furniture sheets were extracted, found
+      to be unmapped, and DELETED rather than left for `import.meta.glob` to
+      bundle. Frame indices were measured, not guessed: candidates scored by
+      colour variance + opacity, then each rendered back from its own index and
+      tiled 3x3 to prove both the arithmetic and the seam (DECISIONS-LOG). The
+      first mapping paired cream with mint and read as a chessboard; re-mapped
+      to warm near-neighbours with indigo reserved for the temple, which is
+      §1's ≤8-colour bar honoured rather than merely claimed. Kenney staging
+      retired; ATTRIBUTION carries both LimeZu rows with the real licence terms
+      (use yes, redistribute no, credit required), an exact restore path, and
+      the do-not-use list (free tier, RPG-Maker build, and the character
+      generator that is never run — rule 3). `*.tiles.json` is now committed
+      while the sheets stay ignored, so the restore path is reproducible.
+      `test/renderer/tileset.test.ts` 36/36, including a new block that
+      validates the REAL drop when present — frame bounds, columns, integer
+      scale, sheet existence — and is inert in CI where the drop is empty.
+      Local suite 2136 passed with exactly the 9 documented Windows
+      worktree/PTY + TZ failures and no flakes.*
+      *Note for the build-state block: the interiors download is named by its
+      itch slug (`moderninteriors-win.zip`), not "v41.4" as BUILD-PROMPT's note
+      assumed — recorded in ATTRIBUTION's restore path.*
       procedural (rule 3).*
 - [ ] **M5b.6 Scenario suites + exit review** — S-STOA and S-MODE green in CI;
       E-STOA recorded; then the exit demo: **one real research cycle through

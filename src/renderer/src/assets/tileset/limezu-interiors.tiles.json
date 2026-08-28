@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "LimeZu Modern Interiors (Room Builder 16x16)",
+  "credit": "LimeZu — limezu.itch.io",
+  "sheet": "limezu-interiors-room-builder.png",
+  "tilePx": 16,
+  "columns": 76,
+  "frames": {
+    "wall": 1217,
+    "floor-a": 4180,
+    "floor-b": 4198,
+    "path": 4204,
+    "temple": 4192
+  }
+}
