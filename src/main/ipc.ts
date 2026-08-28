@@ -22,6 +22,7 @@ import {
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -62,6 +63,24 @@ const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
 /** One recall query from the Memory panel (SDD §5 `agora:recall`). */
 const odeonDeckSchema = z.object({ ref: z.string().min(1).max(256) }).strict()
+
+const gymIdOnlySchema = z.object({ id: z.string().min(1).max(32) }).strict()
+
+/**
+ * The Gymnasium verdict payload.
+ *
+ * It carries NO decider, deliberately and for the same reason `watch:approve`
+ * carries no channel: main knows with certainty that a call on the window
+ * bridge is the Architect, and giving the renderer a field to name a decider
+ * would hand an untrusted surface the one authority ADR-0015 reserves.
+ */
+const gymVerdictSchema = z
+  .object({ id: z.string().min(1).max(32), verdict: z.enum(['approved', 'rejected']) })
+  .strict()
+
+const gymMetricSchema = z
+  .object({ id: z.string().min(1).max(32), measured: z.string().max(2_000).nullable() })
+  .strict()
 
 const odeonSaySchema = z
   .object({ text: z.string().min(1).max(10_000), to: z.string().min(1).max(64).optional() })
@@ -160,6 +179,14 @@ export interface IpcDeps {
   /** The Architect's reference shelf (FR-6.4). */
   /** Every archived standup brief, newest first (FR-7.1). */
   briefs(): readonly BriefRecord[]
+  /** Every Gymnasium ledger row (R2). */
+  gymLedger(): readonly GymRowView[]
+  /** One proposal document. */
+  gymProposal(id: string): string | null
+  /** Records a verdict. The decider is always the Architect (FR-12.3). */
+  gymVerdict(id: string, verdict: 'approved' | 'rejected'): GymDecided
+  /** Records the measured outcome. */
+  gymMetricResult(id: string, measured: string | null): GymDecided
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -277,6 +304,23 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.odeonMeetingClose, (_ev, raw: unknown): MeetingClosed => {
     const { actions } = odeonCloseSchema.parse(raw)
     return deps.meetingClose(actions)
+  })
+  ipcMain.handle(IpcChannels.gymLedger, (): readonly GymRowView[] => deps.gymLedger())
+  ipcMain.handle(IpcChannels.gymProposal, (_ev, raw: unknown): string | null => {
+    const { id } = gymIdOnlySchema.parse(raw)
+    return deps.gymProposal(id)
+  })
+  ipcMain.handle(IpcChannels.gymVerdict, (_ev, raw: unknown): GymDecided => {
+    const { id, verdict } = gymVerdictSchema.parse(raw)
+    // FR-12.3 / R1, enforced HERE: the payload carries no decider, and main
+    // supplies `architect` because a call arriving on the window bridge IS
+    // the Architect. An agent has no path to this channel at all, and the
+    // renderer has no field it could use to claim to be somebody else.
+    return deps.gymVerdict(id, verdict)
+  })
+  ipcMain.handle(IpcChannels.gymMetricResult, (_ev, raw: unknown): GymDecided => {
+    const { id, measured } = gymMetricSchema.parse(raw)
+    return deps.gymMetricResult(id, measured)
   })
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())

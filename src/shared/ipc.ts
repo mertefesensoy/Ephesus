@@ -4,6 +4,7 @@ import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
+import type { GymDecided, GymRowView } from './gym-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -72,6 +73,10 @@ export const IpcChannels = {
   odeonDeck: 'odeon:deck',
   odeonComment: 'odeon:comment',
   odeonBriefs: 'odeon:briefs',
+  gymLedger: 'gym:ledger',
+  gymProposal: 'gym:proposal',
+  gymVerdict: 'gym:verdict',
+  gymMetricResult: 'gym:metric-result',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -252,6 +257,21 @@ export interface EphApi {
     verdict: (memoId: string, verdict: MemoVerdictName, notes: string) => Promise<MemoDecided>
     /** Subscribe to "the memo queue changed"; the panel then re-reads. */
     onQueue: (cb: () => void) => () => void
+  }
+  gym: {
+    /** Every ledger row, oldest first (R2 — the ledger is total). */
+    ledger: () => Promise<readonly GymRowView[]>
+    /** One proposal document, as filed. */
+    proposal: (id: string) => Promise<string | null>
+    /**
+     * The Architect's verdict (FR-12.3). ARCHITECT-ONLY, and enforced in the
+     * handler rather than here: the renderer sends no decider at all, and
+     * main supplies `architect` because it knows a call on the window bridge
+     * IS the Architect. There is no field an untrusted surface could set.
+     */
+    verdict: (id: string, verdict: 'approved' | 'rejected') => Promise<GymDecided>
+    /** Records the measured outcome; null means it could not be measured. */
+    metricResult: (id: string, measured: string | null) => Promise<GymDecided>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */

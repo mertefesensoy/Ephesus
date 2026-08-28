@@ -2436,7 +2436,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       "What was decided / Nothing." section — the layer computes and archives,
       and UC-12 keeps a human between the numbers and any action.
       **Owed to a local session:** an Org-tab screenshot for `docs/demo/`.*
-- [ ] **M5.7 Gymnasium v1** — ADR-0015, SDD §7.6, FR-12: `gymnasium.ts` —
+- [x] **M5.7 Gymnasium v1** — ADR-0015, SDD §7.6, FR-12: `gymnasium.ts` —
       proposal validation (a proposal without a falsifiable metric or a
       rollback is invalid *by construction*, rejected pre-human), ledger
       accessors (`agora/gymnasium/LEDGER.md` append-only, seeded at first run
@@ -2455,6 +2455,38 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       landed-proposal metric miss ⇒ rollback + `regressed` row, ledger rows
       append-only; S-GYM per TEST-STRATEGY §3. Risk: R1–R3 are the package —
       nothing self-approves, the ledger is total, the slice is budgeted.*
+      *Evidence: `typecheck && lint && check-invariants` green; 54 new cases
+      (`test/shared/gym.test.ts` 36, `test/main/gymnasium.test.ts` 18); full
+      suite 1829 passed / 6 skipped, only the known Windows-local failures.
+      **R1** — `GymDecider` has one inhabitant, `architect`; a table refuses a
+      verdict from `agent.artemis`, `agent.mason`, `human` and `system`, and a
+      proposer deciding their own proposal is refused separately.
+      **R2** — the ledger is total: `append` THROWS if a write would ever shrink
+      the row count, rejected rows are kept, and ids are never reused (a
+      rejected GYM-003 still yields GYM-004).
+      **R3** — proposals stop at the budget slice, so improvement can never
+      starve the missions that pay for it.
+      **Authority-widening is refused regardless of approver**: `checkWidening`
+      takes no decider argument at all (asserted by its arity), and a 7-case
+      table covers invariants, accepted ADRs, gym gating, the authority table,
+      the gate policy, global maxima and the invariants tripwire — plus the
+      case proving the check is not vacuous, and one proving it reads the
+      rollback as well as the change.
+      LIVE RUN THROUGH THE REAL APP, all three rules at once:
+      `ledger seeded from the repo: true` (FR-12.6) ·
+      `rows after a metric-less proposal: 0` (FR-12.2, refused before a human) ·
+      `rows after a widening proposal: 0` with `widening logged: true` ·
+      `filed: ["GYM-001:proposed"]` ·
+      `artemis tries to approve: {"ok":false,"reason":"only the Architect may
+      decide a Gymnasium proposal; \"agent.artemis\" may not (R1)"}` with
+      `status after her attempt: proposed` ·
+      `architect approves: {"ok":true,…}` · `lands: {"ok":true,…}` ·
+      `unmeasurable ⇒ {"ok":true,"status":"regressed"}` with
+      `rollback flagged: true` ·
+      `final ledger: ["GYM-001:regressed"]` and
+      `ledger keeps the row on disk: true`.
+      Every word an agent reads lives in `prompts/gymnasium/` (invariant §8).
+      **Owed to a local session:** a Gymnasium-tab screenshot for `docs/demo/`.*
 - [ ] **M5.8 Scenario suites + exit demos + review** — S-DECKGATE, S-MEMO,
       S-BRIEF, S-MEETING, S-GYM (TEST-STRATEGY §3) as automated suites over
       the seams M5.1–M5.7 built; then the exit demos: a `review:deck` task

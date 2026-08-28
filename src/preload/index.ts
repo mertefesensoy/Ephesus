@@ -25,6 +25,7 @@ import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -107,6 +108,14 @@ const eph: EphApi = {
       ipcRenderer.on(ODEON_QUEUE_CHANNEL, listener)
       return () => ipcRenderer.removeListener(ODEON_QUEUE_CHANNEL, listener)
     }
+  },
+  gym: {
+    ledger: () => ipcRenderer.invoke(IpcChannels.gymLedger) as Promise<readonly GymRowView[]>,
+    proposal: (id) => ipcRenderer.invoke(IpcChannels.gymProposal, { id }) as Promise<string | null>,
+    verdict: (id, verdict) =>
+      ipcRenderer.invoke(IpcChannels.gymVerdict, { id, verdict }) as Promise<GymDecided>,
+    metricResult: (id, measured) =>
+      ipcRenderer.invoke(IpcChannels.gymMetricResult, { id, measured }) as Promise<GymDecided>
   },
   org: {
     chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,

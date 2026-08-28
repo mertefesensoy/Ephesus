@@ -26,6 +26,7 @@ import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
+import { Gymnasium } from './gymnasium'
 import { OrgLayer, RETRO_EVERY_MS } from './org'
 import { orgChart as orgChartOf } from '../shared/org'
 import { emptyLedger as emptyTaskLedger } from '../shared/tasks'
@@ -89,6 +90,7 @@ let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
 let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
+let gymnasium: Gymnasium | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -430,11 +432,13 @@ interface EndpointAnswer {
  * so a body that is not JSON at all falls through to the deck parser and gets
  * the precise refusal it deserves there rather than a vaguer one here.
  */
-function filingKind(body: string): 'deck' | 'memo' | 'verdict' | 'brief' {
+function filingKind(body: string): 'deck' | 'memo' | 'verdict' | 'brief' | 'gym-proposal' {
   try {
     const raw: unknown = JSON.parse(body)
     const kind = (raw as { kind?: unknown } | null)?.kind
-    if (kind === 'memo' || kind === 'verdict' || kind === 'brief') return kind
+    if (kind === 'memo' || kind === 'verdict' || kind === 'brief' || kind === 'gym-proposal') {
+      return kind
+    }
   } catch {
     // Not JSON. The deck parser says so precisely; do not guess here.
   }
@@ -634,6 +638,42 @@ function briefIdOf(body: string): string | null {
 function totalOfSpend(agentId: string): number {
   const totals = costLedger?.spendFor(agentId, null).cumulativeTotals
   return totals === undefined ? 0 : totals.inTokens + totals.outTokens
+}
+
+/**
+ * Files a Gymnasium proposal (FR-12.2). SDD §7.6 routes it through the same
+ * endpoint as the other Odeon artifacts — one filing address, because the
+ * Gymnasium deliberately reuses the accountability machinery rather than
+ * growing a second one (ADR-0015 rejects the separate meta-agent outright).
+ */
+function fileGymProposal(message: Message): EndpointAnswer {
+  const words = promptStore
+  const gym = gymnasium
+  if (gym === null) {
+    return { ok: false, subject: 'gymnasium', body: 'the gymnasium is not available' }
+  }
+  const outcome = gym.propose(message)
+  if (words === null) {
+    return { ok: outcome.ok, subject: 'gymnasium', body: JSON.stringify(outcome) }
+  }
+  if (outcome.ok) {
+    return {
+      ok: true,
+      subject: words
+        .render(path.join('gymnasium', 'accept-subject.md'), { gymId: outcome.id })
+        .trim()
+        .slice(0, 200),
+      body: words.render(path.join('gymnasium', 'accept.md'), { gymId: outcome.id }).trim()
+    }
+  }
+  return {
+    ok: false,
+    reasons: outcome.reasons,
+    subject: words.read(path.join('gymnasium', 'refuse-subject.md')).trim().slice(0, 200),
+    body: words
+      .render(path.join('gymnasium', 'refuse.md'), { reasons: bullets(outcome.reasons) })
+      .trim()
+  }
 }
 
 /** Reasons as a markdown list. Serialization, not prose (invariant §8). */
@@ -1136,6 +1176,20 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('odeon', detail)
   })
 
+  // The Gymnasium (ADR-0015, FR-12). Its ledger seeds from the repository’s
+  // own build-phase archive, so the improvement record is continuous from the
+  // first commit rather than starting empty on the day the product ships.
+  gymnasium = new Gymnasium({
+    agoraRoot: agora.root,
+    seedFrom: path.join(appRoot, 'docs', 'gymnasium'),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    commitSoon: (subject) => agora?.commitSoon(subject),
+    onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
   scheduler.add(reflection.trigger())
   // The scheduler’s second client (SDD §7.2).
   scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
@@ -1197,6 +1251,7 @@ async function boot(): Promise<void> {
       if (kind === 'verdict') return settleFromOrchestrator(archive, message)
       if (kind === 'memo') return archiveMemo(archive, message)
       if (kind === 'brief') return archiveBrief(archive, message)
+      if (kind === 'gym-proposal') return fileGymProposal(message)
       return archiveDeck(archive, message)
     },
     library: (message) => {
@@ -1519,6 +1574,27 @@ async function boot(): Promise<void> {
           },
     knowledge: () => library?.knowledge() ?? [],
     briefs: () => odeon?.briefs() ?? [],
+    gymLedger: () =>
+      (gymnasium?.rows() ?? []).map((row) => ({
+        id: row.id,
+        title: row.title,
+        status: row.status,
+        metric: row.metric,
+        proposedAt: row.proposedAt,
+        decidedAt: row.decidedAt,
+        outcome: row.outcome
+      })),
+    gymProposal: (id) => gymnasium?.proposalDoc(id) ?? null,
+    // FR-12.3 / R1: `architect` is supplied HERE, by main, because a call on
+    // the window bridge is the Architect with certainty. The renderer never
+    // names a decider, so there is nothing for it to claim.
+    gymVerdict: (id, verdict) =>
+      gymnasium?.verdict(id, verdict, 'architect') ?? {
+        ok: false,
+        reason: 'the gymnasium is not available'
+      },
+    gymMetricResult: (id, measured) =>
+      gymnasium?.measure(id, measured) ?? { ok: false, reason: 'the gymnasium is not available' },
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {
