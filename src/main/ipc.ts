@@ -21,7 +21,7 @@ import {
   type SecretTest
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
-import type { DeckRecord } from '../shared/odeon'
+import type { DeckCommentOutcome, DeckRecord } from '../shared/odeon'
 import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
@@ -45,6 +45,10 @@ const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
 /** One recall query from the Memory panel (SDD §5 `agora:recall`). */
 const odeonDeckSchema = z.object({ ref: z.string().min(1).max(256) }).strict()
+
+const odeonCommentSchema = z
+  .object({ ref: z.string().min(1).max(256), text: z.string().min(1).max(10_000) })
+  .strict()
 
 const agoraRecallSchema = z
   .object({
@@ -111,6 +115,8 @@ export interface IpcDeps {
   decks(): readonly DeckRecord[]
   /** One deck's HTML; null when the ref names nothing in the archive. */
   deck(ref: string): string | null
+  /** Files an Architect review comment as mail to the orchestrator (UC-05). */
+  commentOnDeck(ref: string, text: string): DeckCommentOutcome
   knowledge(): readonly KnowledgeDoc[]
   /** Registers a shelf document and commits it through the single committer. */
   registerKnowledge(name: string, text: string): readonly KnowledgeDoc[]
@@ -196,6 +202,10 @@ export function registerIpc(deps: IpcDeps): void {
     // Odeon resolves only well-formed deck names inside its own directory.
     const { ref } = odeonDeckSchema.parse(raw)
     return deps.deck(ref)
+  })
+  ipcMain.handle(IpcChannels.odeonComment, (_ev, raw: unknown): DeckCommentOutcome => {
+    const { ref, text } = odeonCommentSchema.parse(raw)
+    return deps.commentOnDeck(ref, text)
   })
   ipcMain.handle(IpcChannels.agoraKnowledge, (): readonly KnowledgeDoc[] => deps.knowledge())
   ipcMain.handle(

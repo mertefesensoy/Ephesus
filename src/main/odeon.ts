@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { writeFileAtomic } from './fsx'
@@ -7,9 +8,11 @@ import {
   escapeHtml,
   parseDeckFiling,
   taskOfDeckFile,
+  type DeckCommentOutcome,
   type DeckRecord
 } from '../shared/odeon'
-import type { Message } from '../shared/message'
+import { composeMessage, makeMessageId, type Message } from '../shared/message'
+import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { Task } from '../shared/tasks'
 import type { PromptStore } from './prompts'
 
@@ -176,6 +179,62 @@ export class Odeon {
     const file = path.join(this.decksDir(), name)
     if (!fs.existsSync(file)) return null
     return fs.readFileSync(file, 'utf8')
+  }
+
+  /**
+   * Turns an Architect review comment into mail for the orchestrator
+   * (UC-05 step 4).
+   *
+   * Contract: it does NOT create a task. FR-5.2 gives the ledger to Artemis,
+   * and a harness that minted its own follow-up task would be deciding what
+   * work the company does — the one thing ADR-0005 keeps out of the harness.
+   * The comment goes to her as a `request`; what it becomes is her judgment.
+   *
+   * A comment that can reach nobody says so rather than vanishing: an
+   * Architect who typed into a company with no orchestrator has to learn it
+   * here (invariant §7).
+   */
+  comment(
+    ref: string,
+    text: string,
+    orchestratorId: string | null
+  ): DeckCommentOutcome & { readonly message?: Message } {
+    if (orchestratorId === null) {
+      return { queued: false, because: 'no orchestrator is hired to receive it' }
+    }
+    const record = this.decks().find((deck) => deck.ref === ref)
+    if (record === undefined) return { queued: false, because: `no archived deck at ${ref}` }
+
+    const vars = { ref, taskId: record.taskId, comment: text }
+    const message = composeMessage({
+      id: makeMessageId(this.now(), `cmt${randomBytes(3).toString('hex')}`),
+      conversation: `conv-deck-${record.taskId}`,
+      in_reply_to: null,
+      // The Architect wrote it, but §4.4 puts `human` in the ADDRESS domain
+      // only — `from` must be an agent id. So the Odeon relays it and signs as
+      // itself, the same reserved-identity answer M3 gave the router's bounce
+      // (which used to claim `from: <the original sender>` for a message the
+      // sender never wrote). The template says whose comment it is.
+      from: ODEON_ENDPOINT,
+      to: orchestratorId,
+      act: 'request',
+      subject: this.options.prompts
+        .render(path.join('odeon', 'deck-comment-subject.md'), vars)
+        .trim()
+        .slice(0, 200),
+      body: this.options.prompts.render(path.join('odeon', 'deck-comment.md'), vars).trim(),
+      hops: 0,
+      created_at: this.now().toISOString()
+    })
+    this.options.onLogEvent?.({
+      kind: 'deck',
+      event: 'commented',
+      taskId: record.taskId,
+      deckRef: ref,
+      to: orchestratorId,
+      msgId: message.id
+    })
+    return { queued: true, to: orchestratorId, message }
   }
 
   private refuse(message: Message, reasons: readonly string[]): FileDeckOutcome {

@@ -415,3 +415,83 @@ describe('the viewer reads the archive, and only the archive', () => {
     expect(r.odeon.read(ref)).toBeNull()
   })
 })
+
+describe('an Architect comment becomes mail for the orchestrator (UC-05 step 4)', () => {
+  it('addresses the comment to the orchestrator, from the human', async () => {
+    const r = await rig()
+    const taskId = await r.createTask()
+    await fileDeck(r, taskId)
+    const ref = r.odeon.decks()[0]?.ref ?? ''
+
+    const outcome = r.odeon.comment(
+      ref,
+      'The trade-offs need a paragraph on cost.',
+      'agent.artemis'
+    )
+
+    expect(outcome.queued).toBe(true)
+    // §4.4 puts `human` in the address domain only, so the Odeon relays and
+    // signs as itself rather than forging a `from` the Architect never had.
+    expect(outcome.message).toMatchObject({
+      from: ODEON_ENDPOINT,
+      to: 'agent.artemis',
+      act: 'request'
+    })
+    expect(outcome.message?.body).toContain('The Architect')
+    expect(outcome.message?.body).toContain('The trade-offs need a paragraph on cost.')
+    expect(outcome.message?.body).toContain(ref)
+  })
+
+  it('creates NO task itself — the ledger belongs to the orchestrator (FR-5.2)', async () => {
+    const r = await rig()
+    const taskId = await r.createTask()
+    await fileDeck(r, taskId)
+    const before = r.agora.tasks().tasks.length
+
+    r.odeon.comment(r.odeon.decks()[0]?.ref ?? '', 'add a cost paragraph', 'agent.artemis')
+
+    expect(r.agora.tasks().tasks).toHaveLength(before)
+  })
+
+  it('says so when there is no orchestrator to receive it (invariant §7)', async () => {
+    const r = await rig()
+    const taskId = await r.createTask()
+    await fileDeck(r, taskId)
+    const outcome = r.odeon.comment(r.odeon.decks()[0]?.ref ?? '', 'anything', null)
+    expect(outcome).toMatchObject({ queued: false })
+    if (!outcome.queued) expect(outcome.because).toContain('no orchestrator')
+  })
+
+  it('refuses a comment on a deck that is not in the archive', async () => {
+    const r = await rig()
+    const outcome = r.odeon.comment(
+      'odeon/decks/t-nope-2026-01-01T00-00-00-000Z.html',
+      'x',
+      'agent.artemis'
+    )
+    expect(outcome.queued).toBe(false)
+  })
+
+  it('records the comment in the book of record (NFR-13)', async () => {
+    const r = await rig()
+    const taskId = await r.createTask()
+    await fileDeck(r, taskId)
+    r.odeon.comment(r.odeon.decks()[0]?.ref ?? '', 'add a cost paragraph', 'agent.artemis')
+    expect(r.logs.find((log) => log['event'] === 'commented')).toMatchObject({
+      kind: 'deck',
+      taskId,
+      to: 'agent.artemis'
+    })
+  })
+
+  it('renders its words from prompts/, never from code (invariant §8)', async () => {
+    const r = await rig()
+    const taskId = await r.createTask()
+    await fileDeck(r, taskId)
+    const outcome = r.odeon.comment(r.odeon.decks()[0]?.ref ?? '', 'x', 'agent.artemis')
+    // The instruction the orchestrator reads comes from the template file.
+    const template = fs.readFileSync('prompts/odeon/deck-comment.md', 'utf8')
+    expect(template).toContain('do not invent a task')
+    expect(outcome.message?.body).toContain('do not invent a task')
+  })
+})

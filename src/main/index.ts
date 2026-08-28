@@ -980,6 +980,14 @@ async function boot(): Promise<void> {
           },
     knowledge: () => library?.knowledge() ?? [],
     decks: () => odeon?.decks() ?? [],
+    commentOnDeck: (ref, text) => {
+      const outcome = odeon?.comment(ref, text, agora?.registry().orchestratorId ?? null) ?? {
+        queued: false as const,
+        because: 'the odeon is not available'
+      }
+      if (outcome.queued && outcome.message) hermes?.deliverFromHarness(outcome.message)
+      return outcome.queued ? { queued: true, to: outcome.to } : outcome
+    },
     deck: (ref) => odeon?.read(ref) ?? null,
     registerKnowledge: (name, text) => {
       if (!library) throw new Error('knowledge: the Library is not available')

@@ -23,7 +23,7 @@ import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
-import type { DeckRecord } from '../shared/odeon'
+import type { DeckCommentOutcome, DeckRecord } from '../shared/odeon'
 import type { RecallResponse } from '../shared/recall'
 import type { Registry } from '../shared/registry'
 import type { SecretStatus, SecretTest } from '../shared/secrets'
@@ -65,7 +65,9 @@ const eph: EphApi = {
   },
   odeon: {
     decks: () => ipcRenderer.invoke(IpcChannels.odeonDecks) as Promise<readonly DeckRecord[]>,
-    deck: (ref) => ipcRenderer.invoke(IpcChannels.odeonDeck, { ref }) as Promise<string | null>
+    deck: (ref) => ipcRenderer.invoke(IpcChannels.odeonDeck, { ref }) as Promise<string | null>,
+    comment: (ref, text) =>
+      ipcRenderer.invoke(IpcChannels.odeonComment, { ref, text }) as Promise<DeckCommentOutcome>
   },
   agora: {
     registry: () => ipcRenderer.invoke(IpcChannels.agoraRegistry) as Promise<Registry>,

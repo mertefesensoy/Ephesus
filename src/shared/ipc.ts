@@ -3,7 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
-import type { DeckRecord } from './odeon'
+import type { DeckCommentOutcome, DeckRecord } from './odeon'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
@@ -51,6 +51,7 @@ export const IpcChannels = {
   // DECISIONS-LOG with SDD §5 updated to name it.
   odeonDecks: 'odeon:decks',
   odeonDeck: 'odeon:deck',
+  odeonComment: 'odeon:comment',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
   // there is deliberately no `secrets:get`, and the API-surface test in
   // test/main/secrets.test.ts fails if a fifth channel is ever added here —
@@ -183,6 +184,13 @@ export interface EphApi {
     decks: () => Promise<readonly DeckRecord[]>
     /** One deck's HTML, for the in-app viewer. Null when the ref is foreign. */
     deck: (ref: string) => Promise<string | null>
+    /**
+     * A review comment on an archived deck (UC-05 step 4). It goes to the
+     * orchestrator as mail, NOT to the ledger: FR-5.2 gives her the ledger, and
+     * SDD §5 routes human-authored mail through her. She decides what task the
+     * comment implies.
+     */
+    comment: (ref: string, text: string) => Promise<DeckCommentOutcome>
   }
   agora: {
     /** The roster (SDD §4.1). */

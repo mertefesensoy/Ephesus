@@ -26,6 +26,15 @@ export const ODEON_SCHEMA_VERSION = 1
  * One archived deck, as the viewer lists them. Lives here rather than beside
  * the archive because the renderer needs the type and may not import main.
  */
+/**
+ * What filing a review comment did. A comment that reached nobody must say so:
+ * an Architect who typed a comment into a company with no orchestrator has to
+ * learn that here, not discover it missing later (invariant §7).
+ */
+export type DeckCommentOutcome =
+  | { readonly queued: true; readonly to: string }
+  | { readonly queued: false; readonly because: string }
+
 export interface DeckRecord {
   readonly ref: string
   readonly taskId: string
