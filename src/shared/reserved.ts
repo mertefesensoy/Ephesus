@@ -36,10 +36,20 @@ export const LEDGER_ENDPOINT = 'agent.ledger'
  */
 export const LIBRARY_ENDPOINT = 'agent.library'
 
+/**
+ * The closing-time endpoint (GYM-003). At an orderly quit the harness mails
+ * every live agent a `request` from this address — park WIP, append state to
+ * `memory.md`, acknowledge — and the workers' replies route back here as an
+ * endpoint hand-off, exactly the standing rule the Architect ratified at the
+ * M3 close for harness-owned correspondents. Never spawned, never a mailbox.
+ */
+export const CLOSING_ENDPOINT = 'agent.closing'
+
 export const RESERVED_AGENT_IDS: readonly string[] = [
   HERMES_SENDER,
   LEDGER_ENDPOINT,
-  LIBRARY_ENDPOINT
+  LIBRARY_ENDPOINT,
+  CLOSING_ENDPOINT
 ]
 
 /** Contract: whether this id belongs to the harness rather than to a hire. */

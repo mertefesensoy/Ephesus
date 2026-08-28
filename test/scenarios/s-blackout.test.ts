@@ -80,6 +80,14 @@ async function restartOver(home: string): Promise<Company> {
       steerText: () => ''
     }),
     breakerActs: [],
+    // The restarted half never closes the floor; a real protocol over the
+    // rebuilt rails is the honest stand-in (nothing calls begin() here).
+    closing: new (await import('../../src/main/closing')).ClosingTime({
+      liveAgents: () => hermes.knownAgents(),
+      deliver: (message) => hermes.deliverFromHarness(message),
+      render: () => '',
+      onLogEvent: () => {}
+    }),
     // A blackout scenario asserts what survived on disk in the *data plane*;
     // the cost plane's own restart property is S-LEDGER's. Honest stand-ins.
     ledgerStore: new MemoryLedgerStore(),

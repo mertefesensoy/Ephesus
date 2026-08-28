@@ -28,6 +28,7 @@ import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
+import { ClosingTime } from './closing'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
 import { initHome } from './config'
@@ -82,6 +83,9 @@ const scheduler = new Scheduler({
     )
 })
 let hermes: Hermes | null = null
+let closingTime: ClosingTime | null = null
+/** Set once the quit path has offered (or skipped) closing time. */
+let closingOffered = false
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
@@ -638,9 +642,29 @@ async function boot(): Promise<void> {
   scheduler.add(reflection.trigger())
   scheduler.start()
 
+  // Closing time (GYM-003): constructed before Hermes so the endpoint below can
+  // hand acknowledgments to it. It only mails, watches and reports — the quit
+  // path in `window-all-closed` decides whether to run it.
+  closingTime = new ClosingTime({
+    liveAgents: () =>
+      agentManager
+        ?.list()
+        .filter((card) => card.lifecycle === 'running')
+        .map((card) => card.agentId) ?? [],
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    render: (kind, vars) =>
+      prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
+    closing: (message) => closingTime?.noteReply(message) ?? false,
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
     library: (message) => {
       if (!reflection) {
@@ -985,9 +1009,63 @@ async function boot(): Promise<void> {
   else reportDegradation('artemis', 'no engine adapter registered; not hired')
 }
 
+/**
+ * Closing time at the quit path (GYM-003) — offered, never forced. With live
+ * agents on the floor the Architect chooses: let them park their work and
+ * acknowledge (bounded by the protocol's hard deadline), or quit now — one
+ * click, ungated, today's behavior. The dialog copy is UI chrome, not an LLM
+ * prompt surface, so it may live here (invariant §8 is about LLM-facing prose).
+ */
+async function offerClosingTime(): Promise<void> {
+  if (closingOffered) return
+  closingOffered = true
+  const closing = closingTime
+  if (!closing || closing.inProgress()) return
+  const live =
+    agentManager
+      ?.list()
+      .filter((card) => card.lifecycle === 'running')
+      .map((card) => card.agentId) ?? []
+  if (live.length === 0) return
+
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Ephesus',
+    message: `${String(live.length)} agent(s) are still working.`,
+    detail:
+      'Closing time asks each agent to park its work and write down where it ' +
+      'stopped before the floor shuts down. Quit now skips that.',
+    buttons: ['Closing time', 'Quit now'],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (choice !== 0) return
+
+  try {
+    const report = await closing.begin()
+    if (report.missing.length > 0) {
+      reportDegradation(
+        'shutdown',
+        `closing time: no acknowledgment from ${report.missing.join(', ')} by the deadline`
+      )
+    }
+  } catch (err) {
+    reportDegradation(
+      'shutdown',
+      `closing time failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
+
 app.on('window-all-closed', () => {
   // Unwind spawns before the ptys die, so every settings file the harness wrote
-  // into a repo is restored (ADR-0009) rather than left behind.
+  // into a repo is restored (ADR-0009) rather than left behind — and, first,
+  // closing time (GYM-003): the one moment agents can still write down where
+  // they stopped is before anything below runs.
+  void offerClosingTime().then(() => teardown())
+})
+
+function teardown(): void {
   void agentManager
     ?.shutdown()
     .catch((err: unknown) => console.warn(`agents: shutdown failed: ${String(err)}`))
@@ -1011,4 +1089,4 @@ app.on('window-all-closed', () => {
     db?.close()
     if (process.platform !== 'darwin') app.quit()
   }
-})
+}

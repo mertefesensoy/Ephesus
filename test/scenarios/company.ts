@@ -11,6 +11,7 @@ import {
 } from '../../src/shared/message'
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
+import { ClosingTime } from '../../src/main/closing'
 import { LedgerEndpoint } from '../../src/main/ledger'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
@@ -54,6 +55,8 @@ export interface CompanyOptions {
    * on. Defaults to `native`, matching `index.ts`'s fallback.
    */
   readonly hookGrade?: string
+  /** Closing time's hard deadline (GYM-003). Scenarios keep it short. */
+  readonly closingDeadlineMs?: number
 }
 
 export interface Company {
@@ -72,6 +75,8 @@ export interface Company {
   readonly breaker: Breaker
   /** What each rung actually did, in order — S-BREAKER reads this. */
   readonly breakerActs: readonly string[]
+  /** Closing time (GYM-003) — the SHIPPED protocol, wired to this company. */
+  readonly closing: ClosingTime
   /** The durable cost plane, so a restarted company can be given the same one. */
   readonly ledgerStore: LedgerStore
   /** The durable cost ledger (ADR-0011). */
@@ -256,9 +261,14 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     }
   })
 
+  // Closing time (GYM-003): the SHIPPED protocol, handed acks by the endpoint
+  // below exactly as `index.ts` hands them. Constructed first because Hermes's
+  // options close over it.
+  let closingRef: ClosingTime | null = null
   const hermes = new Hermes({
     agora,
     prompts,
+    closing: (message) => closingRef?.noteReply(message) ?? false,
     ...(options.hermesFaults ? { faults: options.hermesFaults } : {}),
     ...(options.blockCap === undefined ? {} : { blockCap: options.blockCap }),
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
@@ -290,6 +300,19 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     onDegraded: () => {}
   })
   const budgetedAgents: BudgetedAgent[] = []
+
+  const closing = new ClosingTime({
+    liveAgents: () => hermes.knownAgents(),
+    deliver: (message) => hermes.deliverFromHarness(message),
+    render: (kind, vars) =>
+      prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
+    },
+    ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs })
+  })
+  closingRef = closing
 
   const hookEvents: HookEventRecord[] = []
   const hookServer = new HookServer({
@@ -340,6 +363,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     chokePoints,
     breaker,
     breakerActs,
+    closing,
     ledgerStore,
     costs,
 

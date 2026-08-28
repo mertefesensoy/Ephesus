@@ -227,7 +227,8 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, error }`. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
+gym, shutdown, error }`. `shutdown` carries closing time (GYM-003):
+begin / ack / complete, with the shortfall named. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
 briefing compiler, metrics, and forensics consume only this file + git history.
@@ -513,6 +514,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | Voice provider down | failover §7.4; both down → text-only banner, zero feature loss outside audio (FR-8.6) |
 | Recall index corrupt | delete + rebuild from markdown (derived state, §2) |
 | Schema drift (hooks/profile) | validate, warn visibly, degrade per FR-2.3 / refuse activation with diff |
+| Orderly quit with live agents (GYM-003, `closing.ts`) | Closing time is *offered*, never forced: on accept, every live agent gets a `request` from `agent.closing` (park WIP, append state to `memory.md`, acknowledge); acks route back as an endpoint hand-off; teardown proceeds when all ack or at the hard deadline, with every silent agent named in the report and `log.jsonl` (`kind: shutdown`). "Quit now" and an empty floor skip straight to teardown — today's path, one click |
 
 ---
 

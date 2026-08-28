@@ -1,4 +1,4 @@
-import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from './reserved'
+import { CLOSING_ENDPOINT, LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -128,6 +128,20 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
       }
     }
     return { kind: 'endpoint', endpoint: LIBRARY_ENDPOINT }
+  }
+
+  if (message.to === CLOSING_ENDPOINT) {
+    // GYM-003. Any agent may answer closing time — the request went to all of
+    // them — but only with a reply-shaped act: an ACK informs, it never asks.
+    // Whether a closing is actually in progress is state, not transport; the
+    // handler bounces an out-of-season ACK with a reason (FR-3.4).
+    if (message.act !== 'inform' && message.act !== 'done') {
+      return {
+        kind: 'bounce',
+        reason: `the closing endpoint takes "inform" or "done" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: CLOSING_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

@@ -90,6 +90,12 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   registration through a non-architect path is refused; a `license: "unverified"`
   source allows study but refuses pattern intake; the researcher spawn plan carries
   no secret grants and a read-only checkout.
+- **S-CLOSING** (GYM-003): closing time over real rails — requests land in every
+  live inbox; real fake-engine processes append `memory.md` and acknowledge
+  through their outboxes; all-ack resolves the protocol with the exchange in
+  `log.jsonl` (`kind: shutdown`); a silent agent is named at the hard deadline;
+  an ack with no closing in flight bounces ("no closing time is in progress");
+  reentry while in flight is refused.
 - **S-MODE** (SRS 6.9, FR-14): enabling `improving` with proof evidence missing is
   refused with the missing items listed; a fixture ledger meeting the §6.9 gate
   enables; records produced under autonomy carry the mode tag; a rung-3 breaker stop

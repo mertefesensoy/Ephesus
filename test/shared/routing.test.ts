@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../../src/shared/reserved'
+import { CLOSING_ENDPOINT, LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../../src/shared/reserved'
 import {
   BROADCAST,
   HUMAN,
@@ -291,5 +291,32 @@ describe('the library endpoint (ADR-0006 layer 3)', () => {
     )
     expect(route.kind).toBe('bounce')
     if (route.kind === 'bounce') expect(route.reason).toContain('library endpoint takes')
+  })
+})
+
+describe('the closing endpoint (GYM-003)', () => {
+  it('takes an inform from any agent — the request went to all of them', () => {
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: CLOSING_ENDPOINT, act: 'inform' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: CLOSING_ENDPOINT })
+  })
+
+  it('takes a done — the other reply-shaped act', () => {
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: CLOSING_ENDPOINT, act: 'done' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route.kind).toBe('endpoint')
+  })
+
+  it('bounces an act that asks — an ACK informs, it never requests', () => {
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: CLOSING_ENDPOINT, act: 'request' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route.kind).toBe('bounce')
+    if (route.kind === 'bounce') expect(route.reason).toContain('closing endpoint takes')
   })
 })
