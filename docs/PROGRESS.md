@@ -2658,10 +2658,12 @@ The Odeon endpoint dispatch was extracted to `src/main/odeon-endpoint.ts` so
 applied before it could bite a second time.
 
 **Recorded, not fixed (for the Architect):**
-- `src/shared/breaker.ts` contains two **literal NUL bytes** (a span key
-  separator written raw rather than escaped), so git classifies a Watch-critical
-  file as binary and `git diff` shows only `Bin … bytes`. Pre-existing before
-  M5; the fix is a one-character-class change with identical semantics.
+- ~~`src/shared/breaker.ts` contains two **literal NUL bytes**~~ — **FIXED**
+  after the review, on `fix/breaker-nul-bytes`. The span key separator was a raw
+  NUL in the source, so git classified a Watch-critical file as binary and
+  `git diff` showed only `Bin … bytes`. Now written as `\u0000` escapes: the
+  separator is the same character at runtime, the 82 breaker cases pass
+  untouched, and the file diffs as text again.
 - Four screenshots are owed to a local session for `docs/demo/`: the Decks,
   Memos, Briefs, Odeon, Org and Gymnasium tabs. Every one of those surfaces is
   asserted at the module boundary and exercised live through its IPC, but none
