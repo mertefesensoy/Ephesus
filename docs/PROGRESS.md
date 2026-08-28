@@ -2234,7 +2234,10 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `"act":"request","subject":"review comment on t-evidence-52b"}` ·
       `tasks after the comment: 1 (unchanged: the ledger is hers)` — UC-05 step 4
       routes the comment to the orchestrator and never mints a task itself.
-      **Owed to a local session:** a Decks-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-decks-tab.png](demo/m5-decks-tab.png) — the archive listed,
+      a deck selected, and the comment box that routes to the orchestrator. The
+      deck itself is exported at [m5-deck-artifact.html](demo/m5-deck-artifact.html),
+      because `capturePage()` cannot composite the sandboxed viewer frame.*
 - [x] **M5.3 Memo policy engine + queues + verdict routing** — FR-7.3,
       §7.3, S-MEMO: policy triggers (new dependency, public API/schema
       change, security posture, spend) enforced at the existing gate layer —
@@ -2298,7 +2301,9 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `gate released: settled` · `second verdict refused: … already carries a
       verdict`. **FR-5.5’s countersignature is recorded on the delegated verdict,
       written by the harness rather than claimed by the decider.**
-      **Owed to a local session:** a Memos-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-memos-tab.png](demo/m5-memos-tab.png) — one memo awaiting a
+      verdict with its body rendered and the three verdict buttons, and one already
+      decided, shown as "approved by architect".*
 - [x] **M5.4 Briefing compiler + Briefs tab** — FR-7.1, §7.2, S-BRIEF: the
       compiler assembles *facts* from Agora data only — ledger deltas, log
       events, budget deltas, open gates/memos since the last brief — each
@@ -2347,7 +2352,9 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       the refusal was terminal and the retry impossible. Fixed by moving the
       rule out of the wiring into `BriefingJob.narrated(briefId, accepted)`,
       with two regression tests named after the bug.
-      **Owed to a local session:** a Briefs-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-briefs-tab.png](demo/m5-briefs-tab.png) — an archived brief
+      with every sentence carrying its refs inline and the Source-refs appendix
+      beneath, which is S-BRIEF made visible.*
 - [x] **M5.5 Meeting driver + the Odeon room** — FR-7.4, UC-07, S-MEETING:
       convene (attendees + agenda line); Artemis chairs; turn order enforced
       by the driver — attendees receive the floor via Hermes `query` one at a
@@ -2394,7 +2401,10 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `minutes have the transcript: true` · `minutes have the action item: true` ·
       **`actions went to the scribe, not to tasks.json: 0 task(s); 1 message(s)
       to the orchestrator`** — FR-4.2’s single scribe intact.
-      **Owed to a local session:** an Odeon-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-odeon-meeting.png](demo/m5-odeon-meeting.png) — a live
+      meeting with the floor at `agent.scribe`, and **"Said early — waiting for the
+      floor (1)"** showing `agent.tess`’s held reply: the claim that an out-of-turn
+      answer is held rather than lost, on screen.*
 - [x] **M5.6 Org layer v1 + the retro report** — FR-11.5 (v1 slice): the org
       chart (from the registry — Artemis at the temple, workers by role);
       hire templates as versioned files (`profiles/`-adjacent per SDD §4.1
@@ -2435,7 +2445,10 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `second generate refused: true`. The archived report ends with a
       "What was decided / Nothing." section — the layer computes and archives,
       and UC-12 keeps a human between the numbers and any action.
-      **Owed to a local session:** an Org-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-org-metrics.png](demo/m5-org-metrics.png) — the chart with
+      Artemis at the temple, the metrics table (note the `—` where a rate has no
+      completed task to divide by), the findings with their log refs, and the
+      archived retro.*
 - [x] **M5.7 Gymnasium v1** — ADR-0015, SDD §7.6, FR-12: `gymnasium.ts` —
       proposal validation (a proposal without a falsifiable metric or a
       rollback is invalid *by construction*, rejected pre-human), ledger
@@ -2486,7 +2499,9 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `final ledger: ["GYM-001:regressed"]` and
       `ledger keeps the row on disk: true`.
       Every word an agent reads lives in `prompts/gymnasium/` (invariant §8).
-      **Owed to a local session:** a Gymnasium-tab screenshot for `docs/demo/`.*
+      *Screenshot: [m5-gymnasium.png](demo/m5-gymnasium.png) — GYM-001 landed and
+      GYM-002 waiting, under the standing line that nothing self-approves. Only the
+      proposed row offers APPROVE/REJECT.*
 - [x] **M5.8 Scenario suites + exit demos + review** — S-DECKGATE, S-MEMO,
       S-BRIEF, S-MEETING, S-GYM (TEST-STRATEGY §3) as automated suites over
       the seams M5.1–M5.7 built; then the exit demos: a `review:deck` task
@@ -2664,10 +2679,15 @@ applied before it could bite a second time.
   `git diff` showed only `Bin … bytes`. Now written as `\u0000` escapes: the
   separator is the same character at runtime, the 82 breaker cases pass
   untouched, and the file diffs as text again.
-- Four screenshots are owed to a local session for `docs/demo/`: the Decks,
-  Memos, Briefs, Odeon, Org and Gymnasium tabs. Every one of those surfaces is
-  asserted at the module boundary and exercised live through its IPC, but none
-  has a picture in the repo.
+- ~~Screenshots are owed for the six M5 panels~~ — **DELIVERED**, captured from
+  the running app against a seeded temp home: `m5-briefs-tab.png`,
+  `m5-decks-tab.png`, `m5-memos-tab.png`, `m5-odeon-meeting.png`,
+  `m5-org-metrics.png`, `m5-gymnasium.png`. The Decks frame is blank in its
+  capture: a `sandbox=""` iframe has an opaque origin and Chromium's
+  `capturePage()` does not composite it. The viewer itself works — proven by a
+  throwaway `allow-same-origin` run that rendered the deck in frame — and the
+  sandbox was deliberately NOT loosened for a photograph. The archived deck is
+  exported instead, at `m5-deck-artifact.html`.
 - This machine runs 10 Windows-local test failures the reference platform does
   not (real-process spawns into git worktrees, one POSIX-path fixture, and one
   TZ-dependent case that passes under `TZ=UTC`). CI on Linux is green on every
