@@ -43,6 +43,7 @@ in this harness is named for the part of the city that does the same job:
 | **The Terraces** | Terrace houses | The 2D office floor — every agent is an avatar at a desk; stations, walking, flying envelopes. Watchability as observability. |
 | **The Watch** | City walls | Safety — human gates, budgets, the circuit breaker (steer → constrain → stop), the secret broker, telemetry. |
 | **The Gymnasium** | Training grounds | The self-improvement loop — the company's **primary standing mission**: observe → propose → gate → land → measure, every step Architect-gated and recorded in a permanent ledger. |
+| **The Stoa** | Colonnade of the scholars | The research department — studies Architect-registered external repositories (the tagged watchlist) and files provenance-cited briefs that feed the Gymnasium (ADR-0017); company modes decide when it runs autonomously, behind a proof gate (ADR-0018). |
 
 ## What it is
 
@@ -93,6 +94,7 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | [`BUILD-PROMPT.md`](./BUILD-PROMPT.md) | Ready-to-paste prompt that directs a coding agent to implement this design milestone by milestone, doc-grounded and verification-gated. |
 | [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
 | [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
+| [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
 
 ## How it works (one screen)
 

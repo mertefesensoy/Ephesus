@@ -11,4 +11,4 @@ Proposal files live in `proposals/GYM-<NNN>-<slug>.md` (structure defined in
 
 | ID | Title | Status | Success metric | Proposed | Decided | Measured | Outcome |
 |---|---|---|---|---|---|---|---|
-| — | *(no proposals yet — the first will come from build-phase friction records)* | | | | | | |
+| [GYM-001](./proposals/GYM-001-stoa-build-phase-mirror.md) | Stand up the Stoa build-phase mirror (`docs/stoa/` + `/research`) | landed | ≥ 1 watchlist brief yielding ≥ 1 Architect-approved proposal by 2026-09-25 | 2026-08-28 | 2026-08-28 (Architect directive, ADR-0017) | — | — |
