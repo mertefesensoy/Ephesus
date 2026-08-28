@@ -108,6 +108,15 @@ to run on its own initiative.
 Not in the repository, by licence: `limezu-interiors-room-builder.png` and
 `limezu-office-room-builder.png` in the gitignored drop.
 
+### M5b.6 — Scenario suites in CI + the exit demo
+
+| File | What it does |
+|---|---|
+| `src/shared/mode.ts` | A verdict now counts from the ledger's Decided date OR the log's `approved` event — the seeded-archive fix. |
+| `src/renderer/src/StoaPanel.tsx` | The reading desk gains its pin field. |
+| `test/shared/mode.test.ts` | Two regressions: the seeded shape passes, the genuinely-undecided one still fails. |
+| `docs/demo/m5b-cycle-*.png`, `docs/demo/m5b-cycle-brief-RB-002.md` | The live cycle. |
+
 ---
 
 ## Implementation Approach
@@ -256,6 +265,35 @@ project and forbids redistributing the asset, and requires credit. So: sheets in
 the gitignored drop (never committed), maps committed (they are our own work and
 contain no asset data), and the credit declared *by the pack* in its own map so
 the status strip prints it and swapping packs cannot leave a stale credit behind.
+
+### M5b.6
+
+The exit demo is the package. It drives the **real** desk — filling the actual
+inputs and clicking the actual button, so the registration goes through IPC
+exactly as the Architect's would — and then puts the brief and the proposal into
+a real agent outbox, so Hermes, the Odeon endpoint, the Stoa archive and the
+Gymnasium each run their shipped path. Only the researcher's engine is stood in
+for, and the report says so.
+
+It earned its cost immediately. The router refused the first three attempts —
+a malformed message id, a missing `needs_human`, and `requires_reply: false` on
+a `propose` (ADR-0003's obligation table) — each parked in `outbox/.rejected/`
+with its reason, which is the designed behaviour observed rather than assumed.
+Then it found two real defects that every unit test had missed:
+
+- **The desk could not pin anything.** M5b.1 deferred pin-setting to M5b.2's
+  study flow; M5b.2 built a `plan()` that only *reads* the pin. Neither package
+  owned setting it, so every source registered from the desk was permanently
+  unstudiable — and the demo walked into it on its first step.
+- **The proof gate read every seeded ledger row as a gating violation.** A
+  violation is absorbing by design, so `improving` could never be enabled on any
+  company that inherited a build-phase archive. Which is every company. The unit
+  suite passed because each case synthesised the log it wanted; only the running
+  app read a real seeded ledger beside a real fresh log.
+
+Both are the seam-blindness class the M3, M4 and M5 audits each found a
+different way: two correct halves that only disagree when the running system
+puts them side by side.
 
 ---
 

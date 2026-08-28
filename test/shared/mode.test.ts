@@ -41,6 +41,11 @@ function approvals(...ids: string[]): GymLogEvent[] {
   return ids.map((gymId) => ({ event: 'approved', gymId }))
 }
 
+/** The one log event a seeded ledger still needs: which row a brief seeded. */
+function seeded_(rows: readonly { id: string }[]): GymLogEvent {
+  return { event: 'proposed', gymId: rows[1]?.id ?? '', evidence: ['RB-001'] }
+}
+
 function seeded(gymId: string, ref = 'RB-001'): GymLogEvent {
   return { event: 'proposed', gymId, evidence: [ref, 'log#12'] }
 }
@@ -170,20 +175,46 @@ describe('the proof gate itself (SRS §6.9)', () => {
     expect(gate.met).toBe(false)
   })
 
-  it('REFUSES PERMANENTLY when a proposal landed with no Architect approval', () => {
+  it('REFUSES PERMANENTLY when a proposal landed with no Architect verdict', () => {
     // The one clause that cannot be fixed by waiting: if this ever happened the
     // loop is not immature, it is broken, and more evidence must not open it.
+    // "No verdict" means neither: no `approved` event AND no Decided date.
     const { rows, events } = passingLedger()
+    const undecided = rows.map((r) => (r.id === 'GYM-002' ? { ...r, decidedAt: null } : r))
     const missingApproval = events.filter((e) => e.gymId !== 'GYM-002')
-    const gate = checkProofGate(rows, [...missingApproval, seeded('GYM-002')])
+    const gate = checkProofGate(undecided, [...missingApproval, seeded('GYM-002')])
     expect(gate.met).toBe(false)
     expect(gate.counted.gatingViolations).toHaveLength(1)
     expect(gate.missing.join(' ')).toContain('cannot be waited out')
   })
 
   it('names the violating row so the refusal can be argued with', () => {
-    const gate = checkProofGate([row('GYM-007', 'landed')], [])
+    const undecided = { ...row('GYM-007', 'landed'), decidedAt: null }
+    const gate = checkProofGate([undecided], [])
     expect(gate.counted.gatingViolations[0]).toContain('GYM-007')
+  })
+
+  it('accepts a ledger Decided date as the verdict, not only a log event', () => {
+    // Found by the M5b exit demo. A ledger seeded from the build-phase archive
+    // (FR-12.6) inherits rows the Architect DID decide — the archive records
+    // the date — while the fresh log has no events for them. Reading the log
+    // alone made every seeded row a gating violation, and a violation is
+    // absorbing, so the gate could never open on any company that inherited an
+    // archive. Which is every company.
+    const seeded = [
+      { ...row('GYM-001', 'validated'), decidedAt: '2026-08-20T00:00:00.000Z' },
+      { ...row('GYM-002', 'validated'), decidedAt: '2026-08-21T00:00:00.000Z' },
+      { ...row('GYM-003', 'regressed'), decidedAt: '2026-08-22T00:00:00.000Z' }
+    ]
+    const gate = checkProofGate(seeded, [seeded_(seeded)])
+    expect(gate.counted.gatingViolations).toEqual([])
+    expect(gate.met).toBe(true)
+  })
+
+  it('still catches a row that reached landed with NO verdict anywhere', () => {
+    const gate = checkProofGate([{ ...row('GYM-009', 'landed'), decidedAt: null }], [])
+    expect(gate.counted.gatingViolations).toHaveLength(1)
+    expect(gate.met).toBe(false)
   })
 
   it('reads the ledger and the gym log, and nothing else', () => {
