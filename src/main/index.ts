@@ -421,6 +421,10 @@ async function boot(): Promise<void> {
   chokePoints = wireGateChokePoints({
     gates,
     prompts,
+    // M5.1: the join that makes SDD §4.2's `gates` real in production. Every
+    // gate this app opens is now recorded against the work it blocks, so the
+    // `status → done` refusal finally guards a field something fills.
+    taskOf: (agentId) => ledger?.boundTaskFor(agentId) ?? null,
     onError: (detail) => reportDegradation('gates', detail)
   })
 
@@ -447,6 +451,15 @@ async function boot(): Promise<void> {
         }
       },
       avatar: (agentId, event) => avatarDirector.apply(agentId, event),
+      // ADR-0011 rung 3's owed clause: the stopped agent's task returns to the
+      // ledger as `stalled` with the breaker report, for Artemis to reassign.
+      returnTask: (agentId, report) => {
+        try {
+          ledger?.stallTaskOf(agentId, report)
+        } catch (err) {
+          reportDegradation('breaker', `could not stall the task of ${agentId}: ${String(err)}`)
+        }
+      },
       // ADR-0011 rung 2: "lower its remaining budget". The set is consulted by
       // the budget watcher's agents() below, so the constraint lifts with the
       // rung and never touches the append-only ledger itself.

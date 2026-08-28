@@ -11,6 +11,7 @@ import {
 } from '../../src/shared/message'
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
+import { LedgerEndpoint } from '../../src/main/ledger'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
@@ -57,6 +58,8 @@ export interface Company {
   readonly hookEvents: readonly HookEventRecord[]
   /** The Watch's approval queue, wired through the SHIPPED choke points. */
   readonly gates: GateManager
+  /** The task ledger endpoint — the SHIPPED one, so the M5.1 join is real. */
+  readonly tasks: LedgerEndpoint
   /** The choke-point submitters, for scenarios that drive spend directly. */
   readonly chokePoints: ReturnType<typeof wireGateChokePoints>
   /** The circuit breaker, fed by the same event plane the floor reads. */
@@ -173,10 +176,26 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     refusalReason: (because) => prompts.read(path.join('watch', `refusal-${because}.md`)).trim()
   })
 
+  // The task ledger (SDD §7.1). The rig runs the SHIPPED endpoint so the M5.1
+  // join — gate → `task.gates`, breaker rung 3 → `stalled` — is EXERCISED by
+  // the scenarios rather than described by them.
+  const tasks = new LedgerEndpoint({
+    store: agora,
+    knownAgents: () => hermes.knownAgents(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`ledger ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
   // The SHIPPED choke-point wiring, not a copy of it. The first draft of this
   // rig duplicated `index.ts` character-for-character, so S-GATE stayed green
   // with the production wiring deleted — found by review.
-  const chokePoints = wireGateChokePoints({ gates, prompts })
+  const chokePoints = wireGateChokePoints({
+    gates,
+    prompts,
+    taskOf: (agentId) => tasks.boundTaskFor(agentId)
+  })
 
   // The breaker (ADR-0011), wired to the same effects `index.ts` wires — the
   // acts are recorded rather than performed, because a scenario cannot kill a
@@ -193,6 +212,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
         breakerActs.push(`constrain-budget:${agentId}:${String(constrained)}`),
       interrupt: (agentId) => breakerActs.push(`interrupt:${agentId}`),
       stop: (agentId) => breakerActs.push(`stop:${agentId}`),
+      // Performed for real: ADR-0011 rung 3 is only observable if the task
+      // actually goes back to the ledger.
+      returnTask: (agentId, report) => {
+        const taskId = tasks.stallTaskOf(agentId, report)
+        breakerActs.push(`return-task:${agentId}:${taskId ?? 'none'}`)
+      },
       avatar: (agentId, event) =>
         breakerActs.push(
           `avatar:${agentId}:${event.kind === 'breaker' ? `rung${String(event.rung)}` : 'recover'}`
@@ -287,6 +312,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   return {
     home,
     agora,
+    tasks,
     hermes,
     hookServer,
     hookEvents,

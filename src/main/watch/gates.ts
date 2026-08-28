@@ -366,6 +366,15 @@ export function wireGateChokePoints(deps: {
   readonly prompts: PackagingRenderer
   readonly hooks?: ChokePointHooks
   readonly mail?: ChokePointMail
+  /**
+   * The ledger task this agent is bound to, so a gate is recorded against the
+   * work it blocks (SDD §4.2 `gates`). Until M5.1 every production submission
+   * carried `taskId: null`, so the field the `status → done` guard reads was
+   * only ever written by tests — the guard protected nothing in the shipped
+   * app. Optional because a harness with no ledger still gates; it just
+   * cannot attribute.
+   */
+  taskOf?(agentId: string): string | null
   /** Raised when a choke point could not file its gate (invariant §7). */
   onError?(detail: string): void
 }): {
@@ -383,6 +392,13 @@ export function wireGateChokePoints(deps: {
     }
   }
 
+  // Spread, not a nullable field: `GateSubmission.taskId` is optional and
+  // `exactOptionalPropertyTypes` refuses an explicit `undefined`.
+  const bound = (agentId: string): { taskId?: string } => {
+    const taskId = deps.taskOf?.(agentId) ?? null
+    return taskId === null ? {} : { taskId }
+  }
+
   const submitNotification = (agentId: string, payload: unknown): void =>
     guard('an engine permission prompt', () => {
       const message =
@@ -391,6 +407,7 @@ export function wireGateChokePoints(deps: {
       deps.gates.submit({
         kind: 'tool-permission',
         agentId,
+        ...bound(agentId),
         packaging: parsePackaging(
           deps.prompts.render(path.join('watch', 'packaging-notification.md'), { message }),
           'watch/packaging-notification.md'
@@ -403,6 +420,7 @@ export function wireGateChokePoints(deps: {
       deps.gates.submit({
         kind: 'needs-human',
         agentId: message.from,
+        ...bound(message.from),
         packaging: parsePackaging(
           deps.prompts.render(path.join('watch', 'packaging-needs-human.md'), {
             subject: message.subject,
@@ -419,6 +437,7 @@ export function wireGateChokePoints(deps: {
       deps.gates.submit({
         kind: 'spend',
         agentId,
+        ...bound(agentId),
         // Tokens, not cents: `maxSpendCents` compares dollars, and handing it a
         // token count would make the policy knob silently meaningless. A spend
         // gate with no amount is held by the cap check either way, which is the

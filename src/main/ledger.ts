@@ -1,9 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import type { BreakerReport } from '../shared/breaker'
 import {
   applyProposal,
+  boundTaskFor as findBoundTask,
   parseProposal,
   pendingTasksFor,
   returnTasksOf,
+  stallTask,
   withGate,
   type AppliedOp
 } from '../shared/ledger'
@@ -151,6 +154,51 @@ export class LedgerEndpoint {
   }
 
   /**
+   * The ledger task a live agent is bound to (M5.1).
+   *
+   * Contract: the id, or null when the agent has nothing in flight. This is
+   * the join the gate choke points and the breaker were missing — without it
+   * every production `GateSubmission` carried `taskId: null`, so SDD §4.2's
+   * `gates` field was never written outside tests and the `status → done`
+   * guard that reads it guarded nothing in the shipped app.
+   */
+  boundTaskFor(agentId: string): string | null {
+    return findBoundTask(this.tasks(), agentId)
+  }
+
+  /**
+   * ADR-0011 rung 3: the breaker stopped this agent, so the work it was doing
+   * goes back to the ledger as `stalled`, carrying why.
+   *
+   * Contract: returns the task that stalled, or null when the agent had none
+   * in flight — tripping the breaker on an unassigned agent is ordinary, not
+   * an error. The report goes to `log.jsonl`, never into the task; see
+   * `stallTask` for why a strict normative schema is not widened to hold it.
+   */
+  stallTaskOf(agentId: string, report: BreakerReport): string | null {
+    const before = this.tasks()
+    const taskId = findBoundTask(before, agentId)
+    if (taskId === null) return null
+    const { ledger, stalled } = stallTask(before, taskId, this.now().toISOString())
+    if (!stalled) return null
+    this.options.store.writeTasks(ledger)
+    this.options.store.commitSoon(`ledger: ${taskId} stalled by the breaker`)
+    this.options.onLogEvent?.({
+      kind: 'task',
+      event: 'stalled',
+      taskId,
+      assignee: agentId,
+      because: 'breaker',
+      rung: report.rung,
+      // The trip, reconstructible after the fact (NFR-13).
+      signals: report.signals.map((hit) => hit.signal),
+      detail: report.signals.map((hit) => hit.detail)
+    })
+    this.options.onChange?.()
+    return taskId
+  }
+
+  /**
    * Returns a dead agent's in-flight tasks to `todo` (SDD §10's crash row).
    *
    * Contract: returns the ids that moved, so the caller can put them in the
@@ -160,9 +208,11 @@ export class LedgerEndpoint {
    * record is where every other harness fact about an agent already lives, and
    * NFR-13 asks for exactly this — the action reconstructible from the log.
    *
-   * This is not the agent↔task binding join (carried to M5): it reads the
-   * ledger's own `assignee`, which has been written since M2, and learns
-   * nothing about which spawn was working which task.
+   * This is the crash path, not the breaker's: it returns EVERY task the dead
+   * agent had in flight to `todo`, because a process that died tells us
+   * nothing about which one it was on. `stallTaskOf` above is the deliberate
+   * counterpart — the breaker knows exactly which task it stopped, so it
+   * stalls that one and leaves the rest alone.
    */
   returnTasksOf(agentId: string, because: string): readonly string[] {
     const at = this.now().toISOString()

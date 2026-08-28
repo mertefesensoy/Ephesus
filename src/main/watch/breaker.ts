@@ -7,6 +7,7 @@ import {
   protectionFor,
   RUNG_NAMES,
   spanSchema,
+  type BreakerReport,
   type BreakerState,
   type BreakerThresholds,
   type Rung,
@@ -49,6 +50,14 @@ export interface BreakerEffects {
   /** Rung 3: the engine's cancel key, then a stop. */
   interrupt(agentId: string): void
   stop(agentId: string): void
+  /**
+   * Rung 3's owed clause (ADR-0011): "task returns to the ledger as `stalled`
+   * with the breaker report attached". The breaker supplies the report and
+   * never touches `tasks.json` — the ledger endpoint owns that file and the
+   * single committer owns the write (ADR-0004). Unreachable before M5.1,
+   * because nothing bound a live agent to a task.
+   */
+  returnTask(agentId: string, report: BreakerReport): void
   /** Drives the avatar (`looping` at rung 1, `stopped` at rung 3 — SDD §6). */
   avatar(
     agentId: string,
@@ -268,6 +277,10 @@ export class Breaker {
       // Graceful first: the engine's own cancel key, then the process.
       this.options.effects.interrupt(agentId)
       this.options.effects.stop(agentId)
+      // …and the work does not die with the process: it goes back to the
+      // ledger carrying why it stopped, so Artemis can decide reassignment
+      // instead of discovering an abandoned task later (ADR-0011).
+      this.options.effects.returnTask(agentId, { rung: 3, signals: [...firing] })
     }
   }
 

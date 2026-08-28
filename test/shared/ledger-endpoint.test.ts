@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyProposal,
+  boundTaskFor,
   LEDGER_ENDPOINT,
   LEDGER_SCHEMA_VERSION,
   parseProposal,
   pendingTasksFor,
   PENDING_STATUSES,
+  stallTask,
   tasksByStatus,
   withGate,
   type ApplyContext
@@ -379,5 +381,99 @@ describe('the kanban reads columns, it does not compute them', () => {
       { id: 't-c', priority: 0 }
     )
     expect(tasksByStatus(ledger, 'todo').map((t) => t.id)).toEqual(['t-c', 't-a', 't-b'])
+  })
+})
+
+describe('boundTaskFor — the agent↔task join (M5.1)', () => {
+  it('binds nothing when the agent has no work', () => {
+    expect(boundTaskFor(emptyLedger, 'agent.mason')).toBeNull()
+  })
+
+  it('binds the one task in flight', () => {
+    expect(boundTaskFor(ledgerWith({ status: 'in_progress' }), 'agent.mason')).toBe(
+      't-2026-08-27-00'
+    )
+  })
+
+  it('never binds another agent’s work', () => {
+    const ledger = ledgerWith({ assignee: 'agent.scribe', status: 'in_progress' })
+    expect(boundTaskFor(ledger, 'agent.mason')).toBeNull()
+  })
+
+  it.each(['blocked', 'review', 'done', 'stalled'] as const)(
+    'does not bind a %s task — that is not work in flight',
+    (status) => {
+      expect(boundTaskFor(ledgerWith({ status }), 'agent.mason')).toBeNull()
+    }
+  )
+
+  it('prefers the task being worked over the one merely waiting', () => {
+    // The priorities deliberately favour the `todo`: status must outrank
+    // priority, or a gate would attach to work the agent has not started.
+    const ledger = ledgerWith(
+      { id: 't-waiting', status: 'todo', priority: 0 },
+      { id: 't-working', status: 'in_progress', priority: 9 }
+    )
+    expect(boundTaskFor(ledger, 'agent.mason')).toBe('t-working')
+  })
+
+  it('takes the higher priority within a status', () => {
+    const ledger = ledgerWith(
+      { id: 't-later', status: 'todo', priority: 7 },
+      { id: 't-sooner', status: 'todo', priority: 1 }
+    )
+    expect(boundTaskFor(ledger, 'agent.mason')).toBe('t-sooner')
+  })
+
+  it('is STABLE: ties break by id, and file order does not change the answer', () => {
+    // An unstable binding would open a gate against one task and settle it
+    // against another — the field would then lie in both rows.
+    const a = ledgerWith({ id: 't-aaa', priority: 3 }, { id: 't-bbb', priority: 3 })
+    const b = ledgerWith({ id: 't-bbb', priority: 3 }, { id: 't-aaa', priority: 3 })
+    expect(boundTaskFor(a, 'agent.mason')).toBe('t-aaa')
+    expect(boundTaskFor(b, 'agent.mason')).toBe('t-aaa')
+  })
+})
+
+describe('stallTask — ADR-0011 rung 3’s owed clause', () => {
+  it('moves work in flight to stalled, and stamps when', () => {
+    const before = ledgerWith({ id: 't-x', status: 'in_progress' })
+    const { ledger, stalled } = stallTask(before, 't-x', '2026-08-28T10:00:00.000Z')
+    expect(stalled).toBe(true)
+    expect(ledger.tasks[0]).toMatchObject({
+      status: 'stalled',
+      updatedAt: '2026-08-28T10:00:00.000Z'
+    })
+  })
+
+  it('never mutates the ledger it was handed', () => {
+    const before = ledgerWith({ id: 't-x', status: 'in_progress' })
+    stallTask(before, 't-x', CTX.at)
+    expect(before.tasks[0]?.status).toBe('in_progress')
+  })
+
+  it.each(['blocked', 'review', 'done', 'stalled'] as const)(
+    'refuses to stall a %s task',
+    (status) => {
+      // Stalling a `done` task would rewrite history; a `blocked` one is
+      // already waiting on something the breaker did not cause.
+      const before = ledgerWith({ id: 't-x', status })
+      const { ledger, stalled } = stallTask(before, 't-x', CTX.at)
+      expect(stalled).toBe(false)
+      expect(ledger).toBe(before)
+    }
+  )
+
+  it('is a no-op for a task that is not there', () => {
+    expect(stallTask(ledgerWith({ id: 't-x' }), 't-nope', CTX.at).stalled).toBe(false)
+  })
+
+  it('stalls the named task and nobody else’s', () => {
+    const before = ledgerWith(
+      { id: 't-x', status: 'in_progress' },
+      { id: 't-y', status: 'in_progress' }
+    )
+    const { ledger } = stallTask(before, 't-x', CTX.at)
+    expect(ledger.tasks.map((task) => task.status)).toEqual(['stalled', 'in_progress'])
   })
 })
