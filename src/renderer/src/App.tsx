@@ -6,6 +6,7 @@ import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
+import { OrgPanel } from './OrgPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
 import { LedgerPanel } from './LedgerPanel'
@@ -47,7 +48,16 @@ export function App(): ReactElement {
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
   const [tab, setTab] = useState<
-    'floor' | 'activity' | 'ledger' | 'briefs' | 'decks' | 'memos' | 'odeon' | 'memory' | 'watch'
+    | 'floor'
+    | 'activity'
+    | 'ledger'
+    | 'briefs'
+    | 'decks'
+    | 'memos'
+    | 'odeon'
+    | 'org'
+    | 'memory'
+    | 'watch'
   >('floor')
   /**
    * Open gates, for the status strip's badge (UI-DESIGN §4). `'error'` is a
@@ -236,6 +246,7 @@ export function App(): ReactElement {
             'decks',
             'memos',
             'odeon',
+            'org',
             'memory',
             'watch'
           ] as const
@@ -269,6 +280,7 @@ export function App(): ReactElement {
         {tab === 'decks' && <DecksPanel />}
         {tab === 'memos' && <MemosPanel />}
         {tab === 'odeon' && <MeetingPanel />}
+        {tab === 'org' && <OrgPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
