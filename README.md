@@ -134,39 +134,45 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
-**M4 complete — a company that remembers, on three engines.** Agents read
-their `memory.md` at spawn and append what they learn; a killed agent respawns
-with its memory re-injected and its tasks returned to the board (S-CRASH,
-proven with real SIGKILLed processes). Recall runs on a detect-and-degrade
-ladder — MemPalace (real 3.8.0) → SQLite FTS → plain grep — every rung green
-on known-answer queries and every degradation visible. Codex and gemini join
-claude as engine adapters at their honest demonstrated grades, and an agent
-can take a git worktree of its target repo without ever dirtying yours.
+**M5 complete — the accountable company.** A `review:deck` task is
+*mechanically unclosable* until its deck is archived; a new dependency is held
+at the choke point until a memo exists and is verdict-ed — Artemis decides
+within her delegated classes and **countersigns**, everything else queues for
+the Architect, and a rejection reverses the action. Briefings are compiled
+facts first, narrative second: a sentence without a resolvable ref refuses the
+whole brief. Meetings enforce turn order (an early answer is held, not lost)
+and file their minutes; the org layer computes every metric from `log.jsonl`
+alone and writes a weekly retro that decides nothing. And the Gymnasium runs
+governed: proposals without a falsifiable metric never reach a human,
+verdicts are Architect-only, authority-widening is refused before any
+approver could say yes.
 
 ```
-3. SIGKILL mid-tool-call — exitCode=-1
-   offer: resumable=true memorySections=1 tasksReturned=["t-demo-1"]
-   ledger: t-demo-1=todo, back on the board
-4. respawn — the new process printed back the context it was handed,
-   containing its own sentence verbatim
-   log.jsonl: memoryCarried=true resumed=true
+DEMO 1 close before the deck: todo      ← refused; the task did not move
+DEMO 1 close after the deck:  done
+DEMO 2 action held by: new-dependency
+DEMO 2 rejection reverses the action: denied
+DEMO 3 every sentence carries refs: true
+DEMO 4 held (said early): [ agent.scribe ]
 ```
 
-The respawn-with-memory exit demo, captured to
-[`docs/demo/m4-respawn-recall.txt`](./docs/demo/m4-respawn-recall.txt) — real
-Agora, git, hook socket and child processes; the engine's words are scripted
-because nothing in that environment could authenticate, said plainly in the
-capture itself. **The parity checkpoint is reached**: the upstream
-inspiration's core loop is fully implemented as of M4; what remains is the
-differentiator. Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md)
-(including the two-agent close-out audit); full record in
-[the M4 record](./docs/implementations/2026-08-27-m4-library-and-breadth.md).
+The demo view is in [`docs/demo/`](./docs/demo/): the six panel screenshots
+(`m5-briefs-tab` · `m5-decks-tab` · `m5-memos-tab` · `m5-odeon-meeting` ·
+`m5-org-metrics` · `m5-gymnasium`), a real archived deck
+([`m5-deck-artifact.html`](./docs/demo/m5-deck-artifact.html)), and
+[the retro report](./docs/demo/m5-retro-report.md) generated from this
+company's own records. Alongside M5, the **Stoa** ran its first full cycle:
+a research brief over the upstream inspiration ([RB-001](./docs/stoa/briefs/RB-001-munder-difflin-orchestration-autonomy.md))
+became two Architect-approved, landed improvements (hook-boundary steer,
+closing time) — the ledger's first proof-gate evidence. M5 was closed by the
+two-agent audit (execution + design conformance); it re-proved every exit
+criterion and caught one real ledger-column defect, fixed with regression
+tests. Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md); full
+record in [the M5 record](./docs/implementations/2026-08-28-m5-accountable-company.md).
 
-The implementation plan ([`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md))
-reaches feature parity with the inspiration at M4, with the differentiating
-subsystems (Odeon, Herald, mission profiles, org layer) landing in M5–M7.
-Next: **M5 — the Odeon + Gymnasium v1** (the accountable company: briefs,
-decks, memos, meetings, and governed self-improvement).
+Next: **M5b — the Stoa + company modes** (the learning company: the reading
+desk, governed research, the proof gate before standing autonomy — and the
+purchased LimeZu floor art lands). Then M6, the Herald.
 
 ## License & lineage
 

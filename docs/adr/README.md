@@ -26,3 +26,12 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0018](./ADR-0018-company-modes-proof-gate.md) | Company modes: standing self-improvement is earned through a proof gate | accepted |
 | [ADR-0019](./ADR-0019-recursive-improvement-profile.md) | Recursive Improvement: the self-improvement mission as a third built-in profile | accepted |
 | [ADR-0020](./ADR-0020-company-github-identity.md) | A company GitHub identity: agents co-author as themselves, never as the Architect | accepted |
+
+**Clause notes** (an accepted ADR is never edited; a clause overtaken by a
+recorded decision is listed here so its sentence is not read as current):
+
+- ADR-0008 §4 "minutes + action items written to blackboard + ledger on close" —
+  as built (M5.5, DECISIONS-LOG 2026-08-28), minutes archive in `odeon/minutes/`
+  and action items go to the orchestrator as a `request`; nothing but the single
+  scribe writes `board.md`/`tasks.json` (FR-4.2, ADR-0004). SDD, which takes
+  precedence, states the built behavior.

@@ -106,6 +106,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
       decks/<taskId>-<ts>.html
       memos/<memoId>/memo.md + verdict.json
       minutes/<meetingId>.md
+      retros/<ts>.md         # weekly retro reports (UC-12, write-once — M5.6;
+                             #  events ride the `orchestrator` log kind)
     gymnasium/
       LEDGER.md              # permanent self-improvement ledger (seeded from the
       proposals/GYM-*.md     #  repo's docs/gymnasium/ at first run — FR-12.6)
@@ -227,8 +229,9 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, shutdown, error }`. `shutdown` carries closing time (GYM-003):
-begin / ack / complete, with the shortfall named. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
+gym, stoa, shutdown, error }`. `shutdown` carries closing time (GYM-003):
+begin / ack / complete, with the shortfall named. `stoa` carries the research
+cycle (§7.7): study started, brief accepted/rejected, watchlist changes. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
 briefing compiler, metrics, and forensics consume only this file + git history.
@@ -264,7 +267,10 @@ radius / Rollback**. Verdict:
 
 ### 4.6 SQLite (app-local, never agent-visible)
 `window_state`, `command_history`, `cost_ledger(agent, session, model, day, in_tokens,
-out_tokens, cost_usd, source)` (append-only; ADR-0011), `metrics_rollup` (org layer).
+out_tokens, cost_usd, source)` (append-only; ADR-0011). The org layer keeps no
+`metrics_rollup` table after all: M5.6 chose recompute-on-read from `log.jsonl` +
+the cost fold (DECISIONS-LOG 2026-08-28), so metrics can never disagree with the
+book of record.
 The recall keyword index is deliberately *not* here — it lives in `index/fts.sqlite`
 (§2), because it is derived state a repair may delete and this file is not.
 
@@ -316,8 +322,8 @@ agora:    registry() tasks() board() log(afterSeq, limit) memory(id)
           // (ADR-0006's ladder, visible); registerKnowledge writes the shelf
           // file and commits it through the single committer (FR-6.4, ADR-0004)
 hermes:   threads(filter) compose(msgDraft)          // human-authored mail goes via Artemis
-odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(memoId, v)
-          convene(meeting) meetingSay(text)
+odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(memoId, v, notes?)
+          convene(meeting) meeting() meetingSay(text) meetingClose() retros() generateRetro()
           // deck(ref) is the viewer's read of one archived artifact; comment()
           // files an Architect review comment as mail to the orchestrator — it
           // never writes the ledger, which is hers (FR-5.2, UC-05 step 4)
@@ -325,7 +331,8 @@ herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
 harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
 profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
-org:      chart() metrics(agentId) reviews() applyReview(changeSet)
+org:      chart() orgMetrics()                       // reviews()/applyReview land with
+                                                     // UC-12's full loop (M7-era)
 gym:      ledger() proposal(id) verdict(id, v) metricResult(id, r)   // verdicts: architect-only (FR-12.3)
           mode() setMode(m)                  // company mode (ADR-0018): setMode is
                                              // architect-only; first `improving`
