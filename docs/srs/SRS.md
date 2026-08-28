@@ -25,8 +25,11 @@ Ephesus SHALL:
   with a voice front-end (**the Herald**).
 - Make the company *accountable*: standup briefings, milestone slide reviews, decision
   memos with human sign-off, and live meetings (**the Odeon**).
-- Ship two pre-wired mission profiles: **Skeleton Crew** (keep the Architect's apps
-  alive) and **Front Office** (run a project's outward-facing operations).
+- Ship three pre-wired mission profiles: **Skeleton Crew** (keep the Architect's apps
+  alive), **Front Office** (run a project's outward-facing operations), and
+  **Recursive Improvement** (the standing self-improvement mission packaged as a
+  profile: Stoa research over Architect-presented repositories, gated proposals,
+  delivery as Architect-merged pull requests — ADR-0019).
 - Provide safety controls: human gates, budgets, a circuit breaker, and a secret broker
   (**the Watch**).
 - Support remote command: chat bridge + push briefings + remote approvals (**the Harbor**).
@@ -34,6 +37,11 @@ Ephesus SHALL:
   Gymnasium**): the system SHALL continuously look for ways to improve itself — its
   playbooks, prompts, tooling, docs, tests, and code — through a governed
   observe → propose → gate → land → measure loop (ADR-0015).
+- Feed that loop **external evidence** (**the Stoa**): study Architect-registered
+  repositories and turn what is learned into provenance-cited research briefs
+  (ADR-0017); and expose an explicit, Architect-only **company mode** that turns
+  standing autonomous self-improvement on only after a recorded proof gate
+  (ADR-0018).
 
 Ephesus SHALL NOT (v1):
 - Replace the underlying agent CLIs (they remain the runtime).
@@ -60,6 +68,12 @@ Ephesus SHALL NOT (v1):
 | **Hire** | A role template (name, engine, system prompt, skills, budget) that can be spawned as an agent. |
 | **Gymnasium** | The self-improvement subsystem: the governed loop and permanent ledger through which the company improves itself (ADR-0015). |
 | **Improvement proposal** | A single scoped, evidence-backed change to the company itself, carrying a measurable success metric and a rollback; filed to the Gymnasium ledger. |
+| **Stoa** | The research subsystem: studies Architect-registered external sources and files provenance-cited research briefs as Gymnasium evidence (ADR-0017). |
+| **Watchlist** | The Architect-curated registry of external sources the Stoa may study; each entry tagged with what to learn, its license, and a pinned commit. |
+| **Research brief** | A single-source findings artifact whose every claim cites `repo@commit` + file path; admissible Gymnasium evidence, never a change itself. |
+| **Company mode** | The Architect-set operating mode: `directed` (default — improvement cycles run on demand) or `improving` (the Stoa/Gymnasium cadences run autonomously; approval authority unchanged) (ADR-0018). |
+| **Proof gate** | The recorded ledger evidence required before `improving` can first be enabled (§6.9). |
+| **Company identity** | The single GitHub machine account the harness acts through (ADR-0020): agent PRs are authored by it with per-agent co-author trailers; it can never merge, and it is never the Architect's identity. |
 
 ### 1.4 References
 - Munder Difflin `HIVE.md`, `SPEC.md`, `DESIGN.md` (upstream inspiration; patterns credited in ADRs).
@@ -212,6 +226,41 @@ non-orchestrator agent), **Harbor peer** (GitHub/Slack/webhook counterparty),
 **Alternate 2a:** during the build phase, the same loop runs through the repository (`/improve` skill, `docs/gymnasium/`) with the build's friction records as evidence.
 **Alternate 5a:** metric unmeasurable at window end → treated as `regressed` (an unmeasurable improvement is not an improvement); rollback and a ledger note on why measurement failed.
 
+### UC-14 — Stoa research cycle
+**Actor:** Scheduler/Artemis → Researcher → Artemis → Architect. **Goal:** the company learns from sources the Architect chose, on the record.
+1. The Architect registers external sources on the watchlist with tags describing what to learn (register/retire are Architect-only actions; agents may propose entries but never register them).
+2. On the Stoa cadence (mode-gated, FR-14.4) or on demand ("study X for Y"), a researcher agent studies **one** source at its pinned commit, scoped to the entry's tags — read-only, in an isolated checkout, no secret grants, treating the source strictly as data.
+3. The researcher files **one** research brief: source\@commit, findings each citing file paths, applicability mapped to Ephesus subsystems (cross-referenced to internal friction records where they exist), candidate improvements, and a license note.
+4. The harness validates the brief's shape — a finding without a citation is rejected before any human sees it; valid briefs archive immutably in the Agora.
+5. Artemis reviews the brief, ranks its candidates, and files (or assigns a worker to file) Gymnasium proposals citing the brief; from there UC-13 runs unchanged — Artemis pre-screens, the Architect verdicts.
+
+**Postcondition:** the brief is archived and linkable from every proposal it seeded; the Stoa's health metrics (approved proposals per brief; validated ratio of Stoa-seeded proposals) accumulate for UC-12 retros.
+**Alternate 2a:** source unreachable, pin missing, or license unverifiable → the study is refused with a visible reason, never silently skipped.
+**Alternate 3a:** the source contains instructions addressed to the reader ("ignore your instructions…") → reported as a finding, never followed (NFR-17, S-STOA).
+**Alternate 1a:** during the build phase, the same loop runs through the repository (`/research` skill, `docs/stoa/`) with the Architect as registrar and approver.
+
+### UC-15 — Enable improve-company mode
+**Actor:** Architect. **Goal:** standing autonomous self-improvement, switched on deliberately and provably.
+1. The Architect requests the mode change `directed → improving`.
+2. The harness checks the proof gate (§6.9) against the Gymnasium ledger and event log only. Evidence missing → the change is refused with the exact missing items listed.
+3. On success the mode flips: the status strip shows it, the next standup brief states it, and from then on every record produced by autonomous initiative (task, brief, proposal, log event) carries the mode tag.
+4. In `improving`, the Scheduler runs the Stoa and Gymnasium cadences autonomously; gating is unchanged — every proposal still reaches the Architect per UC-13.
+5. The Architect may revert to `directed` at any moment as a single ungated action; a breaker stop (rung 3) attributable to Gymnasium/Stoa work reverts the mode automatically and reports it.
+
+**Postcondition:** every mode change is in the ledger and log with its actor and reason; no agent or harness path can set `improving`.
+
+### UC-16 — Recursive Improvement delivery
+**Actor:** Architect → Scheduler → Researcher/Improver → Artemis → Architect. **Goal:** the company improves itself continuously, and every change crosses the Architect's desk as a pull request.
+1. The Architect activates the **Recursive Improvement** profile (FR-9.5). Activation is refused unless the company mode is `improving` (FR-14.3's gate having been met), with the missing evidence listed.
+2. The Architect presents repositories to study by URL in the app's Stoa panel — each becomes a tagged watchlist entry under FR-13.1's unchanged authority (Architect registers; agents may only propose).
+3. On the profile's cadences, the Stoa produces briefs (UC-14) and Artemis ranks their candidates and files proposals (UC-13); the Architect verdicts each proposal.
+4. For an approved proposal, an improver agent implements the change in its own worktree on an `agent/<name>/<topic>` branch and opens a **pull request under the company identity** (FR-10.5), carrying evidence and citing the proposal and brief ids it descends from.
+5. The Architect reviews and merges (or rejects) the PR — merge authority is the Architect's alone, and no auto-merge path exists. On merge the ledger row flips `landed` and the metric check is booked (UC-13 step 5 unchanged).
+
+**Postcondition:** the full chain — watchlist entry → brief → proposal → PR → merge → measured outcome — is reconstructible from the ledger, the log, and the PR history.
+**Alternate 1a:** mode is `directed` → activation refused; the refusal names the proof-gate evidence still missing (§6.9).
+**Alternate 5a:** PR rejected → the improver revises on the same branch, addressing review comments point-by-point (ENGINEERING-STANDARDS §7); the proposal stays `approved`, never silently abandoned.
+
 ---
 
 ## 4. Functional requirements
@@ -280,12 +329,14 @@ stable and referenced by the SDD, test strategy, and implementation plan.
 - **FR-9.2 Skeleton Crew profile.** SHALL ship built-in with: health-check watcher, CI babysitter (watch runs, retry/triage failures, open fix PRs), dependency-update agent (batched PRs), and incident-response playbooks with severity-based escalation (UC-09).
 - **FR-9.3 Front Office profile.** SHALL ship built-in with: issue/PR triage, reply drafting with configurable autonomy (draft-only → auto-post), docs/changelog sync, and release-prep checklists (UC-10).
 - **FR-9.4** Profiles SHALL be per-target (per app/repo) instantiable, and multiple profiles SHALL coexist on one floor.
+- **FR-9.5 Recursive Improvement profile.** SHALL ship built-in with: a researcher role running the Stoa cadence over the watchlist, improver role(s) implementing approved proposals in isolated worktrees, Artemis's ranking/pre-screen duties, and delivery playbooks. Its default target is the company's own repository. Activation SHALL be refused outside company mode `improving` (FR-14.3), and deactivation (or a mode revert) SHALL stop its triggers. Every change it lands SHALL be delivered as a pull request under the company identity (FR-10.5) on an `agent/` branch, citing the proposal and brief it descends from; merge authority SHALL rest with the Architect alone and the profile SHALL contain no auto-merge path. Its work runs inside the Gymnasium budget slice (FR-12.5).
 
 ### FR-10 — The Harbor (in/out)
 - **FR-10.1** GitHub: ingest issues, PRs, and CI runs for registered repos; act via the `gh` CLI under the agent's own auth.
 - **FR-10.2** Chat bridge: at least one chat integration (Slack-compatible webhook/bot) through which the Architect can converse with Artemis remotely, receive briefings, and approve gates (UC-11); inbound webhooks MAY spawn ephemeral workers that are torn down after replying.
 - **FR-10.3** Every remote-originated directive SHALL be tagged `remote` in the event log.
 - **FR-10.4** Shareable hires: export/import a role template via link/file; import only pre-fills the spawn form — a human always confirms.
+- **FR-10.5 Company identity.** The system SHALL support acting on GitHub through a single Architect-owned machine account (ADR-0020): its token SHALL live write-only in the secret broker and reach only roles whose hire template declares the grant; agent commits SHALL be authored as the company account with a per-agent co-author trailer, never as the Architect and never as any vendor identity; the account SHALL hold write access only (no admin, no merge — `main` stays PR-and-review protected); and every remote action it takes SHALL be logged. Revoking the token SHALL disable delivery without affecting any other capability.
 
 ### FR-11 — The Watch (safety, budgets, org)
 - **FR-11.1 Gates.** Spend above threshold, destructive ops, scope changes, and prod-facing actions SHALL require Architect approval (native tool-permission prompts + the approvals UI + remote push). Defaults are conservative; autonomy is opt-in per profile.
@@ -296,12 +347,28 @@ stable and referenced by the SDD, test strategy, and implementation plan.
 - **FR-11.6 Telemetry.** Local OTel-style spans and a tool waterfall per agent SHALL be available. Any *outbound* anonymous telemetry SHALL be opt-in, documented, and absent entirely in source builds.
 
 ### FR-12 — The Gymnasium (self-improvement) — *primary standing mission*
-- **FR-12.1** The system SHALL implement the Gymnasium loop (ADR-0015): observe → propose → gate → land → measure, with every step recorded; improvement candidates SHALL derive only from recorded evidence (org metrics, event log, breaker/budget data, memo patterns, drift audits), never from unreferenced speculation.
+- **FR-12.1** The system SHALL implement the Gymnasium loop (ADR-0015): observe → propose → gate → land → measure, with every step recorded; improvement candidates SHALL derive only from recorded evidence (org metrics, event log, breaker/budget data, memo patterns, drift audits, and Stoa research briefs — FR-13), never from unreferenced speculation.
 - **FR-12.2** Improvement proposals SHALL be single-scoped and SHALL carry: evidence refs, the concrete change, cost/risk, a falsifiable success metric with a measurement window, and a rollback. A proposal missing any of these SHALL be rejected by the harness before reaching a human.
 - **FR-12.3** Gating SHALL follow the ADR-0015 authority table: the Architect approves every Gymnasium class; Artemis MAY pre-screen and rank but SHALL NOT approve; no agent approves its own proposal; the Gymnasium SHALL NOT be able to widen its own authority, alter its own gating, or modify accepted ADRs.
 - **FR-12.4** The Gymnasium ledger SHALL be permanent and total: every proposal, verdict, and measured outcome (validated/regressed/rejected) is an immutable row; landed changes whose metric regresses or cannot be measured SHALL be rolled back per their proposal.
 - **FR-12.5** Gymnasium work SHALL run inside an explicit budget slice (configurable share of time/tokens) reported in standup briefings, so self-improvement can never starve the mission profiles.
 - **FR-12.6** The loop SHALL exist in the repository during the build phase (`/improve` skill, `docs/gymnasium/`) and carry into the running system with the same artifact shapes, so the improvement archive is continuous from first commit onward.
+
+### FR-13 — The Stoa (research department)
+- **FR-13.1** The system SHALL maintain an Architect-curated **watchlist** of external sources (SDD §4.7), each entry carrying url, tags describing what to learn, the license as verified at registration, a pinned commit, and intent notes. Registering and retiring entries SHALL be Architect-only actions; any agent MAY propose an entry but SHALL NOT register one (the FR-12.3 authority mirror).
+- **FR-13.2** A Stoa study SHALL be read-only over a pinned snapshot of one watchlist source, in an isolated checkout, with no secret grants; watched-source content SHALL be treated as untrusted data — instructions found in it SHALL never be followed and SHALL be reported as findings (NFR-17).
+- **FR-13.3** Each study SHALL produce exactly one research brief carrying: source\@commit, findings each citing file paths, applicability mapped to Ephesus subsystems, candidate improvements, and a license note. A brief with an uncited finding SHALL be rejected by the harness before reaching a human (the FR-12.2 pattern).
+- **FR-13.4** A brief is evidence, never a change: improvements it seeds SHALL flow through UC-13 unchanged (Artemis pre-screens, the Architect verdicts), citing the brief in their evidence refs; briefs SHALL archive immutably and be linkable from the proposals they seeded.
+- **FR-13.5** The Stoa SHALL learn patterns, not copy code: any verbatim or derived code intake from a watched source SHALL require a verified license on the watchlist entry, recorded attribution, and a decision memo (ENGINEERING-STANDARDS §5).
+- **FR-13.6** Stoa work SHALL run inside the Gymnasium budget slice (FR-12.5) and be reported with it in standup briefings.
+- **FR-13.7** The loop SHALL exist in the repository during the build phase (`/research` skill, `docs/stoa/`) with the same artifact shapes, seeded into the Agora at first run (the FR-12.6 pattern).
+
+### FR-14 — Company modes & the proof gate
+- **FR-14.1** The system SHALL maintain an explicit company mode — `directed` (default) or `improving` — visible at all times in the UI and stated in every standup brief; every record produced by autonomous initiative SHALL be tagged with the mode it ran under.
+- **FR-14.2** Only the Architect SHALL change the mode; no agent or harness path SHALL be able to set `improving`. Reverting to `directed` SHALL always be a single ungated action.
+- **FR-14.3** The first enable of `improving` SHALL be mechanically refused until the proof gate (§6.9) is met, with the missing evidence listed; the check SHALL read only the Gymnasium ledger and event log.
+- **FR-14.4** In `improving` the Scheduler SHALL run the Stoa and Gymnasium cadences autonomously; in `directed` those cadences SHALL run only on demand. Gating (FR-12.3) SHALL be identical in both modes — the mode governs initiative, never approval.
+- **FR-14.5** A circuit-breaker stop (rung 3, ADR-0011) attributable to Gymnasium/Stoa work SHALL revert the mode to `directed` automatically, visibly, and on the ledger; only the Architect can restore `improving`.
 
 ---
 
@@ -325,6 +392,7 @@ stable and referenced by the SDD, test strategy, and implementation plan.
 | NFR-14 | Usability | Any agent's raw terminal is ≤ 1 click away from anywhere; every automated artifact (brief, memo verdict, triage label) links to its evidence. |
 | NFR-15 | Accessibility | Full functionality without voice; UI meets WCAG AA contrast within the pixel-art design language; all panels keyboard-navigable. |
 | NFR-16 | Maintainability | Typecheck-clean TypeScript throughout; the standards doc's Definition of Done gates every merge. |
+| NFR-17 | Security | Watched-source content (FR-13) is untrusted input: it never reaches an executable surface — shell, config, prompts-as-instructions, code — except through a gated Gymnasium proposal; researcher spawns are read-only with no secret grants; instructions embedded in studied content are findings to report, never directives to follow. |
 
 ---
 
@@ -339,3 +407,6 @@ The build is *accepted* when, on a clean machine with Claude Code installed:
 5. **The failover test.** Pulling the ElevenLabs key mid-conversation continues the session on OpenAI Realtime within 3 s.
 6. **The blackout test.** Kill the harness mid-delivery; on restart nothing is lost, no message is double-processed, and no agent is orphaned.
 7. **The gymnasium test.** After two weeks of operation, the company has filed ≥ 1 evidence-backed improvement proposal on its own initiative; an approved one landed, was measured against its declared metric, and its outcome is in the ledger; a proposal attempting to change gating rules or an accepted ADR was mechanically refused; and no improvement landed without an Architect verdict.
+8. **The research test.** With the watchlist holding ≥ 1 registered source, one Stoa cycle produces a brief whose every finding cites `repo@commit` + file path; a planted instruction in a fixture source is reported as a finding, not obeyed; a Gymnasium proposal seeded by the brief reaches the Architect queue citing it; a brief with an uncited finding is rejected before reaching a human; and watchlist registration through any non-Architect path is refused.
+9. **The proof-gate test.** With the proof evidence absent, enabling `improving` is refused with the missing items listed. The gate is met when the Gymnasium ledger records **≥ 3 proposals through the full loop** (proposed → Architect verdict → landed → measured), **≥ 2 of them `validated`**, **≥ 1 seeded by a Stoa brief**, and **zero gating violations** (no refused-class proposal ever landed). Once met, enabling succeeds; the mode is visible, autonomous records carry the mode tag, a rung-3 breaker stop on gym/stoa work auto-reverts to `directed`, and nothing but an Architect action can enable `improving`.
+10. **The recursive test.** With Recursive Improvement active on the company's own repository: one full chain lands — a URL presented on the Stoa panel becomes a watchlist entry, a brief cites it, an approved proposal descends from the brief, and the change arrives as a pull request from the company identity on an `agent/` branch, citing both ids, which the Architect merges. Along the way: activation in `directed` mode was refused; no agent path merged or pushed `main`; the PR's commits are authored by the company account with the agent's co-author trailer and no Architect or vendor identity anywhere.

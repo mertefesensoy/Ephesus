@@ -300,6 +300,70 @@ export function returnTasksOf(
 }
 
 /**
+ * Contract: the ledger task a live agent is bound to — the one a gate it opens
+ * blocks (SDD §4.2 `gates`) and the one the breaker returns when it stops that
+ * agent at rung 3 (ADR-0011). Null when the agent has no work in flight.
+ *
+ * The join is DERIVED, never remembered. A map from agent to task held in
+ * memory would be empty after exactly the event that makes the binding matter
+ * most — a restart — and `tasks.json` already records who owes what durably,
+ * so this reads the book of record rather than keeping a second copy that
+ * could disagree with it (the reasoning invariant §11 applies to spend).
+ *
+ * `in_progress` outranks `todo`: an agent working one task while another waits
+ * in its queue is bound to the one it is working. Within a status the lower
+ * priority number wins, ties broken by id, so the answer is STABLE across
+ * calls — an unstable binding would let a gate open against one task and
+ * settle against another.
+ *
+ * `blocked`, `review`, `done` and `stalled` are not work in flight — the same
+ * reading `PENDING_STATUSES` already encodes.
+ */
+export function boundTaskFor(ledger: TaskLedger, agentId: string): string | null {
+  const bound = ledger.tasks.reduce<Task | null>((best, task) => {
+    if (task.assignee !== agentId || !PENDING_STATUSES.includes(task.status)) return best
+    return best === null || outranksForBinding(task, best) ? task : best
+  }, null)
+  return bound === null ? null : bound.id
+}
+
+function outranksForBinding(candidate: Task, incumbent: Task): boolean {
+  const rank = (task: Task): number => (task.status === 'in_progress' ? 0 : 1)
+  if (rank(candidate) !== rank(incumbent)) return rank(candidate) < rank(incumbent)
+  if (candidate.priority !== incumbent.priority) return candidate.priority < incumbent.priority
+  return candidate.id.localeCompare(incumbent.id) < 0
+}
+
+/**
+ * Contract: the ledger with one task moved to `stalled`, and whether it moved.
+ * Pure; the input ledger is never mutated.
+ *
+ * This is ADR-0011 rung 3's owed clause: "task returns to the ledger as
+ * `stalled` with the breaker report attached". The REPORT does not go into the
+ * task — `taskSchema` is strict and has no notes field, and widening a
+ * normative schema to carry a breaker trip would be a §8 deviation. It goes to
+ * `log.jsonl` as the `task`/`stalled` event: the same split `returnTasksOf`
+ * already makes for SDD §10's crash note, and what NFR-13 asks for — the
+ * action reconstructible from the book of record.
+ *
+ * Only work in flight stalls. Stalling a `done` task would rewrite history,
+ * and a `blocked` one is already waiting on something the breaker did not
+ * cause.
+ */
+export function stallTask(
+  ledger: TaskLedger,
+  taskId: string,
+  at: string
+): { readonly ledger: TaskLedger; readonly stalled: boolean } {
+  let stalled = false
+  const tasks = ledger.tasks.map((task) => {
+    if (task.id !== taskId || !PENDING_STATUSES.includes(task.status)) return task
+    stalled = true
+    return { ...task, status: 'stalled' as const, updatedAt: at }
+  })
+  return stalled ? { ledger: { ...ledger, tasks }, stalled } : { ledger, stalled }
+}
+/**
  * Contract: the ledger with `gateId` recorded against `taskId` (or removed).
  *
  * SDD §4.2's `gates` field has existed since M2 and nothing ever wrote it, so

@@ -446,6 +446,51 @@ describe('the choke-point wiring (SDD §9), shared with production', () => {
     expect(gates.list()).toEqual([])
     expect(errors.join(' ')).toContain('could not be gated')
   })
+
+  it('carries the bound task through EVERY choke point (M5.1)', () => {
+    // The production wiring, not a copy: until M5.1 all three submitted
+    // `taskId: null`, so SDD §4.2's `gates` was written only by tests and the
+    // `status → done` guard that reads it guarded nothing in the shipped app.
+    const gates = manager(DENY_ALL)
+    const wired = wireGateChokePoints({ gates, prompts, taskOf: () => 't-2026-08-28-07' })
+    wired.submitNotification('agent.mason', { message: 'needs permission' })
+    wired.submitNeedsHuman({
+      from: 'agent.scribe',
+      subject: 'staging creds',
+      conversation: 'conv-1'
+    })
+    wired.submitSpend('agent.tess', 4_000, 'breached')
+    expect(gates.list().map((gate) => gate.taskId)).toEqual([
+      't-2026-08-28-07',
+      't-2026-08-28-07',
+      't-2026-08-28-07'
+    ])
+  })
+
+  it('asks about the agent that is actually being gated', () => {
+    // `submitNeedsHuman` gates the SENDER, so the binding must be looked up
+    // for `message.from` — passing the wrong id would attribute the gate to
+    // whoever happened to be nearby.
+    const gates = manager(DENY_ALL)
+    const asked: string[] = []
+    const wired = wireGateChokePoints({
+      gates,
+      prompts,
+      taskOf: (agentId) => {
+        asked.push(agentId)
+        return null
+      }
+    })
+    wired.submitNeedsHuman({ from: 'agent.scribe', subject: 's', conversation: 'conv-1' })
+    expect(asked).toEqual(['agent.scribe'])
+  })
+
+  it('gates perfectly well with no ledger to ask', () => {
+    // A harness without a ledger still gates; it just cannot attribute.
+    const { gates, wired } = rig()
+    wired.submitNotification('agent.mason', { message: 'hi' })
+    expect(gates.list()[0]?.taskId).toBeNull()
+  })
 })
 
 describe('parsePackaging', () => {

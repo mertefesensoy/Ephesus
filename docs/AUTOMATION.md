@@ -39,6 +39,7 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 | `/milestone-review` | Gate-keeps milestone completion: runs exit criteria and S-suites *by execution*, sweeps for stubs/debt, records the verdict. |
 | `/doc-sync` | Audits code↔docs drift (module map, IPC surface, schemas, invariant tripwires) and fixes mechanical drift; escalates behavioral divergence. |
 | `/improve` | Files a governed Gymnasium self-improvement proposal (evidence → single scoped change → success metric → gate). See ADR-0015. |
+| `/research` | Runs one Stoa research cycle: studies ONE Architect-registered source from `docs/stoa/WATCHLIST.md` at a pinned commit and files a provenance-cited brief whose candidates feed `/improve`. See ADR-0017. |
 
 ### Subagents (`.claude/agents/`)
 | Agent | Purpose |

@@ -65,6 +65,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning | 0012 |
 | `org.ts` | Departments, hire-template versioning, per-agent metrics, review/retro reports | — |
 | `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |
+| `stoa.ts` | Watchlist accessors (Architect-only mutation, enforced in the handler like `gym.verdict`), researcher spawn plans (read-only checkout, no secret grants), brief validation (uncited finding ⇒ rejected pre-human), brief archive, the Stoa cadence (a scheduler client, mode-gated) | 0017, 0018 |
 | `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) with idempotent ticks — a trigger fires at most once per interval and is never re-entered while running. `reflection.ts` is its first client: it asks an agent to condense its own memory (ADR-0006 layer 3) and applies what the agent proposes back to the reserved `agent.library` endpoint — the harness never summarizes (ADR-0005) | 0006, 0005 |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
@@ -108,6 +109,11 @@ The hook socket is `0600` with a per-spawn token in each payload.
     gymnasium/
       LEDGER.md              # permanent self-improvement ledger (seeded from the
       proposals/GYM-*.md     #  repo's docs/gymnasium/ at first run — FR-12.6)
+    stoa/
+      watchlist.json         # architect-curated external sources (§4.7); mutated
+                             #  only via architect-verified IPC (FR-13.1)
+      briefs/RB-*.md         # provenance-cited research briefs, immutable once
+                             #  archived (seeded from docs/stoa/ — FR-13.7)
     agents/<agentId>/
       identity.md            # role, capabilities, env grants (mirrors hire template)
       memory.md              # long-term memory (Library layer 1). Append-only,
@@ -221,7 +227,8 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, error }`. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
+gym, shutdown, error }`. `shutdown` carries closing time (GYM-003):
+begin / ack / complete, with the shortfall named. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.
 Every kind carries enough refs to reconstruct the action (NFR-13). The activity UI,
 briefing compiler, metrics, and forensics consume only this file + git history.
@@ -261,6 +268,35 @@ out_tokens, cost_usd, source)` (append-only; ADR-0011), `metrics_rollup` (org la
 The recall keyword index is deliberately *not* here — it lives in `index/fts.sqlite`
 (§2), because it is derived state a repair may delete and this file is not.
 
+### 4.7 Stoa watchlist (`stoa/watchlist.json`) and research briefs (ADR-0017)
+```jsonc
+{
+  "schemaVersion": 1,
+  "sources": [{
+    "id": "src-hermes-agent",              // stable, slug-derived
+    "url": "https://github.com/NousResearch/hermes-agent",
+    "kind": "git",                          // v1: git only; field leaves room for more
+    "tags": ["agent-loop", "tool-use"],     // what to learn — scopes every study
+    "license": "MIT",                       // as verified at registration; "unverified"
+                                            //  ⇒ study allowed, pattern intake refused
+                                            //  (FR-13.5)
+    "pin": "8c1f2ab",                       // commit each study runs against; briefs
+                                            //  cite this pin. Architect advances it.
+    "registeredBy": "architect",            // only ever "architect" (FR-13.1)
+    "registeredAt": "ISO-8601",
+    "notes": "why this source; what the Architect wants learned"
+  }]
+}
+```
+A **research brief** (`stoa/briefs/RB-<NNN>-<slug>.md`) is templated markdown with
+required sections, validated by `stoa.ts` before archiving (an uncited finding
+rejects the brief pre-human — FR-13.3): **Source** (watchlist id + `repo@commit`) /
+**Question** (which tags this study served) / **Findings** (each with file-path
+citations into the pinned commit) / **Applicability** (mapped to Ephesus subsystems,
+cross-referenced to internal records where they exist) / **Candidate improvements**
+(seeds for GYM proposals — candidates, not proposals) / **License note**. Briefs are
+immutable once archived; proposals cite them by id in their evidence refs.
+
 ---
 
 ## 5. IPC contract (`window.eph`)
@@ -287,6 +323,11 @@ harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
 profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
 org:      chart() metrics(agentId) reviews() applyReview(changeSet)
 gym:      ledger() proposal(id) verdict(id, v) metricResult(id, r)   // verdicts: architect-only (FR-12.3)
+          mode() setMode(m)                  // company mode (ADR-0018): setMode is
+                                             // architect-only; first `improving`
+                                             // enable checked against the proof gate
+stoa:     watchlist() register(entry) retire(id) briefs() brief(id)
+                                             // register/retire: architect-only (FR-13.1)
 secrets:  set(name, value) status(name) test(name) delete(name)   // write-only (ADR-0010)
 config:   get() set(patch) prompts.get(name) prompts.set(name, text)
 ```
@@ -389,6 +430,48 @@ Mechanically refused regardless of verdict: proposals altering gym gating, accep
 or the Watch's global maxima (FR-12.3 — the Gymnasium cannot widen its own authority).
 ```
 
+### 7.7 Stoa research cycle (UC-14, ADR-0017) and the mode gate (UC-15, ADR-0018)
+```
+scheduler (stoa cadence — fires autonomously only in mode `improving`) ─or─ on-demand
+  ─► stoa.ts picks ONE watchlist source (architect-registered; license recorded; pin set)
+  ─► researcher spawn: read-only checkout at the pin · no secret grants · tags injected
+       as the study question · source content is DATA (NFR-17 — embedded instructions
+       become findings, never actions)
+  ─► ONE brief drafted (source@commit · cited findings · applicability · candidates
+       · license note)
+  ─► stoa.ts validates shape — uncited finding ⇒ rejected pre-human (FR-13.3)
+  ─► brief archived immutably (stoa/briefs/) ─► log.jsonl kind:stoa
+  ─► Artemis reviews + ranks candidates ─► GYM proposal(s) filed citing the brief
+  ─► from here §7.6 unchanged: Artemis pre-screens, the Architect verdicts
+
+mode change (UC-15): architect requests `improving`
+  ─► watch/gates.ts checks the proof gate (SRS §6.9) against gym ledger + log ONLY
+       ─ evidence missing ──► refusal listing exactly what is missing
+       ─ met ──► mode flips · status strip + next brief state it · autonomous records
+                 tagged with the mode from here on (FR-14.1)
+revert to `directed`: always one ungated architect action; breaker rung 3 on gym/stoa
+work reverts automatically and lands on the ledger (FR-14.5)
+```
+
+### 7.8 Recursive Improvement delivery (UC-16, ADR-0019/0020)
+```
+architect activates the Recursive Improvement profile
+  ─► profiles.ts checks company mode — `directed` ⇒ refusal naming §6.9's missing
+       evidence; `improving` ⇒ triggers armed (deactivation / mode revert disarms)
+architect presents a repo URL on the Stoa panel ─► watchlist entry (FR-13.1 unchanged)
+stoa cadence ─► brief (§7.7) ─► Artemis ranks ─► proposal filed ─► architect verdict (§7.6)
+verdict approve
+  ─► improver takes the task in its own worktree, branch agent/<name>/<topic> (git.ts)
+  ─► commits authored as the COMPANY identity + per-agent co-author trailer
+       (token: broker env-grant to the improver role only — ADR-0010, NFR-17)
+  ─► PR opened via harbor/github.ts under the company account, body citing
+       GYM-<NNN> + RB-<NNN> ─► log.jsonl (remote-tagged) ─► architect's queue
+architect merges ─► ledger row `landed` ─► metric check booked (§7.6 unchanged)
+architect rejects ─► revision on the SAME branch (ENGINEERING-STANDARDS §7)
+Mechanically absent: any agent merge path — the account holds write, main is
+PR-and-review protected, so the host enforces what the harness promises.
+```
+
 ---
 
 ## 8. The Herald — component design (ADR-0007)
@@ -421,9 +504,22 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   Deny-by-default; profile autonomy levels can only *loosen* up to global maxima —
   stricter wins (ADR-0012).
 - **Budgets**: pre-flight burn-rate projection per task + post-hoc ledger folding
-  (§4.6). Breaker signal wiring per ADR-0011.
+  (§4.6). Breaker signal wiring per ADR-0011. Rung 1's corrective sentence rides
+  the hook boundary on `native`-grade engines — the next `post-tool` reply
+  carries it as a decision the shim already relays, so it lands mid-turn — and
+  falls back to the FR-1.3 command queue below that grade; the channel taken is
+  a `breaker`/`steer-channel` log event (GYM-002, `watch/steer-notes.ts`).
 - **Telemetry**: every tool call becomes a span (agent, tool, duration, outcome) →
   waterfall UI; spans are local-only (NFR-10).
+- **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`;
+  `gym.setMode` is architect-verified in the handler (the `gym.verdict` pattern);
+  the first `improving` enable is checked against the proof gate (SRS §6.9) read
+  from the gym ledger + log only; the scheduler consults the mode before firing
+  the Stoa/Gymnasium cadences; a rung-3 breaker stop attributable to gym/stoa
+  work reverts the mode (FR-14.5). Researcher spawns get read-only checkouts and
+  no secret grants — enforced here, not by convention (NFR-17). The Recursive
+  Improvement profile (FR-9.5) activates only in `improving`, and the company
+  GitHub token (FR-10.5) is a broker grant declared only by improver roles.
 
 ---
 
@@ -439,6 +535,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | Voice provider down | failover §7.4; both down → text-only banner, zero feature loss outside audio (FR-8.6) |
 | Recall index corrupt | delete + rebuild from markdown (derived state, §2) |
 | Schema drift (hooks/profile) | validate, warn visibly, degrade per FR-2.3 / refuse activation with diff |
+| Orderly quit with live agents (GYM-003, `closing.ts`) | Closing time is *offered*, never forced: on accept, every live agent gets a `request` from `agent.closing` (park WIP, append state to `memory.md`, acknowledge); acks route back as an endpoint hand-off; teardown proceeds when all ack or at the hard deadline, with every silent agent named in the report and `log.jsonl` (`kind: shutdown`). "Quit now" and an empty floor skip straight to teardown — today's path, one click |
 
 ---
 
@@ -471,3 +568,5 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | FR-10 | §1 (harbor/) |
 | FR-11 | §9 (watch/), §4.6, org.ts |
 | FR-12 | §2, §7.6 (gymnasium.ts), ADR-0015 |
+| FR-13 | §2, §4.7, §7.7 (stoa.ts), ADR-0017 |
+| FR-14 | §9, §7.7 (watch/gates.ts, scheduler.ts), ADR-0018 |

@@ -40,6 +40,8 @@ export const LOG_KINDS = [
   'secret-rotated',
   'profile',
   'gym',
+  /** Closing time (GYM-003): begin / ack / complete, with the shortfall named. */
+  'shutdown',
   'error'
 ] as const
 

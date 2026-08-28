@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The append-only step needs the merge base with the PR's target;
+          # a depth-1 clone has no ancestry to find it in (GYM-005).
+          fetch-depth: 0
       - name: Check relative markdown links resolve
         run: |
           set -e
@@ -33,13 +37,23 @@ jobs:
       - name: ADRs are append-only (accepted ADRs unchanged on PRs)
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- 'docs/adr/ADR-*.md' || true)
+          set -e
+          # Append-only means existing ADRs are never modified, deleted, or
+          # renamed — ADDING a new ADR is the one legal change and must pass
+          # (--diff-filter=a excludes additions). Diff against the merge base,
+          # not the base tip, so drift on the base branch is never blamed on
+          # the PR; and no error is swallowed — a git failure here must fail
+          # the check, not silently pass it (GYM-005: both defects were real,
+          # found by the first PR that ever added an ADR).
+          git fetch origin "${{ github.base_ref }}"
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          changed="$(git diff --name-only --diff-filter=a "$base" HEAD -- 'docs/adr/ADR-*.md')"
           if [ -n "$changed" ]; then
-            echo "Accepted ADRs modified (ADRs are append-only; supersede instead):"
+            echo "Accepted ADRs modified or removed (ADRs are append-only; supersede instead):"
             echo "$changed"
             exit 1
           fi
+          echo "append-only holds: only additions under docs/adr/ (or no ADR changes)"
 
   code:
     name: Typecheck · lint · test

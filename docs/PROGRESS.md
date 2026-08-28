@@ -2127,7 +2127,7 @@ clause "task returns `stalled` with the breaker report attached" (→ M5.1).
 **Owed to local sessions, not packages:** the Memory panel screenshot;
 codex/gemini hook wiring post-trust; a real-engine respawn demo.
 
-- [ ] **M5.1 The agent↔task binding join** — bind live spawns to ledger
+- [x] **M5.1 The agent↔task binding join** — bind live spawns to ledger
       tasks: an assignment `request` carries its `taskId` and the harness
       records the binding (spawn → task) so the three consumers that were
       blind get eyes: gate choke points submit `taskId` (SDD §4.2's
@@ -2143,6 +2143,46 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       rung-3 stalled + report; done-refused-while-gated now reachable and
       asserted end-to-end. Risk: the binding is harness bookkeeping — no new
       agent-facing schema; the message already carries the task in its spec.*
+      *Evidence: `typecheck && lint && check-invariants` green; the suites this
+      package touches run 200/200 (`test/shared/ledger-endpoint`,
+      `test/main/ledger-endpoint`, `test/main/gates`, `test/main/breaker`,
+      `s-breaker`, `s-blackout`, `s-gate`, `s-ledger`) — 33 new cases.
+      The join is **derived from `tasks.json`, never remembered**: an in-memory
+      agent→task map would be empty after exactly the event that makes the
+      binding matter most, a restart. `boundTaskFor` prefers `in_progress` over
+      `todo`, then lower priority, then id, and a table asserts the answer is
+      STABLE under file reordering — an unstable binding would open a gate
+      against one task and settle it against another.
+      **The production wiring is what is asserted**: `wireGateChokePoints`
+      gained `taskOf`, and a test drives all three choke points (notification,
+      needs-human, spend) and asserts each gate carries the bound task; a second
+      case proves `submitNeedsHuman` looks the binding up for the SENDER.
+      `test/scenarios/company.ts` now runs the SHIPPED `LedgerEndpoint`, so the
+      scenarios exercise the join rather than describing it.
+      **ADR-0011 rung 3's owed clause is closed**: `BreakerEffects.returnTask`
+      is required (not optional — rung 3 always owes it), and S-BREAKER now
+      proves it against a REAL spawned `fake-engine` looping on failing calls:
+      `return-task:agent.mason:t-sbreaker-01`, the task at `stalled`, and the
+      `task`/`stalled` row in `log.jsonl` carrying `because: breaker`, `rung: 3`
+      and the `error-rate` signal. An unassigned agent stops with
+      `return-task:agent.tess:none` and invents no work to stall. The report
+      goes to the book of record, NOT into `taskSchema` — the schema is strict
+      and has no notes field, the same split `returnTasksOf` already makes for
+      SDD §10's crash note.
+      LIVE RUN THROUGH THE REAL APP (`EPH_HOME=<temp> electron-vite dev`), the
+      whole gate half end to end on a real `tasks.json`:
+      `task created: {"ok":true,"applied":[{"op":"create","taskId":"t-evidence-01"}]}` ·
+      `bound task for agent.mason: t-evidence-01` ·
+      `gate opened: g-2026-08-28t07-42-17-921z-… taskId= t-evidence-01` ·
+      `tasks.json gates: [{"id":"t-evidence-01","gates":["g-2026-08-28t07-…"]}]` ·
+      `close while gated: {"ok":false,"reasons":["task t-evidence-01 is blocked by open gate(s): g-…"]}` ·
+      `tasks.json gates after verdict: [{"id":"t-evidence-01","gates":[]}]` ·
+      `close after verdict: {"ok":true,…}` · `final status: done`.
+      That is the M3/M4 carried item closed in the shipped app: `task.gates` is
+      written by the running harness for the first time, and SDD §4.2's
+      `status → done` refusal finally guards a field something fills. Artemis's
+      reassignment of a stalled task is asserted through her own outbox, and the
+      binding follows the new assignee.*
 - [ ] **M5.2 Deck template + task-close gate + deck viewer** — FR-7.2,
       S-DECKGATE: a `review:deck` task is *mechanically unclosable* until a
       deck exists — the harness rejects `status→done` (the §4.2 guard's

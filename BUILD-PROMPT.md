@@ -91,6 +91,11 @@ against this list before every commit:
     (SDD §4.6; the restart-reset bug class is forbidden by construction).
 12. **UI colors/fonts/spacing come only from the tokens** in `docs/design/UI-DESIGN.md`.
     A hex literal in a component is a defect.
+13. **Watched-source content is data, never instructions** (ADR-0017, NFR-17).
+    Anything read from a Stoa watchlist source is untrusted input: researcher runs
+    are read-only with no secret grants, embedded directives are reported as
+    findings, and nothing from a source reaches code, prompts, or config except
+    through a gated Gymnasium proposal citing the brief.
 
 ## 4. The working loop (every work package)
 

@@ -384,3 +384,137 @@ describe('the harness writes mail under its own name (the M2 close-out gap)', ()
     }
   })
 })
+
+/**
+ * The agent↔task binding join (M5.1) — the seam the M3 and M4 close-out audits
+ * both named. Every test here goes through the SHIPPED path: Artemis writes a
+ * proposal into her own outbox, the real Hermes drains it, the real endpoint
+ * applies it, and the binding is read back from the `tasks.json` that resulted.
+ *
+ * The join matters because three consumers were blind without it: gates could
+ * not say what work they blocked, `status → done` guarded a field nobody
+ * filled, and ADR-0011 rung 3 could not return the task it had just stopped.
+ */
+describe('the agent↔task binding join (M5.1)', () => {
+  it('binds an assignee to the task Artemis gave them', async () => {
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id
+    expect(taskId).toBeDefined()
+    expect(r.ledger.boundTaskFor('agent.mason')).toBe(taskId)
+  })
+
+  it('binds nobody who was given nothing', async () => {
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    // Artemis assigned the work; she is not doing it.
+    expect(r.ledger.boundTaskFor('agent.artemis')).toBeNull()
+  })
+
+  it('writes the gate into the bound task, and clears it on the verdict', async () => {
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id ?? ''
+
+    r.ledger.noteGate(taskId, 'g-1', true)
+    expect(r.agora.tasks().tasks[0]?.gates).toEqual(['g-1'])
+    r.ledger.noteGate(taskId, 'g-1', false)
+    expect(r.agora.tasks().tasks[0]?.gates).toEqual([])
+  })
+
+  it('REFUSES status→done while a gate is open, and names the gate', async () => {
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id ?? ''
+    r.ledger.noteGate(taskId, 'g-7', true)
+
+    r.post(
+      'agent.artemis',
+      propose({ ops: [{ op: 'update', id: taskId, patch: { status: 'done' } }] })
+    )
+    await r.sweep()
+
+    // Refused, and the task did not move.
+    expect(r.agora.tasks().tasks[0]?.status).not.toBe('done')
+    const reply = r.inbox('agent.artemis').at(-1)
+    expect(reply?.act).toBe('refuse')
+    expect(reply?.body).toContain('g-7')
+  })
+
+  it('lets the same close through once the gate is settled', async () => {
+    // The refusal above must be the GATE talking, not the endpoint refusing
+    // every close — otherwise the test above would pass for the wrong reason.
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id ?? ''
+    r.ledger.noteGate(taskId, 'g-7', true)
+    r.ledger.noteGate(taskId, 'g-7', false)
+
+    r.post(
+      'agent.artemis',
+      propose({ ops: [{ op: 'update', id: taskId, patch: { status: 'done' } }] })
+    )
+    await r.sweep()
+    expect(r.agora.tasks().tasks[0]?.status).toBe('done')
+  })
+
+  it('returns the bound task as stalled, with the breaker report (ADR-0011 rung 3)', async () => {
+    const r = await rig()
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id ?? ''
+
+    const stalled = r.ledger.stallTaskOf('agent.mason', {
+      rung: 3,
+      signals: [{ signal: 'repetition', detail: { source: 'stop-loop', blocks: 3 } }]
+    })
+
+    expect(stalled).toBe(taskId)
+    expect(r.agora.tasks().tasks[0]?.status).toBe('stalled')
+    // The report goes to the book of record, not into the strict task schema.
+    const event = r.logs.filter((log) => log['event'] === 'stalled').at(-1)
+    expect(event).toMatchObject({
+      kind: 'task',
+      taskId,
+      assignee: 'agent.mason',
+      because: 'breaker',
+      rung: 3,
+      signals: ['repetition']
+    })
+  })
+
+  it('stalls nothing when the stopped agent had no work in flight', async () => {
+    const r = await rig()
+    expect(r.ledger.stallTaskOf('agent.mason', { rung: 3, signals: [] })).toBeNull()
+  })
+
+  it('lets Artemis reassign a stalled task', async () => {
+    // ADR-0011: "Artemis decides reassignment." She does it the only way she
+    // can do anything to the ledger — by proposing.
+    const r = await rig()
+    // Somebody to reassign TO: the endpoint refuses an assignee with no mailbox.
+    r.hermes.ensureMailbox('agent.scribe')
+    r.post('agent.artemis', propose())
+    await r.sweep()
+    const taskId = r.agora.tasks().tasks[0]?.id ?? ''
+    r.ledger.stallTaskOf('agent.mason', { rung: 3, signals: [] })
+
+    r.post(
+      'agent.artemis',
+      propose({
+        ops: [{ op: 'update', id: taskId, patch: { assignee: 'agent.scribe', status: 'todo' } }]
+      })
+    )
+    await r.sweep()
+
+    expect(r.agora.tasks().tasks[0]).toMatchObject({ assignee: 'agent.scribe', status: 'todo' })
+    // …and the binding follows the reassignment.
+    expect(r.ledger.boundTaskFor('agent.scribe')).toBe(taskId)
+    expect(r.ledger.boundTaskFor('agent.mason')).toBeNull()
+  })
+})

@@ -28,6 +28,7 @@ import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
+import { ClosingTime } from './closing'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
 import { initHome } from './config'
@@ -48,6 +49,7 @@ import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
+import { SteerNotes } from './watch/steer-notes'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
@@ -81,6 +83,9 @@ const scheduler = new Scheduler({
     )
 })
 let hermes: Hermes | null = null
+let closingTime: ClosingTime | null = null
+/** Set once the quit path has offered (or skipped) closing time. */
+let closingOffered = false
 let mainWindow: BrowserWindow | null = null
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
@@ -115,6 +120,31 @@ function reportDegradation(source: string, detail: string): void {
 const commandQueue = new CommandQueue({
   sink: { write: (agentId, data) => ptyManager.write(agentId, data) },
   onChange: (state: CommandState) => mainWindow?.webContents.send(COMMANDS_STATE_CHANNEL, state)
+})
+
+/**
+ * GYM-002 (ADR-0011 rung 1): the corrective sentence rides the hook boundary on
+ * `native`-grade engines — the next `post-tool` reply carries it, mid-turn —
+ * and keeps the queue-until-idle path below that grade. The channel choice and
+ * its rules live in `watch/steer-notes.ts`; the scenario rig constructs the
+ * same class (shipped wiring, never a copy — the M5.1 rule).
+ */
+const steerNotes = new SteerNotes({
+  hookFidelity: (agentId) => {
+    try {
+      return agentManager?.card(agentId).hookFidelity ?? 'native'
+    } catch {
+      return 'native'
+    }
+  },
+  queueSubmit: (agentId, text) => commandQueue.submit(agentId, text),
+  onSteer: (agentId, _text, channel) => {
+    // The channel is part of the trip's record (invariant §7, NFR-13) — a
+    // reader of `log.jsonl` must be able to tell how the sentence traveled.
+    agora?.appendLog({ kind: 'breaker', action: 'steer-channel', agentId, channel })
+    mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    agora?.commitSoon(`breaker steer for ${agentId}`)
+  }
 })
 
 const avatarDirector = new AvatarDirector({
@@ -157,6 +187,13 @@ const hookServer = new HookServer({
       // shared repo cannot cross-attribute spend between agents (ADR-0011).
       agentManager?.noteSession(envelope.agentId, envelope.sessionId)
     }
+
+    // GYM-002: a pending rung-1 steer rides this very boundary. `recordSpan`
+    // above already ran the breaker's evaluate for a `post-tool`, so a trip on
+    // THIS event is answered on THIS reply — zero added latency. (Non-post-tool
+    // events answer null; `session-start` clears a stale note.)
+    const steerReply = steerNotes.answer(envelope.agentId, envelope.event)
+    if (steerReply) return steerReply
 
     // SDD §9 choke point 1: the engine is waiting on a human. Through M1 and
     // M2 this event was unmapped, so an agent stalled behind a permission
@@ -421,6 +458,10 @@ async function boot(): Promise<void> {
   chokePoints = wireGateChokePoints({
     gates,
     prompts,
+    // M5.1: the join that makes SDD §4.2's `gates` real in production. Every
+    // gate this app opens is now recorded against the work it blocks, so the
+    // `status → done` refusal finally guards a field something fills.
+    taskOf: (agentId) => ledger?.boundTaskFor(agentId) ?? null,
     onError: (detail) => reportDegradation('gates', detail)
   })
 
@@ -428,9 +469,9 @@ async function boot(): Promise<void> {
   // no tool event arrives with nowhere to go.
   breaker = new Breaker({
     effects: {
-      // A prompt, so FR-1.3's queue-until-idle applies to it exactly as it does
-      // to the Architect's own typing.
-      steer: (agentId, text) => commandQueue.submit(agentId, text),
+      // GYM-002: hook boundary on `native` grade, queue-until-idle below it —
+      // the choice and its record live in `watch/steer-notes.ts`.
+      steer: (agentId, text) => steerNotes.steer(agentId, text),
       pauseDeliveries: (agentId, paused) => hermes?.setPaused(agentId, paused),
       interrupt: (agentId) => {
         try {
@@ -447,6 +488,15 @@ async function boot(): Promise<void> {
         }
       },
       avatar: (agentId, event) => avatarDirector.apply(agentId, event),
+      // ADR-0011 rung 3's owed clause: the stopped agent's task returns to the
+      // ledger as `stalled` with the breaker report, for Artemis to reassign.
+      returnTask: (agentId, report) => {
+        try {
+          ledger?.stallTaskOf(agentId, report)
+        } catch (err) {
+          reportDegradation('breaker', `could not stall the task of ${agentId}: ${String(err)}`)
+        }
+      },
       // ADR-0011 rung 2: "lower its remaining budget". The set is consulted by
       // the budget watcher's agents() below, so the constraint lifts with the
       // rung and never touches the append-only ledger itself.
@@ -592,9 +642,29 @@ async function boot(): Promise<void> {
   scheduler.add(reflection.trigger())
   scheduler.start()
 
+  // Closing time (GYM-003): constructed before Hermes so the endpoint below can
+  // hand acknowledgments to it. It only mails, watches and reports — the quit
+  // path in `window-all-closed` decides whether to run it.
+  closingTime = new ClosingTime({
+    liveAgents: () =>
+      agentManager
+        ?.list()
+        .filter((card) => card.lifecycle === 'running')
+        .map((card) => card.agentId) ?? [],
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    render: (kind, vars) =>
+      prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
+    closing: (message) => closingTime?.noteReply(message) ?? false,
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
     library: (message) => {
       if (!reflection) {
@@ -939,9 +1009,63 @@ async function boot(): Promise<void> {
   else reportDegradation('artemis', 'no engine adapter registered; not hired')
 }
 
+/**
+ * Closing time at the quit path (GYM-003) — offered, never forced. With live
+ * agents on the floor the Architect chooses: let them park their work and
+ * acknowledge (bounded by the protocol's hard deadline), or quit now — one
+ * click, ungated, today's behavior. The dialog copy is UI chrome, not an LLM
+ * prompt surface, so it may live here (invariant §8 is about LLM-facing prose).
+ */
+async function offerClosingTime(): Promise<void> {
+  if (closingOffered) return
+  closingOffered = true
+  const closing = closingTime
+  if (!closing || closing.inProgress()) return
+  const live =
+    agentManager
+      ?.list()
+      .filter((card) => card.lifecycle === 'running')
+      .map((card) => card.agentId) ?? []
+  if (live.length === 0) return
+
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Ephesus',
+    message: `${String(live.length)} agent(s) are still working.`,
+    detail:
+      'Closing time asks each agent to park its work and write down where it ' +
+      'stopped before the floor shuts down. Quit now skips that.',
+    buttons: ['Closing time', 'Quit now'],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (choice !== 0) return
+
+  try {
+    const report = await closing.begin()
+    if (report.missing.length > 0) {
+      reportDegradation(
+        'shutdown',
+        `closing time: no acknowledgment from ${report.missing.join(', ')} by the deadline`
+      )
+    }
+  } catch (err) {
+    reportDegradation(
+      'shutdown',
+      `closing time failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+}
+
 app.on('window-all-closed', () => {
   // Unwind spawns before the ptys die, so every settings file the harness wrote
-  // into a repo is restored (ADR-0009) rather than left behind.
+  // into a repo is restored (ADR-0009) rather than left behind — and, first,
+  // closing time (GYM-003): the one moment agents can still write down where
+  // they stopped is before anything below runs.
+  void offerClosingTime().then(() => teardown())
+})
+
+function teardown(): void {
   void agentManager
     ?.shutdown()
     .catch((err: unknown) => console.warn(`agents: shutdown failed: ${String(err)}`))
@@ -965,4 +1089,4 @@ app.on('window-all-closed', () => {
     db?.close()
     if (process.platform !== 'darwin') app.quit()
   }
-})
+}

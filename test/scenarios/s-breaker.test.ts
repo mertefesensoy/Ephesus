@@ -1,6 +1,14 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { DEFAULT_THRESHOLDS } from '../../src/shared/breaker'
-import { cleanupHomes, scenarioMessage, startCompany, type Company } from './company'
+import { decideCommand } from '../../src/shared/commands'
+import { LEDGER_ENDPOINT, LEDGER_SCHEMA_VERSION } from '../../src/shared/ledger'
+import {
+  cleanupHomes,
+  scenarioMessage,
+  startCompany,
+  type Company,
+  type CompanyOptions
+} from './company'
 
 /**
  * S-BREAKER (TEST-STRATEGY §3): "scripted repetition/error-storm/burn-rate
@@ -9,9 +17,10 @@ import { cleanupHomes, scenarioMessage, startCompany, type Company } from './com
  *
  * Real spawned `fake-engine` processes emitting real hook events over a real
  * socket — the breaker sees exactly what it sees in the app, through the same
- * wiring. Two of the spec's clauses land here in full; the ledger-`stalled`
- * clause needs Artemis's reassignment (M3.8), and the brief needs the Odeon
- * (M5), so both are named as owed rather than faked.
+ * wiring. The ledger-`stalled` clause landed with the agent↔task binding join
+ * (M5.1) and is asserted at the bottom of this file; the brief-mentions-trip
+ * clause still needs the Odeon's briefing compiler (M5.4) and is named as owed
+ * rather than faked.
  */
 
 const companies: Company[] = []
@@ -20,8 +29,8 @@ afterAll(async () => {
   cleanupHomes()
 })
 
-async function company(): Promise<Company> {
-  const started = await startCompany()
+async function company(options: CompanyOptions = {}): Promise<Company> {
+  const started = await startCompany(options)
   companies.push(started)
   return started
 }
@@ -89,6 +98,65 @@ describe('S-BREAKER — repetition walks the ladder', () => {
     // the Architect turns off, and then it protects nothing at all.
     expect(eph.breaker.stateFor('agent.scribe').rung).toBe(0)
     expect(eph.breakerActs).toEqual([])
+  })
+})
+
+/**
+ * GYM-002 (RB-001): rung 1's sentence used to ride the command queue, and
+ * `decideCommand` holds mid-turn text — so the correction waited out the very
+ * loop it targeted. On `native` grade it now rides the next `post-tool` hook
+ * reply; below that grade the queue path stands as the honest degradation.
+ */
+describe('S-BREAKER — rung 1 rides the hook boundary (GYM-002)', () => {
+  it('the defect, on record: the queue channel holds a mid-turn sentence', () => {
+    // The pre-GYM-002 channel, kept as the sub-native fallback. A looping
+    // agent is `thinking`/`working` by definition, and both phases HOLD.
+    expect(decideCommand('working').kind).toBe('hold')
+    expect(decideCommand('thinking').kind).toBe('hold')
+  })
+
+  it('a native-grade loop is steered on a reply of the SAME turn that tripped', async () => {
+    const eph = await company()
+    eph.hire('agent.mason')
+    // Two extra calls AFTER the trip: the answer must ride the tripping
+    // boundary (mid-turn), not trail out at the end of the turn.
+    const stdout = await eph.runTurn('agent.mason', [
+      ...Array.from({ length: DEFAULT_THRESHOLDS.repeatCount + 2 }, () =>
+        toolCall('Read', { path: 'same.ts' })
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+
+    const lines = stdout.split('\n')
+    const answers = lines.filter((line) => line.includes('hook-answer post-tool'))
+    expect(answers).toHaveLength(1)
+    expect(answers[0]).toContain('block:')
+    expect(answers[0]).toContain('looping')
+    // Mid-turn, provably: post-tool boundaries follow the answer line.
+    const answerAt = lines.findIndex((line) => line.includes('hook-answer post-tool'))
+    const lastSentAt = lines
+      .map((line, i) => (line.includes('hook-sent post-tool') ? i : -1))
+      .filter((i) => i >= 0)
+      .at(-1)
+    expect(answerAt).toBeLessThan(lastSentAt ?? -1)
+    // The record names the channel, and nothing rode the queue.
+    expect(eph.breakerActs).toContain('steer-channel:agent.mason:hook')
+    expect(eph.breakerActs.filter((act) => act.startsWith('queue-steer:'))).toEqual([])
+  })
+
+  it('below native the queue path stands and the hook reply stays silent', async () => {
+    const eph = await company({ hookGrade: 'pty-heuristic' })
+    eph.hire('agent.mason')
+    const stdout = await eph.runTurn('agent.mason', [
+      ...Array.from({ length: DEFAULT_THRESHOLDS.repeatCount }, () =>
+        toolCall('Read', { path: 'same.ts' })
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+
+    expect(stdout).not.toContain('hook-answer post-tool')
+    expect(eph.breakerActs).toContain('steer-channel:agent.mason:queue')
+    expect(eph.breakerActs.some((act) => act.startsWith('queue-steer:agent.mason:'))).toBe(true)
   })
 })
 
@@ -206,5 +274,90 @@ describe('S-BREAKER — reduced protection is surfaced, not hidden', () => {
     const state = eph.breaker.stateFor('agent.mason')
     expect(state.reducedProtection).toBe(false)
     expect(state.spanCount).toBe(1)
+  })
+})
+
+/**
+ * The clause this suite has carried since M3: "ledger `stalled`". It was owed
+ * to the agent↔task binding join, which landed in M5.1 — before it, rung 3
+ * stopped a process and the work it was doing simply went quiet in the ledger.
+ */
+describe('S-BREAKER — rung 3 gives the work back (ADR-0011, M5.1)', () => {
+  /** Assigns one task to `agent.mason` through the real ledger endpoint. */
+  function assign(eph: Company, taskId: string): void {
+    eph.tasks.submit(
+      scenarioMessage({
+        from: 'agent.artemis',
+        to: LEDGER_ENDPOINT,
+        act: 'propose',
+        subject: 'decompose the directive',
+        body: JSON.stringify({
+          schemaVersion: LEDGER_SCHEMA_VERSION,
+          ops: [
+            {
+              op: 'create',
+              task: {
+                id: taskId,
+                title: 'Fix the flaky checkout test',
+                spec: 'Reproduce it, then fix it.',
+                assignee: 'agent.mason'
+              }
+            }
+          ]
+        })
+      })
+    )
+  }
+
+  it('returns the bound task as `stalled`, with the trip in the book of record', async () => {
+    const eph = await company()
+    eph.hire('agent.mason')
+    assign(eph, 't-sbreaker-01')
+    expect(eph.tasks.boundTaskFor('agent.mason')).toBe('t-sbreaker-01')
+
+    // A real spawned agent, failing the same call over and over.
+    await eph.runTurn('agent.mason', [
+      ...Array.from({ length: 8 }, (_unused, i) =>
+        toolCall('Bash', { command: `attempt-${String(i)}` }, true)
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+    eph.breaker.forceEvaluate('agent.mason')
+    eph.breaker.forceEvaluate('agent.mason')
+    expect(eph.breaker.stateFor('agent.mason').rung).toBe(3)
+
+    // The task went back to the ledger rather than dying with the process.
+    expect(eph.breakerActs).toContain('return-task:agent.mason:t-sbreaker-01')
+    const task = eph.tasks.tasks().tasks.find((row) => row.id === 't-sbreaker-01')
+    expect(task?.status).toBe('stalled')
+
+    // …and why, reconstructible from `log.jsonl` alone (NFR-13).
+    const stalled = eph.agora
+      .readLog()
+      .filter((row) => row['kind'] === 'task' && row['event'] === 'stalled')
+      .at(-1)
+    expect(stalled).toMatchObject({
+      taskId: 't-sbreaker-01',
+      assignee: 'agent.mason',
+      because: 'breaker',
+      rung: 3
+    })
+    expect(String((stalled as Record<string, unknown>)['signals'])).toContain('error-rate')
+  })
+
+  it('stops an unassigned agent without inventing work to stall', async () => {
+    const eph = await company()
+    eph.hire('agent.tess')
+    await eph.runTurn('agent.tess', [
+      ...Array.from({ length: 8 }, (_unused, i) =>
+        toolCall('Bash', { command: `attempt-${String(i)}` }, true)
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+    eph.breaker.forceEvaluate('agent.tess')
+    eph.breaker.forceEvaluate('agent.tess')
+
+    expect(eph.breakerActs).toContain('return-task:agent.tess:none')
+    expect(eph.tasks.tasks().tasks).toEqual([])
   })
 })

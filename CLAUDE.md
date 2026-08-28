@@ -61,5 +61,6 @@ test output). One work package per PR. Do not create PRs unless asked.
 `/goal` (drive the current milestone run: authorship + branch policy +
 package loop) · `/build-package` (execute next BUILD-PROMPT work package) ·
 `/milestone-review` (verify exit criteria, update PROGRESS) · `/doc-sync`
-(code↔docs drift check) · `/improve` (file a Gymnasium improvement proposal).
+(code↔docs drift check) · `/improve` (file a Gymnasium improvement proposal) ·
+`/research` (run a Stoa research cycle over the watchlist).
 See `docs/AUTOMATION.md`.

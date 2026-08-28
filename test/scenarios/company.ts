@@ -11,10 +11,13 @@ import {
 } from '../../src/shared/message'
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
+import { ClosingTime } from '../../src/main/closing'
+import { LedgerEndpoint } from '../../src/main/ledger'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { Breaker } from '../../src/main/watch/breaker'
+import { SteerNotes } from '../../src/main/watch/steer-notes'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
 import { CostLedger, MemoryLedgerStore, type LedgerStore } from '../../src/main/watch/ledger'
 import { GateManager, wireGateChokePoints } from '../../src/main/watch/gates'
@@ -47,6 +50,13 @@ export interface CompanyOptions {
    * never from an in-memory counter).
    */
   readonly ledgerStore?: LedgerStore
+  /**
+   * The hook grade every hire declares — the fact GYM-002's steer channel keys
+   * on. Defaults to `native`, matching `index.ts`'s fallback.
+   */
+  readonly hookGrade?: string
+  /** Closing time's hard deadline (GYM-003). Scenarios keep it short. */
+  readonly closingDeadlineMs?: number
 }
 
 export interface Company {
@@ -57,12 +67,16 @@ export interface Company {
   readonly hookEvents: readonly HookEventRecord[]
   /** The Watch's approval queue, wired through the SHIPPED choke points. */
   readonly gates: GateManager
+  /** The task ledger endpoint — the SHIPPED one, so the M5.1 join is real. */
+  readonly tasks: LedgerEndpoint
   /** The choke-point submitters, for scenarios that drive spend directly. */
   readonly chokePoints: ReturnType<typeof wireGateChokePoints>
   /** The circuit breaker, fed by the same event plane the floor reads. */
   readonly breaker: Breaker
   /** What each rung actually did, in order — S-BREAKER reads this. */
   readonly breakerActs: readonly string[]
+  /** Closing time (GYM-003) — the SHIPPED protocol, wired to this company. */
+  readonly closing: ClosingTime
   /** The durable cost plane, so a restarted company can be given the same one. */
   readonly ledgerStore: LedgerStore
   /** The durable cost ledger (ADR-0011). */
@@ -173,18 +187,45 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     refusalReason: (because) => prompts.read(path.join('watch', `refusal-${because}.md`)).trim()
   })
 
+  // The task ledger (SDD §7.1). The rig runs the SHIPPED endpoint so the M5.1
+  // join — gate → `task.gates`, breaker rung 3 → `stalled` — is EXERCISED by
+  // the scenarios rather than described by them.
+  const tasks = new LedgerEndpoint({
+    store: agora,
+    knownAgents: () => hermes.knownAgents(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`ledger ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
   // The SHIPPED choke-point wiring, not a copy of it. The first draft of this
   // rig duplicated `index.ts` character-for-character, so S-GATE stayed green
   // with the production wiring deleted — found by review.
-  const chokePoints = wireGateChokePoints({ gates, prompts })
+  const chokePoints = wireGateChokePoints({
+    gates,
+    prompts,
+    taskOf: (agentId) => tasks.boundTaskFor(agentId)
+  })
 
   // The breaker (ADR-0011), wired to the same effects `index.ts` wires — the
   // acts are recorded rather than performed, because a scenario cannot kill a
   // process it also needs to assert against.
   const breakerActs: string[] = []
+  // GYM-002: the SHIPPED steer channel, not a copy of it — the same class
+  // `index.ts` constructs, so the scenarios exercise the grade split and the
+  // exactly-once boundary delivery rather than describing them.
+  const steerNotes = new SteerNotes({
+    hookFidelity: () => options.hookGrade ?? 'native',
+    queueSubmit: (agentId, text) => breakerActs.push(`queue-steer:${agentId}:${text.slice(0, 40)}`),
+    onSteer: (agentId, text, channel) => {
+      breakerActs.push(`steer:${agentId}:${text.slice(0, 40)}`)
+      breakerActs.push(`steer-channel:${agentId}:${channel}`)
+    }
+  })
   const breaker = new Breaker({
     effects: {
-      steer: (agentId, text) => breakerActs.push(`steer:${agentId}:${text.slice(0, 40)}`),
+      steer: (agentId, text) => steerNotes.steer(agentId, text),
       pauseDeliveries: (agentId, paused) => {
         breakerActs.push(`pause:${agentId}:${String(paused)}`)
         hermes.setPaused(agentId, paused)
@@ -193,6 +234,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
         breakerActs.push(`constrain-budget:${agentId}:${String(constrained)}`),
       interrupt: (agentId) => breakerActs.push(`interrupt:${agentId}`),
       stop: (agentId) => breakerActs.push(`stop:${agentId}`),
+      // Performed for real: ADR-0011 rung 3 is only observable if the task
+      // actually goes back to the ledger.
+      returnTask: (agentId, report) => {
+        const taskId = tasks.stallTaskOf(agentId, report)
+        breakerActs.push(`return-task:${agentId}:${taskId ?? 'none'}`)
+      },
       avatar: (agentId, event) =>
         breakerActs.push(
           `avatar:${agentId}:${event.kind === 'breaker' ? `rung${String(event.rung)}` : 'recover'}`
@@ -214,9 +261,14 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     }
   })
 
+  // Closing time (GYM-003): the SHIPPED protocol, handed acks by the endpoint
+  // below exactly as `index.ts` hands them. Constructed first because Hermes's
+  // options close over it.
+  let closingRef: ClosingTime | null = null
   const hermes = new Hermes({
     agora,
     prompts,
+    closing: (message) => closingRef?.noteReply(message) ?? false,
     ...(options.hermesFaults ? { faults: options.hermesFaults } : {}),
     ...(options.blockCap === undefined ? {} : { blockCap: options.blockCap }),
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
@@ -249,6 +301,19 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   })
   const budgetedAgents: BudgetedAgent[] = []
 
+  const closing = new ClosingTime({
+    liveAgents: () => hermes.knownAgents(),
+    deliver: (message) => hermes.deliverFromHarness(message),
+    render: (kind, vars) =>
+      prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
+    },
+    ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs })
+  })
+  closingRef = closing
+
   const hookEvents: HookEventRecord[] = []
   const hookServer = new HookServer({
     onEvent: (record) => {
@@ -271,6 +336,9 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
         )
         breaker.evaluate(record.envelope.agentId)
       }
+      // GYM-002: a steer the evaluate above just queued rides this same reply.
+      const steerReply = steerNotes.answer(record.envelope.agentId, record.envelope.event)
+      if (steerReply) return steerReply
       return record.envelope.event === 'stop'
         ? hermes
             .decideOnStop(record.envelope.agentId, record.envelope.payload)
@@ -287,6 +355,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   return {
     home,
     agora,
+    tasks,
     hermes,
     hookServer,
     hookEvents,
@@ -294,6 +363,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     chokePoints,
     breaker,
     breakerActs,
+    closing,
     ledgerStore,
     costs,
 

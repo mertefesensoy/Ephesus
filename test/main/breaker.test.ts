@@ -18,6 +18,8 @@ interface Recorded {
   readonly stops: string[]
   readonly avatars: string[]
   readonly logs: Record<string, unknown>[]
+  /** Rung 3's owed clause: what went back to the ledger, and why. */
+  readonly returned: string[]
 }
 
 function rig(over: { budget?: () => 'ok' | 'breached'; fidelity?: string } = {}): {
@@ -32,7 +34,8 @@ function rig(over: { budget?: () => 'ok' | 'breached'; fidelity?: string } = {})
     interrupts: [],
     stops: [],
     avatars: [],
-    logs: []
+    logs: [],
+    returned: []
   }
   let now = 1_700_000_000_000
   const effects: BreakerEffects = {
@@ -42,7 +45,11 @@ function rig(over: { budget?: () => 'ok' | 'breached'; fidelity?: string } = {})
     interrupt: (id) => rec.interrupts.push(id),
     stop: (id) => rec.stops.push(id),
     avatar: (_id, event) =>
-      rec.avatars.push(event.kind === 'breaker' ? `rung${String(event.rung)}` : 'recover')
+      rec.avatars.push(event.kind === 'breaker' ? `rung${String(event.rung)}` : 'recover'),
+    returnTask: (id, report) =>
+      rec.returned.push(
+        `${id}:rung${String(report.rung)}:${report.signals.map((hit) => hit.signal).join(',')}`
+      )
   }
   const breaker = new Breaker({
     effects,
@@ -129,6 +136,41 @@ describe('climbing the ladder', () => {
     expect(rec.stops).toEqual(['agent.mason'])
     // The engine's own cancel key BEFORE the process stop (ADR-0011).
     expect(rec.avatars).toEqual(['rung1', 'rung2', 'rung3'])
+  })
+
+  it('returns the work to the ledger when it stops the agent (ADR-0011)', () => {
+    // Rung 3's owed clause, unreachable until the M5.1 join existed: "task
+    // returns to the ledger as `stalled` with the breaker report attached".
+    // Work is preserved at every rung — 1 and 2 keep the agent working, and 3
+    // hands the task back rather than letting it die with the process.
+    const { breaker, rec, tick } = rig()
+    for (let i = 0; i < 3; i += 1) {
+      loop(breaker)
+      breaker.evaluate('agent.mason')
+      tick(DWELL)
+    }
+    expect(rec.returned).toEqual(['agent.mason:rung3:repetition'])
+  })
+
+  it('returns nothing at rungs 1 and 2 — those preserve the work in place', () => {
+    const { breaker, rec, tick } = rig()
+    loop(breaker)
+    breaker.evaluate('agent.mason')
+    tick(DWELL)
+    loop(breaker)
+    breaker.evaluate('agent.mason')
+    expect(rec.returned).toEqual([])
+  })
+
+  it('hands back the task exactly once, however long the agent stays stopped', () => {
+    // A task returned twice would be stalled, reassigned, then stalled again.
+    const { breaker, rec, tick } = rig()
+    for (let i = 0; i < 6; i += 1) {
+      loop(breaker)
+      breaker.evaluate('agent.mason')
+      tick(DWELL)
+    }
+    expect(rec.returned).toHaveLength(1)
   })
 
   it('stays at 3 rather than climbing past it', () => {
@@ -244,7 +286,8 @@ describe('span capture (FR-11.6)', () => {
         constrainBudget: () => {},
         interrupt: () => {},
         stop: () => {},
-        avatar: () => {}
+        avatar: () => {},
+        returnTask: () => {}
       },
       steerText: () => 'x',
       spanLimit: 10

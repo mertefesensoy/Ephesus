@@ -40,6 +40,7 @@ async function restartOver(home: string): Promise<Company> {
   const { PromptStore } = await import('../../src/main/prompts')
   const { GateManager, wireGateChokePoints } = await import('../../src/main/watch/gates')
   const { Breaker } = await import('../../src/main/watch/breaker')
+  const { LedgerEndpoint } = await import('../../src/main/ledger')
   const { CostLedger, MemoryLedgerStore } = await import('../../src/main/watch/ledger')
   const { denyAllPolicy } = await import('../../src/shared/gates')
   const { fileURLToPath } = await import('node:url')
@@ -61,6 +62,8 @@ async function restartOver(home: string): Promise<Company> {
     // The restarted half of a blackout re-reads state from disk; it never
     // opens a gate, so a deny-all manager with no sinks is the honest stand-in.
     gates: blackoutGates,
+    // The restarted half re-reads `tasks.json` from disk like the real app.
+    tasks: new LedgerEndpoint({ store: agora, knownAgents: () => hermes.knownAgents() }),
     chokePoints: wireGateChokePoints({ gates: blackoutGates, prompts }),
     // A blackout scenario never trips the breaker; it asserts what survived on
     // disk. A no-effect breaker is the honest stand-in.
@@ -71,11 +74,20 @@ async function restartOver(home: string): Promise<Company> {
         constrainBudget: () => {},
         interrupt: () => {},
         stop: () => {},
-        avatar: () => {}
+        avatar: () => {},
+        returnTask: () => {}
       },
       steerText: () => ''
     }),
     breakerActs: [],
+    // The restarted half never closes the floor; a real protocol over the
+    // rebuilt rails is the honest stand-in (nothing calls begin() here).
+    closing: new (await import('../../src/main/closing')).ClosingTime({
+      liveAgents: () => hermes.knownAgents(),
+      deliver: (message) => hermes.deliverFromHarness(message),
+      render: () => '',
+      onLogEvent: () => {}
+    }),
     // A blackout scenario asserts what survived on disk in the *data plane*;
     // the cost plane's own restart property is S-LEDGER's. Honest stand-ins.
     ledgerStore: new MemoryLedgerStore(),

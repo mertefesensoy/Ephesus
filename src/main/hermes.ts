@@ -2,7 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
-import { HERMES_SENDER, LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../shared/reserved'
+import {
+  CLOSING_ENDPOINT,
+  HERMES_SENDER,
+  LEDGER_ENDPOINT,
+  LIBRARY_ENDPOINT
+} from '../shared/reserved'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
@@ -106,6 +111,13 @@ export interface HermesOptions {
     readonly subject: string
     readonly body: string
   }
+  /**
+   * The closing-time endpoint (GYM-003) — carries acknowledgments to the
+   * shutdown protocol without the router learning what a shutdown is. Returns
+   * true when a closing is in flight and the message was consumed; false
+   * bounces it back to the sender ("no closing time is in progress", FR-3.4).
+   */
+  closing?(message: Message): boolean
   /** Renders the block reason and the wake nudge — both are prompt surfaces. */
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
@@ -299,6 +311,16 @@ export class Hermes {
       outcome.body,
       LIBRARY_ENDPOINT
     )
+  }
+
+  /**
+   * Hands an acknowledgment to the closing-time protocol (GYM-003). An ack
+   * with no closing in flight is out of season — bounced with the reason
+   * rather than dropped (FR-3.4), so the agent learns nobody was packing up.
+   */
+  private submitToClosing(message: Message): void {
+    const handled = this.options.closing?.(message) ?? false
+    if (!handled) this.bounce(message, 'no closing time is in progress')
   }
 
   /**
@@ -502,6 +524,7 @@ export class Hermes {
       // believing work exists that does not, or an agent believing its memory
       // was condensed when it was not.
       if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
+      else if (route.endpoint === CLOSING_ENDPOINT) this.submitToClosing(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }

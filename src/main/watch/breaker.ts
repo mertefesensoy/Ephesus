@@ -7,6 +7,7 @@ import {
   protectionFor,
   RUNG_NAMES,
   spanSchema,
+  type BreakerReport,
   type BreakerState,
   type BreakerThresholds,
   type Rung,
@@ -32,9 +33,11 @@ import {
 /** The acts a rung performs. Injected, so the breaker owns no subsystem. */
 export interface BreakerEffects {
   /**
-   * Rung 1: one corrective sentence into the agent's session, through the
-   * command queue — it is a prompt, so FR-1.3's queue-until-idle applies to it
-   * exactly as it does to the Architect's own typing.
+   * Rung 1: one corrective sentence into the agent's session. The breaker owns
+   * the policy only — the wiring chooses the channel (GYM-002, RB-001): the
+   * next `post-tool` hook reply on `native`-grade engines (mid-turn, race-free),
+   * the FR-1.3 command queue below that grade (held until idle, the honest
+   * degradation). See `watch/steer-notes.ts`.
    */
   steer(agentId: string, text: string): void
   /** Rung 2: pause this agent's Hermes deliveries. */
@@ -49,6 +52,14 @@ export interface BreakerEffects {
   /** Rung 3: the engine's cancel key, then a stop. */
   interrupt(agentId: string): void
   stop(agentId: string): void
+  /**
+   * Rung 3's owed clause (ADR-0011): "task returns to the ledger as `stalled`
+   * with the breaker report attached". The breaker supplies the report and
+   * never touches `tasks.json` — the ledger endpoint owns that file and the
+   * single committer owns the write (ADR-0004). Unreachable before M5.1,
+   * because nothing bound a live agent to a task.
+   */
+  returnTask(agentId: string, report: BreakerReport): void
   /** Drives the avatar (`looping` at rung 1, `stopped` at rung 3 — SDD §6). */
   avatar(
     agentId: string,
@@ -268,6 +279,10 @@ export class Breaker {
       // Graceful first: the engine's own cancel key, then the process.
       this.options.effects.interrupt(agentId)
       this.options.effects.stop(agentId)
+      // …and the work does not die with the process: it goes back to the
+      // ledger carrying why it stopped, so Artemis can decide reassignment
+      // instead of discovering an abandoned task later (ADR-0011).
+      this.options.effects.returnTask(agentId, { rung: 3, signals: [...firing] })
     }
   }
 

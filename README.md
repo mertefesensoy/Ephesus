@@ -43,6 +43,7 @@ in this harness is named for the part of the city that does the same job:
 | **The Terraces** | Terrace houses | The 2D office floor — every agent is an avatar at a desk; stations, walking, flying envelopes. Watchability as observability. |
 | **The Watch** | City walls | Safety — human gates, budgets, the circuit breaker (steer → constrain → stop), the secret broker, telemetry. |
 | **The Gymnasium** | Training grounds | The self-improvement loop — the company's **primary standing mission**: observe → propose → gate → land → measure, every step Architect-gated and recorded in a permanent ledger. |
+| **The Stoa** | Colonnade of the scholars | The research department — studies Architect-registered external repositories (the tagged watchlist) and files provenance-cited briefs that feed the Gymnasium (ADR-0017); company modes decide when it runs autonomously, behind a proof gate (ADR-0018). |
 
 ## What it is
 
@@ -59,11 +60,15 @@ What makes it different from its inspiration:
    milestone produces a short slide review; Artemis delivers spoken standup briefings; and
    you can convene a live meeting with any subset of agents. See
    [`docs/sdd/SDD.md §7`](./docs/sdd/SDD.md) (the Odeon).
-2. **Mission profiles.** Two first-class, pre-wired company configurations:
+2. **Mission profiles.** Three first-class, pre-wired company configurations:
    - **Skeleton Crew** — a standing crew per app you own: health watching, CI
      babysitting, dependency updates, incident response with escalation to you.
    - **Front Office** — the outward face of a project: issue/PR triage, drafted replies,
      docs and changelog upkeep, release preparation.
+   - **Recursive Improvement** — the self-improvement mission as a switchable crew
+     (ADR-0019): you present repositories by URL, the Stoa studies them, approved
+     proposals come back as pull requests from the company's own GitHub identity
+     (ADR-0020) — and you merge.
 3. **A voice-first chief of staff.** The Herald gives Artemis a refined, Jarvis-style
    spoken presence: wake word, barge-in, briefings on demand, approvals by voice.
 4. **A real org.** Departments, roles, hiring templates, agent performance reviews, and
@@ -93,6 +98,7 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | [`BUILD-PROMPT.md`](./BUILD-PROMPT.md) | Ready-to-paste prompt that directs a coding agent to implement this design milestone by milestone, doc-grounded and verification-gated. |
 | [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
 | [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
+| [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
 
 ## How it works (one screen)
 

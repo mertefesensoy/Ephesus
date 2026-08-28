@@ -96,6 +96,29 @@ S-BRIEF and S-MEETING pass; a real weekly retro report generates; S-GYM passes
 (proposal shape enforcement, architect-only verdicts, mechanical refusal of
 authority-widening proposals, rollback on regressed metric).
 
+## M5b — The Stoa + company modes: the learning company (≈ 1–2 weeks)
+
+The proof-of-improvement milestone (ADR-0017, ADR-0018). Depends only on M5's
+Gymnasium v1; runs immediately after M5 and may proceed in parallel with M6 — it is
+deliberately lettered rather than renumbering the milestones that accepted ADRs
+already cite.
+
+`stoa.ts`: watchlist (schema §4.7, architect-only mutation), researcher spawn plans
+(read-only checkout, no secret grants), brief validation (uncited finding rejected
+pre-human), immutable brief archive, `stoa` IPC group; the Agora `stoa/` layout
+seeded from the repo's build-phase `docs/stoa/` (FR-13.7). Company mode in
+`config.json` + `gym.mode/setMode` (architect-verified handler), the proof-gate
+check over the gym ledger + log (SRS §6.9), scheduler mode-gating for the
+Stoa/Gymnasium cadences, mode tagging on autonomous records, breaker rung-3
+auto-revert (FR-14.5). Status-strip mode chip; the standup brief states the mode
+and folds the Stoa into the gym-slice section.
+
+**Exit:** SRS acceptance §6.8 (research) passes as S-STOA and §6.9 (proof gate) as
+S-MODE; E-STOA runs against the fixture source; one **real** research cycle over a
+registered watchlist source produces an archived, provenance-valid brief and a GYM
+proposal citing it in the Architect's queue. The proof gate itself is *met* later,
+by operation — this milestone builds and proves the machinery that will measure it.
+
 ## M6 — The Herald: the spoken company (≈ 2–3 weeks) — *differentiator*
 
 Voice seam interfaces + policy layer (PTT, barge-in, repeat-back, failover state
@@ -111,14 +134,22 @@ scripted; a full day driven by voice without touching the keyboard for status.
 Profile schema + loader + activation UI. **Skeleton Crew** built-in profile (health
 watcher, CI babysitter, dependency updates, incident playbooks + severity
 escalation). **Front Office** built-in profile (issue/PR triage, reply drafting with
-autonomy levels, docs/changelog sync, release-prep checklist). GitHub ingestion via
+autonomy levels, docs/changelog sync, release-prep checklist). **Recursive
+Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa and modes):
+researcher + improver roles, mode-gated activation, delivery as PRs under the
+company identity (FR-10.5, ADR-0020 — machine account, broker-held token, the
+attribution carve-out in `check-attribution.cjs` lands here). GitHub ingestion via
 `gh`. Chat bridge (remote conversation, briefs, approvals; `remote` tagging).
 Shareable hires/profiles (export/import, human-confirmed). Packaging: signed builds
 for macOS/Windows/Linux, one-click update check.
 
 **Exit:** **The one-hour company test (SRS §6.1) passes on a real repo.** S-PROFILE
-passes; a real overnight run produces a truthful morning brief on the phone. The
-Gymnasium cadence trigger is live, and the two-week gymnasium acceptance test
+and S-RECURSE pass; the recursive test (SRS §6.10) lands one real chain — URL on
+the Stoa panel → brief → approved proposal → company-identity PR → Architect
+merge; a real overnight run produces a truthful morning brief on the phone. The
+Gymnasium and Stoa cadence triggers are live under company-mode governance
+(ADR-0018 — they fire autonomously only in `improving`, which the proof gate
+§6.9 must first unlock), and the two-week gymnasium acceptance test
 (SRS §6.7) is booked as the final v1 acceptance gate.
 
 ## Post-v1 horizon (recorded, not planned)
@@ -144,14 +175,19 @@ bridges · multi-machine crews.
 | R9 | Solo-maintainer bus factor | Certain | Medium | This documentation suite + dogfooding from M3 (the company maintains itself under supervision) |
 | R10 | Secret leakage via agent output | Low | Critical | Broker + env-grant least privilege + redaction filter + S-SECRETS; security memo path for new grants |
 | R11 | Gymnasium drift: self-improvement gamed (metric gaming, authority creep) or degenerating into busywork | Medium | High | ADR-0015 hard rules (nothing self-approves; ledger is total; budget slice); mechanical refusal of authority-widening proposals (FR-12.3); unmeasurable ⇒ regressed ⇒ rollback; the Gymnasium's own health metric is its validated-vs-regressed ratio, reviewed in retros (UC-12) |
+| R12 | Prompt injection / hostile content in a watched source steers the researcher | Medium | High | ADR-0017 R2: content is data; read-only, no-secrets researcher spawns enforced by the Watch (NFR-17); adversarial S-STOA plants an injection per run; nothing from a source lands ungated (FR-13.4) |
+| R13 | License/IP contamination from studied repositories | Low | High | Patterns not code (FR-13.5); license recorded at registration, `unverified` refuses pattern intake; verbatim/derived intake demands memo + attribution (ENGINEERING-STANDARDS §5) |
+| R14 | Autonomy enabled before the loop is trustworthy, or left on through a failure | Low | High | ADR-0018: proof gate refuses the first enable until §6.9 evidence exists; mode is architect-only, always visible, mode-tagged records; breaker rung 3 auto-reverts (FR-14.5) |
+| R15 | Recursive Improvement floods the Architect with PRs, or review decays into rubber-stamping | Medium | Medium | One scoped change per proposal (FR-12.2) bounds PR size; Artemis ranks before anything is implemented; the gym budget slice (FR-12.5) bounds volume; PR throughput + time-in-review become org-panel health metrics reviewed in retros (UC-12) |
+| R16 | Company GitHub credential leaks or the account is misused | Low | High | ADR-0020: fine-grained PAT, broker write-only, env-grant to improver roles only; account holds write not admin; `main` PR-and-review protected so the host blocks merges; every remote act logged; one broker action revokes |
 
 ## Dependency order (what blocks what)
 
 ```
 M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7
-            │          │      ▲      ▲
-            │          └──────┘      │   (Library feeds briefing quality)
-            └── fake-engine rig ─────┘   (everything tests against it)
+            │          │      ▲ └► M5b ──┘   (Stoa + modes need only Gymnasium v1;
+            │          └──────┘              M7's cadences run under M5b's modes)
+            └── fake-engine rig ─────────┘   (everything tests against it)
 ```
 
 The only cross-cutting asset built early and maintained forever is the fake-engine

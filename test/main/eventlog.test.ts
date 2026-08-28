@@ -25,7 +25,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty-one documented kinds', () => {
+  it('carries the twenty-two documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -49,6 +49,8 @@ describe('log line format (SDD §4.3)', () => {
       'secret-rotated',
       'profile',
       'gym',
+      // Added by GYM-003: closing time's begin / ack / complete (SDD §4.3).
+      'shutdown',
       'error'
     ])
   })
