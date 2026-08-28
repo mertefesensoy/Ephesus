@@ -16,6 +16,7 @@ import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { Breaker } from '../../src/main/watch/breaker'
+import { SteerNotes } from '../../src/main/watch/steer-notes'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
 import { CostLedger, MemoryLedgerStore, type LedgerStore } from '../../src/main/watch/ledger'
 import { GateManager, wireGateChokePoints } from '../../src/main/watch/gates'
@@ -48,6 +49,11 @@ export interface CompanyOptions {
    * never from an in-memory counter).
    */
   readonly ledgerStore?: LedgerStore
+  /**
+   * The hook grade every hire declares — the fact GYM-002's steer channel keys
+   * on. Defaults to `native`, matching `index.ts`'s fallback.
+   */
+  readonly hookGrade?: string
 }
 
 export interface Company {
@@ -201,9 +207,20 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   // acts are recorded rather than performed, because a scenario cannot kill a
   // process it also needs to assert against.
   const breakerActs: string[] = []
+  // GYM-002: the SHIPPED steer channel, not a copy of it — the same class
+  // `index.ts` constructs, so the scenarios exercise the grade split and the
+  // exactly-once boundary delivery rather than describing them.
+  const steerNotes = new SteerNotes({
+    hookFidelity: () => options.hookGrade ?? 'native',
+    queueSubmit: (agentId, text) => breakerActs.push(`queue-steer:${agentId}:${text.slice(0, 40)}`),
+    onSteer: (agentId, text, channel) => {
+      breakerActs.push(`steer:${agentId}:${text.slice(0, 40)}`)
+      breakerActs.push(`steer-channel:${agentId}:${channel}`)
+    }
+  })
   const breaker = new Breaker({
     effects: {
-      steer: (agentId, text) => breakerActs.push(`steer:${agentId}:${text.slice(0, 40)}`),
+      steer: (agentId, text) => steerNotes.steer(agentId, text),
       pauseDeliveries: (agentId, paused) => {
         breakerActs.push(`pause:${agentId}:${String(paused)}`)
         hermes.setPaused(agentId, paused)
@@ -296,6 +313,9 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
         )
         breaker.evaluate(record.envelope.agentId)
       }
+      // GYM-002: a steer the evaluate above just queued rides this same reply.
+      const steerReply = steerNotes.answer(record.envelope.agentId, record.envelope.event)
+      if (steerReply) return steerReply
       return record.envelope.event === 'stop'
         ? hermes
             .decideOnStop(record.envelope.agentId, record.envelope.payload)

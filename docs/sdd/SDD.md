@@ -484,7 +484,11 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   Deny-by-default; profile autonomy levels can only *loosen* up to global maxima —
   stricter wins (ADR-0012).
 - **Budgets**: pre-flight burn-rate projection per task + post-hoc ledger folding
-  (§4.6). Breaker signal wiring per ADR-0011.
+  (§4.6). Breaker signal wiring per ADR-0011. Rung 1's corrective sentence rides
+  the hook boundary on `native`-grade engines — the next `post-tool` reply
+  carries it as a decision the shim already relays, so it lands mid-turn — and
+  falls back to the FR-1.3 command queue below that grade; the channel taken is
+  a `breaker`/`steer-channel` log event (GYM-002, `watch/steer-notes.ts`).
 - **Telemetry**: every tool call becomes a span (agent, tool, duration, outcome) →
   waterfall UI; spans are local-only (NFR-10).
 - **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`;

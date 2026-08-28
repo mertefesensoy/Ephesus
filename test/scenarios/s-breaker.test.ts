@@ -1,7 +1,14 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { DEFAULT_THRESHOLDS } from '../../src/shared/breaker'
+import { decideCommand } from '../../src/shared/commands'
 import { LEDGER_ENDPOINT, LEDGER_SCHEMA_VERSION } from '../../src/shared/ledger'
-import { cleanupHomes, scenarioMessage, startCompany, type Company } from './company'
+import {
+  cleanupHomes,
+  scenarioMessage,
+  startCompany,
+  type Company,
+  type CompanyOptions
+} from './company'
 
 /**
  * S-BREAKER (TEST-STRATEGY §3): "scripted repetition/error-storm/burn-rate
@@ -22,8 +29,8 @@ afterAll(async () => {
   cleanupHomes()
 })
 
-async function company(): Promise<Company> {
-  const started = await startCompany()
+async function company(options: CompanyOptions = {}): Promise<Company> {
+  const started = await startCompany(options)
   companies.push(started)
   return started
 }
@@ -91,6 +98,65 @@ describe('S-BREAKER — repetition walks the ladder', () => {
     // the Architect turns off, and then it protects nothing at all.
     expect(eph.breaker.stateFor('agent.scribe').rung).toBe(0)
     expect(eph.breakerActs).toEqual([])
+  })
+})
+
+/**
+ * GYM-002 (RB-001): rung 1's sentence used to ride the command queue, and
+ * `decideCommand` holds mid-turn text — so the correction waited out the very
+ * loop it targeted. On `native` grade it now rides the next `post-tool` hook
+ * reply; below that grade the queue path stands as the honest degradation.
+ */
+describe('S-BREAKER — rung 1 rides the hook boundary (GYM-002)', () => {
+  it('the defect, on record: the queue channel holds a mid-turn sentence', () => {
+    // The pre-GYM-002 channel, kept as the sub-native fallback. A looping
+    // agent is `thinking`/`working` by definition, and both phases HOLD.
+    expect(decideCommand('working').kind).toBe('hold')
+    expect(decideCommand('thinking').kind).toBe('hold')
+  })
+
+  it('a native-grade loop is steered on a reply of the SAME turn that tripped', async () => {
+    const eph = await company()
+    eph.hire('agent.mason')
+    // Two extra calls AFTER the trip: the answer must ride the tripping
+    // boundary (mid-turn), not trail out at the end of the turn.
+    const stdout = await eph.runTurn('agent.mason', [
+      ...Array.from({ length: DEFAULT_THRESHOLDS.repeatCount + 2 }, () =>
+        toolCall('Read', { path: 'same.ts' })
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+
+    const lines = stdout.split('\n')
+    const answers = lines.filter((line) => line.includes('hook-answer post-tool'))
+    expect(answers).toHaveLength(1)
+    expect(answers[0]).toContain('block:')
+    expect(answers[0]).toContain('looping')
+    // Mid-turn, provably: post-tool boundaries follow the answer line.
+    const answerAt = lines.findIndex((line) => line.includes('hook-answer post-tool'))
+    const lastSentAt = lines
+      .map((line, i) => (line.includes('hook-sent post-tool') ? i : -1))
+      .filter((i) => i >= 0)
+      .at(-1)
+    expect(answerAt).toBeLessThan(lastSentAt ?? -1)
+    // The record names the channel, and nothing rode the queue.
+    expect(eph.breakerActs).toContain('steer-channel:agent.mason:hook')
+    expect(eph.breakerActs.filter((act) => act.startsWith('queue-steer:'))).toEqual([])
+  })
+
+  it('below native the queue path stands and the hook reply stays silent', async () => {
+    const eph = await company({ hookGrade: 'pty-heuristic' })
+    eph.hire('agent.mason')
+    const stdout = await eph.runTurn('agent.mason', [
+      ...Array.from({ length: DEFAULT_THRESHOLDS.repeatCount }, () =>
+        toolCall('Read', { path: 'same.ts' })
+      ).flat(),
+      { kind: 'exit', code: 0 }
+    ])
+
+    expect(stdout).not.toContain('hook-answer post-tool')
+    expect(eph.breakerActs).toContain('steer-channel:agent.mason:queue')
+    expect(eph.breakerActs.some((act) => act.startsWith('queue-steer:agent.mason:'))).toBe(true)
   })
 })
 

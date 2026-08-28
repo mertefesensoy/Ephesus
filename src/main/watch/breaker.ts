@@ -33,9 +33,11 @@ import {
 /** The acts a rung performs. Injected, so the breaker owns no subsystem. */
 export interface BreakerEffects {
   /**
-   * Rung 1: one corrective sentence into the agent's session, through the
-   * command queue — it is a prompt, so FR-1.3's queue-until-idle applies to it
-   * exactly as it does to the Architect's own typing.
+   * Rung 1: one corrective sentence into the agent's session. The breaker owns
+   * the policy only — the wiring chooses the channel (GYM-002, RB-001): the
+   * next `post-tool` hook reply on `native`-grade engines (mid-turn, race-free),
+   * the FR-1.3 command queue below that grade (held until idle, the honest
+   * degradation). See `watch/steer-notes.ts`.
    */
   steer(agentId: string, text: string): void
   /** Rung 2: pause this agent's Hermes deliveries. */

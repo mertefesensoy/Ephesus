@@ -193,6 +193,24 @@ async function runStep(step) {
           ? `hook-sent ${event}`
           : `hook-failed ${event} ${delivery.error ?? 'unknown'}`
       )
+      // Surface a harness decision exactly as the real shim relays one
+      // (eph-hook.mjs `decisionOf`): the tests read this line to prove a reply
+      // reached "the engine" on THIS boundary (GYM-002, ADR-0013).
+      if (delivery.delivered && typeof delivery.body === 'string') {
+        try {
+          const parsed = JSON.parse(delivery.body)
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            typeof parsed.decision === 'string' &&
+            typeof parsed.reason === 'string'
+          ) {
+            say(`hook-answer ${event} ${parsed.decision}:${parsed.reason}`)
+          }
+        } catch {
+          // Not JSON — nothing to relay, same as the shim.
+        }
+      }
       return
     }
 

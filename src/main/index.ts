@@ -48,6 +48,7 @@ import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
+import { SteerNotes } from './watch/steer-notes'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
@@ -117,6 +118,31 @@ const commandQueue = new CommandQueue({
   onChange: (state: CommandState) => mainWindow?.webContents.send(COMMANDS_STATE_CHANNEL, state)
 })
 
+/**
+ * GYM-002 (ADR-0011 rung 1): the corrective sentence rides the hook boundary on
+ * `native`-grade engines — the next `post-tool` reply carries it, mid-turn —
+ * and keeps the queue-until-idle path below that grade. The channel choice and
+ * its rules live in `watch/steer-notes.ts`; the scenario rig constructs the
+ * same class (shipped wiring, never a copy — the M5.1 rule).
+ */
+const steerNotes = new SteerNotes({
+  hookFidelity: (agentId) => {
+    try {
+      return agentManager?.card(agentId).hookFidelity ?? 'native'
+    } catch {
+      return 'native'
+    }
+  },
+  queueSubmit: (agentId, text) => commandQueue.submit(agentId, text),
+  onSteer: (agentId, _text, channel) => {
+    // The channel is part of the trip's record (invariant §7, NFR-13) — a
+    // reader of `log.jsonl` must be able to tell how the sentence traveled.
+    agora?.appendLog({ kind: 'breaker', action: 'steer-channel', agentId, channel })
+    mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    agora?.commitSoon(`breaker steer for ${agentId}`)
+  }
+})
+
 const avatarDirector = new AvatarDirector({
   // The floor and the autonomy loop read the SAME fact about pending work, so
   // they can never disagree about whether an agent is done (ADR-0013).
@@ -157,6 +183,13 @@ const hookServer = new HookServer({
       // shared repo cannot cross-attribute spend between agents (ADR-0011).
       agentManager?.noteSession(envelope.agentId, envelope.sessionId)
     }
+
+    // GYM-002: a pending rung-1 steer rides this very boundary. `recordSpan`
+    // above already ran the breaker's evaluate for a `post-tool`, so a trip on
+    // THIS event is answered on THIS reply — zero added latency. (Non-post-tool
+    // events answer null; `session-start` clears a stale note.)
+    const steerReply = steerNotes.answer(envelope.agentId, envelope.event)
+    if (steerReply) return steerReply
 
     // SDD §9 choke point 1: the engine is waiting on a human. Through M1 and
     // M2 this event was unmapped, so an agent stalled behind a permission
@@ -432,9 +465,9 @@ async function boot(): Promise<void> {
   // no tool event arrives with nowhere to go.
   breaker = new Breaker({
     effects: {
-      // A prompt, so FR-1.3's queue-until-idle applies to it exactly as it does
-      // to the Architect's own typing.
-      steer: (agentId, text) => commandQueue.submit(agentId, text),
+      // GYM-002: hook boundary on `native` grade, queue-until-idle below it —
+      // the choice and its record live in `watch/steer-notes.ts`.
+      steer: (agentId, text) => steerNotes.steer(agentId, text),
       pauseDeliveries: (agentId, paused) => hermes?.setPaused(agentId, paused),
       interrupt: (agentId) => {
         try {
