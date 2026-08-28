@@ -98,6 +98,15 @@ describe('seeding from the build-phase archive (FR-13.7)', () => {
     expect(stoa.brief('RB-001')).toContain('Munder Difflin')
   })
 
+  it('answers a seeded brief even as the FIRST call on a fresh home', () => {
+    // M5b close-out audit, finding 2: `brief()` read the archive directory
+    // without seeding first, so a fresh home whose first Stoa-touching action
+    // was `briefExists('RB-001')` — a gym proposal citing a seeded brief —
+    // false-refused it. The order of first calls must not decide the answer.
+    const { stoa } = rig()
+    expect(stoa.brief('RB-001')).toContain('Munder Difflin')
+  })
+
   it('reads a brief title off its heading and ignores non-brief files', () => {
     const { stoa } = rig()
     expect(stoa.briefs()).toEqual([

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { CompanyModes } from '../../src/main/modes'
 import { Scheduler } from '../../src/main/scheduler'
+import { stoaCadenceTick } from '../../src/main/stoa-cadence'
 import { GYM_SCHEMA_VERSION } from '../../src/shared/gym'
 import { STOA_SCHEMA_VERSION } from '../../src/shared/stoa'
 import type { CompanyMode, GymLogEvent } from '../../src/shared/mode'
@@ -239,6 +240,9 @@ describe('S-MODE — autonomy is gated at the scheduler (FR-14.4)', () => {
   it('does not fire the Stoa cadence in directed, and does in improving', async () => {
     const eph = await company()
     const { modes, state } = modesOf(eph, { mode: 'directed', everEnabled: true })
+    // The SHIPPED tick, not a copy of it (M5b close-out audit, finding 5: this
+    // case used to rebuild the trigger inline, so the production body was
+    // exercised by nothing — the rig's own copy-of-the-wiring defect class).
     let fired = 0
     const scheduler = new Scheduler({ now: () => new Date(0) })
     scheduler.add({
@@ -247,9 +251,12 @@ describe('S-MODE — autonomy is gated at the scheduler (FR-14.4)', () => {
       enabled: () => modes.mode() === 'improving',
       run: () => {
         fired += 1
-        // FR-14.1: a record produced by autonomous initiative carries the mode
-        // it ran under.
-        eph.agora.appendLog({ kind: 'stoa', event: 'cadence-fired', mode: modes.mode() })
+        stoaCadenceTick({
+          sources: () => eph.stoa.sources(),
+          plan: (sourceId) => eph.stoa.plan(sourceId),
+          mode: () => modes.mode(),
+          appendLog: (draft) => eph.agora.appendLog(draft)
+        })
       }
     })
 
@@ -260,11 +267,15 @@ describe('S-MODE — autonomy is gated at the scheduler (FR-14.4)', () => {
     await scheduler.tick()
     expect(fired).toBe(1)
 
+    // FR-14.1: the record the SHIPPED tick wrote carries the mode it ran
+    // under, and names the source it planned.
     const record = eph.agora
       .readLog()
       .filter((e) => e['kind'] === 'stoa' && e['event'] === 'cadence-fired')
       .at(-1)
     expect(record?.['mode']).toBe('improving')
+    expect(record?.['sourceId']).toBe('src-fixture-pinned')
+    expect(record?.['planned']).toBe(true)
   })
 })
 

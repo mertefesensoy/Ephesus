@@ -38,6 +38,25 @@ export type CompanyMode = z.infer<typeof companyModeSchema>
 export const DEFAULT_MODE: CompanyMode = 'directed'
 
 /**
+ * The roles autonomy itself creates (ADR-0019's profile vocabulary). A rung-3
+ * breaker stop reverts the company mode ONLY when the stopped agent held one
+ * of these roles (FR-14.5) — a stop on ordinary mission work must never
+ * switch self-improvement off for reasons that had nothing to do with it.
+ */
+export const IMPROVEMENT_ROLES = ['researcher', 'improver'] as const
+
+/**
+ * Exact role equality, not a substring test: the old `includes('improv')`
+ * heuristic lived untested in `index.ts` and would have counted a mission
+ * hire named "process-improver-docs" as gym work (M5b close-out audit,
+ * finding 12). Roles are the roster's vocabulary; when ADR-0019's profile
+ * adds one, it is added HERE, visibly.
+ */
+export function isImprovementRole(role: string): boolean {
+  return (IMPROVEMENT_ROLES as readonly string[]).includes(role.trim().toLowerCase())
+}
+
+/**
  * SRS §6.9's numbers, in one place and named.
  *
  * They live here rather than inline so the gate and its test read the same
