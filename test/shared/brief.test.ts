@@ -360,3 +360,23 @@ describe('the archived brief carries its own audit trail', () => {
     expect(md).not.toContain('## ahead')
   })
 })
+
+describe('the brief reports the Gymnasium slice (FR-12.5, ADR-0015 R3)', () => {
+  it('names the slice, what it has spent, and how many proposals are open', () => {
+    // Improvement is budgeted, not ambient — and an ambient slice is one nobody
+    // notices growing, so the standup is where the budget becomes visible.
+    const facts = compileFacts({
+      ...EMPTY,
+      gymSlice: { spentTokens: 12_000, tokensPerWeek: 200_000, open: 2 }
+    })
+    const slice = facts.find((fact) => fact.refs.includes('gym:slice'))
+    expect(slice).toBeDefined()
+    expect(slice?.section).toBe('health')
+    expect(slice?.what).toContain('12000 of 200000')
+    expect(slice?.what).toContain('2 proposal(s) open')
+  })
+
+  it('says nothing about a Gymnasium that is not running', () => {
+    expect(compileFacts(EMPTY).some((fact) => fact.refs.includes('gym:slice'))).toBe(false)
+  })
+})

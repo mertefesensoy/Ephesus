@@ -294,7 +294,11 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       ledger: tasks.tasks(),
       openGates: gates.list().map((gate) => ({ id: gate.id, agentId: gate.agentId })),
       openMemos: odeon.memos('open').map((memo) => ({ memoId: memo.memoId })),
-      spend: []
+      spend: [],
+      gymSlice: {
+        ...gymnasium.slice(),
+        open: gymnasium.rows().filter((row) => row.status === 'proposed').length
+      }
     }),
     orchestrator: () => 'agent.artemis',
     deliver: (message) => hermes.deliverFromHarness(message),
