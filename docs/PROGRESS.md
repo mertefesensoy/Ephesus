@@ -2797,7 +2797,7 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       registerable but NOT studiable; SDD §4.7 updated for both. The `stoa:`
       IPC group is exactly SDD §5's five channels (no `stoa:pin` — §7.7 puts
       pin-setting in M5b.2's study flow).*
-- [ ] **M5b.2 Researcher spawn + brief validation** — read-only study spawn
+- [x] **M5b.2 Researcher spawn + brief validation** — read-only study spawn
       plan: clone the pinned source into scratch (never a worktree of the
       Agora; no secret grants — NFR-17, enforced in the plan builder);
       research prompt from `prompts/stoa/` incl. the injection rule (content
@@ -2810,6 +2810,27 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       per TEST-STRATEGY §3 (planted pattern cited; planted instruction
       reported-not-obeyed; unverified license refuses intake; no-secrets
       spawn plan asserted). Risk: the adversarial case is the package.*
+      *Evidence: S-STOA green 18/18 (`test/scenarios/s-stoa.test.ts`) against a
+      fixture watchlist, every brief filed by a REAL spawned agent through the
+      SHIPPED Odeon endpoint. Every TEST-STRATEGY clause has a case: the plan
+      carries `envGrants: []` and `readOnly: true`, checks out OUTSIDE the
+      Agora and `worktrees/`, and scopes its question to the entry's tags; an
+      unpinned source is refused visibly (`study-refused` on the log) rather
+      than skipped; an unverified license studies but reports
+      `intakePermitted: false`; an uncited finding is refused before any human
+      sees it, in words from `prompts/` naming FR-13.3; a brief citing an
+      unpinned commit, a dangling applicability ref, or an unregistered source
+      is refused; the archive is write-once. The adversarial clause is asserted
+      as "there is no path", not "the agent behaved": a researcher that TRIES
+      to obey the planted instruction gets its brief refused and the watchlist
+      is provably unchanged. 31 further unit cases in
+      `test/shared/stoa-brief.test.ts`. Prompt-rendered instructions carry the
+      injection rule from `prompts/stoa/study.md` (asserted, incl. the
+      intake-permitted/refused split). Local full suite 2040 passed; the 13
+      failures are the documented Windows worktree/PTY + TZ set and load-flakes
+      that pass in isolation — verified against the clean baseline, no
+      regressions. The endpoint now takes SIX filings; `kind:'research-brief'`
+      because `brief` is the standup narration's (DECISIONS-LOG).*
 - [ ] **M5b.3 Company modes + proof gate** — `config.json` mode field
       (`directed`/`improving`); `gym.mode()/setMode(m)` architect-verified in
       the handler; first-enable proof-gate check reading ONLY the gym ledger +

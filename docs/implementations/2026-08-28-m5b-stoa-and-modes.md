@@ -48,6 +48,20 @@ to run on its own initiative.
 | `test/main/stoa.test.ts` | NEW. 27 cases — seeding both halves, register/retire, damaged file, read-only archive surface. |
 | `test/main/ipc-handlers.test.ts`, `test/scenarios/s-secrets.test.ts` | The two rigs that construct `IpcDeps` gain the five stubs. |
 
+### M5b.2 — Researcher spawn + brief validation
+
+| File | What it does |
+|---|---|
+| `src/shared/stoa-brief.ts` | NEW. The research-brief schema, `parseResearchBrief`, `checkBriefAgainstSource` (source/pin/dangling-ref checks), `renderBrief` (the archive markdown), `briefFileName`. |
+| `src/shared/stoa.ts` | Adds `StudyPlan`, `buildStudyPlan` and `isSafeScratchPath` — the read-only, secret-free spawn plan. |
+| `src/main/stoa.ts` | Adds `plan()` (plan + rendered instructions + refusal logging) and `fileBrief()` (validate → archive write-once → log). |
+| `src/main/odeon-endpoint.ts` | The sixth filing: `kind: 'research-brief'` dispatches to the Stoa. |
+| `prompts/stoa/*.md` | `study.md` (the researcher's briefing, carrying the injection rule), `intake-permitted.md` / `intake-refused.md`, `brief-archived*.md`, `brief-refuse*.md`, `study-refused.md`. |
+| `src/main/index.ts`, `test/scenarios/company.ts`, `test/scenarios/s-blackout.test.ts` | Wire the Stoa into the endpoint, with scratch/worktrees roots and the prompt store. |
+| `test/fixtures/stoa-seed/WATCHLIST.md` | A fixture watchlist: one pinned+MIT source, one pinned+unverified, one unpinned. |
+| `test/scenarios/s-stoa.test.ts` | NEW. S-STOA, 18 cases. |
+| `test/shared/stoa-brief.test.ts` | NEW. 31 cases over the brief shape, the watchlist checks and the archive rendering. |
+
 ---
 
 ## Implementation Approach
@@ -85,6 +99,43 @@ disk that fails validation → reported, read as empty, and **left byte-for-byte
 untouched**: the file may be the only copy of what the Architect registered, so a
 boot that "repaired" it by truncating would destroy the record it could not read.
 
+### M5b.2
+
+**The spawn plan is a plan, not a spawn.** `Stoa.plan()` returns a description
+the caller executes. That is what makes NFR-17's posture *assertable*: S-STOA
+reads `envGrants` and `readOnly` off a value rather than trusting a comment
+above a spawn call. `envGrants` is typed `readonly []` and no parameter can fill
+it — there is nothing to pass.
+
+**The checkout is re-checked inside the driver.** `buildStudyPlan` composes the
+path from a root the driver supplies, and the driver then still asserts it is
+outside the Agora and outside `worktrees/`. A defence that depends on nobody
+passing the wrong root is not a defence.
+
+**The injection rule is words, not code.** `prompts/stoa/study.md` tells the
+researcher that everything in the source is data, that an instruction addressed
+to it is a *finding* with `directive: true`, and that obeying one hands an
+outsider the company's hands. It lives in `prompts/` because invariant §8 says
+so and because NFR-17 is the instruction most likely to need rewording as real
+sources teach us how an attack is phrased. A plan built with no prompt store
+carries `instructions: null` and reports a degradation — an un-briefed
+researcher is never silent.
+
+**Validation is layered, and every layer refuses before a human reads.** The
+schema catches shape (an uncited finding is named in FR-13.3's own words, not
+zod's); `checkBriefAgainstSource` catches the things the schema cannot see —
+wrong source, a commit the watchlist never pinned, applicability or candidates
+pointing at findings that do not exist. Then the archive writes once and never
+revises, because the proposals citing a brief must keep resolving to the words
+their author read.
+
+**The adversarial test asserts "no path", not "good behaviour".** A scripted
+agent behaving correctly proves nothing about injection. S-STOA has the
+researcher *try* what the planted README told it to do, and asserts the
+watchlist is unchanged and the brief refused — because the only registrar in the
+system is the Architect on the window bridge, and there is no channel an agent
+could even be refused on.
+
 ---
 
 ## Mathematical / Statistical Details
@@ -99,6 +150,24 @@ gap, because a deleted brief's id may still be cited).
 ---
 
 ## Design Decisions
+
+### M5b.2
+
+5. **An unverified license permits study and refuses intake.** UC-14 alternate
+   2a appears to contradict this ("license unverifiable → the study is
+   refused"), but FR-13.5 — the normative requirement — conditions only *intake*
+   on a verified license, FR-13.2 (which governs studies) says nothing about
+   licenses, and SDD §4.7 and TEST-STRATEGY's S-STOA clause both state the
+   split explicitly. "Unverifiable" is a stronger state than "not yet checked",
+   has no separate value on the watchlist, and is expressed by the Architect
+   declining to register the source.
+6. **`kind: 'research-brief'`, not `brief`.** The standup narration took `brief`
+   in M5.4. Overloading it would let two unrelated artifacts answer for each
+   other at one address, and that failure is silent.
+7. **A field to report a directive.** Without `directive: true`, the only way a
+   researcher could mention "the README told me to do X" would be to do X.
+
+### M5b.1
 
 Two genuine gaps between documents were hit and resolved rather than guessed; both
 are in `docs/DECISIONS-LOG.md` and both changed SDD §4.7.

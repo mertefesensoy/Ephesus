@@ -43,6 +43,7 @@ async function restartOver(home: string): Promise<Company> {
   const { LedgerEndpoint } = await import('../../src/main/ledger')
   const { Odeon } = await import('../../src/main/odeon')
   const { Gymnasium } = await import('../../src/main/gymnasium')
+  const { Stoa } = await import('../../src/main/stoa')
   const { BriefingJob } = await import('../../src/main/briefing')
   const { MeetingDriver } = await import('../../src/main/meeting')
   const { OrgLayer } = await import('../../src/main/org')
@@ -82,6 +83,12 @@ async function restartOver(home: string): Promise<Company> {
     gymnasium: new Gymnasium({
       agoraRoot: agora.root,
       seedFrom: path.join(repo, 'docs', 'gymnasium')
+    }),
+    // The restarted half re-reads the watchlist from disk like everything else
+    // here; a blackout never studies anything.
+    stoa: new Stoa({
+      agoraRoot: agora.root,
+      seedFrom: path.join(repo, 'test', 'fixtures', 'stoa-seed')
     }),
     briefing: new BriefingJob({
       prompts,

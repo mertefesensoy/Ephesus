@@ -2,6 +2,7 @@ import path from 'node:path'
 import { parseVerdictFiling } from '../shared/memo'
 import type { Message } from '../shared/message'
 import type { Gymnasium } from './gymnasium'
+import type { Stoa } from './stoa'
 import type { BriefingJob } from './briefing'
 import type { Odeon } from './odeon'
 import type { PromptStore } from './prompts'
@@ -9,9 +10,11 @@ import type { PromptStore } from './prompts'
 /**
  * The Odeon endpoint's dispatch (ADR-0008, FR-7.1–7.3, FR-12).
  *
- * One address takes five filings — deck, memo, verdict, brief, gym proposal —
- * because the archive is one subsystem and ADR-0015 rejects a second governance
- * machine outright. Which parser runs is chosen here; what each filing MEANS is
+ * One address takes six filings — deck, memo, verdict, standup brief, gym
+ * proposal, research brief — because the archive is one subsystem and ADR-0015
+ * rejects a second governance machine outright. (The sixth arrived with the
+ * Stoa in M5b.2, for the same reason the fifth did: a second filing address
+ * would be a second place for filing to fail.) Which parser runs is chosen here; what each filing MEANS is
  * decided by the module that owns it.
  *
  * This lives in its own module for the reason the M2 close-out review found the
@@ -24,6 +27,8 @@ import type { PromptStore } from './prompts'
 export interface OdeonEndpointDeps {
   readonly odeon: Odeon
   readonly gymnasium: Gymnasium | null
+  /** The Stoa (ADR-0017). Null before M5b wires it, exactly like the others. */
+  readonly stoa: Stoa | null
   readonly briefing: BriefingJob | null
   /** Invariant §8: every word an agent reads is rendered from `prompts/`. */
   readonly prompts: PromptStore | null
@@ -71,11 +76,22 @@ export function wireOdeonEndpoint(deps: OdeonEndpointDeps): (message: Message) =
    * so a body that is not JSON at all falls through to the deck parser and gets
    * the precise refusal it deserves there rather than a vaguer one here.
    */
-  function filingKind(body: string): 'deck' | 'memo' | 'verdict' | 'brief' | 'gym-proposal' {
+  function filingKind(
+    body: string
+  ): 'deck' | 'memo' | 'verdict' | 'brief' | 'gym-proposal' | 'research-brief' {
     try {
       const raw: unknown = JSON.parse(body)
       const kind = (raw as { kind?: unknown } | null)?.kind
-      if (kind === 'memo' || kind === 'verdict' || kind === 'brief' || kind === 'gym-proposal') {
+      if (
+        kind === 'memo' ||
+        kind === 'verdict' ||
+        kind === 'brief' ||
+        kind === 'gym-proposal' ||
+        // `brief` was taken by the standup narration years before the Stoa
+        // existed, so a RESEARCH brief says so in full rather than either
+        // artifact quietly answering for the other.
+        kind === 'research-brief'
+      ) {
         return kind
       }
     } catch {
@@ -333,6 +349,57 @@ export function wireOdeonEndpoint(deps: OdeonEndpointDeps): (message: Message) =
     }
   }
 
+  /**
+   * Archives one research brief (ADR-0017, FR-13.3).
+   *
+   * Filed at the SAME address as every other artifact, for the reason M5.7
+   * gave for gym proposals: ADR-0015 rejects a second governance machine, and a
+   * second filing address would be a second place for filing to fail.
+   */
+  function archiveResearchBrief(message: Message): EndpointAnswer {
+    const words = deps.prompts
+    const stoa = deps.stoa
+    if (stoa === null) {
+      return refuseResearchBrief(['the stoa is not available'], words)
+    }
+    const outcome = stoa.fileBrief(message)
+    if (words === null) {
+      return { ok: outcome.ok, subject: 'stoa', body: JSON.stringify(outcome) }
+    }
+    if (outcome.ok) {
+      return {
+        ok: true,
+        subject: words
+          .render(path.join('stoa', 'brief-archived-subject.md'), { briefId: outcome.briefId })
+          .trim()
+          .slice(0, 200),
+        body: words
+          .render(path.join('stoa', 'brief-archived.md'), {
+            briefId: outcome.briefId,
+            findings: String(outcome.findings),
+            commit: outcome.commit
+          })
+          .trim()
+      }
+    }
+    return refuseResearchBrief(outcome.reasons, words)
+  }
+
+  function refuseResearchBrief(
+    reasons: readonly string[],
+    words: PromptStore | null
+  ): EndpointAnswer {
+    if (words === null) {
+      return { ok: false, reasons, subject: 'stoa', body: JSON.stringify({ reasons }) }
+    }
+    return {
+      ok: false,
+      reasons,
+      subject: words.read(path.join('stoa', 'brief-refuse-subject.md')).trim().slice(0, 200),
+      body: words.render(path.join('stoa', 'brief-refuse.md'), { reasons: bullets(reasons) }).trim()
+    }
+  }
+
   /** Reasons as a markdown list. Serialization, not prose (invariant §8). */
   function bullets(reasons: readonly string[]): string {
     return reasons.map((r) => `- ${r}`).join('\n')
@@ -344,6 +411,7 @@ export function wireOdeonEndpoint(deps: OdeonEndpointDeps): (message: Message) =
     if (kind === 'memo') return archiveMemo(deps.odeon, message)
     if (kind === 'brief') return archiveBrief(deps.odeon, message)
     if (kind === 'gym-proposal') return fileGymProposal(message)
+    if (kind === 'research-brief') return archiveResearchBrief(message)
     return archiveDeck(deps.odeon, message)
   }
 }

@@ -327,3 +327,107 @@ export function parseWatchlistMarkdown(markdown: string, registeredAt: string): 
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/**
+ * The plan for one study spawn (FR-13.2, NFR-17, SDD §7.7).
+ *
+ * A plan, not a spawn: this is a pure description that the caller executes, so
+ * the properties NFR-17 cares about are assertable without running anything —
+ * which is exactly what S-STOA asserts.
+ *
+ * Three of its fields are the security posture, and none of them is optional:
+ *
+ * - `envGrants` is `readonly []` and there is no parameter that could fill it.
+ *   A researcher reads arbitrary third-party text; handing it a credential is
+ *   the one mistake that turns a bad README into a breach.
+ * - `readOnly` says the checkout is never written back. The study observes.
+ * - `cwd` is under a scratch root that is NEVER the Agora or one of its
+ *   worktrees. ADR-0004 gives the Agora exactly one working copy, and a
+ *   checkout of somebody else's repository inside the company's own record is
+ *   a category error before it is a risk.
+ */
+export interface StudyPlan {
+  readonly sourceId: string
+  readonly url: string
+  /** The commit the study runs against; citations resolve inside it. */
+  readonly commit: string
+  /** Scratch checkout path — never the Agora, never an Agora worktree. */
+  readonly cwd: string
+  /** Always empty (NFR-17). There is no argument that changes this. */
+  readonly envGrants: readonly string[]
+  /** Always true — the study observes and never writes back. */
+  readonly readOnly: boolean
+  /** The study question, scoped by the entry's tags (FR-13.2). */
+  readonly question: string
+  /** What the license permits, carried into the brief's license note. */
+  readonly license: string
+  /** False when the license is unverified: study yes, pattern intake no. */
+  readonly intakePermitted: boolean
+}
+
+export type StudyPlanOutcome =
+  { readonly ok: true; readonly plan: StudyPlan } | { readonly ok: false; readonly reason: string }
+
+/**
+ * Contract: the read-only, secret-free plan for studying one source.
+ *
+ * Refuses rather than degrades (UC-14 alternate 2a): an unpinned source is not
+ * studiable, and the refusal is visible instead of the study being silently
+ * skipped. An unverified LICENSE is not a refusal — SDD §4.7 and TEST-STRATEGY
+ * S-STOA both make study permitted and pattern intake refused, so the plan
+ * carries `intakePermitted: false` and the study proceeds.
+ */
+export function buildStudyPlan(entry: WatchlistEntry, root: string): StudyPlanOutcome {
+  const studiable = checkStudiable(entry)
+  if (!studiable.allowed || entry.pin === null) {
+    return { ok: false, reason: studiable.because }
+  }
+  // Trailing separators trimmed here rather than inside the template below:
+  // a regex in a `${}` is exactly the thing a later edit mis-escapes.
+  const scratchRoot = trimTrailingSeparators(root)
+  return {
+    ok: true,
+    plan: {
+      sourceId: entry.id,
+      url: entry.url,
+      commit: entry.pin,
+      // Deliberately joined here rather than taken as a parameter: a caller
+      // that could choose the directory could choose the Agora.
+      cwd: `${scratchRoot}/stoa/${entry.id}@${entry.pin}`,
+      envGrants: [],
+      readOnly: true,
+      question:
+        `Study ${entry.url} at ${entry.pin}, scoped to: ${entry.tags.join(', ')}. ${entry.notes}`.trim(),
+      license: entry.license,
+      intakePermitted: checkIntake(entry).allowed
+    }
+  }
+}
+
+/**
+ * Contract: is this path safe to check a watched source out into?
+ *
+ * The Agora is the company's single working copy (ADR-0004) and `worktrees/`
+ * holds isolated checkouts of the company's OWN targets. A third-party
+ * repository belongs in neither, so this refuses both rather than trusting the
+ * caller to have read the ADR.
+ */
+export function isSafeScratchPath(cwd: string, agoraRoot: string, worktreesRoot: string): boolean {
+  // Split/join rather than a backslash regex: this compares Windows and POSIX
+  // paths, and the escaping is the part a future edit gets wrong.
+  const normal = (p: string): string => p.split('\\').join('/').replace(/\/+$/, '').toLowerCase()
+  const target = normal(cwd)
+  return (
+    !target.startsWith(`${normal(agoraRoot)}/`) &&
+    !target.startsWith(`${normal(worktreesRoot)}/`) &&
+    target !== normal(agoraRoot) &&
+    target !== normal(worktreesRoot)
+  )
+}
+
+/** Contract: `<root>/` and `<root>` name the same directory. Trims either separator. */
+function trimTrailingSeparators(p: string): string {
+  let end = p.length
+  while (end > 0 && (p[end - 1] === '/' || p[end - 1] === '\\')) end -= 1
+  return p.slice(0, end)
+}
