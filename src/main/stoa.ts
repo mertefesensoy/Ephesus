@@ -51,6 +51,13 @@ import type { PromptStore } from './prompts'
  * would be the same half-archive one subsystem over.
  */
 
+/**
+ * The Stoa's cadence (SDD §7.7). One study a day: a reading list the Architect
+ * curates by hand does not grow fast enough to justify more, and a researcher
+ * spawn costs Gymnasium budget (R4) that the missions are also paying for.
+ */
+export const STOA_EVERY_MS = 24 * 60 * 60 * 1000
+
 export interface StoaOptions {
   readonly agoraRoot: string
   /** The repo's build-phase archive: `docs/stoa/` (FR-13.7). */

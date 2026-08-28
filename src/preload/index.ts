@@ -27,6 +27,7 @@ import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
+import type { ModeSet, ModeView } from '../shared/mode-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -116,7 +117,10 @@ const eph: EphApi = {
     verdict: (id, verdict) =>
       ipcRenderer.invoke(IpcChannels.gymVerdict, { id, verdict }) as Promise<GymDecided>,
     metricResult: (id, measured) =>
-      ipcRenderer.invoke(IpcChannels.gymMetricResult, { id, measured }) as Promise<GymDecided>
+      ipcRenderer.invoke(IpcChannels.gymMetricResult, { id, measured }) as Promise<GymDecided>,
+    mode: () => ipcRenderer.invoke(IpcChannels.gymMode) as Promise<ModeView>,
+    // No actor crosses this bridge: FR-14.2's authority is main's to assert.
+    setMode: (mode) => ipcRenderer.invoke(IpcChannels.gymSetMode, { mode }) as Promise<ModeSet>
   },
   stoa: {
     watchlist: () =>

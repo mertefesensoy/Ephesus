@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { companyModeSchema } from './mode'
 
 /**
  * App config (`~/.ephesus/config.json`, SDD §2). Carries no secrets — ever
@@ -17,7 +18,25 @@ export const configSchema = z
      * a migration: absent means "use the name on PATH", which is what every
      * global install gives you.
      */
-    mempalaceCommand: z.string().min(1).max(4096).optional()
+    mempalaceCommand: z.string().min(1).max(4096).optional(),
+    /**
+     * The company mode (ADR-0018, FR-14.1): `directed` or `improving`. Optional
+     * for the same reason `mempalaceCommand` is — an existing `config.json`
+     * stays valid without a migration — and absent means `directed`, which is
+     * the honest default: a company that has never been told to act on its own
+     * initiative does not.
+     */
+    mode: companyModeSchema.optional(),
+    /**
+     * Whether `improving` has EVER been enabled. The proof gate (SRS §6.9) is a
+     * first-enable check (FR-14.3): once the company has proved the loop works,
+     * a later revert-and-re-enable is an ordinary Architect action, not a fresh
+     * examination. Recorded here rather than inferred from the ledger, because
+     * inferring it would make a rung-3 auto-revert look like the gate had never
+     * been met and silently re-impose it — turning a safety stop into a
+     * demotion nobody asked for.
+     */
+    everEnabledImproving: z.boolean().optional()
   })
   .strict()
 

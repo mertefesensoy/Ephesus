@@ -6,6 +6,7 @@ import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
 import type { GymDecided, GymRowView } from './gym-view'
 import type { BriefView, SourceView, StoaCurated } from './stoa-view'
+import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -78,6 +79,12 @@ export const IpcChannels = {
   gymProposal: 'gym:proposal',
   gymVerdict: 'gym:verdict',
   gymMetricResult: 'gym:metric-result',
+  // The company mode (SDD §5 `gym: mode() setMode(m)`, ADR-0018). `setMode` is
+  // architect-only and enforced in the handler, like `gym:verdict`: the
+  // renderer names no actor, so there is no field an untrusted surface could
+  // set to claim one.
+  gymMode: 'gym:mode',
+  gymSetMode: 'gym:set-mode',
   // The Stoa's surface (SDD §5 `stoa:`), exactly the five documented channels.
   // `register`/`retire` are Architect-only (FR-13.1) and enforced in the
   // handler, not here — the renderer names no registrar, so there is no field
@@ -283,6 +290,14 @@ export interface EphApi {
     verdict: (id: string, verdict: 'approved' | 'rejected') => Promise<GymDecided>
     /** Records the measured outcome; null means it could not be measured. */
     metricResult: (id: string, measured: string | null) => Promise<GymDecided>
+    /** The company mode, plus what the proof gate would say (FR-14.1). */
+    mode: () => Promise<ModeView>
+    /**
+     * Sets the company mode (FR-14.2). ARCHITECT-ONLY, enforced in the handler.
+     * The first `improving` enable is refused unless SRS §6.9's evidence is on
+     * the record, and the refusal lists exactly what is missing.
+     */
+    setMode: (mode: 'directed' | 'improving') => Promise<ModeSet>
   }
   stoa: {
     /** Every registered source, plus retired ones marked as such (FR-13.1). */

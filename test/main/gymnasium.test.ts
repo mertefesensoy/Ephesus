@@ -343,3 +343,59 @@ describe('R2 — the ledger is total, and rows are never lost', () => {
     )
   })
 })
+
+describe('the ledger keeps what is written below its table (FR-14.5)', () => {
+  it('preserves a mode-change section across a later proposal', () => {
+    const { gym, ledger } = rig()
+    gym.propose(proposal())
+    gym.recordModeChange({
+      from: 'directed',
+      to: 'improving',
+      by: 'architect',
+      reason: 'the proof gate was met',
+      at: '2026-08-28T09:00:00.000Z'
+    })
+
+    // The rewrite that files the NEXT proposal must not eat the section. The
+    // first version of `append` kept only the preamble, so everything under
+    // the table was silently deleted — the M5 close-out's finding-1 class, one
+    // row further down.
+    gym.propose(proposal({ title: 'A second improvement' }))
+
+    const text = ledger()
+    expect(text).toContain('## Mode changes')
+    expect(text).toContain('directed → improving')
+    expect(text).toContain('the proof gate was met')
+    expect(gym.rows()).toHaveLength(2)
+  })
+
+  it('appends a second mode change under the same heading', () => {
+    const { gym, ledger } = rig()
+    const base = {
+      by: 'architect',
+      reason: 'r',
+      at: '2026-08-28T09:00:00.000Z'
+    }
+    gym.recordModeChange({ ...base, from: 'directed', to: 'improving' })
+    gym.recordModeChange({ ...base, from: 'improving', to: 'directed', by: 'breaker' })
+    const text = ledger()
+    expect(text.match(/## Mode changes/g)).toHaveLength(1)
+    expect(text).toContain('improving → directed')
+    expect(text).toContain('breaker')
+  })
+
+  it('does not confuse a mode row with a proposal row', () => {
+    const { gym } = rig()
+    gym.propose(proposal())
+    gym.recordModeChange({
+      from: 'directed',
+      to: 'improving',
+      by: 'architect',
+      reason: 'r',
+      at: '2026-08-28T09:00:00.000Z'
+    })
+    // The mode table is pipe-delimited too; the parser must still see exactly
+    // one proposal, because its ids are what a mint collides with.
+    expect(gym.rows().map((row) => row.id)).toEqual(['GYM-001'])
+  })
+})

@@ -161,3 +161,36 @@ describe('Scheduler bookkeeping', () => {
     expect(scheduler.ids()).toEqual([])
   })
 })
+
+describe('the mode gate (ADR-0018, FR-14.4, SDD §9)', () => {
+  it('does not fire a trigger whose `enabled` says no', async () => {
+    let fired = 0
+    let allowed = false
+    const scheduler = new Scheduler({ now: () => new Date(0) })
+    scheduler.add({
+      id: 'stoa-cadence',
+      everyMs: 1,
+      enabled: () => allowed,
+      run: () => {
+        fired += 1
+      }
+    })
+    await scheduler.tick()
+    expect(fired).toBe(0)
+
+    // …and fires the moment it is allowed, WITHOUT waiting out an interval it
+    // spent forbidden. A cadence switched off for a week should run when it is
+    // switched back on, not sit out one more day for having been asked while off.
+    allowed = true
+    await scheduler.tick()
+    expect(fired).toBe(1)
+  })
+
+  it('treats a trigger with no `enabled` as always allowed', async () => {
+    let fired = 0
+    const scheduler = new Scheduler({ now: () => new Date(0) })
+    scheduler.add({ id: 'always', everyMs: 1, run: () => void (fired += 1) })
+    await scheduler.tick()
+    expect(fired).toBe(1)
+  })
+})
