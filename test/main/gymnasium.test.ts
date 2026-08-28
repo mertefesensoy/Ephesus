@@ -66,9 +66,14 @@ function rig(over: { seed?: string | null; spend?: number } = {}): Rig {
   homes.push(home)
   const agoraRoot = path.join(home, 'agora')
 
-  // The repo's own build-phase archive, unless the case wants it missing.
+  // A FIXTURE archive by default, not the repo’s real one: the real archive
+  // grows every week, and a suite that broke because the company filed another
+  // proposal would be testing the wrong thing. One case below seeds from the
+  // real `docs/gymnasium/` on purpose, to assert FR-12.6’s continuity.
   const seedFrom =
-    over.seed === null ? path.join(home, 'no-such-archive') : (over.seed ?? 'docs/gymnasium')
+    over.seed === null
+      ? path.join(home, 'no-such-archive')
+      : (over.seed ?? 'test/fixtures/gymnasium-seed')
 
   const logs: Record<string, unknown>[] = []
   const degradations: string[] = []
@@ -95,12 +100,37 @@ function rig(over: { seed?: string | null; spend?: number } = {}): Rig {
 }
 
 describe('FR-12.6 — the ledger seeds from the repo’s own archive', () => {
-  it('carries the build-phase ledger into the running system', () => {
-    const r = rig()
-    expect(r.gym.rows()).toEqual([])
-    // The seed's own words, not a fresh empty file.
-    expect(r.ledger()).toContain('primary standing mission')
+  it('carries the REAL build-phase archive into the running system', () => {
+    // Seeded from `docs/gymnasium/` on purpose — the one case that should.
+    // FR-12.6: the improvement record is continuous from the build phase, so
+    // the running system inherits the rows rather than starting over.
+    const r = rig({ seed: 'docs/gymnasium' })
+    const rows = r.gym.rows()
+
+    expect(rows.length).toBeGreaterThan(0)
     expect(r.logs.find((log) => log['event'] === 'seeded')).toBeDefined()
+    // The archive links each id to its proposal file; the rows must survive
+    // that formatting, or a seeded ledger reads as empty and the next mint
+    // collides with a row already on the page.
+    expect(rows.every((row) => /^GYM-\d{3,}$/.test(row.id))).toBe(true)
+  })
+
+  it('mints past everything the real archive already holds', () => {
+    const r = rig({ seed: 'docs/gymnasium' })
+    const highest = r.gym.rows().length
+    expect(highest).toBeGreaterThan(0)
+
+    const outcome = r.gym.propose(proposal())
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    // Not GYM-001: that id is taken by the archive it inherited.
+    expect(r.gym.rows().some((row) => row.id === outcome.id)).toBe(true)
+    expect(r.gym.rows().filter((row) => row.id === outcome.id)).toHaveLength(1)
+  })
+
+  it('starts from a fixture archive in every other case, so the suite does not', () => {
+    // …break each time the company files another real proposal.
+    expect(rig().gym.rows()).toEqual([])
   })
 
   it('starts empty and SAYS SO when there is no archive to seed from', () => {

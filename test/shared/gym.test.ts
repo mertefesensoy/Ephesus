@@ -40,8 +40,11 @@ function body(over: Record<string, unknown> = {}): string {
 }
 
 function row(over: Partial<GymRow> = {}): GymRow {
+  // `idCell` follows `id` unless a case sets it, so overriding the id in a
+  // fixture cannot silently leave two rows rendering under the same one.
   return {
-    id: 'GYM-001',
+    id: over.id ?? 'GYM-001',
+    idCell: over.idCell ?? over.id ?? 'GYM-001',
     title: 'Shorten the wake nudge',
     class: 'craft',
     status: 'proposed',
@@ -217,5 +220,47 @@ describe('R3 — improvement is budgeted, not ambient', () => {
   it('stops at the slice, so improvement can never starve the missions', () => {
     expect(withinSlice(100, { tokensPerWeek: 100 })).toBe(false)
     expect(withinSlice(101, { tokensPerWeek: 100 })).toBe(false)
+  })
+})
+
+describe('the seeded ledger is read, links and all (merge regression)', () => {
+  it('reads an id written as a LINK to its proposal file', () => {
+    // The build-phase archive writes `| [GYM-001](./proposals/…) | …`. A parser
+    // that only accepted a bare id read a five-row ledger as EMPTY — and the
+    // next mint then collided with a row already on the page. Found when the
+    // Gymnasium met the archive the research department had been filling.
+    const table = [
+      '| ID | Title | Status | Success metric | Proposed | Decided | Measured | Outcome |',
+      '|---|---|---|---|---|---|---|---|',
+      '| [GYM-001](./proposals/GYM-001-stoa.md) | Stand up the Stoa | landed | a metric | 2026-08-28 | 2026-08-28 | — | |',
+      '| [GYM-003](./proposals/GYM-003-closing.md) | Closing Time | landed | another | 2026-08-28 | 2026-08-28 | — | |'
+    ].join('\n')
+
+    const rows = parseLedger(table)
+    expect(rows.map((r) => r.id)).toEqual(['GYM-001', 'GYM-003'])
+    expect(rows[0]?.status).toBe('landed')
+  })
+
+  it('mints the NEXT id past a linked ledger, never a colliding one', () => {
+    const table = [
+      '| [GYM-001](./proposals/a.md) | A | landed | m | 2026-08-28 | | | |',
+      '| [GYM-005](./proposals/b.md) | B | landed | m | 2026-08-28 | | | |'
+    ].join('\n')
+    expect(nextGymId(parseLedger(table))).toBe('GYM-006')
+  })
+
+  it('round-trips the link when a row is rewritten', () => {
+    // A status change must not flatten the ledger's own formatting.
+    const row = parseLedger(
+      '| [GYM-002](./proposals/x.md) | X | proposed | m | 2026-08-28 | | | |'
+    )[0]
+    expect(row).toBeDefined()
+    expect(renderRow({ ...row!, status: 'approved' })).toContain('[GYM-002](./proposals/x.md)')
+  })
+
+  it('still reads a bare id', () => {
+    expect(
+      parseLedger('| GYM-007 | X | proposed | m | 2026-08-28 | | | |').map((r) => r.id)
+    ).toEqual(['GYM-007'])
   })
 })

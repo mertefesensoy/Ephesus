@@ -183,6 +183,13 @@ export function checkWidening(proposal: GymProposal): WideningCheck {
 /** One permanent row of the ledger (R2 — the ledger is total). */
 export interface GymRow {
   readonly id: string
+  /**
+   * The ID cell exactly as the ledger writes it. The build-phase archive
+   * links each id to its proposal file — `[GYM-001](./proposals/…)` — and a
+   * status change must not flatten that into bare text: the ledger is a
+   * document a human reads, not only a table a machine appends to.
+   */
+  readonly idCell: string
   readonly title: string
   readonly class: GymClass
   readonly status: GymStatus
@@ -277,7 +284,7 @@ export const DEFAULT_GYM_SLICE = { tokensPerWeek: 200_000 } as const
 export function renderRow(row: GymRow): string {
   return [
     '',
-    row.id,
+    row.idCell.length > 0 ? row.idCell : row.id,
     row.title,
     row.status,
     row.metric,
@@ -303,11 +310,17 @@ export function parseLedger(markdown: string): readonly GymRow[] {
     if (!line.startsWith('|')) continue
     const cells = line.split('|').map((cell) => cell.trim())
     // ['', id, title, status, metric, proposed, decided, measured, outcome, '']
-    const id = cells[1]
-    if (id === undefined || !/^GYM-\d{3,}$/.test(id)) continue
+    const idCell = cells[1] ?? ''
+    // The id may be bare (`GYM-001`) or a link to its proposal file
+    // (`[GYM-001](./proposals/…)`). The build-phase archive uses the link
+    // form, so reading only the bare one made a seeded ledger look EMPTY —
+    // and the next mint would then collide with a row already on the page.
+    const id = /^\[?(GYM-\d{3,})\]?/.exec(idCell)?.[1]
+    if (id === undefined) continue
     const status = gymStatusSchema.safeParse(cells[3])
     rows.push({
       id,
+      idCell,
       title: cells[2] ?? '',
       class: 'craft',
       status: status.success ? status.data : 'proposed',

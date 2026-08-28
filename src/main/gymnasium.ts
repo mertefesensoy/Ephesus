@@ -136,6 +136,7 @@ export class Gymnasium {
     const id = nextGymId(rows)
     const row: GymRow = {
       id,
+      idCell: id,
       title: parsed.proposal.title,
       class: parsed.proposal.class,
       status: 'proposed',
