@@ -24,8 +24,12 @@ import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
+import type { OrgNode } from '../shared/org'
 import type {
   BriefRecord,
+  RetroGenerated,
+  RetroRow,
+  RetroView,
   ConveneOutcome,
   MeetingClosed,
   MeetingSaid,
@@ -103,6 +107,12 @@ const eph: EphApi = {
       ipcRenderer.on(ODEON_QUEUE_CHANNEL, listener)
       return () => ipcRenderer.removeListener(ODEON_QUEUE_CHANNEL, listener)
     }
+  },
+  org: {
+    chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,
+    metrics: () => ipcRenderer.invoke(IpcChannels.orgMetrics) as Promise<RetroView>,
+    retros: () => ipcRenderer.invoke(IpcChannels.orgRetros) as Promise<readonly RetroRow[]>,
+    generateRetro: () => ipcRenderer.invoke(IpcChannels.orgGenerateRetro) as Promise<RetroGenerated>
   },
   agora: {
     registry: () => ipcRenderer.invoke(IpcChannels.agoraRegistry) as Promise<Registry>,

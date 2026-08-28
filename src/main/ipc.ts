@@ -21,8 +21,12 @@ import {
   type SecretTest
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
+import type { OrgNode } from '../shared/org'
 import type {
   BriefRecord,
+  RetroGenerated,
+  RetroRow,
+  RetroView,
   ConveneOutcome,
   MeetingClosed,
   MeetingSaid,
@@ -156,6 +160,14 @@ export interface IpcDeps {
   /** The Architect's reference shelf (FR-6.4). */
   /** Every archived standup brief, newest first (FR-7.1). */
   briefs(): readonly BriefRecord[]
+  /** The org chart, read off the roster (FR-11.5). */
+  orgChart(): readonly OrgNode[]
+  /** Per-agent metrics, folded from the book of record. */
+  orgMetrics(): RetroView
+  /** Every archived weekly retro. */
+  retros(): readonly RetroRow[]
+  /** Generates one retro now. */
+  generateRetro(): RetroGenerated
   /** Convenes a meeting (FR-7.4). */
   convene(attendees: readonly string[], agenda: string): ConveneOutcome
   /** The live meeting, or null. */
@@ -266,6 +278,10 @@ export function registerIpc(deps: IpcDeps): void {
     const { actions } = odeonCloseSchema.parse(raw)
     return deps.meetingClose(actions)
   })
+  ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
+  ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())
+  ipcMain.handle(IpcChannels.orgRetros, (): readonly RetroRow[] => deps.retros())
+  ipcMain.handle(IpcChannels.orgGenerateRetro, (): RetroGenerated => deps.generateRetro())
   ipcMain.handle(IpcChannels.odeonBriefs, (): readonly BriefRecord[] => deps.briefs())
   ipcMain.handle(IpcChannels.odeonDecks, (): readonly DeckRecord[] => deps.decks())
   ipcMain.handle(IpcChannels.odeonDeck, (_ev, raw: unknown): string | null => {

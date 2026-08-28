@@ -3,8 +3,12 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
+import type { OrgNode } from './org'
 import type {
   BriefRecord,
+  RetroGenerated,
+  RetroRow,
+  RetroView,
   ConveneOutcome,
   MeetingAction,
   MeetingClosed,
@@ -68,6 +72,10 @@ export const IpcChannels = {
   odeonDeck: 'odeon:deck',
   odeonComment: 'odeon:comment',
   odeonBriefs: 'odeon:briefs',
+  orgChart: 'org:chart',
+  orgMetrics: 'org:metrics',
+  orgRetros: 'org:retros',
+  orgGenerateRetro: 'org:generate-retro',
   odeonConvene: 'odeon:convene',
   odeonMeeting: 'odeon:meeting',
   odeonMeetingSay: 'odeon:meeting-say',
@@ -244,6 +252,16 @@ export interface EphApi {
     verdict: (memoId: string, verdict: MemoVerdictName, notes: string) => Promise<MemoDecided>
     /** Subscribe to "the memo queue changed"; the panel then re-reads. */
     onQueue: (cb: () => void) => () => void
+  }
+  org: {
+    /** The org chart, read off the roster (FR-11.5). */
+    chart: () => Promise<readonly OrgNode[]>
+    /** Per-agent metrics, folded from the book of record — never counted. */
+    metrics: () => Promise<RetroView>
+    /** Every archived weekly retro, newest first. */
+    retros: () => Promise<readonly RetroRow[]>
+    /** Generates one now, for the Architect who does not want to wait. */
+    generateRetro: () => Promise<RetroGenerated>
   }
   agora: {
     /** The roster (SDD §4.1). */

@@ -26,6 +26,8 @@ import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
+import { OrgLayer, RETRO_EVERY_MS } from './org'
+import { orgChart as orgChartOf } from '../shared/org'
 import { emptyLedger as emptyTaskLedger } from '../shared/tasks'
 import { LedgerEndpoint } from './ledger'
 import { Odeon } from './odeon'
@@ -84,6 +86,7 @@ let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
 let meetings: MeetingDriver | null = null
+let org: OrgLayer | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -1074,9 +1077,33 @@ async function boot(): Promise<void> {
     onChange: () => mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
   })
 
+  // The org layer (FR-11.5, UC-12). It computes and archives; it never acts.
+  // Every figure is folded from `log.jsonl` and the durable cost ledger on
+  // each read — invariant §11 in a second place, because a metric nobody can
+  // recompute is a metric nobody can argue with.
+  org = new OrgLayer({
+    agoraRoot: agora.root,
+    gather: () => ({
+      events: agora?.readLog() ?? [],
+      agents: Object.keys(agora?.registry().agents ?? {}).sort(),
+      spend: Object.keys(agora?.registry().agents ?? {}).map((agentId) => ({
+        agentId,
+        tokens: totalOfSpend(agentId)
+      }))
+    }),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    commitSoon: (subject) => agora?.commitSoon(subject),
+    onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
   scheduler.add(reflection.trigger())
   // The scheduler’s second client (SDD §7.2).
   scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
+  // The scheduler's third client (FR-11.5's scheduled retro).
+  scheduler.add(org.trigger(RETRO_EVERY_MS))
   scheduler.start()
 
   hermes = new Hermes({
@@ -1435,6 +1462,20 @@ async function boot(): Promise<void> {
           },
     knowledge: () => library?.knowledge() ?? [],
     briefs: () => odeon?.briefs() ?? [],
+    orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
+    orgMetrics: () => {
+      const report = org?.report() ?? {
+        metrics: [],
+        findings: [],
+        window: { fromSeq: 0, toSeq: 0 }
+      }
+      return {
+        metrics: report.metrics.map((row) => ({ ...row })),
+        findings: report.findings.map((row) => ({ what: row.what, refs: [...row.refs] }))
+      }
+    },
+    retros: () => (org?.retros() ?? []).map((row) => ({ ...row })),
+    generateRetro: () => org?.generate() ?? { ok: false, reason: 'the org layer is not available' },
     convene: (attendees, agenda) =>
       meetings?.convene({ attendees: [...attendees], agenda }) ?? {
         ok: false,

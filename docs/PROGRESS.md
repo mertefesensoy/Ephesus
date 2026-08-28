@@ -2395,7 +2395,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       **`actions went to the scribe, not to tasks.json: 0 task(s); 1 message(s)
       to the orchestrator`** — FR-4.2’s single scribe intact.
       **Owed to a local session:** an Odeon-tab screenshot for `docs/demo/`.*
-- [ ] **M5.6 Org layer v1 + the retro report** — FR-11.5 (v1 slice): the org
+- [x] **M5.6 Org layer v1 + the retro report** — FR-11.5 (v1 slice): the org
       chart (from the registry — Artemis at the temple, workers by role);
       hire templates as versioned files (`profiles/`-adjacent per SDD §4.1
       `hire` refs) with a validator; per-agent metrics computed from
@@ -2408,6 +2408,34 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       template versioning; retro report's every claim ref'd like a brief.
       Risk: metrics are per-agent judgments — compute mechanically, let the
       org review (UC-12 full loop, M7-era) interpret; no auto-actions.*
+      *Evidence: `typecheck && lint && check-invariants` green; 31 new cases
+      (`test/shared/org.test.ts` 24, `test/main/org.test.ts` 7); full suite 1776
+      passed / 6 skipped, only the known Windows-local failures.
+      **No counter exists anywhere in the org layer** — every figure is folded
+      from `log.jsonl` plus the durable cost fold on each read, which is
+      invariant §11 applied a second time. Tests feed a log and a spend fold and
+      assert the numbers that come out; there is nothing to poke.
+      An agent that did nothing appears with zeroes rather than being omitted,
+      and a rate with no completed task is NULL rather than 0 — zero would say
+      "perfectly efficient" about an agent that finished nothing.
+      Attribution reads `agentId`, `assignee`, `by` and `from`, because the
+      log’s kinds carry the agent differently and reading one would under-count
+      gates and escalations.
+      LIVE RUN THROUGH THE REAL APP, on real records:
+      `org chart: [{"agentId":"agent.artemis","role":"orchestrator","seat":"temple",
+      "orchestrator":true},{"agentId":"agent.mason","role":"engineer",…}]` ·
+      `metrics: [{"agentId":"agent.artemis","tasksDone":0,…,"escalationRate":null},
+      {"agentId":"agent.mason","tasksDone":1,"rework":1,"escalations":2,
+      "escalationRate":2,…}]` ·
+      `findings: ["the breaker tripped 1 time(s)","1 memo(s) needed the Architect",
+      "agent.mason had 1 piece(s) of work handed back"]` ·
+      `every finding carries refs: true` ·
+      `retro archived: odeon/retros/2026-08-28T10-30-15-433Z.md` ·
+      `has a metrics table: true` · `says nothing was decided: true` ·
+      `second generate refused: true`. The archived report ends with a
+      "What was decided / Nothing." section — the layer computes and archives,
+      and UC-12 keeps a human between the numbers and any action.
+      **Owed to a local session:** an Org-tab screenshot for `docs/demo/`.*
 - [ ] **M5.7 Gymnasium v1** — ADR-0015, SDD §7.6, FR-12: `gymnasium.ts` —
       proposal validation (a proposal without a falsifiable metric or a
       rollback is invalid *by construction*, rejected pre-human), ledger

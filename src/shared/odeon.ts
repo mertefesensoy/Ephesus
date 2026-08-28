@@ -54,6 +54,30 @@ export type MemoDecided =
   | { readonly ok: true; readonly gateVerdict: string }
   | { readonly ok: false; readonly reason: string }
 
+/** One archived retro, as the Org tab lists them. */
+export interface RetroRow {
+  readonly ref: string
+  readonly generatedAt: string
+  readonly markdown: string
+}
+
+/** The current metrics and findings, recomputed on every read. */
+export interface RetroView {
+  readonly metrics: readonly {
+    readonly agentId: string
+    readonly tasksDone: number
+    readonly rework: number
+    readonly escalations: number
+    readonly escalationRate: number | null
+    readonly tokens: number
+    readonly tokensPerTask: number | null
+  }[]
+  readonly findings: readonly { readonly what: string; readonly refs: readonly string[] }[]
+}
+
+export type RetroGenerated =
+  { readonly ok: true; readonly ref: string } | { readonly ok: false; readonly reason: string }
+
 /** The live meeting as the panel sees it (FR-7.4). */
 export interface MeetingView {
   readonly id: string
