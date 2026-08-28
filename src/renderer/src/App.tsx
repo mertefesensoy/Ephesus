@@ -4,6 +4,7 @@ import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
+import { BriefsPanel } from './BriefsPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
 import { LedgerPanel } from './LedgerPanel'
@@ -45,7 +46,7 @@ export function App(): ReactElement {
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
   const [tab, setTab] = useState<
-    'floor' | 'activity' | 'ledger' | 'decks' | 'memos' | 'memory' | 'watch'
+    'floor' | 'activity' | 'ledger' | 'briefs' | 'decks' | 'memos' | 'memory' | 'watch'
   >('floor')
   /**
    * Open gates, for the status strip's badge (UI-DESIGN §4). `'error'` is a
@@ -225,34 +226,35 @@ export function App(): ReactElement {
         </span>
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
-        {(['floor', 'activity', 'ledger', 'decks', 'memos', 'memory', 'watch'] as const).map(
-          (name) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => setTab(name)}
-              aria-current={tab === name}
-              style={{
-                fontFamily: 'var(--eph-face-display)',
-                fontSize: '8px',
-                padding: '4px 8px',
-                border: '2px solid var(--eph-ink-900)',
-                background: tab === name ? 'var(--eph-marble-50)' : 'var(--eph-marble-200)'
-              }}
-            >
-              {name.toUpperCase()}
-              {name === 'watch' && typeof openGates === 'number' && openGates > 0
-                ? ` ${String(openGates)}`
-                : ''}
-            </button>
-          )
-        )}
+        {(
+          ['floor', 'activity', 'ledger', 'briefs', 'decks', 'memos', 'memory', 'watch'] as const
+        ).map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTab(name)}
+            aria-current={tab === name}
+            style={{
+              fontFamily: 'var(--eph-face-display)',
+              fontSize: '8px',
+              padding: '4px 8px',
+              border: '2px solid var(--eph-ink-900)',
+              background: tab === name ? 'var(--eph-marble-50)' : 'var(--eph-marble-200)'
+            }}
+          >
+            {name.toUpperCase()}
+            {name === 'watch' && typeof openGates === 'number' && openGates > 0
+              ? ` ${String(openGates)}`
+              : ''}
+          </button>
+        ))}
       </nav>
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: '8px' }}>
         {/* App shell (UI-DESIGN §4): floor left (dominant), context stack right. */}
         {tab === 'floor' && <FloorCanvas />}
         {tab === 'activity' && <ActivityPanel />}
         {tab === 'ledger' && <LedgerPanel />}
+        {tab === 'briefs' && <BriefsPanel />}
         {tab === 'decks' && <DecksPanel />}
         {tab === 'memos' && <MemosPanel />}
         {tab === 'memory' && <MemoryPanel />}

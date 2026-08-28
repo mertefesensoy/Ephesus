@@ -103,6 +103,7 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
         }),
       knowledge: () => [],
       registerKnowledge: () => [],
+      briefs: () => [],
       decks: () => [],
       deck: () => null,
       commentOnDeck: () => ({ queued: false, because: 'no orchestrator' }),
