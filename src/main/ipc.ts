@@ -21,7 +21,9 @@ import {
   type SecretTest
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
-import type { DeckCommentOutcome, DeckRecord } from '../shared/odeon'
+import type { DeckCommentOutcome, DeckRecord, MemoDecided, MemoQueueRow } from '../shared/odeon'
+import { memoVerdictNameSchema, type MemoVerdictName } from '../shared/memo'
+import type { MemoQueueName } from '../shared/ipc'
 import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
@@ -45,6 +47,26 @@ const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
 /** One recall query from the Memory panel (SDD §5 `agora:recall`). */
 const odeonDeckSchema = z.object({ ref: z.string().min(1).max(256) }).strict()
+
+const odeonMemosSchema = z.object({ queue: z.enum(['open', 'decided', 'all']) }).strict()
+
+/**
+ * The Architect bench for a memo verdict (UC-06 step 4).
+ *
+ * It carries no `decidedBy`, deliberately, and for the same reason
+ * `watch:approve` carries no channel: a verdict arriving through the window
+ * bridge IS the Architect, main knows that with certainty, and taking the
+ * renderer's word for who decided would let an untrusted surface stamp a
+ * countersignature onto the permanent record of a delegated decision
+ * (invariant §2, FR-5.5).
+ */
+const odeonVerdictSchema = z
+  .object({
+    memoId: z.string().min(1).max(64),
+    verdict: memoVerdictNameSchema,
+    notes: z.string().max(10_000)
+  })
+  .strict()
 
 const odeonCommentSchema = z
   .object({ ref: z.string().min(1).max(256), text: z.string().min(1).max(10_000) })
@@ -117,6 +139,10 @@ export interface IpcDeps {
   deck(ref: string): string | null
   /** Files an Architect review comment as mail to the orchestrator (UC-05). */
   commentOnDeck(ref: string, text: string): DeckCommentOutcome
+  /** The memo queue (FR-7.3). */
+  memos(queue: MemoQueueName): readonly MemoQueueRow[]
+  /** The Architect's verdict on a memo (UC-06 step 4). */
+  decideMemo(memoId: string, verdict: MemoVerdictName, notes: string): MemoDecided
   knowledge(): readonly KnowledgeDoc[]
   /** Registers a shelf document and commits it through the single committer. */
   registerKnowledge(name: string, text: string): readonly KnowledgeDoc[]
@@ -202,6 +228,14 @@ export function registerIpc(deps: IpcDeps): void {
     // Odeon resolves only well-formed deck names inside its own directory.
     const { ref } = odeonDeckSchema.parse(raw)
     return deps.deck(ref)
+  })
+  ipcMain.handle(IpcChannels.odeonMemos, (_ev, raw: unknown): readonly MemoQueueRow[] => {
+    const { queue } = odeonMemosSchema.parse(raw)
+    return deps.memos(queue)
+  })
+  ipcMain.handle(IpcChannels.odeonVerdict, (_ev, raw: unknown): MemoDecided => {
+    const { memoId, verdict, notes } = odeonVerdictSchema.parse(raw)
+    return deps.decideMemo(memoId, verdict, notes)
   })
   ipcMain.handle(IpcChannels.odeonComment, (_ev, raw: unknown): DeckCommentOutcome => {
     const { ref, text } = odeonCommentSchema.parse(raw)

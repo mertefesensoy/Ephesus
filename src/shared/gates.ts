@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { agentIdSchema } from './agents'
+import { memoTriggerSchema } from './memo'
 
 /**
  * The Watch's gate policy (SDD §9, FR-11.1, ADR-0011/0012, UC-08).
@@ -315,6 +316,12 @@ export const openGateSchema = z
     taskId: z.string().min(1).max(64).nullable(),
     /** True when a voice approval must be repeated back before it counts. */
     requiresRepeatBack: z.boolean(),
+    /**
+     * Set when memo policy is what held this action (ADR-0008 §3, FR-7.3): the
+     * gate does not open to a plain verdict, it waits for a filed memo whose
+     * verdict then settles it. Null for every other hold.
+     */
+    memoTrigger: memoTriggerSchema.nullable(),
     openedAt: z.string().min(1).max(64)
   })
   .strict()

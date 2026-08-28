@@ -2,6 +2,13 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  DEFAULT_MEMO_POLICY,
+  matchMemoTrigger,
+  type MemoAction,
+  type MemoPolicy,
+  type MemoTrigger
+} from '../../shared/memo'
+import {
   checkVerdictChannel,
   composeAutonomy,
   denyAllPolicy,
@@ -11,6 +18,7 @@ import {
   parseGatePolicy,
   repeatBackRequired,
   type GateDecision,
+  type GateKind,
   type GatePackaging,
   gatePackagingSchema,
   type GatePolicy,
@@ -61,6 +69,13 @@ export interface GateSubmission extends GateRequest {
   readonly packaging: GatePackaging
   /** Ledger task this gate blocks (SDD §4.2 `gates`), when there is one. */
   readonly taskId?: string
+  /**
+   * Set when memo policy matched the action (FR-7.3). The gate then waits for
+   * a memo, not for a bare verdict — the Architect or the orchestrator decides
+   * on the memo's options, blast radius and rollback, which is the whole point
+   * of ADR-0008 §3.
+   */
+  readonly memoTrigger?: MemoTrigger
 }
 
 /** A submitted action: allowed outright, or held behind an open gate. */
@@ -117,6 +132,7 @@ export class GateManager {
       channel: submission.channel ?? 'local',
       packaging: submission.packaging,
       taskId: submission.taskId ?? null,
+      memoTrigger: submission.memoTrigger ?? null,
       // From the gate's OWN facts, not from why it was held: under
       // deny-by-default the reason is almost always `no-rule`, so reading it
       // off `because` left the flag false on exactly the destructive ops
@@ -134,6 +150,7 @@ export class GateManager {
       because: gate.because,
       channel: gate.channel,
       taskId: gate.taskId,
+      memoTrigger: gate.memoTrigger,
       // The packaging is the record UC-08 asks for; it belongs in the book.
       what: gate.packaging.what,
       blastRadius: gate.packaging.blastRadius
@@ -361,6 +378,21 @@ export interface PackagingRenderer {
  * Returns the submit functions the caller drives directly (spend has no event
  * source of its own — the budget watcher calls it).
  */
+/**
+ * Which gate kind a memo trigger is held under.
+ *
+ * The gate kinds are a documented closed set (SDD §9 / `gate-policy.json`), so
+ * a memo trigger borrows the one that describes its blast radius rather than
+ * inventing a seventh. The trigger itself rides on the gate, so nothing is
+ * lost by the mapping.
+ */
+const GATE_KIND_FOR_TRIGGER: Readonly<Record<MemoTrigger, GateKind>> = {
+  'new-dependency': 'scope-change',
+  'api-or-schema-change': 'scope-change',
+  'security-posture': 'prod-facing',
+  spend: 'spend'
+}
+
 export function wireGateChokePoints(deps: {
   readonly gates: GateManager
   readonly prompts: PackagingRenderer
@@ -375,10 +407,13 @@ export function wireGateChokePoints(deps: {
    * cannot attribute.
    */
   taskOf?(agentId: string): string | null
+  /** The memo policy in force (ADR-0008’s tuning knob). */
+  memoPolicy?(): MemoPolicy
   /** Raised when a choke point could not file its gate (invariant §7). */
   onError?(detail: string): void
 }): {
   submitNotification(agentId: string, payload: unknown): void
+  submitMemoTrigger(agentId: string, action: MemoAction): MemoTrigger | null
   submitNeedsHuman(message: NeedsHumanMessage): void
   submitSpend(agentId: string, spentTokens: number, state: string): void
 } {
@@ -414,6 +449,38 @@ export function wireGateChokePoints(deps: {
         )
       })
     })
+
+  /**
+   * SDD §7.3’s first step: an action that matches memo policy is HELD, and
+   * the worker is told which memo it owes.
+   *
+   * Returns the trigger it matched, or null when the action is ordinary — so
+   * the caller can tell "held for a memo" from "nothing to do" without
+   * re-running the match.
+   */
+  const submitMemoTrigger = (agentId: string, action: MemoAction): MemoTrigger | null => {
+    let matched: MemoTrigger | null = null
+    guard('a memo-policy action', () => {
+      const trigger = matchMemoTrigger(action, deps.memoPolicy?.() ?? DEFAULT_MEMO_POLICY)
+      if (trigger === null) return
+      matched = trigger
+      deps.gates.submit({
+        kind: GATE_KIND_FOR_TRIGGER[trigger],
+        agentId,
+        ...bound(agentId),
+        memoTrigger: trigger,
+        packaging: parsePackaging(
+          deps.prompts.render(path.join('watch', 'packaging-memo.md'), {
+            trigger,
+            tool: action.tool,
+            what: action.path ?? action.text ?? action.tool
+          }),
+          'watch/packaging-memo.md'
+        )
+      })
+    })
+    return matched
+  }
 
   const submitNeedsHuman = (message: NeedsHumanMessage): void =>
     guard('a needs_human message', () => {
@@ -455,5 +522,5 @@ export function wireGateChokePoints(deps: {
 
   deps.hooks?.onNotification(submitNotification)
   deps.mail?.onNeedsHuman(submitNeedsHuman)
-  return { submitNotification, submitNeedsHuman, submitSpend }
+  return { submitNotification, submitNeedsHuman, submitSpend, submitMemoTrigger }
 }

@@ -35,6 +35,25 @@ export type DeckCommentOutcome =
   | { readonly queued: true; readonly to: string }
   | { readonly queued: false; readonly because: string }
 
+/**
+ * One memo as the queue surface shows it. The markdown is the archived
+ * artifact itself, so the panel can never show a memo that differs from the
+ * one on disk.
+ */
+export interface MemoQueueRow {
+  readonly memoId: string
+  readonly markdown: string
+  readonly decided: boolean
+  readonly verdict: string | null
+  readonly decidedBy: string | null
+  readonly countersigned: boolean
+}
+
+/** What recording a verdict did. */
+export type MemoDecided =
+  | { readonly ok: true; readonly gateVerdict: string }
+  | { readonly ok: false; readonly reason: string }
+
 export interface DeckRecord {
   readonly ref: string
   readonly taskId: string

@@ -11,6 +11,19 @@ import {
   type DeckCommentOutcome,
   type DeckRecord
 } from '../shared/odeon'
+import {
+  gateVerdictFor,
+  MEMO_SCHEMA_VERSION,
+  memoVerdictSchema,
+  parseMemoFiling,
+  parseMemoHeader,
+  renderMemoMarkdown,
+  type MemoFiling,
+  type MemoHeader,
+  type MemoTrigger,
+  type MemoVerdict,
+  type MemoVerdictName
+} from '../shared/memo'
 import { composeMessage, makeMessageId, type Message } from '../shared/message'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { Task } from '../shared/tasks'
@@ -46,8 +59,12 @@ export interface OdeonOptions {
   task(taskId: string): Task | null
   /** Records `artifacts.deck`; the ledger endpoint owns `tasks.json`. */
   recordDeck(taskId: string, deckRef: string): void
-  /** `log` kind `deck` (SDD §4.3). */
-  onLogEvent?(draft: { kind: 'deck' } & Record<string, unknown>): void
+  /** The open gate a memo answers, so a filing cannot claim somebody else’s. */
+  gate?(
+    gateId: string
+  ): { readonly agentId: string; readonly memoTrigger: MemoTrigger | null } | null
+  /** `log` kinds `deck` and `memo` (SDD §4.3). */
+  onLogEvent?(draft: { kind: 'deck' | 'memo' } & Record<string, unknown>): void
   /** Queued through the single committer (ADR-0004), never awaited. */
   commitSoon?(subject: string): void
   now?(): Date
@@ -56,6 +73,36 @@ export interface OdeonOptions {
 export type FileDeckOutcome =
   | { readonly ok: true; readonly ref: string; readonly taskId: string }
   | { readonly ok: false; readonly reasons: readonly string[] }
+
+/** Who settled a memo, and under what. */
+export type MemoDecider =
+  | { readonly kind: 'architect' }
+  | { readonly kind: 'orchestrator'; readonly agentId: string; readonly under: string }
+
+export type DecideOutcome =
+  | {
+      readonly ok: true
+      readonly gateId: string
+      readonly gateVerdict: 'approved' | 'denied'
+      readonly trigger: MemoTrigger
+      readonly taskId: string | null
+    }
+  | { readonly ok: false; readonly reason: string }
+
+export type FileMemoOutcome =
+  | { readonly ok: true; readonly memoId: string; readonly filing: MemoFiling }
+  | { readonly ok: false; readonly reasons: readonly string[] }
+
+export type VerdictOutcome = { readonly ok: true } | { readonly ok: false; readonly reason: string }
+
+export type MemoQueue = 'open' | 'decided' | 'all'
+
+/** One archived memo and its verdict, as the queue lists them. */
+export interface MemoRecord {
+  readonly memoId: string
+  readonly markdown: string
+  readonly verdict: MemoVerdict | null
+}
 
 export class Odeon {
   private readonly now: () => Date
@@ -235,6 +282,215 @@ export class Odeon {
       msgId: message.id
     })
     return { queued: true, to: orchestratorId, message }
+  }
+
+  /**
+   * Archives one memo filed by an agent (ADR-0008 §3, FR-7.3, SDD §4.5).
+   *
+   * Contract: all-or-nothing, every refusal named at once. The memo must
+   * answer a gate that is actually open and that actually held THIS agent’s
+   * action — otherwise an agent could file against somebody else’s hold and
+   * have a verdict on it release work it never owned.
+   *
+   * The memo is archived the moment it is filed, before any verdict exists.
+   * That is deliberate: ADR-0008 calls rejected memos part of the training
+   * substrate, so a memo the Architect turns down must still be a permanent
+   * record rather than a file that only survives approval.
+   */
+  fileMemo(message: Message): FileMemoOutcome {
+    const parsed = parseMemoFiling(message.body)
+    if (!parsed.ok) return this.refuseMemo(message, [parsed.reason])
+    const filing = parsed.filing
+
+    const gate = this.options.gate?.(filing.gateId) ?? null
+    const reasons: string[] = []
+    if (gate === null) {
+      reasons.push(`no open gate "${filing.gateId}" to answer`)
+    } else {
+      if (gate.agentId !== message.from) {
+        reasons.push(`gate ${filing.gateId} holds ${gate.agentId}, not "${message.from}"`)
+      }
+      if (gate.memoTrigger === null) {
+        reasons.push(`gate ${filing.gateId} is not waiting on a memo`)
+      } else if (gate.memoTrigger !== filing.trigger) {
+        reasons.push(
+          `gate ${filing.gateId} was held for ${gate.memoTrigger}, not ${filing.trigger}`
+        )
+      }
+    }
+    if (reasons.length > 0) return this.refuseMemo(message, reasons)
+
+    const at = this.now()
+    const memoId = this.mintMemoId(at)
+    const dir = path.join(this.memosDir(), memoId)
+    if (fs.existsSync(dir)) return this.refuseMemo(message, [`a memo already exists at ${memoId}`])
+    fs.mkdirSync(dir, { recursive: true })
+    writeFileAtomic(path.join(dir, 'memo.md'), renderMemoMarkdown(memoId, filing, at.toISOString()))
+
+    this.options.onLogEvent?.({
+      kind: 'memo',
+      event: 'filed',
+      memoId,
+      trigger: filing.trigger,
+      gateId: filing.gateId,
+      taskId: filing.taskId,
+      by: message.from,
+      msgId: message.id
+    })
+    this.options.commitSoon?.(`odeon: memo ${memoId} filed`)
+    return { ok: true, memoId, filing }
+  }
+
+  /**
+   * Records a verdict on a filed memo (SDD §4.5’s `verdict.json`).
+   *
+   * Contract: a memo gets exactly ONE verdict. The archive is immutable
+   * (invariant §5), and a memo that could be re-decided would let an approval
+   * be quietly replaced after the action it released had already run.
+   *
+   * The schema refuses a delegated verdict carrying no countersignature and no
+   * named grant, so FR-5.5 is enforced by the validator rather than by the
+   * caller remembering to.
+   */
+  recordVerdict(verdict: MemoVerdict): VerdictOutcome {
+    const dir = path.join(this.memosDir(), verdict.memoId)
+    if (!fs.existsSync(path.join(dir, 'memo.md'))) {
+      return { ok: false, reason: `no memo "${verdict.memoId}" is on file` }
+    }
+    const file = path.join(dir, 'verdict.json')
+    if (fs.existsSync(file)) {
+      return { ok: false, reason: `memo ${verdict.memoId} already carries a verdict` }
+    }
+    const parsed = memoVerdictSchema.safeParse(verdict)
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]
+      return { ok: false, reason: issue?.message ?? 'invalid verdict' }
+    }
+    writeFileAtomic(file, `${JSON.stringify(parsed.data, null, 2)}\n`)
+    this.options.onLogEvent?.({
+      kind: 'memo',
+      event: 'decided',
+      memoId: verdict.memoId,
+      trigger: verdict.trigger,
+      verdict: verdict.verdict,
+      decidedBy: verdict.decidedBy,
+      countersigned: verdict.countersigned,
+      authority: verdict.authority,
+      taskId: verdict.taskId
+    })
+    this.options.commitSoon?.(`odeon: memo ${verdict.memoId} ${verdict.verdict}`)
+    return { ok: true }
+  }
+
+  /**
+   * The memo queue (SDD §5 `odeon:memos(queue)`), newest first.
+   *
+   * Read off the directory for the same reason `decks()` is: the files are the
+   * record, and a manifest would be a second copy that could disagree with it.
+   */
+  memos(queue: MemoQueue = 'all'): readonly MemoRecord[] {
+    const dir = this.memosDir()
+    if (!fs.existsSync(dir)) return []
+    const records: MemoRecord[] = []
+    for (const memoId of fs.readdirSync(dir)) {
+      const body = path.join(dir, memoId, 'memo.md')
+      if (!fs.existsSync(body)) continue
+      const verdictFile = path.join(dir, memoId, 'verdict.json')
+      const decided = fs.existsSync(verdictFile)
+      if (queue === 'open' && decided) continue
+      if (queue === 'decided' && !decided) continue
+      const parsed = decided
+        ? memoVerdictSchema.safeParse(JSON.parse(fs.readFileSync(verdictFile, 'utf8')))
+        : null
+      records.push({
+        memoId,
+        markdown: fs.readFileSync(body, 'utf8'),
+        verdict: parsed?.success === true ? parsed.data : null
+      })
+    }
+    return records.sort((a, b) => b.memoId.localeCompare(a.memoId))
+  }
+
+  /**
+   * Settles a filed memo, from either bench (FR-7.3, UC-06 step 4).
+   *
+   * Contract: the harness fills `decidedBy`, `countersigned` and `authority`
+   * from what it knows — never from what the decider claimed. An orchestrator
+   * that could write its own countersignature could grant itself authority it
+   * was never given, which is the widening FR-5.5 exists to prevent.
+   *
+   * Returns the gate the verdict settles and how, so the caller can release or
+   * refuse the held action without re-deriving either.
+   */
+  decideMemo(input: {
+    readonly memoId: string
+    readonly verdict: MemoVerdictName
+    readonly notes: string
+    readonly decider: MemoDecider
+  }): DecideOutcome {
+    const header = this.headerOf(input.memoId)
+    if (header === null) {
+      return { ok: false, reason: `no memo "${input.memoId}" is on file` }
+    }
+    const recorded = this.recordVerdict({
+      schemaVersion: MEMO_SCHEMA_VERSION,
+      memoId: header.memoId,
+      trigger: header.trigger,
+      verdict: input.verdict,
+      decidedBy: input.decider.kind === 'architect' ? 'architect' : input.decider.agentId,
+      countersigned: input.decider.kind === 'orchestrator',
+      authority: input.decider.kind === 'orchestrator' ? input.decider.under : null,
+      notes: input.notes,
+      decidedAt: this.now().toISOString(),
+      taskId: header.taskId
+    })
+    if (!recorded.ok) return recorded
+    return {
+      ok: true,
+      gateId: header.gateId,
+      gateVerdict: gateVerdictFor(input.verdict),
+      trigger: header.trigger,
+      taskId: header.taskId
+    }
+  }
+
+  /** The header of one filed memo, or null when it is not on file. */
+  headerOf(memoId: string): MemoHeader | null {
+    const body = path.join(this.memosDir(), memoId, 'memo.md')
+    if (!fs.existsSync(body)) return null
+    return parseMemoHeader(fs.readFileSync(body, 'utf8'))
+  }
+
+  /** One memo’s markdown, for the queue UI and the triage message. */
+  memoBody(memoId: string): string | null {
+    const body = path.join(this.memosDir(), memoId, 'memo.md')
+    return fs.existsSync(body) ? fs.readFileSync(body, 'utf8') : null
+  }
+
+  private memosDir(): string {
+    return path.join(this.options.agoraRoot, 'odeon', 'memos')
+  }
+
+  /** `m-<time>-<random>`, so two memos in the same millisecond cannot collide. */
+  private mintMemoId(at: Date): string {
+    const stamp = at
+      .toISOString()
+      .toLowerCase()
+      .replace(/[:.tz]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/-$/, '')
+    return `m-${stamp}-${randomBytes(2).toString('hex')}`
+  }
+
+  private refuseMemo(message: Message, reasons: readonly string[]): FileMemoOutcome {
+    this.options.onLogEvent?.({
+      kind: 'memo',
+      event: 'refused',
+      by: message.from,
+      msgId: message.id,
+      reasons: [...reasons]
+    })
+    return { ok: false, reasons }
   }
 
   private refuse(message: Message, reasons: readonly string[]): FileDeckOutcome {

@@ -3,7 +3,11 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
-import type { DeckCommentOutcome, DeckRecord } from './odeon'
+import type { DeckCommentOutcome, DeckRecord, MemoDecided, MemoQueueRow } from './odeon'
+import type { MemoVerdictName } from './memo'
+
+/** Which slice of the memo queue to read. */
+export type MemoQueueName = 'open' | 'decided' | 'all'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
@@ -52,6 +56,8 @@ export const IpcChannels = {
   odeonDecks: 'odeon:decks',
   odeonDeck: 'odeon:deck',
   odeonComment: 'odeon:comment',
+  odeonMemos: 'odeon:memos',
+  odeonVerdict: 'odeon:verdict',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
   // there is deliberately no `secrets:get`, and the API-surface test in
   // test/main/secrets.test.ts fails if a fifth channel is ever added here —
@@ -101,6 +107,13 @@ export const COMMANDS_STATE_CHANNEL = 'state:commands'
  * disagree with main about what the ledger holds (the renderer is a projection).
  */
 export const TASKS_STATE_CHANNEL = 'state:tasks'
+
+/**
+ * the memo queue changed (SDD §5 `odeon:queue`). A nudge, not a payload: the
+ * panel re-reads `odeon:memos`, so it can never hold a second copy of the queue
+ * that disagrees with the archive.
+ */
+export const ODEON_QUEUE_CHANNEL = 'odeon:queue'
 
 /** Push channel signalling that `log.jsonl` has grown (SDD §5 `log:append`). */
 export const LOG_APPEND_CHANNEL = 'log:append'
@@ -191,6 +204,17 @@ export interface EphApi {
      * comment implies.
      */
     comment: (ref: string, text: string) => Promise<DeckCommentOutcome>
+    /** The memo queue (FR-7.3). `open` is what the Architect owes a verdict. */
+    memos: (queue: MemoQueueName) => Promise<readonly MemoQueueRow[]>
+    /**
+     * The Architect's verdict on a memo (UC-06 step 4). Architect-only by
+     * construction: this channel exists on the window bridge, which main knows
+     * with certainty is the Architect, and the orchestrator's own verdicts
+     * arrive as mail instead.
+     */
+    verdict: (memoId: string, verdict: MemoVerdictName, notes: string) => Promise<MemoDecided>
+    /** Subscribe to "the memo queue changed"; the panel then re-reads. */
+    onQueue: (cb: () => void) => () => void
   }
   agora: {
     /** The roster (SDD §4.1). */

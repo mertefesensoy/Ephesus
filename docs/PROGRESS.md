@@ -2235,7 +2235,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `tasks after the comment: 1 (unchanged: the ledger is hers)` — UC-05 step 4
       routes the comment to the orchestrator and never mints a task itself.
       **Owed to a local session:** a Decks-tab screenshot for `docs/demo/`.*
-- [ ] **M5.3 Memo policy engine + queues + verdict routing** — FR-7.3,
+- [x] **M5.3 Memo policy engine + queues + verdict routing** — FR-7.3,
       §7.3, S-MEMO: policy triggers (new dependency, public API/schema
       change, security posture, spend) enforced at the existing gate layer —
       the matching action is held until a memo exists and is verdict-ed; memo
@@ -2251,6 +2251,54 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       archive immutable; S-MEMO per TEST-STRATEGY §3. Risk: memo-policy
       granularity is the tuning knob (ADR-0008 consequence) — defaults stay
       the four documented triggers, no invented ones.*
+      *Evidence: `typecheck && lint && check-invariants` green; 68 new cases
+      (`test/shared/memo.test.ts` 50, `test/main/memo.test.ts` 18); full suite
+      1654 passed / 6 skipped, with only the 10 known Windows-local failures
+      (real-process spawns into git worktrees + one POSIX-path fixture) that
+      CI on Linux does not have.
+      **The hold IS a Watch gate**: a matching action opens an ordinary gate
+      carrying `memoTrigger`, and the memo’s verdict settles it — one hold
+      mechanism, one queue, one release path. The four documented triggers and
+      no fifth, asserted table-driven in both directions (10 held paths, 4 held
+      commands, 4 ordinary paths and an ordinary command let through, the spend
+      threshold at and below, a moved threshold, Windows separators, case, and
+      the double-match order).
+      **`mayDecide`’s first production caller is closed** (the carried item):
+      triage routes a filed memo to the orchestrator when the authority table
+      grants it and to the Architect queue otherwise, deny-by-default in every
+      ambiguous case.
+      **The harness writes the countersignature; the decider never claims it** —
+      `verdictFilingSchema` carries only `memoId`/`verdict`/`notes`, and a
+      filing that tries to set `decidedBy`, `countersigned` or `authority` is
+      refused as an unknown field (three cases). `memoVerdictSchema` itself
+      refuses a delegated verdict with no countersignature or no named grant, so
+      FR-5.5 cannot be bypassed by any code path.
+      LIVE RUN THROUGH THE REAL APP, the escalated bench end to end:
+      `ordinary edit trigger: null` · `package.json trigger: new-dependency` ·
+      `gate: g-… | kind: scope-change | memoTrigger: new-dependency` ·
+      `worker notified: memo required: new-dependency` ·
+      `notice names the gate: true` ·
+      `memos archived: ["m-2026-08-28-09-36-32-093-9113"]` ·
+      `memo.md has all five sections: true` ·
+      `triage: {"kind":"memo","event":"escalated","because":"no delegated
+      authority for memo/new-dependency"}` · `open queue: 1` ·
+      `verdict: denied` ·
+      `verdict.json: {"verdict":"rejected","decidedBy":"architect",
+      "countersigned":false,"authority":null}` ·
+      `gate after rejection: settled` · `worker told: memo …: rejected` ·
+      `told not to retry: true` ·
+      `second verdict: memo … already carries a verdict`.
+      A REJECTED MEMO REVERSED THE HELD ACTION, which is ADR-0008’s own clause.
+      LIVE RUN, the delegated bench, with one grant seeded in `authority.json`:
+      `triage: {"event":"delegated","to":"agent.artemis","under":
+      "memo:new-dependency"}` · the orchestrator settled it through the endpoint
+      and the harness wrote
+      `verdict.json: {"verdict":"approved","decidedBy":"agent.artemis",
+      "countersigned":true,"authority":"memo:new-dependency"}` ·
+      `gate released: settled` · `second verdict refused: … already carries a
+      verdict`. **FR-5.5’s countersignature is recorded on the delegated verdict,
+      written by the harness rather than claimed by the decider.**
+      **Owed to a local session:** a Memos-tab screenshot for `docs/demo/`.*
 - [ ] **M5.4 Briefing compiler + Briefs tab** — FR-7.1, §7.2, S-BRIEF: the
       compiler assembles *facts* from Agora data only — ledger deltas, log
       events, budget deltas, open gates/memos since the last brief — each

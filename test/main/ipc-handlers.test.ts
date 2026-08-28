@@ -82,7 +82,9 @@ async function rig(): Promise<{
     registerKnowledge: () => [],
     decks: () => [],
     deck: () => null,
-    commentOnDeck: () => ({ queued: false, because: 'no orchestrator' })
+    commentOnDeck: () => ({ queued: false, because: 'no orchestrator' }),
+    memos: () => [],
+    decideMemo: () => ({ ok: false, reason: 'no odeon' })
   })
   return {
     gates,
