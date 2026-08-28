@@ -288,10 +288,22 @@ The recall keyword index is deliberately *not* here — it lives in `index/fts.s
                                             //  (FR-13.5)
     "pin": "8c1f2ab",                       // commit each study runs against; briefs
                                             //  cite this pin. Architect advances it.
+                                            //  NULL until the first study sets it:
+                                            //  FR-13.2 needs a pinned snapshot, so an
+                                            //  unpinned entry is registered but NOT
+                                            //  studiable (M5b.1)
     "registeredBy": "architect",            // only ever "architect" (FR-13.1)
     "registeredAt": "ISO-8601",
     "notes": "why this source; what the Architect wants learned"
-  }]
+  }],
+  "retired": []                             // retired entries, VERBATIM (M5b.1). A
+                                            //  sibling of `sources`, not a flag on an
+                                            //  entry, so `sources` holds only studiable
+                                            //  sources by construction and a consumer
+                                            //  that forgets to filter cannot study a
+                                            //  retired one. Same idiom as §2's
+                                            //  inbox/ → inbox/.done/: processed, never
+                                            //  deleted — a brief still cites its source
 }
 ```
 A **research brief** (`stoa/briefs/RB-<NNN>-<slug>.md`) is templated markdown with
