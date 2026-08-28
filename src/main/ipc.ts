@@ -21,7 +21,13 @@ import {
   type SecretTest
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
-import type { DeckCommentOutcome, DeckRecord, MemoDecided, MemoQueueRow } from '../shared/odeon'
+import type {
+  BriefRecord,
+  DeckCommentOutcome,
+  DeckRecord,
+  MemoDecided,
+  MemoQueueRow
+} from '../shared/odeon'
 import { memoVerdictNameSchema, type MemoVerdictName } from '../shared/memo'
 import type { MemoQueueName } from '../shared/ipc'
 import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
@@ -133,6 +139,8 @@ export interface IpcDeps {
   /** Recall on the best rung that answers (ADR-0006 layer 2). */
   recall(query: string, scope: string | null, limit: number): Promise<RecallResponse>
   /** The Architect's reference shelf (FR-6.4). */
+  /** Every archived standup brief, newest first (FR-7.1). */
+  briefs(): readonly BriefRecord[]
   /** Every archived review deck, newest first (FR-7.2). */
   decks(): readonly DeckRecord[]
   /** One deck's HTML; null when the ref names nothing in the archive. */
@@ -222,6 +230,7 @@ export function registerIpc(deps: IpcDeps): void {
     const { query, scope, limit } = agoraRecallSchema.parse(raw)
     return deps.recall(query, scope, limit)
   })
+  ipcMain.handle(IpcChannels.odeonBriefs, (): readonly BriefRecord[] => deps.briefs())
   ipcMain.handle(IpcChannels.odeonDecks, (): readonly DeckRecord[] => deps.decks())
   ipcMain.handle(IpcChannels.odeonDeck, (_ev, raw: unknown): string | null => {
     // The ref crosses the trust boundary, so it is validated here and the

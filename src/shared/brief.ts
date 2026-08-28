@@ -1,0 +1,329 @@
+import { z } from 'zod'
+import type { LogEntry } from './log'
+import type { Task, TaskLedger } from './tasks'
+
+/**
+ * The briefing compiler (ADR-0008 §1, FR-7.1, SDD §7.2, UC-04) — S-BRIEF.
+ *
+ * The division of labour is the whole design, and it runs one way only:
+ *
+ * - **The harness assembles FACTS.** Every fact comes from the Agora — the
+ *   ledger, `log.jsonl`, the cost ledger, open gates and memos — and every one
+ *   carries the refs that let a reader find it again. The compiler has no
+ *   opinions and writes no prose.
+ * - **Artemis writes the NARRATIVE.** Which fact matters most, how to say it,
+ *   what to lead with: judgement, and ADR-0005 keeps judgement out of the
+ *   harness.
+ *
+ * Never the reverse. The harness must not narrate, and Artemis must not invent
+ * facts — which is enforceable in exactly one direction: **every sentence she
+ * writes must carry a ref that resolves to a fact the compiler issued.** A
+ * sentence with no resolvable ref fails the brief (`checkNarrative` below), so
+ * "briefings compiled strictly from Agora data, never from free recollection"
+ * (FR-7.1) is a mechanism rather than an instruction.
+ */
+
+export const BRIEF_SCHEMA_VERSION = 1
+
+/**
+ * The fixed running order (VOICE-DESIGN §4). Order is part of the contract: the
+ * Architect hears briefs daily and should never have to wait to find out what
+ * is blocked.
+ */
+export const BRIEF_SECTIONS = ['headline', 'done', 'blocked', 'health', 'ahead'] as const
+
+export const briefSectionSchema = z.enum(BRIEF_SECTIONS)
+
+export type BriefSection = z.infer<typeof briefSectionSchema>
+
+/**
+ * "Blocked & needs-you is never truncated" (VOICE-DESIGN §4). When the length
+ * budget bites, it bites everywhere else first.
+ */
+export const NEVER_TRUNCATED: BriefSection = 'blocked'
+
+/** Measured pace for a briefing voice (VOICE-DESIGN §3). */
+export const BRIEF_WPM = 150
+
+/** SRS §6.2's standup test: under 90 seconds of audio. */
+export const BRIEF_MAX_SECONDS = 90
+
+/** One assembled fact, with the refs that make it checkable. */
+export interface BriefFact {
+  readonly section: BriefSection
+  /** Machine-readable summary. Not prose — Artemis writes the prose. */
+  readonly what: string
+  /** `log#12`, `task:t-…`, `gate:g-…`, `memo:m-…`, `budget:agent.mason`. */
+  readonly refs: readonly string[]
+}
+
+/** What the compiler reads. Every field is Agora data; there is no other source. */
+export interface BriefInput {
+  /** Events since the last brief, oldest first. */
+  readonly events: readonly LogEntry[]
+  readonly ledger: TaskLedger
+  readonly openGates: readonly { readonly id: string; readonly agentId: string }[]
+  readonly openMemos: readonly { readonly memoId: string }[]
+  /** Cumulative tokens per agent, folded from the durable ledger (ADR-0011). */
+  readonly spend: readonly { readonly agentId: string; readonly tokens: number }[]
+}
+
+/**
+ * Contract: the facts a brief may be built from, in section order. Pure and
+ * total — the same input always gives the same facts, which is what lets a
+ * scenario seed a fixture and assert the whole set.
+ *
+ * A quiet window yields a headline fact saying so rather than nothing at all: a
+ * brief that vanished because nothing happened is indistinguishable from a
+ * brief that failed.
+ */
+export function compileFacts(input: BriefInput): readonly BriefFact[] {
+  const facts: BriefFact[] = []
+
+  const done = input.ledger.tasks.filter((task) => task.status === 'done')
+  const ahead = input.ledger.tasks.filter(
+    (task) => task.status === 'todo' || task.status === 'in_progress'
+  )
+  const stalled = input.ledger.tasks.filter((task) => task.status === 'stalled')
+  const breakerTrips = input.events.filter((event) => event.kind === 'breaker')
+  const escalations = input.events.filter(
+    (event) => event.kind === 'memo' && event['event'] === 'escalated'
+  )
+
+  // 1. Headline — the single most important thing, chosen mechanically by
+  //    consequence: something the Architect must act on beats something that
+  //    merely happened.
+  const headline =
+    input.openGates[0] !== undefined
+      ? fact('headline', `${String(input.openGates.length)} action(s) waiting on you`, [
+          ...input.openGates.map((gate) => `gate:${gate.id}`)
+        ])
+      : input.openMemos[0] !== undefined
+        ? fact('headline', `${String(input.openMemos.length)} memo(s) waiting on your verdict`, [
+            ...input.openMemos.map((memo) => `memo:${memo.memoId}`)
+          ])
+        : stalled[0] !== undefined
+          ? fact('headline', `${String(stalled.length)} task(s) stalled`, refsOfTasks(stalled))
+          : done[0] !== undefined
+            ? fact('headline', `${String(done.length)} task(s) completed`, refsOfTasks(done))
+            : fact('headline', 'nothing happened in this window', [])
+
+  facts.push(headline)
+
+  // 2. Done — grouped, never enumerated past three (VOICE-DESIGN §4).
+  for (const task of done.slice(0, 3)) {
+    facts.push(fact('done', `${task.id} completed: ${task.title}`, [`task:${task.id}`]))
+  }
+  if (done.length > 3) {
+    facts.push(
+      fact('done', `and ${String(done.length - 3)} more completed`, refsOfTasks(done.slice(3)))
+    )
+  }
+
+  // 3. Blocked & needs-you — each with something the Architect can act on.
+  for (const gate of input.openGates) {
+    facts.push(fact('blocked', `${gate.agentId} is held at a gate`, [`gate:${gate.id}`]))
+  }
+  for (const memo of input.openMemos) {
+    facts.push(fact('blocked', `memo ${memo.memoId} awaits a verdict`, [`memo:${memo.memoId}`]))
+  }
+  for (const task of stalled) {
+    facts.push(fact('blocked', `${task.id} is stalled: ${task.title}`, [`task:${task.id}`]))
+  }
+
+  // 4. Health — budgets, breaker trips, escalations.
+  for (const row of input.spend) {
+    facts.push(
+      fact('health', `${row.agentId} has spent ${String(row.tokens)} tokens`, [
+        `budget:${row.agentId}`
+      ])
+    )
+  }
+  for (const trip of breakerTrips) {
+    facts.push(
+      fact(
+        'health',
+        `breaker at rung ${String(trip['rung'] ?? '?')} for ${String(trip['agentId'] ?? '?')}`,
+        [`log#${String(trip.seq)}`]
+      )
+    )
+  }
+  for (const escalation of escalations) {
+    facts.push(
+      fact('health', `memo ${String(escalation['memoId'] ?? '?')} escalated to you`, [
+        `log#${String(escalation.seq)}`
+      ])
+    )
+  }
+
+  // 5. Ahead — what the company will do next, per the ledger.
+  for (const task of ahead.slice(0, 3)) {
+    facts.push(fact('ahead', `${task.id} (${task.status}): ${task.title}`, [`task:${task.id}`]))
+  }
+  if (ahead.length > 3) {
+    facts.push(
+      fact('ahead', `and ${String(ahead.length - 3)} more queued`, refsOfTasks(ahead.slice(3)))
+    )
+  }
+
+  return facts
+}
+
+function fact(section: BriefSection, what: string, refs: readonly string[]): BriefFact {
+  return { section, what, refs }
+}
+
+function refsOfTasks(tasks: readonly Task[]): readonly string[] {
+  return tasks.map((task) => `task:${task.id}`)
+}
+
+/** One narrated sentence and the facts it rests on. */
+export const briefSentenceSchema = z
+  .object({
+    section: briefSectionSchema,
+    text: z.string().min(1).max(1_000),
+    /** At least one: a sentence with no ref is exactly what S-BRIEF forbids. */
+    refs: z.array(z.string().min(1).max(128)).min(1).max(32)
+  })
+  .strict()
+
+export const briefFilingSchema = z
+  .object({
+    schemaVersion: z.literal(BRIEF_SCHEMA_VERSION),
+    kind: z.literal('brief'),
+    /** The window this narrates — the compiler minted it with the facts. */
+    briefId: z.string().min(1).max(64),
+    sentences: z.array(briefSentenceSchema).min(1).max(200)
+  })
+  .strict()
+
+export type BriefFiling = z.infer<typeof briefFilingSchema>
+
+export type BriefParse =
+  | { readonly ok: true; readonly filing: BriefFiling }
+  | { readonly ok: false; readonly reason: string }
+
+/** Contract: parses a narration, or explains why it could not. Never throws. */
+export function parseBriefFiling(body: string): BriefParse {
+  let raw: unknown
+  try {
+    raw = JSON.parse(body)
+  } catch (err) {
+    return { ok: false, reason: `brief: body is not JSON — ${reason(err)}` }
+  }
+  const parsed = briefFilingSchema.safeParse(raw)
+  if (parsed.success) return { ok: true, filing: parsed.data }
+  const issue = parsed.error.issues[0]
+  const where = issue && issue.path.length > 0 ? issue.path.join('.') : 'brief'
+  return { ok: false, reason: `${where}: ${issue?.message ?? 'invalid brief'}` }
+}
+
+export interface NarrativeCheck {
+  readonly ok: boolean
+  readonly reasons: readonly string[]
+  readonly spokenSeconds: number
+}
+
+/**
+ * Contract: does this narration rest entirely on facts the compiler issued?
+ *
+ * **S-BRIEF's core.** Three ways to fail, and each is the same failure wearing
+ * different clothes — a claim the Architect cannot check:
+ *
+ * 1. a sentence carrying no ref at all (the schema already refuses this, so it
+ *    is belt-and-braces for a filing built some other way);
+ * 2. a sentence carrying a ref that no fact issued — an invented citation is
+ *    worse than none, because it looks checked;
+ * 3. a narration over the spoken-length budget, which is not a truth failure
+ *    but is the one SRS §6.2 measures.
+ *
+ * What it deliberately does NOT check is whether the prose is any good. That is
+ * Artemis's job and nobody else's.
+ */
+export function checkNarrative(
+  filing: BriefFiling,
+  facts: readonly BriefFact[],
+  options: { readonly wpm?: number; readonly maxSeconds?: number } = {}
+): NarrativeCheck {
+  const issued = new Set(facts.flatMap((entry) => entry.refs))
+  const reasons: string[] = []
+
+  for (const sentence of filing.sentences) {
+    if (sentence.refs.length === 0) {
+      reasons.push(`a ${sentence.section} sentence carries no source ref`)
+      continue
+    }
+    const unknown = sentence.refs.filter((ref) => !issued.has(ref))
+    if (unknown.length > 0) {
+      reasons.push(
+        `"${sentence.text.slice(0, 60)}" cites ${unknown.join(', ')}, which no fact supports`
+      )
+    }
+  }
+
+  const seconds = spokenSeconds(
+    filing.sentences.map((sentence) => sentence.text).join(' '),
+    options.wpm ?? BRIEF_WPM
+  )
+  const max = options.maxSeconds ?? BRIEF_MAX_SECONDS
+  if (seconds > max) {
+    reasons.push(
+      `the brief runs ${String(Math.round(seconds))}s spoken; the budget is ${String(max)}s`
+    )
+  }
+
+  return { ok: reasons.length === 0, reasons, spokenSeconds: seconds }
+}
+
+/**
+ * Contract: how long this text takes to say, in seconds, at `wpm`.
+ *
+ * Word-count math rather than a synthesis round-trip: the budget has to be
+ * checkable before the Herald exists (M6) and without spending a TTS call to
+ * find out a brief is too long.
+ */
+export function spokenSeconds(text: string, wpm: number = BRIEF_WPM): number {
+  const words = text.trim().length === 0 ? 0 : text.trim().split(/\s+/).length
+  return (words / wpm) * 60
+}
+
+/**
+ * Contract: the archived artifact — the narration followed by the refs that
+ * back it (SDD §2's `briefs/<ts>.md (+ source refs)`).
+ *
+ * The refs appendix is not decoration: it is what makes the archive auditable
+ * a month later, when the log has grown past the window this brief described.
+ */
+export function renderBriefMarkdown(
+  briefId: string,
+  filing: BriefFiling,
+  facts: readonly BriefFact[],
+  at: string
+): string {
+  const lines: string[] = [
+    `# Standup brief ${briefId}`,
+    '',
+    `- brief: ${briefId}`,
+    `- at: ${at}`,
+    ''
+  ]
+  for (const section of BRIEF_SECTIONS) {
+    const said = filing.sentences.filter((sentence) => sentence.section === section)
+    if (said.length === 0) continue
+    lines.push(`## ${section}`, '')
+    for (const sentence of said) {
+      lines.push(`${sentence.text} [${sentence.refs.join(', ')}]`)
+    }
+    lines.push('')
+  }
+  lines.push('## Source refs', '')
+  for (const entry of facts) {
+    lines.push(`- ${entry.section}: ${entry.what} [${entry.refs.join(', ')}]`)
+  }
+  lines.push('')
+  return lines.join('\n')
+}
+
+function reason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}

@@ -8,9 +8,16 @@ import {
   escapeHtml,
   parseDeckFiling,
   taskOfDeckFile,
+  type BriefRecord,
   type DeckCommentOutcome,
   type DeckRecord
 } from '../shared/odeon'
+import {
+  checkNarrative,
+  parseBriefFiling,
+  renderBriefMarkdown,
+  type BriefFact
+} from '../shared/brief'
 import {
   gateVerdictFor,
   MEMO_SCHEMA_VERSION,
@@ -63,8 +70,8 @@ export interface OdeonOptions {
   gate?(
     gateId: string
   ): { readonly agentId: string; readonly memoTrigger: MemoTrigger | null } | null
-  /** `log` kinds `deck` and `memo` (SDD §4.3). */
-  onLogEvent?(draft: { kind: 'deck' | 'memo' } & Record<string, unknown>): void
+  /** `log` kinds `deck`, `memo` and `brief` (SDD §4.3). */
+  onLogEvent?(draft: { kind: 'deck' | 'memo' | 'brief' } & Record<string, unknown>): void
   /** Queued through the single committer (ADR-0004), never awaited. */
   commitSoon?(subject: string): void
   now?(): Date
@@ -72,6 +79,15 @@ export interface OdeonOptions {
 
 export type FileDeckOutcome =
   | { readonly ok: true; readonly ref: string; readonly taskId: string }
+  | { readonly ok: false; readonly reasons: readonly string[] }
+
+export type FileBriefOutcome =
+  | {
+      readonly ok: true
+      readonly ref: string
+      readonly briefId: string
+      readonly spokenSeconds: number
+    }
   | { readonly ok: false; readonly reasons: readonly string[] }
 
 /** Who settled a memo, and under what. */
@@ -465,6 +481,83 @@ export class Odeon {
   memoBody(memoId: string): string | null {
     const body = path.join(this.memosDir(), memoId, 'memo.md')
     return fs.existsSync(body) ? fs.readFileSync(body, 'utf8') : null
+  }
+
+  /**
+   * Archives one narrated brief (ADR-0008 §1, FR-7.1, SDD §2).
+   *
+   * Contract: the narration is checked against the facts the compiler issued
+   * BEFORE anything is written. A brief whose sentences cite nothing, or cite
+   * something no fact supports, is refused — that check is the only thing
+   * standing between "compiled strictly from Agora data" and an instruction
+   * nobody can audit.
+   *
+   * The facts are supplied by the caller rather than re-derived here, because
+   * they must be the SAME set the narrator was given: re-deriving them would
+   * check the prose against a window that had moved on since.
+   */
+  fileBrief(
+    message: Message,
+    facts: readonly BriefFact[],
+    options: { readonly wpm?: number; readonly maxSeconds?: number } = {}
+  ): FileBriefOutcome {
+    const parsed = parseBriefFiling(message.body)
+    if (!parsed.ok) return this.refuseBrief(message, [parsed.reason])
+    const filing = parsed.filing
+
+    const check = checkNarrative(filing, facts, options)
+    if (!check.ok) return this.refuseBrief(message, check.reasons)
+
+    const at = this.now()
+    const dir = path.join(this.options.agoraRoot, 'odeon', 'briefs')
+    fs.mkdirSync(dir, { recursive: true })
+    const name = `${at.toISOString().replace(/[:.]/g, '-')}.md`
+    const file = path.join(dir, name)
+    if (fs.existsSync(file)) {
+      return this.refuseBrief(message, [`a brief is already archived at ${name}`])
+    }
+    writeFileAtomic(file, renderBriefMarkdown(filing.briefId, filing, facts, at.toISOString()))
+
+    const ref = path.posix.join('odeon', 'briefs', name)
+    this.options.onLogEvent?.({
+      kind: 'brief',
+      event: 'archived',
+      briefId: filing.briefId,
+      briefRef: ref,
+      by: message.from,
+      msgId: message.id,
+      sentences: filing.sentences.length,
+      facts: facts.length,
+      spokenSeconds: Math.round(check.spokenSeconds)
+    })
+    this.options.commitSoon?.(`odeon: brief ${filing.briefId}`)
+    return { ok: true, ref, briefId: filing.briefId, spokenSeconds: check.spokenSeconds }
+  }
+
+  /** Every archived brief, newest first (SDD §5 `odeon:briefs`). */
+  briefs(): readonly BriefRecord[] {
+    const dir = path.join(this.options.agoraRoot, 'odeon', 'briefs')
+    if (!fs.existsSync(dir)) return []
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.md'))
+      .sort((a, b) => b.localeCompare(a))
+      .map((name) => ({
+        ref: path.posix.join('odeon', 'briefs', name),
+        archivedAt: name.replace(/\.md$/, ''),
+        markdown: fs.readFileSync(path.join(dir, name), 'utf8')
+      }))
+  }
+
+  private refuseBrief(message: Message, reasons: readonly string[]): FileBriefOutcome {
+    this.options.onLogEvent?.({
+      kind: 'brief',
+      event: 'refused',
+      by: message.from,
+      msgId: message.id,
+      reasons: [...reasons]
+    })
+    return { ok: false, reasons }
   }
 
   private memosDir(): string {

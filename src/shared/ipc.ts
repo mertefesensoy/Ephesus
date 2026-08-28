@@ -3,7 +3,13 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
-import type { DeckCommentOutcome, DeckRecord, MemoDecided, MemoQueueRow } from './odeon'
+import type {
+  BriefRecord,
+  DeckCommentOutcome,
+  DeckRecord,
+  MemoDecided,
+  MemoQueueRow
+} from './odeon'
 import type { MemoVerdictName } from './memo'
 
 /** Which slice of the memo queue to read. */
@@ -56,6 +62,7 @@ export const IpcChannels = {
   odeonDecks: 'odeon:decks',
   odeonDeck: 'odeon:deck',
   odeonComment: 'odeon:comment',
+  odeonBriefs: 'odeon:briefs',
   odeonMemos: 'odeon:memos',
   odeonVerdict: 'odeon:verdict',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
@@ -193,6 +200,8 @@ export interface EphApi {
     state: () => Promise<HooksState>
   }
   odeon: {
+    /** Every archived standup brief, newest first (FR-7.1). */
+    briefs: () => Promise<readonly BriefRecord[]>
     /** Every archived review deck, newest first (FR-7.2). */
     decks: () => Promise<readonly DeckRecord[]>
     /** One deck's HTML, for the in-app viewer. Null when the ref is foreign. */

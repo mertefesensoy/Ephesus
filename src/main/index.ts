@@ -24,6 +24,8 @@ import { composeMessage, makeMessageId, type Message } from '../shared/message'
 import { parseVerdictFiling } from '../shared/memo'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { OpenGate } from '../shared/gates'
+import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
+import { emptyLedger as emptyTaskLedger } from '../shared/tasks'
 import { LedgerEndpoint } from './ledger'
 import { Odeon } from './odeon'
 import { Library } from './library'
@@ -79,6 +81,7 @@ let agora: Agora | null = null
 let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
+let briefing: BriefingJob | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -385,11 +388,11 @@ interface EndpointAnswer {
  * so a body that is not JSON at all falls through to the deck parser and gets
  * the precise refusal it deserves there rather than a vaguer one here.
  */
-function filingKind(body: string): 'deck' | 'memo' | 'verdict' {
+function filingKind(body: string): 'deck' | 'memo' | 'verdict' | 'brief' {
   try {
     const raw: unknown = JSON.parse(body)
     const kind = (raw as { kind?: unknown } | null)?.kind
-    if (kind === 'memo' || kind === 'verdict') return kind
+    if (kind === 'memo' || kind === 'verdict' || kind === 'brief') return kind
   } catch {
     // Not JSON. The deck parser says so precisely; do not guess here.
   }
@@ -511,6 +514,84 @@ function refuseVerdict(reasons: readonly string[]): EndpointAnswer {
     subject: 'odeon: verdict not recorded',
     body: JSON.stringify({ reasons })
   }
+}
+
+/**
+ * Archives a narrated brief, checked against the facts the compiler issued
+ * (FR-7.1, S-BRIEF).
+ *
+ * A narration whose `briefId` nobody asked for is refused before a single
+ * sentence is read: the fact set is the question, and an answer to a question
+ * nobody posed cannot be checked against anything.
+ */
+function archiveBrief(archive: Odeon, message: Message): EndpointAnswer {
+  const words = promptStore
+  const job = briefing
+  if (job === null) return refuseBrief(['no briefing job is running'], words)
+  const briefId = briefIdOf(message.body)
+  const facts = briefId === null ? null : job.factsFor(briefId)
+  if (facts === null) {
+    return refuseBrief([`no standup is waiting on a brief called "${briefId ?? '?'}"`], words)
+  }
+  const outcome = archive.fileBrief(message, facts)
+  // Settle ONLY on success. A refused narration leaves the question open so
+  // the orchestrator can correct it and narrate the same window again —
+  // closing it on refusal would make the refusal terminal and the retry
+  // impossible, which a live run found the hard way.
+  job.narrated(briefId ?? '', outcome.ok)
+  if (words === null) {
+    return { ok: outcome.ok, subject: 'odeon', body: JSON.stringify(outcome) }
+  }
+  if (outcome.ok) {
+    return {
+      ok: true,
+      subject: words
+        .render(path.join('odeon', 'brief-accept-subject.md'), { briefId: outcome.briefId })
+        .trim()
+        .slice(0, 200),
+      body: words
+        .render(path.join('odeon', 'brief-accept.md'), {
+          ref: outcome.ref,
+          spokenSeconds: String(Math.round(outcome.spokenSeconds))
+        })
+        .trim()
+    }
+  }
+  return refuseBrief(outcome.reasons, words)
+}
+
+function refuseBrief(reasons: readonly string[], words: PromptStore | null): EndpointAnswer {
+  if (words === null) {
+    return { ok: false, reasons, subject: 'odeon', body: JSON.stringify({ reasons }) }
+  }
+  return {
+    ok: false,
+    reasons,
+    subject: words.read(path.join('odeon', 'brief-refuse-subject.md')).trim().slice(0, 200),
+    body: words.render(path.join('odeon', 'brief-refuse.md'), { reasons: bullets(reasons) }).trim()
+  }
+}
+
+/** The brief a narration claims to answer, without validating the rest. */
+function briefIdOf(body: string): string | null {
+  try {
+    const raw: unknown = JSON.parse(body)
+    const id = (raw as { briefId?: unknown } | null)?.briefId
+    return typeof id === 'string' ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * One agent’s cumulative token spend, folded from the durable ledger.
+ *
+ * ADR-0011 and invariant §11: the figure comes from stored rows every time,
+ * never from a counter this process kept, so a restart cannot zero it.
+ */
+function totalOfSpend(agentId: string): number {
+  const totals = costLedger?.spendFor(agentId, null).cumulativeTotals
+  return totals === undefined ? 0 : totals.inTokens + totals.outTokens
 }
 
 /** Reasons as a markdown list. Serialization, not prose (invariant §8). */
@@ -937,7 +1018,40 @@ async function boot(): Promise<void> {
     deliver: (message) => hermes?.deliverFromHarness(message),
     onDegraded: (detail) => reportDegradation('library', detail)
   })
+  // The standup briefing (ADR-0008 §1, FR-7.1). The harness compiles facts;
+  // Artemis narrates them. It never writes prose, and her narration is checked
+  // sentence by sentence against the facts it issued before anything is
+  // archived — which is what makes FR-7.1 a mechanism instead of an
+  // instruction.
+  briefing = new BriefingJob({
+    prompts,
+    gather: (sinceSeq) => ({
+      events: agora?.readLog().filter((entry) => entry.seq > sinceSeq) ?? [],
+      ledger: ledger?.tasks() ?? emptyTaskLedger,
+      openGates: (gates?.list() ?? []).map((gate) => ({
+        id: gate.id,
+        agentId: gate.agentId
+      })),
+      openMemos: (odeon?.memos('open') ?? []).map((memo) => ({ memoId: memo.memoId })),
+      // ADR-0011: cumulative spend is folded from the durable ledger, never
+      // from a counter this process kept.
+      spend: Object.keys(agora?.registry().agents ?? {}).map((agentId) => ({
+        agentId,
+        tokens: totalOfSpend(agentId)
+      }))
+    }),
+    orchestrator: () => agora?.registry().orchestratorId ?? null,
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
   scheduler.add(reflection.trigger())
+  // The scheduler’s second client (SDD §7.2).
+  scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
   scheduler.start()
 
   hermes = new Hermes({
@@ -960,6 +1074,7 @@ async function boot(): Promise<void> {
       const kind = filingKind(message.body)
       if (kind === 'verdict') return settleFromOrchestrator(archive, message)
       if (kind === 'memo') return archiveMemo(archive, message)
+      if (kind === 'brief') return archiveBrief(archive, message)
       return archiveDeck(archive, message)
     },
     library: (message) => {
@@ -1281,6 +1396,7 @@ async function boot(): Promise<void> {
             degraded: 'the Library is not available'
           },
     knowledge: () => library?.knowledge() ?? [],
+    briefs: () => odeon?.briefs() ?? [],
     decks: () => odeon?.decks() ?? [],
     memos: (queue) =>
       (odeon?.memos(queue) ?? []).map((row) => ({

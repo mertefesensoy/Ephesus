@@ -54,6 +54,13 @@ export type MemoDecided =
   | { readonly ok: true; readonly gateVerdict: string }
   | { readonly ok: false; readonly reason: string }
 
+/** One archived brief, as the Briefs tab lists them. */
+export interface BriefRecord {
+  readonly ref: string
+  readonly archivedAt: string
+  readonly markdown: string
+}
+
 export interface DeckRecord {
   readonly ref: string
   readonly taskId: string

@@ -2299,7 +2299,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       verdict`. **FR-5.5’s countersignature is recorded on the delegated verdict,
       written by the harness rather than claimed by the decider.**
       **Owed to a local session:** a Memos-tab screenshot for `docs/demo/`.*
-- [ ] **M5.4 Briefing compiler + Briefs tab** — FR-7.1, §7.2, S-BRIEF: the
+- [x] **M5.4 Briefing compiler + Briefs tab** — FR-7.1, §7.2, S-BRIEF: the
       compiler assembles *facts* from Agora data only — ledger deltas, log
       events, budget deltas, open gates/memos since the last brief — each
       fact carrying source refs (log seq / task id / memo id); Artemis
@@ -2313,6 +2313,41 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       pure and table-driven; seeded fixtures → deterministic fact set. Risk:
       the compiler is mechanism (facts), Artemis is intelligence (prose) —
       never let the harness write narrative or Artemis invent facts.*
+      *Evidence: `typecheck && lint && check-invariants` green; 46 new cases
+      (`test/shared/brief.test.ts` 27, `test/main/briefing.test.ts` 19); full
+      suite 1700 passed / 6 skipped, only the known Windows-local failures.
+      **The direction is enforced, not asked for**: `compileFacts` is pure and
+      writes no prose, the narration comes back as mail, and `checkNarrative`
+      refuses the WHOLE brief when any sentence cites a ref no fact issued —
+      an invented citation being worse than none, because it looks checked.
+      Three distinct failures are asserted (a sentence with no ref, a sentence
+      citing an unissued fact, a narration over budget) plus the case that
+      proves the check is not vacuous: the same over-long text passes when the
+      budget is raised, so the length check is about length and not the words.
+      The ≤ 90 s budget (SRS §6.2) is word-count math at VOICE-DESIGN’s 150 wpm,
+      checkable before the Herald exists. The compiler is deterministic, emits
+      sections in the documented running order, groups completions past three,
+      and NEVER truncates `blocked` (7 gates in, 7 facts out).
+      The scheduler gained its second client (`standup`).
+      LIVE RUN THROUGH THE REAL APP — the standup cycle end to end:
+      `facts compiled: 3` ·
+      `fact refs: ["gate:g-…","gate:g-…","task:t-evidence-54"]` ·
+      `brief asked: b-2026-08-28T09-56-05-597Z-5727` ·
+      `asked by: agent.odeon | standup b-…: narrate these facts` ·
+      `after an unsupported sentence: 0 brief(s) archived` ·
+      `refusal named the citation: true` ·
+      then the SAME window re-narrated on issued facts:
+      `archived: ["2026-08-28T09-56-05-678Z.md"]` ·
+      `every sentence carries refs: true` ·
+      `has a source-ref appendix: true` · `odeon:briefs() sees: 1` ·
+      `standup settled: true`.
+      **The live run caught a real defect**: `archiveBrief` settled the
+      outstanding ask unconditionally, so a refusal closed the question and the
+      corrected narration was rejected as answering a brief nobody asked for —
+      the refusal was terminal and the retry impossible. Fixed by moving the
+      rule out of the wiring into `BriefingJob.narrated(briefId, accepted)`,
+      with two regression tests named after the bug.
+      **Owed to a local session:** a Briefs-tab screenshot for `docs/demo/`.*
 - [ ] **M5.5 Meeting driver + the Odeon room** — FR-7.4, UC-07, S-MEETING:
       convene (attendees + agenda line); Artemis chairs; turn order enforced
       by the driver — attendees receive the floor via Hermes `query` one at a
