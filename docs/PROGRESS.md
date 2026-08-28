@@ -2619,6 +2619,10 @@ CI green on every M5 commit — runs 33152624246 (M5.1) · 33154688487 (M5.2) ·
 33160420476 (M5.3) · 33161721415 (M5.4) · 33163021861 (M5.5) · 33163764115
 (M5.6) · 33170534063 (M5.7) · 33172228794 (M5.8), all SUCCESS.
 
+The verdict itself is closed on a CI-green tree: run **33172756433** on
+`069b0bc` — docs integrity, typecheck·lint·test and commit attribution all
+SUCCESS, with the five S-suites running green on Linux there.
+
 **A gap the review itself found and closed.** IMPLEMENTATION M5 names "the
 standup brief's gym-slice section" and FR-12.5 requires the slice reported in
 briefings. `Gymnasium.slice()` existed but nothing put it in a brief. Closed
