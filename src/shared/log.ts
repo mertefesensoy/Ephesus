@@ -34,12 +34,19 @@ export const LOG_KINDS = [
   'meeting',
   'breaker',
   'budget',
+  /** The Library's events (SDD §4.3, Architect-ratified at the M4 close).
+   *  Listed since M4 but omitted here until the M5 close-out audit — nothing
+   *  emits it yet; its first emitter documents its refs. */
+  'memory',
   /** Artemis's lifecycle and her countersigned decisions (FR-5.4, FR-5.5). */
   'orchestrator',
   'remote',
   'secret-rotated',
   'profile',
   'gym',
+  /** The Stoa's research cycle (SDD §7.7, ADR-0017): study, brief, watchlist.
+   *  Listed with §4.3 at the M5 close-out; first emitted by M5b.2. */
+  'stoa',
   /** Closing time (GYM-003): begin / ack / complete, with the shortfall named. */
   'shutdown',
   'error'

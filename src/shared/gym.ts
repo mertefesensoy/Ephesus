@@ -198,6 +198,14 @@ export interface GymRow {
   readonly proposedAt: string
   readonly decidedBy: string | null
   readonly decidedAt: string | null
+  /**
+   * The Measured cell verbatim — "due 2026-09-11" before the check, the
+   * measurement date after. Dropped by the first `renderRow`, which emitted
+   * seven cells under the eight-column header, so every rewrite silently
+   * erased it and the Outcome beside it (M5 close-out audit, finding 1 —
+   * ADR-0015 R2 was mechanically false).
+   */
+  readonly measured: string | null
   readonly outcome: string | null
 }
 
@@ -290,6 +298,7 @@ export function renderRow(row: GymRow): string {
     row.metric,
     row.proposedAt,
     row.decidedAt ?? '',
+    row.measured ?? '',
     row.outcome ?? '',
     ''
   ]
@@ -329,6 +338,7 @@ export function parseLedger(markdown: string): readonly GymRow[] {
       proposedAt: cells[5] ?? '',
       decidedBy: null,
       decidedAt: cells[6] === '' ? null : (cells[6] ?? null),
+      measured: cells[7] === '' ? null : (cells[7] ?? null),
       outcome: cells[8] === '' ? null : (cells[8] ?? null)
     })
   }

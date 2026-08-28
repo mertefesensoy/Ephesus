@@ -82,6 +82,21 @@ export class Gymnasium {
     if (existsSync(seed)) {
       const text = readFileSync(seed, 'utf8')
       writeFileAtomic(file, text)
+      // SDD §2 seeds `proposals/GYM-*.md` WITH the ledger — the rows link to
+      // them, and a ledger whose every link is broken is half an archive
+      // (M5 close-out audit, finding 4).
+      const seedProposals = path.join(this.options.seedFrom, 'proposals')
+      if (existsSync(seedProposals)) {
+        const target = path.join(path.dirname(file), 'proposals')
+        mkdirSync(target, { recursive: true })
+        for (const name of readdirSync(seedProposals)) {
+          if (!name.endsWith('.md')) continue
+          writeFileAtomic(
+            path.join(target, name),
+            readFileSync(path.join(seedProposals, name), 'utf8')
+          )
+        }
+      }
       this.options.onLogEvent?.({ kind: 'gym', event: 'seeded', from: seed })
       this.options.commitSoon?.('gymnasium: seed the ledger from the build-phase archive')
       return text
@@ -145,6 +160,7 @@ export class Gymnasium {
       proposedAt: at,
       decidedBy: null,
       decidedAt: null,
+      measured: null,
       outcome: null
     }
     this.append(row)
@@ -224,6 +240,9 @@ export class Gymnasium {
     this.append({
       ...row,
       status,
+      // The Measured cell flips from its "due …" note to the date the check
+      // actually ran — the row tells its own history (ADR-0015 R2).
+      measured: this.now().toISOString().slice(0, 10),
       outcome: measured ?? 'not measurable'
     })
     this.options.onLogEvent?.({
@@ -249,9 +268,13 @@ export class Gymnasium {
   }
 
   /** What the standup brief reports about the slice (R3, FR-12.5). */
-  slice(): { readonly spentTokens: number; readonly tokensPerWeek: number } {
+  slice(): { readonly spentTokens: number | null; readonly tokensPerWeek: number } {
     return {
-      spentTokens: this.options.gymSpend?.() ?? 0,
+      // Null, not zero, when nothing attributes gym spend yet — the brief
+      // must report the figure as missing rather than as a measurement
+      // (M5 close-out audit, finding 2; the wiring deferral is in
+      // DECISIONS-LOG and carried with the M6 scheduler work).
+      spentTokens: this.options.gymSpend ? this.options.gymSpend() : null,
       tokensPerWeek: (this.options.slice ?? DEFAULT_GYM_SLICE).tokensPerWeek
     }
   }

@@ -73,7 +73,12 @@ export interface BriefInput {
    * growing.
    */
   readonly gymSlice?: {
-    readonly spentTokens: number
+    /**
+     * Null when no spend-attribution source is wired (M5 close-out audit,
+     * finding 2): the brief must say the figure is missing, never report a
+     * constant zero as ledger data (invariant §7 — degradation visible).
+     */
+    readonly spentTokens: number | null
     readonly tokensPerWeek: number
     readonly open: number
   }
@@ -173,9 +178,13 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
     facts.push(
       fact(
         'health',
-        `the gymnasium has spent ${String(input.gymSlice.spentTokens)} of ` +
-          `${String(input.gymSlice.tokensPerWeek)} tokens this week, with ` +
-          `${String(input.gymSlice.open)} proposal(s) open`,
+        input.gymSlice.spentTokens === null
+          ? `the gymnasium's spend is not yet attributed (slice: ` +
+              `${String(input.gymSlice.tokensPerWeek)} tokens/week), with ` +
+              `${String(input.gymSlice.open)} proposal(s) open`
+          : `the gymnasium has spent ${String(input.gymSlice.spentTokens)} of ` +
+              `${String(input.gymSlice.tokensPerWeek)} tokens this week, with ` +
+              `${String(input.gymSlice.open)} proposal(s) open`,
         ['gym:slice']
       )
     )

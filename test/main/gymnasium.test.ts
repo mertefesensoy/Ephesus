@@ -80,7 +80,9 @@ function rig(over: { seed?: string | null; spend?: number } = {}): Rig {
   const gym = new Gymnasium({
     agoraRoot,
     seedFrom,
-    gymSpend: () => over.spend ?? 0,
+    // Omitted when a case sets no spend, so slice() honestly reports the
+    // missing attribution as null (finding 2) rather than a constant zero.
+    ...(over.spend === undefined ? {} : { gymSpend: () => over.spend as number }),
     onLogEvent: (draft) => logs.push(draft),
     onDegraded: (detail) => degradations.push(detail),
     now: () => new Date('2026-08-28T12:00:00.000Z')
@@ -126,6 +128,29 @@ describe('FR-12.6 — the ledger seeds from the repo’s own archive', () => {
     // Not GYM-001: that id is taken by the archive it inherited.
     expect(r.gym.rows().some((row) => row.id === outcome.id)).toBe(true)
     expect(r.gym.rows().filter((row) => row.id === outcome.id)).toHaveLength(1)
+  })
+
+  it('seeds the proposal files beside the ledger, so no link on the page is broken', () => {
+    // SDD §2: `proposals/GYM-*.md` is seeded WITH the ledger. Before the M5
+    // close-out audit (finding 4) only LEDGER.md crossed over, so every
+    // seeded row's link pointed at nothing and `proposalDoc()` was null.
+    const r = rig({ seed: 'docs/gymnasium' })
+    expect(r.gym.rows().length).toBeGreaterThan(0)
+    expect(r.proposals().some((name) => name.startsWith('GYM-001'))).toBe(true)
+  })
+
+  it("the archive's Measured cells survive the first new proposal (R2)", () => {
+    // The real archive carries `due 2026-09-11` Measured notes. Before the
+    // audit's finding 1 fix, the first propose() — which rewrites every row —
+    // erased them all permanently.
+    const r = rig({ seed: 'docs/gymnasium' })
+    const before = r.gym.rows().find((row) => row.measured !== null)
+    expect(before).toBeDefined()
+
+    expect(r.gym.propose(proposal()).ok).toBe(true)
+    const after = r.gym.rows().find((row) => row.id === before!.id)
+    expect(after?.measured).toEqual(before!.measured)
+    expect(r.ledger()).toContain(before!.measured ?? '')
   })
 
   it('starts from a fixture archive in every other case, so the suite does not', () => {
@@ -197,6 +222,13 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
   it('reports the slice for the standup brief (FR-12.5)', () => {
     expect(rig({ spend: 25 }).gym.slice()).toMatchObject({ spentTokens: 25 })
   })
+
+  it('reports NULL, not zero, when nothing attributes gym spend yet', () => {
+    // Finding 2 of the M5 close-out audit: production wires no gymSpend
+    // source, and the brief was narrating the resulting constant 0 as if it
+    // were a ledger figure. A missing measurement must read as missing.
+    expect(rig().gym.slice().spentTokens).toBeNull()
+  })
 })
 
 describe('R1 — the verdict is the Architect’s, enforced here too', () => {
@@ -249,6 +281,29 @@ describe('R2 — the ledger is total, and rows are never lost', () => {
 
     expect(r.gym.rows().length).toBeGreaterThanOrEqual(before)
     expect(r.gym.rows().map((row) => row.id)).toEqual(['GYM-001', 'GYM-002'])
+  })
+
+  it('a measured outcome survives the NEXT rewrite — R2, asserted end to end', () => {
+    // M5 close-out audit, findings 1 + 10: `measure()` used to record an
+    // outcome that `rows()` immediately read back as null (the seven-cell
+    // render), and the next `propose()` — which rewrites every row — erased
+    // it from the file permanently. The ledger is total, provably.
+    const r = rig()
+    r.gym.propose(proposal())
+    r.gym.verdict('GYM-001', 'approved', 'architect')
+    r.gym.land('GYM-001')
+    r.gym.measure('GYM-001', 'median turns fell to 2')
+
+    const measured = r.gym.rows().find((row) => row.id === 'GYM-001')
+    expect(measured?.status).toBe('validated')
+    expect(measured?.outcome).toBe('median turns fell to 2')
+    expect(measured?.measured).not.toBeNull()
+
+    // The erasure path: a later proposal rewrites the whole table.
+    r.gym.propose(proposal({ title: 'A later idea' }))
+    const after = r.gym.rows().find((row) => row.id === 'GYM-001')
+    expect(after?.outcome).toBe('median turns fell to 2')
+    expect(after?.measured).toEqual(measured?.measured)
   })
 
   it('walks the documented flow and refuses to skip a step', () => {

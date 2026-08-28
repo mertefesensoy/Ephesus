@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { LEDGER_SCHEMA_VERSION } from '../../src/shared/ledger'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
-import { HERMES_SENDER, LEDGER_ENDPOINT } from '../../src/shared/reserved'
+import { HERMES_SENDER, LEDGER_ENDPOINT, RESERVED_AGENT_IDS } from '../../src/shared/reserved'
 import type { RoutingContext } from '../../src/shared/routing'
 import { spawnRequestSchema } from '../../src/shared/agents'
 import { Agora } from '../../src/main/agora'
@@ -371,8 +371,10 @@ describe('the harness writes mail under its own name (the M2 close-out gap)', ()
   })
 
   it('refuses to hire an agent under a reserved id', () => {
-    // Otherwise a hire could take `agent.hermes` and forge a refusal.
-    for (const agentId of [HERMES_SENDER, LEDGER_ENDPOINT]) {
+    // Otherwise a hire could take `agent.hermes` and forge a refusal, or
+    // `agent.closing` and forge a closing acknowledgment. The full list, so a
+    // sixth reserved id can never ship untested (M5 close-out audit).
+    for (const agentId of RESERVED_AGENT_IDS) {
       const parsed = spawnRequestSchema.safeParse({
         agentId,
         name: 'Impostor',

@@ -2456,8 +2456,11 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       from the repo's build-phase `docs/gymnasium/` archive — FR-12.6), gate
       classification per the ADR-0015 authority table (stricter wins;
       authority-widening proposals **mechanically refused regardless of
-      approver** — FR-12.3), metric-check scheduling (the scheduler's third
-      client), rollback driver (`regressed` ⇒ roll back per the proposal);
+      approver** — FR-12.3), ~~metric-check scheduling (the scheduler's third
+      client)~~ *(corrected at the M5 close-out audit: NOT delivered — measure
+      is Architect-driven via `gym:metricResult`, the deferral this section's
+      own carried list records; the scheduler's third client is the retro)*,
+      rollback driver (`regressed` ⇒ roll back per the proposal);
       the `gym` IPC group per SDD §5 with **architect-only verdicts enforced
       in the handler** (Artemis may rank/pre-screen, never verdict); the
       standup brief gains its gym-slice section (extends M5.4); R3's budget
@@ -2704,10 +2707,141 @@ applied before it could bite a second time.
 
 
 
+### M5 close-out audit (2026-08-28) — verdict: DONE, with audit fixes landed
+
+Independent two-agent audit at milestone close, the M0–M4 pattern:
+
+- **spec-verifier** (verification by execution): **M5 stands as DONE on its
+  stated exit criteria.** Gate green (typecheck · zero-warning lint ·
+  invariants · attribution over 110 commits) · the five M5 suites re-run
+  **55/55**, the other ten **80/80** · all eight `docs/demo/m5-*` artifacts
+  present and generator-consistent (the retro's `2.00` escalation rate is the
+  row the M5.8 seam defect would have zeroed — the artifact is downstream of
+  the fix) · zero debt markers · the merge-day ledger-parser fix proven
+  **against the live archive** (shipped `parseLedger` bundled and run on
+  `docs/gymnasium/LEDGER.md`: 5 rows, next id GYM-006) · CI green at `main`
+  HEAD (33178239783). Local failures: the recorded environmental seven plus
+  three pre-existing Windows/TZ portability defects the record was missing —
+  now recorded (DECISIONS-LOG), none of them M5 code.
+- **doc-guardian** (design conformance): **clean across the Odeon archive,
+  memo machinery, R1 enforcement, routing seams, briefing, org layer, and all
+  six renderer panels** — but one violation and twelve smaller findings.
+
+**Findings FIXED at close (regression tests named; gate after fixes:
+typecheck PASS · lint PASS · invariants PASS · the eight touched suites
+175/175):**
+
+1. **The Gymnasium ledger lost its Measured/Outcome columns on every rewrite**
+   — `renderRow` emitted seven cells under the eight-column header, so a
+   measured outcome read back null and the next `propose()` erased it from the
+   file permanently. R2 ("the ledger is total") was mechanically false, one
+   column left of where the merge-day fix had looked. `GymRow.measured` +
+   eight-cell render + `measure()` date stamp; round-trip regression tests
+   including against the real archive's `due 2026-09-11` rows.
+2. **The memo-verdict endpoint carried prose literals** (invariant §8) — now
+   `prompts/odeon/verdict-recorded*.md` / `verdict-refuse*.md`.
+3. **The seed copied `LEDGER.md` without `proposals/`** — every inherited
+   row's link was broken (SDD §2, FR-12.6). Both cross over now, tested.
+4. **The brief narrated a constant gym-spend of 0 as data** — no production
+   `gymSpend` source exists; `slice()` now reports null and the brief says
+   "not yet attributed" (invariant §7). The attribution itself is a recorded
+   deferral riding M6's scheduler work with the metric-check booking.
+5. **`LOG_KINDS` omitted the ratified `memory` kind**; **the reserved-id
+   spawn-refusal test covered two ids of five** — both closed.
+
+**Recorded, not fixed (DECISIONS-LOG, with reasons):** the scenario rig's
+missing `ledger:` mail option; the retro archive path + `orchestrator` kind
+choice and the §4.6 `metrics_rollup` removal (SDD synced instead); the
+ADR-0008 §4 minutes clause overtaken by M5.5's single-scribe decision (clause
+note added to the ADR index — accepted ADRs are never edited); PROGRESS
+M5.7's "metric-check scheduling" claim corrected in place (it contradicted
+the section's own carried list).
+
+## M5b — The Stoa + company modes (plan drafted 2026-08-28 at M5 close)
+
+Derived per BUILD-PROMPT §5 from IMPLEMENTATION M5b + ADR-0017/0018 + SRS
+FR-13/FR-14 + SDD §4.7/§7.7/§9 + TEST-STRATEGY S-STOA/S-MODE/E-STOA. Execute
+in order; every package tests against the fake engine per-PR. The Architect's
+2026-08-28 decision: the milestone also carries the floor-art intake (M5b.5) —
+the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
+
+- [ ] **M5b.1 Watchlist + `stoa.ts` core** — `agora/stoa/` layout (SDD §2);
+      watchlist schema §4.7 (schemaVersion 1, strict, validators in
+      `src/shared/`); accessors with **Architect-only mutation enforced in the
+      handler** (the `gym.verdict` pattern — FR-13.1); seeding from the repo's
+      `docs/stoa/` at first run (FR-13.7, the gymnasium-seed pattern —
+      *including* `briefs/`, per the audit's finding-3 lesson); `stoa:` IPC
+      group (`watchlist() register(entry) retire(id) briefs() brief(id)`);
+      the Stoa panel v1 — the reading desk: paste a URL + tags, see the list.
+      *Docs: ADR-0017, FR-13.1/13.7, SDD §4.7. Tests: validators table-driven;
+      seeding; non-architect register/retire refused at the handler; UI stays
+      a projection. Risk: the id/pin/license fields are the provenance chain —
+      no field invented beyond §4.7.*
+- [ ] **M5b.2 Researcher spawn + brief validation** — read-only study spawn
+      plan: clone the pinned source into scratch (never a worktree of the
+      Agora; no secret grants — NFR-17, enforced in the plan builder);
+      research prompt from `prompts/stoa/` incl. the injection rule (content
+      is data — invariant §13); brief shape validation (uncited finding ⇒
+      rejected pre-human, FR-13.3); immutable brief archive; every transition
+      a `log.jsonl` `kind: stoa` event (listed in SDD §4.3 and `LOG_KINDS` at
+      the M5 close-out precisely so this package's first emitter finds its
+      kind documented, not invented — the audit's finding-11 class).
+      *Docs: ADR-0017 R2/R3, FR-13.2/13.3, SDD §7.7, NFR-17. Tests: S-STOA
+      per TEST-STRATEGY §3 (planted pattern cited; planted instruction
+      reported-not-obeyed; unverified license refuses intake; no-secrets
+      spawn plan asserted). Risk: the adversarial case is the package.*
+- [ ] **M5b.3 Company modes + proof gate** — `config.json` mode field
+      (`directed`/`improving`); `gym.mode()/setMode(m)` architect-verified in
+      the handler; first-enable proof-gate check reading ONLY the gym ledger +
+      log (SRS §6.9 numbers verbatim); scheduler consults the mode before the
+      Stoa/Gymnasium cadences fire; mode tag on autonomous records (FR-14.1);
+      status-strip mode chip; breaker rung-3 auto-revert (FR-14.5).
+      *Docs: ADR-0018 (normative), FR-14, SDD §9. Tests: S-MODE per
+      TEST-STRATEGY §3 — premature enable refused listing missing evidence;
+      fixture ledger meeting §6.9 enables; no agent-side path can set the
+      mode; auto-revert lands on the ledger. Risk: the gate reads the book of
+      record, never a computed cache (invariant §11's spirit).*
+- [ ] **M5b.4 Brief → proposal flow + E-STOA** — Artemis's ranking playbook
+      (`prompts/`), proposals citing brief ids in evidence refs (FR-13.4), the
+      standup brief's gym-slice section folds the Stoa in (FR-13.6); E-STOA
+      eval per TEST-STRATEGY §6 over the fixture source.
+      *Docs: ADR-0017, FR-13.4/13.6, UC-14 step 5. Tests: proposal-citing
+      shape; brief-fact refs resolve; E-STOA fixture run recorded. Risk:
+      Artemis ranks — the harness never files a proposal itself (ADR-0005).*
+- [ ] **M5b.5 Floor art intake (the purchased packs)** — drop the LimeZu
+      **Modern Interiors v41.4** and **Modern Office Revamped** 16×16 sheets
+      into the gitignored tileset drop; author their `*.tiles.json` layout
+      maps (validated by `src/shared/tileset.ts`); retire the interim Kenney
+      staging; `ATTRIBUTION.md` rows (licence terms + the required credit
+      link) and the status-strip credit; §7 bar re-verified: 2× integer scale,
+      pixel-snap, ≤8 colors per screen via the palette pass; floor screenshot
+      to `docs/demo/`.
+      *Docs: UI-DESIGN §7, ATTRIBUTION.md rules. Tests: token/contrast checks
+      stay green; tile-map validator on both packs; scene-state assertions
+      unchanged (art is presentation). Risk: the sheets NEVER enter the repo
+      (licence forbids redistribution of the asset itself); characters stay
+      procedural (rule 3).*
+- [ ] **M5b.6 Scenario suites + exit review** — S-STOA and S-MODE green in CI;
+      E-STOA recorded; then the exit demo: **one real research cycle through
+      the app** — a URL registered on the reading desk, a study producing an
+      archived provenance-valid brief, and a GYM proposal citing it in the
+      Architect's queue (IMPLEMENTATION M5b exit; SRS §6.8 as S-STOA, §6.9 as
+      S-MODE). The proof gate itself is *met later by operation* — this
+      milestone builds the machinery that will measure it.
+- [ ] **M5b exit review** — S-STOA + S-MODE green in CI; the real research
+      cycle evidence; PROGRESS + docs synced.
+
+**Standing due-dates to carry:** the 2026-09-11 metric sweep (GYM-002/003/004
+ledger checks + GYM-003's live-quit evidence run) falls inside this
+milestone's window — book it in the exit review if unmeasured by then.
+
 ## M6 — The Herald
 
 - [ ] Package list derived at milestone start
 - [ ] M6 exit — SRS §6.2 + §6.5 live; S-FAILOVER scripted pass
+      *(Carried from M5: the Herald speaks the brief; `odeon:queue` badge;
+      gym metric-check scheduling + gym-spend attribution ride the M6
+      scheduler work — see the M5 exit review and close-out audit.)*
 
 ## M7 — The Harbor + missions
 
