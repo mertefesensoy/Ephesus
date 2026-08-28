@@ -150,10 +150,14 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
     // accountability nobody owes. What an agent may file FOR is checked by the
     // endpoint, which refuses a deck for a task the sender was not assigned;
     // that is a ledger fact, and the router does not read the ledger.
-    if (message.act !== 'propose') {
+    // `propose` files an artifact; `inform` answers a meeting question. The
+    // floor is handed out as a `query`, and ADR-0003's act table makes the
+    // reply to a query an `inform` — so refusing one here would make the
+    // meeting driver unable to hear its own attendees.
+    if (message.act !== 'propose' && message.act !== 'inform') {
       return {
         kind: 'bounce',
-        reason: `the odeon endpoint takes "propose" acts; got "${message.act}"`
+        reason: `the odeon endpoint takes "propose" or "inform" acts; got "${message.act}"`
       }
     }
     return { kind: 'endpoint', endpoint: ODEON_ENDPOINT }

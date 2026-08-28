@@ -25,6 +25,7 @@ import { parseVerdictFiling } from '../shared/memo'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
+import { MeetingDriver } from './meeting'
 import { emptyLedger as emptyTaskLedger } from '../shared/tasks'
 import { LedgerEndpoint } from './ledger'
 import { Odeon } from './odeon'
@@ -84,6 +85,7 @@ let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
+let meetings: MeetingDriver | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -1086,6 +1088,29 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('odeon', detail)
   })
 
+  // The meeting driver (ADR-0008 §4, FR-7.4). It owns who may speak, and
+  // nothing else: Artemis chairs, the Architect interjects, and the driver
+  // guarantees only that two people never hold the floor at once and that an
+  // early answer is held rather than thrown away.
+  meetings = new MeetingDriver({
+    agoraRoot: agora.root,
+    prompts,
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    orchestrator: () => agora?.registry().orchestratorId ?? null,
+    // SDD §6: attendees walk to the Odeon room. The station map already
+    // sends the `meeting` tool class there, so this needs no new avatar state.
+    onAttendance: (agentId, present) =>
+      avatarDirector.apply(
+        agentId,
+        present ? { kind: 'pre-tool', toolClass: 'meeting' } : { kind: 'post-tool' }
+      ),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onChange: () => mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+  })
+
   scheduler.add(reflection.trigger())
   // The scheduler’s second client (SDD §7.2).
   scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
@@ -1129,6 +1154,19 @@ async function boot(): Promise<void> {
         }
       }
       const kind = filingKind(message.body)
+      // A meeting reply is an `inform`, not a filing: the floor was handed out
+      // as a `query` and ADR-0003's table makes the answer an `inform`.
+      if (message.act === 'inform') {
+        const outcome = meetings?.say(message.from, message.body) ?? {
+          kind: 'refused' as const,
+          reason: 'no meeting is open'
+        }
+        return {
+          ok: outcome.kind !== 'refused',
+          subject: `meeting: ${outcome.kind}`,
+          body: JSON.stringify(outcome)
+        }
+      }
       if (kind === 'verdict') return settleFromOrchestrator(archive, message)
       if (kind === 'memo') return archiveMemo(archive, message)
       if (kind === 'brief') return archiveBrief(archive, message)
@@ -1454,6 +1492,29 @@ async function boot(): Promise<void> {
           },
     knowledge: () => library?.knowledge() ?? [],
     briefs: () => odeon?.briefs() ?? [],
+    convene: (attendees, agenda) =>
+      meetings?.convene({ attendees: [...attendees], agenda }) ?? {
+        ok: false,
+        reason: 'the odeon is not available'
+      },
+    meeting: () => {
+      const state = meetings?.current() ?? null
+      return state === null
+        ? null
+        : {
+            id: state.id,
+            agenda: state.agenda,
+            attendees: [...state.attendees],
+            floor: state.floor,
+            transcript: state.transcript.map((turn) => ({ ...turn })),
+            held: state.held.map((turn) => ({ ...turn })),
+            status: state.status
+          }
+    },
+    meetingSay: (text, to) =>
+      meetings?.interject(text, to) ?? { kind: 'refused', reason: 'the odeon is not available' },
+    meetingClose: (actions) =>
+      meetings?.close(actions) ?? { ok: false, reason: 'the odeon is not available' },
     decks: () => odeon?.decks() ?? [],
     memos: (queue) =>
       (odeon?.memos(queue) ?? []).map((row) => ({

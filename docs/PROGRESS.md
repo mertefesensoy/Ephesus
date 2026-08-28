@@ -2348,7 +2348,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       rule out of the wiring into `BriefingJob.narrated(briefId, accepted)`,
       with two regression tests named after the bug.
       **Owed to a local session:** a Briefs-tab screenshot for `docs/demo/`.*
-- [ ] **M5.5 Meeting driver + the Odeon room** — FR-7.4, UC-07, S-MEETING:
+- [x] **M5.5 Meeting driver + the Odeon room** — FR-7.4, UC-07, S-MEETING:
       convene (attendees + agenda line); Artemis chairs; turn order enforced
       by the driver — attendees receive the floor via Hermes `query` one at a
       time, replies stream into the meeting panel; Architect interjection
@@ -2363,6 +2363,38 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       S-MEETING per TEST-STRATEGY §3 (3 fakes). Risk: the driver enforces
       order mechanically; the chair's judgment (who answers what) stays
       Artemis's.*
+      *Evidence: `typecheck && lint && check-invariants` green; 41 new cases
+      (`test/shared/meeting.test.ts` 21, `test/main/meeting.test.ts` 16, plus 4
+      routing cases); full suite 1745 passed / 6 skipped, only the known
+      Windows-local failures.
+      **An out-of-turn reply is HELD, not lost** — and holding pays out: a
+      table drives three agents answering at once and asserts the transcript
+      drains in ATTENDEE order, not arrival order, with nothing left held. A
+      non-attendee is REFUSED rather than held, because somebody outside the
+      meeting has no turn coming.
+      The driver asks ONLY the floor-holder, as a `query` (which ADR-0003
+      obligates a reply to), and asks nobody at all while a reply is held.
+      **A test caught a stall**: the floor was handed out only when the holder
+      changed, so a drain that wrapped the floor back to the same agent left
+      nobody asked and the meeting stopped with a full transcript. The floor is
+      now handed out after every accepted turn.
+      LIVE RUN THROUGH THE REAL APP — a three-agent meeting end to end:
+      `convened: mt-2026-08-28t10-13-37-261z-fbdc` · `floor: agent.a` ·
+      `asked so far — a: 1 b: 0 c: 0` (turn order enforced, not suggested) ·
+      b and c answered from their own outboxes out of turn →
+      `held (said early): [agent.b, agent.c]` with
+      `transcript so far: [human]` ·
+      then a answered and the held replies were released:
+      `transcript after the round: [human, agent.a, agent.b, agent.c]` ·
+      `still held: 0` ·
+      `after interjection, floor: agent.b` (the Architect grabbed it and handed
+      it on) · `stranger: {"kind":"refused","reason":"\"agent.zzz\" is not in
+      meeting …"}` ·
+      `closed: odeon/minutes/mt-….md` ·
+      `minutes have the transcript: true` · `minutes have the action item: true` ·
+      **`actions went to the scribe, not to tasks.json: 0 task(s); 1 message(s)
+      to the orchestrator`** — FR-4.2’s single scribe intact.
+      **Owed to a local session:** an Odeon-tab screenshot for `docs/demo/`.*
 - [ ] **M5.6 Org layer v1 + the retro report** — FR-11.5 (v1 slice): the org
       chart (from the registry — Artemis at the temple, workers by role);
       hire templates as versioned files (`profiles/`-adjacent per SDD §4.1

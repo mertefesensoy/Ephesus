@@ -23,12 +23,17 @@ import {
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type {
   BriefRecord,
+  ConveneOutcome,
+  MeetingClosed,
+  MeetingSaid,
+  MeetingView,
   DeckCommentOutcome,
   DeckRecord,
   MemoDecided,
   MemoQueueRow
 } from '../shared/odeon'
 import { memoVerdictNameSchema, type MemoVerdictName } from '../shared/memo'
+import { actionItemSchema, conveneSchema } from '../shared/meeting'
 import type { MemoQueueName } from '../shared/ipc'
 import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
 import type { AgentManager } from './agents'
@@ -53,6 +58,16 @@ const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
 /** One recall query from the Memory panel (SDD §5 `agora:recall`). */
 const odeonDeckSchema = z.object({ ref: z.string().min(1).max(256) }).strict()
+
+const odeonSaySchema = z
+  .object({ text: z.string().min(1).max(10_000), to: z.string().min(1).max(64).optional() })
+  .strict()
+
+const odeonCloseSchema = z
+  .object({
+    actions: z.array(actionItemSchema).max(32)
+  })
+  .strict()
 
 const odeonMemosSchema = z.object({ queue: z.enum(['open', 'decided', 'all']) }).strict()
 
@@ -141,6 +156,14 @@ export interface IpcDeps {
   /** The Architect's reference shelf (FR-6.4). */
   /** Every archived standup brief, newest first (FR-7.1). */
   briefs(): readonly BriefRecord[]
+  /** Convenes a meeting (FR-7.4). */
+  convene(attendees: readonly string[], agenda: string): ConveneOutcome
+  /** The live meeting, or null. */
+  meeting(): MeetingView | null
+  /** The Architect takes the floor (UC-07 step 3). */
+  meetingSay(text: string, to: string | undefined): MeetingSaid
+  /** Closes the meeting. */
+  meetingClose(actions: readonly { title: string; assignee: string; spec: string }[]): MeetingClosed
   /** Every archived review deck, newest first (FR-7.2). */
   decks(): readonly DeckRecord[]
   /** One deck's HTML; null when the ref names nothing in the archive. */
@@ -229,6 +252,19 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.agoraRecall, async (_ev, raw: unknown): Promise<RecallResponse> => {
     const { query, scope, limit } = agoraRecallSchema.parse(raw)
     return deps.recall(query, scope, limit)
+  })
+  ipcMain.handle(IpcChannels.odeonConvene, (_ev, raw: unknown): ConveneOutcome => {
+    const { attendees, agenda } = conveneSchema.parse(raw)
+    return deps.convene(attendees, agenda)
+  })
+  ipcMain.handle(IpcChannels.odeonMeeting, (): MeetingView | null => deps.meeting())
+  ipcMain.handle(IpcChannels.odeonMeetingSay, (_ev, raw: unknown): MeetingSaid => {
+    const { text, to } = odeonSaySchema.parse(raw)
+    return deps.meetingSay(text, to)
+  })
+  ipcMain.handle(IpcChannels.odeonMeetingClose, (_ev, raw: unknown): MeetingClosed => {
+    const { actions } = odeonCloseSchema.parse(raw)
+    return deps.meetingClose(actions)
   })
   ipcMain.handle(IpcChannels.odeonBriefs, (): readonly BriefRecord[] => deps.briefs())
   ipcMain.handle(IpcChannels.odeonDecks, (): readonly DeckRecord[] => deps.decks())
