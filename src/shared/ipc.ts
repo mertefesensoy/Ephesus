@@ -3,6 +3,7 @@ import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
+import type { DeckRecord } from './odeon'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
@@ -45,6 +46,11 @@ export const IpcChannels = {
   agoraRecall: 'agora:recall',
   agoraKnowledge: 'agora:knowledge',
   agoraRegisterKnowledge: 'agora:register-knowledge',
+  // The Odeon's surface (SDD §5 `odeon:`). `deck` is the viewer's read of one
+  // archived artifact; it is not in the SDD's abridged list and is recorded in
+  // DECISIONS-LOG with SDD §5 updated to name it.
+  odeonDecks: 'odeon:decks',
+  odeonDeck: 'odeon:deck',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
   // there is deliberately no `secrets:get`, and the API-surface test in
   // test/main/secrets.test.ts fails if a fifth channel is ever added here —
@@ -171,6 +177,12 @@ export interface EphApi {
   hooks: {
     /** Event-plane health, including drift warnings that must be shown. */
     state: () => Promise<HooksState>
+  }
+  odeon: {
+    /** Every archived review deck, newest first (FR-7.2). */
+    decks: () => Promise<readonly DeckRecord[]>
+    /** One deck's HTML, for the in-app viewer. Null when the ref is foreign. */
+    deck: (ref: string) => Promise<string | null>
   }
   agora: {
     /** The roster (SDD §4.1). */

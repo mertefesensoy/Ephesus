@@ -21,6 +21,7 @@ import {
   type SecretTest
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
+import type { DeckRecord } from '../shared/odeon'
 import { RECALL_MAX_LIMIT, type RecallResponse } from '../shared/recall'
 import type { AgentManager } from './agents'
 import type { Agora } from './agora'
@@ -43,6 +44,8 @@ const agoraLogSchema = z
 const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
 /** One recall query from the Memory panel (SDD §5 `agora:recall`). */
+const odeonDeckSchema = z.object({ ref: z.string().min(1).max(256) }).strict()
+
 const agoraRecallSchema = z
   .object({
     query: z.string().min(1).max(1_000),
@@ -104,6 +107,10 @@ export interface IpcDeps {
   /** Recall on the best rung that answers (ADR-0006 layer 2). */
   recall(query: string, scope: string | null, limit: number): Promise<RecallResponse>
   /** The Architect's reference shelf (FR-6.4). */
+  /** Every archived review deck, newest first (FR-7.2). */
+  decks(): readonly DeckRecord[]
+  /** One deck's HTML; null when the ref names nothing in the archive. */
+  deck(ref: string): string | null
   knowledge(): readonly KnowledgeDoc[]
   /** Registers a shelf document and commits it through the single committer. */
   registerKnowledge(name: string, text: string): readonly KnowledgeDoc[]
@@ -182,6 +189,13 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.agoraRecall, async (_ev, raw: unknown): Promise<RecallResponse> => {
     const { query, scope, limit } = agoraRecallSchema.parse(raw)
     return deps.recall(query, scope, limit)
+  })
+  ipcMain.handle(IpcChannels.odeonDecks, (): readonly DeckRecord[] => deps.decks())
+  ipcMain.handle(IpcChannels.odeonDeck, (_ev, raw: unknown): string | null => {
+    // The ref crosses the trust boundary, so it is validated here and the
+    // Odeon resolves only well-formed deck names inside its own directory.
+    const { ref } = odeonDeckSchema.parse(raw)
+    return deps.deck(ref)
   })
   ipcMain.handle(IpcChannels.agoraKnowledge, (): readonly KnowledgeDoc[] => deps.knowledge())
   ipcMain.handle(

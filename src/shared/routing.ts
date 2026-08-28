@@ -1,4 +1,4 @@
-import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from './reserved'
+import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT, ODEON_ENDPOINT } from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -128,6 +128,21 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
       }
     }
     return { kind: 'endpoint', endpoint: LIBRARY_ENDPOINT }
+  }
+
+  if (message.to === ODEON_ENDPOINT) {
+    // ADR-0008, FR-7.2. Like the Library and unlike the ledger, ANY agent may
+    // file here — accountability that only the orchestrator could file would be
+    // accountability nobody owes. What an agent may file FOR is checked by the
+    // endpoint, which refuses a deck for a task the sender was not assigned;
+    // that is a ledger fact, and the router does not read the ledger.
+    if (message.act !== 'propose') {
+      return {
+        kind: 'bounce',
+        reason: `the odeon endpoint takes "propose" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: ODEON_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

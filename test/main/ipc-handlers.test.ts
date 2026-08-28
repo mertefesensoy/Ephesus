@@ -79,7 +79,9 @@ async function rig(): Promise<{
         degraded: 'no library in this rig'
       }),
     knowledge: () => [],
-    registerKnowledge: () => []
+    registerKnowledge: () => [],
+    decks: () => [],
+    deck: () => null
   })
   return {
     gates,

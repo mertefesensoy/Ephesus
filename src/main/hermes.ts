@@ -2,7 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
-import { HERMES_SENDER, LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../shared/reserved'
+import {
+  HERMES_SENDER,
+  LEDGER_ENDPOINT,
+  LIBRARY_ENDPOINT,
+  ODEON_ENDPOINT
+} from '../shared/reserved'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
@@ -100,6 +105,18 @@ export interface HermesOptions {
    * things — the ledger's prompts are `prompts/hermes/`, the Library's are
    * `prompts/library/` (invariant §8 either way).
    */
+  /**
+   * The Odeon's filing endpoint (ADR-0008, FR-7.2). Same shape as the
+   * Library's, injected for the same reason: the router carries the message,
+   * the endpoint owns the archive, and their words live in different prompt
+   * directories (`prompts/odeon/` here — invariant §8 either way).
+   */
+  odeon?(message: Message): {
+    readonly ok: boolean
+    readonly reasons?: readonly string[]
+    readonly subject: string
+    readonly body: string
+  }
   library?(message: Message): {
     readonly ok: boolean
     readonly reasons?: readonly string[]
@@ -298,6 +315,27 @@ export class Hermes {
       outcome.subject,
       outcome.body,
       LIBRARY_ENDPOINT
+    )
+  }
+
+  /**
+   * Hands an artifact filing to the Odeon and answers its author (ADR-0008,
+   * FR-7.2). Same contract as the other two endpoints: `propose` obligates a
+   * reply, and a refusal carries every reason so the next filing can be right.
+   */
+  private submitToOdeon(proposal: Message): void {
+    const outcome = this.options.odeon?.(proposal) ?? {
+      ok: false,
+      reasons: ['the odeon endpoint is not available'],
+      subject: 'odeon-unavailable',
+      body: JSON.stringify({ reasons: ['the odeon endpoint is not available'] })
+    }
+    this.replyFromHarness(
+      proposal,
+      outcome.ok ? 'agree' : 'refuse',
+      outcome.subject,
+      outcome.body,
+      ODEON_ENDPOINT
     )
   }
 
@@ -502,6 +540,7 @@ export class Hermes {
       // believing work exists that does not, or an agent believing its memory
       // was condensed when it was not.
       if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
+      else if (route.endpoint === ODEON_ENDPOINT) this.submitToOdeon(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }

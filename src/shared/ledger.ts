@@ -364,6 +364,34 @@ export function stallTask(
   return stalled ? { ledger: { ...ledger, tasks }, stalled } : { ledger, stalled }
 }
 /**
+ * Contract: the ledger with `deckRef` recorded on a task, and whether it stuck.
+ * Pure; the input ledger is never mutated.
+ *
+ * This is the other half of SDD §4.2's close guard. `gates` got its writer in
+ * M3; `artifacts.deck` gets its writer here, which is what turns FR-7.2's
+ * "mechanically unclosable until a deck exists" from a rule about an empty
+ * field into a rule about a real archived artifact.
+ *
+ * The ref REPLACES any earlier one, and that is not a rewrite of the record: the
+ * archive keeps every deck ever filed under its own timestamped name, and this
+ * field only says which one is current (invariant §5).
+ */
+export function withDeck(
+  ledger: TaskLedger,
+  taskId: string,
+  deckRef: string,
+  at: string
+): { readonly ledger: TaskLedger; readonly recorded: boolean } {
+  let recorded = false
+  const tasks = ledger.tasks.map((task) => {
+    if (task.id !== taskId) return task
+    recorded = true
+    return { ...task, artifacts: { ...task.artifacts, deck: deckRef }, updatedAt: at }
+  })
+  return recorded ? { ledger: { ...ledger, tasks }, recorded } : { ledger, recorded }
+}
+
+/**
  * Contract: the ledger with `gateId` recorded against `taskId` (or removed).
  *
  * SDD §4.2's `gates` field has existed since M2 and nothing ever wrote it, so

@@ -19,6 +19,7 @@ import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { ExecGitRunner, Worktrees } from './git'
 import { LedgerEndpoint } from './ledger'
+import { Odeon } from './odeon'
 import { Library } from './library'
 import { RECALL_SCHEMA_VERSION } from '../shared/recall'
 import { ReflectionJob } from './reflection'
@@ -71,6 +72,7 @@ let agentManager: AgentManager | null = null
 let agora: Agora | null = null
 let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
+let odeon: Odeon | null = null
 let library: Library | null = null
 let reflection: ReflectionJob | null = null
 const scheduler = new Scheduler({
@@ -549,6 +551,21 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('agora', detail)
   })
 
+  // The Odeon (ADR-0008, FR-7.2). Agents never write `odeon/` — SDD §2 gives
+  // the directory to the harness, so an agent files from its own outbox and
+  // this is the only thing that ever writes the archive.
+  odeon = new Odeon({
+    agoraRoot: agora.root,
+    prompts,
+    task: (taskId) => ledger?.tasks().tasks.find((row) => row.id === taskId) ?? null,
+    recordDeck: (taskId, ref) => ledger?.noteDeck(taskId, ref),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    commitSoon: (subject) => agora?.commitSoon(subject)
+  })
+
   // The Library (ADR-0006). Layer 1 is the markdown ground truth every spawn
   // carries; layer 2 is recall, on the best rung that will answer — MemPalace
   // (M4.3) above SQLite FTS above plain grep, every step down visible.
@@ -609,6 +626,40 @@ async function boot(): Promise<void> {
     agora,
     prompts,
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
+    // ADR-0008's filing endpoint. The answer's words render from
+    // prompts/odeon/ (invariant §8); the reasons are data in a slot.
+    odeon: (message) => {
+      const outcome = odeon?.fileDeck(message) ?? {
+        ok: false as const,
+        reasons: ['the odeon endpoint is not available']
+      }
+      if (outcome.ok) {
+        return {
+          ok: true,
+          subject: prompts
+            .render(path.join('odeon', 'deck-accept-subject.md'), { taskId: outcome.taskId })
+            .trim()
+            .slice(0, 200),
+          body: prompts
+            .render(path.join('odeon', 'deck-accept.md'), {
+              ref: outcome.ref,
+              taskId: outcome.taskId
+            })
+            .trim()
+        }
+      }
+      const reasons = outcome.reasons
+      return {
+        ok: false,
+        reasons,
+        subject: prompts.read(path.join('odeon', 'deck-refuse-subject.md')).trim().slice(0, 200),
+        body: prompts
+          .render(path.join('odeon', 'deck-refuse.md'), {
+            reasons: reasons.map((r) => `- ${r}`).join('\n')
+          })
+          .trim()
+      }
+    },
     library: (message) => {
       if (!reflection) {
         // Read by an agent, so it is a prompt surface (invariant §8; the M4
@@ -928,6 +979,8 @@ async function boot(): Promise<void> {
             degraded: 'the Library is not available'
           },
     knowledge: () => library?.knowledge() ?? [],
+    decks: () => odeon?.decks() ?? [],
+    deck: (ref) => odeon?.read(ref) ?? null,
     registerKnowledge: (name, text) => {
       if (!library) throw new Error('knowledge: the Library is not available')
       library.registerKnowledge(name, text)
