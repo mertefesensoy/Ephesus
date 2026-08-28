@@ -6,6 +6,7 @@ import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
+import { GymPanel } from './GymPanel'
 import { OrgPanel } from './OrgPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
@@ -56,6 +57,7 @@ export function App(): ReactElement {
     | 'memos'
     | 'odeon'
     | 'org'
+    | 'gym'
     | 'memory'
     | 'watch'
   >('floor')
@@ -247,6 +249,7 @@ export function App(): ReactElement {
             'memos',
             'odeon',
             'org',
+            'gym',
             'memory',
             'watch'
           ] as const
@@ -281,6 +284,7 @@ export function App(): ReactElement {
         {tab === 'memos' && <MemosPanel />}
         {tab === 'odeon' && <MeetingPanel />}
         {tab === 'org' && <OrgPanel />}
+        {tab === 'gym' && <GymPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
