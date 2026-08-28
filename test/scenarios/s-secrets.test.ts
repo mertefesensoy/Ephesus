@@ -105,7 +105,9 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       registerKnowledge: () => [],
       decks: () => [],
       deck: () => null,
-      commentOnDeck: () => ({ queued: false, because: 'no orchestrator' })
+      commentOnDeck: () => ({ queued: false, because: 'no orchestrator' }),
+      memos: () => [],
+      decideMemo: () => ({ ok: false, reason: 'no odeon' })
     })
 
     const secretChannels = [...handlers.keys()].filter((c) => c.startsWith('secrets:')).sort()

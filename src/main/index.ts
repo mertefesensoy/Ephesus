@@ -10,6 +10,7 @@ import {
   COMMANDS_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
   LOG_APPEND_CHANNEL,
+  ODEON_QUEUE_CHANNEL,
   TASKS_STATE_CHANNEL,
   type AgoraHealth,
   type HooksState
@@ -18,6 +19,11 @@ import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis } from './artemis'
 import { ExecGitRunner, Worktrees } from './git'
+import { randomBytes } from 'node:crypto'
+import { composeMessage, makeMessageId, type Message } from '../shared/message'
+import { parseVerdictFiling } from '../shared/memo'
+import { ODEON_ENDPOINT } from '../shared/reserved'
+import type { OpenGate } from '../shared/gates'
 import { LedgerEndpoint } from './ledger'
 import { Odeon } from './odeon'
 import { Library } from './library'
@@ -75,6 +81,11 @@ let agora: Agora | null = null
 let artemis: Artemis | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
+// The prompt store the memo helpers below render from (invariant §8 keeps
+// every word an agent reads in a file). boot() assigns it before anything
+// can file a memo; the helpers are top-level because the endpoint dispatch
+// and the IPC bench both reach them.
+let promptStore: PromptStore | null = null
 let library: Library | null = null
 let reflection: ReflectionJob | null = null
 const scheduler = new Scheduler({
@@ -252,6 +263,298 @@ const hookServer = new HookServer({
  * engine that does not report failures gives a weaker error signal, which is
  * what ADR-0011's reduced-protection note is about, not something to guess at.
  */
+/**
+ * Tells an agent which memo its held action owes (SDD §7.3).
+ *
+ * Harness-authored mail signed by the endpoint that will receive the memo —
+ * the reserved-identity rule, so nothing forges a `from` (see `reserved.ts`).
+ */
+function noticeMemoOwed(gate: OpenGate): void {
+  const mail = hermes
+  const words = promptStore
+  if (gate.memoTrigger === null || mail === null || words === null) return
+  mail.deliverFromHarness(
+    composeMessage({
+      id: makeMessageId(new Date(), `memo${randomBytes(3).toString('hex')}`),
+      conversation: `conv-memo-${gate.id}`,
+      in_reply_to: null,
+      from: ODEON_ENDPOINT,
+      to: gate.agentId,
+      act: 'request',
+      subject: `memo required: ${gate.memoTrigger}`,
+      body: words
+        .render(path.join('odeon', 'memo-required.md'), {
+          trigger: gate.memoTrigger,
+          gateId: gate.id,
+          what: gate.packaging.what,
+          taskId: JSON.stringify(gate.taskId)
+        })
+        .trim(),
+      hops: 0,
+      created_at: new Date().toISOString()
+    })
+  )
+}
+
+/**
+ * FR-7.3 triage — and `mayDecide`'s first production caller.
+ *
+ * Delegated classes the orchestrator settles herself, with the harness
+ * recording her countersignature; everything else waits for the Architect.
+ * Deny-by-default is the whole shape: no table, no matching grant, an unknown
+ * domain — every one escalates, because an escalation costs a notification
+ * and a wrong delegation costs a decision nobody signed.
+ */
+function triageMemo(memoId: string, trigger: string, filedBy: string): void {
+  const archive = odeon
+  const mail = hermes
+  const words = promptStore
+  if (archive === null || mail === null || words === null) return
+  const may = artemis?.mayDecide({ class: 'memo', domain: trigger }) ?? {
+    allowed: false as const,
+    because: 'no orchestrator is hired to triage it'
+  }
+  if (!may.allowed) {
+    // The Architect queue. The badge is the `odeon:queue` push; the memo is
+    // already archived, so nothing depends on this notification arriving.
+    mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+    agora?.appendLog({
+      kind: 'memo',
+      event: 'escalated',
+      memoId,
+      trigger,
+      by: filedBy,
+      because: may.because
+    })
+    return
+  }
+  const body = archive.memoBody(memoId) ?? ''
+  mail.deliverFromHarness(
+    composeMessage({
+      id: makeMessageId(new Date(), `tri${randomBytes(3).toString('hex')}`),
+      conversation: `conv-memo-${memoId}`,
+      in_reply_to: null,
+      from: ODEON_ENDPOINT,
+      to: may.countersignature.by,
+      act: 'request',
+      subject: words
+        .render(path.join('odeon', 'memo-triage-subject.md'), { memoId, trigger })
+        .trim()
+        .slice(0, 200),
+      body: words
+        .render(path.join('odeon', 'memo-triage.md'), { memoId, trigger, memo: body })
+        .trim(),
+      hops: 0,
+      created_at: new Date().toISOString()
+    })
+  )
+  agora?.appendLog({
+    kind: 'memo',
+    event: 'delegated',
+    memoId,
+    trigger,
+    to: may.countersignature.by,
+    under: may.countersignature.under
+  })
+}
+
+/**
+ * Applies a settled memo: the gate is released or refused, and the agent that
+ * filed it is told which (UC-06 step 4).
+ *
+ * A rejected memo REVERSES the held action — ADR-0008 says so in as many
+ * words — which is a `denied` verdict on the gate, so the action never runs.
+ */
+function applyMemoVerdict(input: {
+  readonly gateId: string
+  readonly gateVerdict: 'approved' | 'denied'
+  readonly verdict: string
+  readonly memoId: string
+  readonly notes: string
+  readonly decidedBy: string
+}): void {
+  const gate = gates?.get(input.gateId) ?? null
+  gates?.decide(input.gateId, input.gateVerdict)
+  const mail = hermes
+  const words = promptStore
+  if (gate === null || mail === null || words === null) return
+  mail.deliverFromHarness(
+    composeMessage({
+      id: makeMessageId(new Date(), `vrd${randomBytes(3).toString('hex')}`),
+      conversation: `conv-memo-${input.memoId}`,
+      in_reply_to: null,
+      from: ODEON_ENDPOINT,
+      to: gate.agentId,
+      act: 'inform',
+      subject: words
+        .render(path.join('odeon', 'memo-verdict-subject.md'), {
+          memoId: input.memoId,
+          verdict: input.verdict
+        })
+        .trim()
+        .slice(0, 200),
+      body: words
+        .render(path.join('odeon', 'memo-verdict.md'), {
+          memoId: input.memoId,
+          verdict: input.verdict,
+          decidedBy: input.decidedBy,
+          notes: input.notes,
+          consequence: words.read(path.join('odeon', `memo-consequence-${input.verdict}.md`)).trim()
+        })
+        .trim(),
+      hops: 0,
+      created_at: new Date().toISOString()
+    })
+  )
+}
+
+interface EndpointAnswer {
+  readonly ok: boolean
+  readonly reasons?: readonly string[]
+  readonly subject: string
+  readonly body: string
+}
+
+/**
+ * Which artifact a filing claims to be, without validating it.
+ *
+ * The full parse belongs to the archive; this only chooses which parser runs,
+ * so a body that is not JSON at all falls through to the deck parser and gets
+ * the precise refusal it deserves there rather than a vaguer one here.
+ */
+function filingKind(body: string): 'deck' | 'memo' | 'verdict' {
+  try {
+    const raw: unknown = JSON.parse(body)
+    const kind = (raw as { kind?: unknown } | null)?.kind
+    if (kind === 'memo' || kind === 'verdict') return kind
+  } catch {
+    // Not JSON. The deck parser says so precisely; do not guess here.
+  }
+  return 'deck'
+}
+
+/** Archives a deck and renders the endpoint answer (invariant §8). */
+function archiveDeck(archive: Odeon, message: Message): EndpointAnswer {
+  const words = promptStore
+  const outcome = archive.fileDeck(message)
+  if (words === null) return { ok: outcome.ok, subject: 'odeon', body: JSON.stringify(outcome) }
+  if (outcome.ok) {
+    return {
+      ok: true,
+      subject: words
+        .render(path.join('odeon', 'deck-accept-subject.md'), { taskId: outcome.taskId })
+        .trim()
+        .slice(0, 200),
+      body: words
+        .render(path.join('odeon', 'deck-accept.md'), { ref: outcome.ref, taskId: outcome.taskId })
+        .trim()
+    }
+  }
+  return {
+    ok: false,
+    reasons: outcome.reasons,
+    subject: words.read(path.join('odeon', 'deck-refuse-subject.md')).trim().slice(0, 200),
+    body: words
+      .render(path.join('odeon', 'deck-refuse.md'), { reasons: bullets(outcome.reasons) })
+      .trim()
+  }
+}
+
+/**
+ * Archives a memo, then triages it (FR-7.3). Archive FIRST: a memo exists on
+ * disk even when nobody can decide it yet, because ADR-0008 makes the memo
+ * itself the record, not the verdict on it.
+ */
+function archiveMemo(archive: Odeon, message: Message): EndpointAnswer {
+  const words = promptStore
+  const outcome = archive.fileMemo(message)
+  if (outcome.ok) triageMemo(outcome.memoId, outcome.filing.trigger, message.from)
+  if (words === null) return { ok: outcome.ok, subject: 'odeon', body: JSON.stringify(outcome) }
+  if (outcome.ok) {
+    return {
+      ok: true,
+      subject: words
+        .render(path.join('odeon', 'memo-accept-subject.md'), { memoId: outcome.memoId })
+        .trim()
+        .slice(0, 200),
+      body: words.render(path.join('odeon', 'memo-accept.md'), { memoId: outcome.memoId }).trim()
+    }
+  }
+  return {
+    ok: false,
+    reasons: outcome.reasons,
+    subject: words.read(path.join('odeon', 'memo-refuse-subject.md')).trim().slice(0, 200),
+    body: words
+      .render(path.join('odeon', 'memo-refuse.md'), { reasons: bullets(outcome.reasons) })
+      .trim()
+  }
+}
+
+/**
+ * The orchestrator settling a memo she was delegated (FR-5.5, FR-7.3).
+ *
+ * `mayDecide` is asked AGAIN here rather than trusted from the triage: the
+ * verdict arrives as mail, and mail can arrive late, out of order, or from an
+ * orchestrator whose authority table changed in between. The countersignature
+ * must describe the authority that exists NOW, not the one that existed when
+ * the memo was routed.
+ */
+function settleFromOrchestrator(archive: Odeon, message: Message): EndpointAnswer {
+  const parsed = parseVerdictFiling(message.body)
+  if (!parsed.ok) return refuseVerdict([parsed.reason])
+  const header = archive.headerOf(parsed.filing.memoId)
+  if (header === null) return refuseVerdict([`no memo "${parsed.filing.memoId}" is on file`])
+  const may = artemis?.mayDecide({ class: 'memo', domain: header.trigger }) ?? {
+    allowed: false as const,
+    because: 'no orchestrator is hired'
+  }
+  if (!may.allowed) return refuseVerdict([may.because])
+  if (may.countersignature.by !== message.from) {
+    return refuseVerdict([
+      `only ${may.countersignature.by} may settle a delegated memo; "${message.from}" may not`
+    ])
+  }
+  const settled = archive.decideMemo({
+    memoId: parsed.filing.memoId,
+    verdict: parsed.filing.verdict,
+    notes: parsed.filing.notes,
+    decider: {
+      kind: 'orchestrator',
+      agentId: may.countersignature.by,
+      under: may.countersignature.under
+    }
+  })
+  if (!settled.ok) return refuseVerdict([settled.reason])
+  applyMemoVerdict({
+    gateId: settled.gateId,
+    gateVerdict: settled.gateVerdict,
+    verdict: parsed.filing.verdict,
+    memoId: parsed.filing.memoId,
+    notes: parsed.filing.notes,
+    decidedBy: may.countersignature.by
+  })
+  mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+  return {
+    ok: true,
+    subject: `memo ${parsed.filing.memoId}: ${parsed.filing.verdict}`,
+    body: `Recorded, countersigned under ${may.countersignature.under}.`
+  }
+}
+
+function refuseVerdict(reasons: readonly string[]): EndpointAnswer {
+  return {
+    ok: false,
+    reasons,
+    subject: 'odeon: verdict not recorded',
+    body: JSON.stringify({ reasons })
+  }
+}
+
+/** Reasons as a markdown list. Serialization, not prose (invariant §8). */
+function bullets(reasons: readonly string[]): string {
+  return reasons.map((r) => `- ${r}`).join('\n')
+}
+
 function recordSpan(record: HookEventRecord): void {
   const { envelope } = record
   const payload = envelope.payload as Record<string, unknown> | null
@@ -259,6 +562,15 @@ function recordSpan(record: HookEventRecord): void {
   if (tool === null) return
   if (envelope.event === 'pre-tool') {
     breaker?.openSpan(envelope.agentId, tool, payload)
+    // SDD §7.3 step 1: a choice matching memo policy is HELD before it lands.
+    // The event plane already carries what the trigger table reads, so this is
+    // the same stream the breaker watches, asked a different question.
+    chokePoints?.submitMemoTrigger(envelope.agentId, {
+      tool,
+      ...(typeof payload?.['path'] === 'string' ? { path: payload['path'] } : {}),
+      ...(typeof payload?.['file_path'] === 'string' ? { path: payload['file_path'] } : {}),
+      ...(typeof payload?.['command'] === 'string' ? { text: payload['command'] } : {})
+    })
     return
   }
   if (envelope.event === 'post-tool') {
@@ -359,6 +671,7 @@ async function boot(): Promise<void> {
   // Architect-editable copies (invariant §8).
   const appRoot = app.getAppPath()
   const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
+  promptStore = prompts
 
   // The broker is constructed before anything can spawn: an agent must never
   // start before the harness knows which credentials it is allowed to hand it
@@ -441,6 +754,9 @@ async function boot(): Promise<void> {
       // M3.3 review). Until this, "the harness refuses `→ done` while a gate is
       // open" was a rule guarding a field nobody ever filled.
       if (gate.taskId) ledger?.noteGate(gate.taskId, gate.id, true)
+      // SDD §7.3: "worker notified with memo template ref". A held action the
+      // agent is never told about is a stall it cannot act on (invariant §7).
+      if (gate.memoTrigger !== null) noticeMemoOwed(gate)
     },
     onSettled: (gate) => {
       // Only when the LAST gate on that agent clears: an agent held behind two
@@ -596,6 +912,8 @@ async function boot(): Promise<void> {
     prompts,
     task: (taskId) => ledger?.tasks().tasks.find((row) => row.id === taskId) ?? null,
     recordDeck: (taskId, ref) => ledger?.noteDeck(taskId, ref),
+    // A memo must answer a gate that really holds its filer (FR-7.3).
+    gate: (gateId) => gates?.get(gateId) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
@@ -683,39 +1001,23 @@ async function boot(): Promise<void> {
     prompts,
     closing: (message) => closingTime?.noteReply(message) ?? false,
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
-    // ADR-0008's filing endpoint. The answer's words render from
-    // prompts/odeon/ (invariant §8); the reasons are data in a slot.
+    // ADR-0008 filing endpoint. One address, three filings: the archive is one
+    // subsystem, and giving each artifact its own reserved id would put three
+    // harness identities where the design has one.
     odeon: (message) => {
-      const outcome = odeon?.fileDeck(message) ?? {
-        ok: false as const,
-        reasons: ['the odeon endpoint is not available']
-      }
-      if (outcome.ok) {
+      const archive = odeon
+      if (archive === null) {
         return {
-          ok: true,
-          subject: prompts
-            .render(path.join('odeon', 'deck-accept-subject.md'), { taskId: outcome.taskId })
-            .trim()
-            .slice(0, 200),
-          body: prompts
-            .render(path.join('odeon', 'deck-accept.md'), {
-              ref: outcome.ref,
-              taskId: outcome.taskId
-            })
-            .trim()
+          ok: false,
+          reasons: ['the odeon endpoint is not available'],
+          subject: 'odeon-unavailable',
+          body: JSON.stringify({ reasons: ['the odeon endpoint is not available'] })
         }
       }
-      const reasons = outcome.reasons
-      return {
-        ok: false,
-        reasons,
-        subject: prompts.read(path.join('odeon', 'deck-refuse-subject.md')).trim().slice(0, 200),
-        body: prompts
-          .render(path.join('odeon', 'deck-refuse.md'), {
-            reasons: reasons.map((r) => `- ${r}`).join('\n')
-          })
-          .trim()
-      }
+      const kind = filingKind(message.body)
+      if (kind === 'verdict') return settleFromOrchestrator(archive, message)
+      if (kind === 'memo') return archiveMemo(archive, message)
+      return archiveDeck(archive, message)
     },
     library: (message) => {
       if (!reflection) {
@@ -1037,6 +1339,39 @@ async function boot(): Promise<void> {
           },
     knowledge: () => library?.knowledge() ?? [],
     decks: () => odeon?.decks() ?? [],
+    memos: (queue) =>
+      (odeon?.memos(queue) ?? []).map((row) => ({
+        memoId: row.memoId,
+        markdown: row.markdown,
+        decided: row.verdict !== null,
+        verdict: row.verdict?.verdict ?? null,
+        decidedBy: row.verdict?.decidedBy ?? null,
+        countersigned: row.verdict?.countersigned ?? false
+      })),
+    decideMemo: (memoId, verdict, notes) => {
+      // UC-06 step 4, the Architect bench. Architect-only by construction:
+      // this arrives on the window bridge, which main knows IS the Architect —
+      // nothing here takes a claimed identity from the caller.
+      const archive = odeon
+      if (archive === null) return { ok: false, reason: 'the odeon is not available' }
+      const settled = archive.decideMemo({
+        memoId,
+        verdict,
+        notes,
+        decider: { kind: 'architect' }
+      })
+      if (!settled.ok) return settled
+      applyMemoVerdict({
+        gateId: settled.gateId,
+        gateVerdict: settled.gateVerdict,
+        verdict,
+        memoId,
+        notes,
+        decidedBy: 'architect'
+      })
+      mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+      return { ok: true, gateVerdict: settled.gateVerdict }
+    },
     commentOnDeck: (ref, text) => {
       const outcome = odeon?.comment(ref, text, agora?.registry().orchestratorId ?? null) ?? {
         queued: false as const,

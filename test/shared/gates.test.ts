@@ -250,6 +250,7 @@ describe('schemas', () => {
       channel: 'local',
       packaging: { what: 'w', why: 'y', blastRadius: 'b', rollback: 'r' },
       taskId: null,
+      memoTrigger: null,
       requiresRepeatBack: false,
       openedAt: '2026-08-27T01:00:00.000Z'
     }
