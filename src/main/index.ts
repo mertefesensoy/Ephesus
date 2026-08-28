@@ -888,7 +888,13 @@ async function boot(): Promise<void> {
         : {
             gymSlice: {
               ...gymnasium.slice(),
-              open: gymnasium.rows().filter((row) => row.status === 'proposed').length
+              open: gymnasium.rows().filter((row) => row.status === 'proposed').length,
+              // FR-13.6 / FR-14.1: the Stoa's work and the company mode ride
+              // the same standup section as the budget they share.
+              ...(stoa === null
+                ? {}
+                : { stoa: { sources: stoa.sources().length, briefs: stoa.briefs().length } }),
+              mode: modes?.mode() ?? 'directed'
             }
           })
     }),
@@ -952,6 +958,8 @@ async function boot(): Promise<void> {
   gymnasium = new Gymnasium({
     agoraRoot: agora.root,
     seedFrom: path.join(appRoot, 'docs', 'gymnasium'),
+    // FR-13.4: a proposal citing a brief must cite one that exists.
+    briefExists: (briefId) => stoa?.brief(briefId) !== null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)

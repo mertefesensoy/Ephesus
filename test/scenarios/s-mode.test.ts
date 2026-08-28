@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { CompanyModes } from '../../src/main/modes'
 import { Scheduler } from '../../src/main/scheduler'
 import { GYM_SCHEMA_VERSION } from '../../src/shared/gym'
+import { STOA_SCHEMA_VERSION } from '../../src/shared/stoa'
 import type { CompanyMode, GymLogEvent } from '../../src/shared/mode'
 import { ODEON_ENDPOINT } from '../../src/shared/reserved'
 import { cleanupHomes, scenarioMessage, sendStep, startCompany, type Company } from './company'
@@ -73,6 +74,42 @@ function modesOf(
   return { modes, state }
 }
 
+/**
+ * Archives one real research brief through the SHIPPED endpoint.
+ *
+ * §6.9's "seeded by a Stoa brief" clause is only meaningful if the brief is a
+ * brief — so this files one rather than citing an id nobody archived, which
+ * FR-13.4 now refuses anyway.
+ */
+async function archiveBrief(eph: Company): Promise<string> {
+  await eph.runTurn('agent.artemis', [
+    sendStep(
+      scenarioMessage({
+        from: 'agent.artemis',
+        to: ODEON_ENDPOINT,
+        act: 'propose',
+        subject: 'research brief',
+        body: JSON.stringify({
+          schemaVersion: STOA_SCHEMA_VERSION,
+          kind: 'research-brief',
+          sourceId: 'src-fixture-pinned',
+          title: 'Turn structure',
+          question: 'tags agent-loop — how the loop is structured',
+          commit: 'a1b2c3d',
+          findings: [
+            { what: 'Planning is separate from dispatch.', citations: ['src/loop/turn.ts'] }
+          ],
+          applicability: [{ finding: 1, subsystem: 'SDD §7.1', note: 'Matches ours.', refs: [] }],
+          candidates: [{ what: 'Name the rule in adapter docs.', fromFindings: [1] }],
+          licenseNote: 'MIT; nothing needs intake.'
+        })
+      })
+    )
+  ])
+  await eph.hermes.sweep()
+  return eph.stoa.briefs()[0]?.id ?? ''
+}
+
 /** Drives a proposal all the way through the loop, on the SHIPPED paths. */
 async function fullLoop(
   eph: Company,
@@ -121,7 +158,7 @@ describe('S-MODE — the first enable is refused until the gate is met (FR-14.3)
 
   it('still refuses with two proposals through the loop — three is the bar', async () => {
     const eph = await company()
-    await fullLoop(eph, 'One', { validated: true, brief: 'RB-001' })
+    await fullLoop(eph, 'One', { validated: true, brief: await archiveBrief(eph) })
     await fullLoop(eph, 'Two', { validated: true })
     const { modes } = modesOf(eph)
     expect(modes.setMode('improving', 'architect').ok).toBe(false)
@@ -132,7 +169,7 @@ describe('S-MODE — the first enable is refused until the gate is met (FR-14.3)
     // Three through the full loop, two validated, one seeded by a brief —
     // built by driving the SHIPPED endpoint and the SHIPPED verdict path, so
     // the gate is reading a ledger the company actually produced.
-    await fullLoop(eph, 'One', { validated: true, brief: 'RB-001' })
+    await fullLoop(eph, 'One', { validated: true, brief: await archiveBrief(eph) })
     await fullLoop(eph, 'Two', { validated: true })
     await fullLoop(eph, 'Three', { validated: false })
 
@@ -144,7 +181,7 @@ describe('S-MODE — the first enable is refused until the gate is met (FR-14.3)
 
   it('lands the change on the ledger document, not only the log (UC-15)', async () => {
     const eph = await company()
-    await fullLoop(eph, 'One', { validated: true, brief: 'RB-001' })
+    await fullLoop(eph, 'One', { validated: true, brief: await archiveBrief(eph) })
     await fullLoop(eph, 'Two', { validated: true })
     await fullLoop(eph, 'Three', { validated: false })
     const { modes } = modesOf(eph)
@@ -167,7 +204,7 @@ describe('S-MODE — no agent-side path can change the mode (FR-14.2)', () => {
     'refuses "%s" even on a passing ledger',
     async (who) => {
       const eph = await company()
-      await fullLoop(eph, 'One', { validated: true, brief: 'RB-001' })
+      await fullLoop(eph, 'One', { validated: true, brief: await archiveBrief(eph) })
       await fullLoop(eph, 'Two', { validated: true })
       await fullLoop(eph, 'Three', { validated: false })
       const { modes } = modesOf(eph)

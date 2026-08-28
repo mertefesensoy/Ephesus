@@ -81,6 +81,18 @@ export interface BriefInput {
     readonly spentTokens: number | null
     readonly tokensPerWeek: number
     readonly open: number
+    /**
+     * The Stoa's work, reported WITH the slice (FR-13.6) because it is spent
+     * out of the same budget (ADR-0017 R4). Optional so a company with no
+     * research department reports nothing rather than a row of zeroes that
+     * would read as "the Stoa did nothing this week".
+     */
+    readonly stoa?: {
+      readonly sources: number
+      readonly briefs: number
+    }
+    /** The company mode this standup covers (FR-14.1 — stated in every brief). */
+    readonly mode?: string
   }
 }
 
@@ -188,6 +200,22 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
         ['gym:slice']
       )
     )
+    // FR-13.6: Stoa work is reported with the slice it is spent from.
+    if (input.gymSlice.stoa !== undefined) {
+      facts.push(
+        fact(
+          'health',
+          `the stoa is watching ${String(input.gymSlice.stoa.sources)} source(s) ` +
+            `and has archived ${String(input.gymSlice.stoa.briefs)} brief(s)`,
+          ['stoa:watchlist']
+        )
+      )
+    }
+    // FR-14.1: every standup states the mode the company is running under, so
+    // "did we do this because we were asked?" is answerable from the brief.
+    if (input.gymSlice.mode !== undefined) {
+      facts.push(fact('health', `the company is in ${input.gymSlice.mode} mode`, ['gym:mode']))
+    }
   }
 
   // 5. Ahead — what the company will do next, per the ledger.

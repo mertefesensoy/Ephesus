@@ -318,6 +318,9 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     // testing the wrong thing (FR-12.6 continuity is asserted in the unit
     // suite, against the real archive, on purpose).
     seedFrom: path.join(REPO, 'test', 'fixtures', 'gymnasium-seed'),
+    // FR-13.4, through the SHIPPED wiring: the Stoa is constructed below, so
+    // the lookup is late-bound rather than a copy of the production wiring.
+    briefExists: (briefId) => stoa.brief(briefId) !== null,
     onLogEvent: (draft) => agora.appendLog(draft)
   })
 

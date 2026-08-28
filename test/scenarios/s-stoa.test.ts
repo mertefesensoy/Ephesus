@@ -358,3 +358,77 @@ describe('S-STOA — an uncited finding never reaches a human (FR-13.3)', () => 
     expect(events).toContain('brief-refused')
   })
 })
+
+describe('S-STOA — a brief is evidence a proposal must cite (FR-13.4)', () => {
+  it('accepts a proposal citing a brief that is in the archive', async () => {
+    const eph = await company()
+    await fileBrief(eph)
+    const archived = eph.stoa.briefs()[0]?.id ?? ''
+
+    await eph.runTurn('agent.researcher', [
+      sendStep(
+        scenarioMessage({
+          from: 'agent.researcher',
+          to: ODEON_ENDPOINT,
+          act: 'propose',
+          subject: 'improvement',
+          body: JSON.stringify({
+            schemaVersion: 1,
+            kind: 'gym-proposal',
+            title: 'Adopt the re-plan rule',
+            class: 'craft',
+            // "Here is how a comparable system avoids it" is stronger BESIDE
+            // "and here is where it hurt us"; it is weaker alone.
+            evidence: [`${archived} finding 1`, 'log#412'],
+            change: 'Name the re-plan rule in the adapter docs.',
+            costRisk: 'Low.',
+            metric: { what: 'replayed retries', target: '0', windowDays: 14 },
+            rollback: 'Revert the doc change.'
+          })
+        })
+      )
+    ])
+    await eph.hermes.sweep()
+
+    expect(eph.gymnasium.rows().map((row) => row.title)).toContain('Adopt the re-plan rule')
+    // The link is the citation — recorded on the log so the proof gate can
+    // count Stoa-seeded proposals without re-reading every document.
+    const proposed = eph.agora
+      .readLog()
+      .find((e) => e['kind'] === 'gym' && e['event'] === 'proposed')
+    expect(proposed?.['briefs']).toEqual([archived])
+  })
+
+  it('REFUSES a proposal citing a brief that was never archived', async () => {
+    const eph = await company()
+    await eph.runTurn('agent.researcher', [
+      sendStep(
+        scenarioMessage({
+          from: 'agent.researcher',
+          to: ODEON_ENDPOINT,
+          act: 'propose',
+          subject: 'improvement',
+          body: JSON.stringify({
+            schemaVersion: 1,
+            kind: 'gym-proposal',
+            title: 'Adopt something nobody studied',
+            class: 'craft',
+            evidence: ['RB-404'],
+            change: 'Change a thing.',
+            costRisk: 'Low.',
+            metric: { what: 'a number', target: 'lower', windowDays: 14 },
+            rollback: 'Revert.'
+          })
+        })
+      )
+    ])
+    await eph.hermes.sweep()
+
+    // A citation to an unarchived brief is the uncited-finding problem wearing
+    // a different hat: it looks like provenance and resolves to nothing.
+    expect(eph.gymnasium.rows()).toEqual([])
+    const reply = lastReply(eph)
+    expect(reply?.act).toBe('refuse')
+    expect(reply?.body).toContain('RB-404')
+  })
+})

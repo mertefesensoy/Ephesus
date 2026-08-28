@@ -2859,13 +2859,35 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       vanished at the next proposal — the M5 close-out finding-1 class one row
       further down (DECISIONS-LOG). Local suite 2104 passed; the 12 failures are
       the documented Windows worktree/PTY + TZ set and load-flakes.*
-- [ ] **M5b.4 Brief → proposal flow + E-STOA** — Artemis's ranking playbook
+- [x] **M5b.4 Brief → proposal flow + E-STOA** — Artemis's ranking playbook
       (`prompts/`), proposals citing brief ids in evidence refs (FR-13.4), the
       standup brief's gym-slice section folds the Stoa in (FR-13.6); E-STOA
       eval per TEST-STRATEGY §6 over the fixture source.
       *Docs: ADR-0017, FR-13.4/13.6, UC-14 step 5. Tests: proposal-citing
       shape; brief-fact refs resolve; E-STOA fixture run recorded. Risk:
       Artemis ranks — the harness never files a proposal itself (ADR-0005).*
+      *Evidence: the chain is real end-to-end — a brief archived through the
+      shipped endpoint, a proposal citing it accepted, and a proposal citing
+      `RB-404` REFUSED with the id named (S-STOA now 20/20). The link is the
+      citation itself: `citedBriefIds` reads the evidence refs, the Gymnasium
+      refuses ids not in the archive, and the `proposed` log event carries them
+      so the proof gate counts Stoa-seeded proposals from the log alone.
+      Artemis's ranking playbook is `prompts/stoa/rank.md` (rank, never decide;
+      cite the brief; keep the internal evidence; file fewer than you found).
+      FR-13.6: the standup's gym-slice section now reports sources watched and
+      briefs archived, plus the company mode (FR-14.1) — omitted rather than
+      zeroed when there is no Stoa (3 cases in `test/shared/brief.test.ts`).
+      E-STOA: `test/fixtures/stoa-source/` carries two planted patterns, noise
+      (a roadmap), and a planted injection; `test/evals/e-stoa.ts` scores a
+      brief against them and `e-stoa.test.ts` (15/15) asserts the RUBRIC
+      discriminates — a good brief passes, and uncited / noise-only / obeyed /
+      silently-ignored each fail it. Local suite 2124 passed; the 12 failures
+      are the documented Windows worktree/PTY + TZ set and load-flakes (the one
+      unfamiliar name passed in isolation).*
+      *Owed to a real-engine session (recorded, never faked): E-STOA's
+      LLM-judged half — "is this applicability mapping honest?" and "does the
+      prose match the file it cites?" — needs a rubric-scoring model over a
+      real researcher run. The deterministic half runs in CI today.*
 - [ ] **M5b.5 Floor art intake (the purchased packs)** — drop the LimeZu
       **Modern Interiors v41.4** and **Modern Office Revamped** 16×16 sheets
       into the gitignored tileset drop; author their `*.tiles.json` layout
