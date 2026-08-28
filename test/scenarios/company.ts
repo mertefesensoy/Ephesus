@@ -12,6 +12,12 @@ import {
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
 import { LedgerEndpoint } from '../../src/main/ledger'
+import { Odeon } from '../../src/main/odeon'
+import { Gymnasium } from '../../src/main/gymnasium'
+import { BriefingJob } from '../../src/main/briefing'
+import { MeetingDriver } from '../../src/main/meeting'
+import { OrgLayer } from '../../src/main/org'
+import { wireOdeonEndpoint } from '../../src/main/odeon-endpoint'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
@@ -42,6 +48,16 @@ export interface CompanyOptions {
   /** The Watch's policy for this company. Defaults to deny-all (FR-11.1). */
   readonly gatePolicy?: GatePolicy
   /**
+   * Artemis’s delegated-authority answer for memo triage (FR-5.5).
+   * Defaults to refusing everything, which is deny-by-default.
+   */
+  readonly mayDecide?: (request: {
+    class: 'memo'
+    domain: string
+  }) =>
+    | { readonly allowed: true; readonly countersignature: { by: string; under: string } }
+    | { readonly allowed: false; readonly because: string }
+  /**
    * The durable cost plane. Passing the SAME store to a second `startCompany`
    * is what "restart" means for S-LEDGER: the harness objects are rebuilt, the
    * durable rows are not (ADR-0011 — cost figures come only from the ledger,
@@ -60,6 +76,18 @@ export interface Company {
   readonly gates: GateManager
   /** The task ledger endpoint — the SHIPPED one, so the M5.1 join is real. */
   readonly tasks: LedgerEndpoint
+  /** The Odeon archive (ADR-0008). */
+  readonly odeon: Odeon
+  /** The Gymnasium and its ledger (ADR-0015). */
+  readonly gymnasium: Gymnasium
+  /** The standup job (FR-7.1). */
+  readonly briefing: BriefingJob
+  /** The meeting driver (FR-7.4). */
+  readonly meetings: MeetingDriver
+  /** The org layer and its retro (FR-11.5). */
+  readonly org: OrgLayer
+  /** Which bench each filed memo was triaged to. */
+  readonly triaged: readonly string[]
   /** The choke-point submitters, for scenarios that drive spend directly. */
   readonly chokePoints: ReturnType<typeof wireGateChokePoints>
   /** The circuit breaker, fed by the same event plane the floor reads. */
@@ -239,9 +267,100 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     }
   })
 
+  // The Odeon and its neighbours, wired the way `index.ts` wires them so the
+  // S-suites exercise the shipped path (the M2 close-out lesson).
+  const odeon = new Odeon({
+    agoraRoot: agora.root,
+    prompts,
+    task: (taskId) => tasks.tasks().tasks.find((row) => row.id === taskId) ?? null,
+    recordDeck: (taskId, ref) => tasks.noteDeck(taskId, ref),
+    gate: (gateId) => gates.get(gateId),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`odeon ${String(draft['event'] ?? 'event')}`)
+    }
+  })
+
+  const gymnasium = new Gymnasium({
+    agoraRoot: agora.root,
+    seedFrom: path.join(REPO, 'docs', 'gymnasium'),
+    onLogEvent: (draft) => agora.appendLog(draft)
+  })
+
+  const briefing = new BriefingJob({
+    prompts,
+    gather: (sinceSeq) => ({
+      events: agora.readLog().filter((entry) => entry.seq > sinceSeq),
+      ledger: tasks.tasks(),
+      openGates: gates.list().map((gate) => ({ id: gate.id, agentId: gate.agentId })),
+      openMemos: odeon.memos('open').map((memo) => ({ memoId: memo.memoId })),
+      spend: []
+    }),
+    orchestrator: () => 'agent.artemis',
+    deliver: (message) => hermes.deliverFromHarness(message),
+    onLogEvent: (draft) => agora.appendLog(draft)
+  })
+
+  const meetings = new MeetingDriver({
+    agoraRoot: agora.root,
+    prompts,
+    deliver: (message) => hermes.deliverFromHarness(message),
+    orchestrator: () => 'agent.artemis',
+    onLogEvent: (draft) => agora.appendLog(draft)
+  })
+
+  const org = new OrgLayer({
+    agoraRoot: agora.root,
+    gather: () => ({
+      events: agora.readLog(),
+      // The agents this company actually has. A rig hire makes a mailbox
+      // rather than a roster row, so reading the registry here would report
+      // metrics for nobody.
+      agents: [...hermes.knownAgents()].sort(),
+      spend: []
+    }),
+    onLogEvent: (draft) => agora.appendLog(draft)
+  })
+
+  /** What the memo triage did, so a scenario can assert the bench it chose. */
+  const triaged: string[] = []
+
+  // The SHIPPED endpoint dispatch, not a copy of it.
+  const odeonEndpoint = wireOdeonEndpoint({
+    odeon,
+    gymnasium,
+    briefing,
+    prompts,
+    mayDecide: (request) =>
+      options.mayDecide?.(request) ?? {
+        allowed: false as const,
+        because: `no delegated authority for memo/${request.domain}`
+      },
+    triageMemo: (memoId, trigger) => {
+      const may = options.mayDecide?.({ class: 'memo', domain: trigger })
+      triaged.push(`${memoId}:${may?.allowed === true ? 'delegated' : 'escalated'}`)
+    },
+    applyMemoVerdict: (input) => {
+      gates.decide(input.gateId, input.gateVerdict)
+    }
+  })
+
   const hermes = new Hermes({
     agora,
     prompts,
+    odeon: (message) => {
+      // A meeting reply is an `inform`, not a filing — exactly as `index.ts`
+      // routes it.
+      if (message.act === 'inform') {
+        const outcome = meetings.say(message.from, message.body)
+        return {
+          ok: outcome.kind !== 'refused',
+          subject: `meeting: ${outcome.kind}`,
+          body: JSON.stringify(outcome)
+        }
+      }
+      return odeonEndpoint(message)
+    },
     ...(options.hermesFaults ? { faults: options.hermesFaults } : {}),
     ...(options.blockCap === undefined ? {} : { blockCap: options.blockCap }),
     ...(options.isIdle ? { isIdle: options.isIdle } : {}),
@@ -287,6 +406,14 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       const tool = typeof payload?.['tool'] === 'string' ? payload['tool'] : null
       if (tool !== null && record.envelope.event === 'pre-tool') {
         breaker.openSpan(record.envelope.agentId, tool, payload)
+        // SDD §7.3 step 1, wired as `index.ts` wires it: a choice matching memo
+        // policy is HELD before it lands, off the same tool stream.
+        chokePoints.submitMemoTrigger(record.envelope.agentId, {
+          tool,
+          ...(typeof payload?.['path'] === 'string' ? { path: payload['path'] } : {}),
+          ...(typeof payload?.['file_path'] === 'string' ? { path: payload['file_path'] } : {}),
+          ...(typeof payload?.['command'] === 'string' ? { text: payload['command'] } : {})
+        })
       }
       if (tool !== null && record.envelope.event === 'post-tool') {
         breaker.closeSpan(
@@ -313,6 +440,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     home,
     agora,
     tasks,
+    odeon,
+    gymnasium,
+    briefing,
+    meetings,
+    org,
+    triaged,
     hermes,
     hookServer,
     hookEvents,

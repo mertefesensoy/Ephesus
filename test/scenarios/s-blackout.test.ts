@@ -41,6 +41,12 @@ async function restartOver(home: string): Promise<Company> {
   const { GateManager, wireGateChokePoints } = await import('../../src/main/watch/gates')
   const { Breaker } = await import('../../src/main/watch/breaker')
   const { LedgerEndpoint } = await import('../../src/main/ledger')
+  const { Odeon } = await import('../../src/main/odeon')
+  const { Gymnasium } = await import('../../src/main/gymnasium')
+  const { BriefingJob } = await import('../../src/main/briefing')
+  const { MeetingDriver } = await import('../../src/main/meeting')
+  const { OrgLayer } = await import('../../src/main/org')
+  const { emptyLedger } = await import('../../src/shared/tasks')
   const { CostLedger, MemoryLedgerStore } = await import('../../src/main/watch/ledger')
   const { denyAllPolicy } = await import('../../src/shared/gates')
   const { fileURLToPath } = await import('node:url')
@@ -64,6 +70,36 @@ async function restartOver(home: string): Promise<Company> {
     gates: blackoutGates,
     // The restarted half re-reads `tasks.json` from disk like the real app.
     tasks: new LedgerEndpoint({ store: agora, knownAgents: () => hermes.knownAgents() }),
+    // A blackout scenario asserts what survived on disk in the data plane; the
+    // Odeon subsystems are not exercised, so honest stand-ins over the same
+    // restored Agora are what belong here.
+    odeon: new Odeon({
+      agoraRoot: agora.root,
+      prompts,
+      task: () => null,
+      recordDeck: () => {}
+    }),
+    gymnasium: new Gymnasium({
+      agoraRoot: agora.root,
+      seedFrom: path.join(repo, 'docs', 'gymnasium')
+    }),
+    briefing: new BriefingJob({
+      prompts,
+      gather: () => ({ events: [], ledger: emptyLedger, openGates: [], openMemos: [], spend: [] }),
+      orchestrator: () => null,
+      deliver: () => {}
+    }),
+    meetings: new MeetingDriver({
+      agoraRoot: agora.root,
+      prompts,
+      deliver: () => {},
+      orchestrator: () => null
+    }),
+    org: new OrgLayer({
+      agoraRoot: agora.root,
+      gather: () => ({ events: [], agents: [], spend: [] })
+    }),
+    triaged: [],
     chokePoints: wireGateChokePoints({ gates: blackoutGates, prompts }),
     // A blackout scenario never trips the breaker; it asserts what survived on
     // disk. A no-effect breaker is the honest stand-in.

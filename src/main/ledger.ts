@@ -117,15 +117,23 @@ export class LedgerEndpoint {
     this.options.store.commitSoon(`ledger: ${result.applied.length} op(s) from ${message.from}`)
 
     for (const op of result.applied) {
+      const task = op.taskId === null ? undefined : findTask(result.ledger, op.taskId)
       this.options.onLogEvent?.({
         kind: 'task',
         event: op.op,
         taskId: op.taskId,
         by: message.from,
         msgId: message.id,
-        ...(op.taskId === null
+        ...(task === undefined
           ? {}
-          : { assignee: findTask(result.ledger, op.taskId)?.assignee ?? null })
+          : {
+              assignee: task.assignee,
+              // The status the op LEFT the task in. Without it the org layer
+              // cannot count a completed task from the book of record, and a
+              // metric that can only be computed from a fixture is a metric
+              // nobody can check (found by the M5 exit demo).
+              status: task.status
+            })
       })
     }
     this.options.onChange?.()

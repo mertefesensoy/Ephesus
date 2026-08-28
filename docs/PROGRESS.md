@@ -2487,7 +2487,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `ledger keeps the row on disk: true`.
       Every word an agent reads lives in `prompts/gymnasium/` (invariant §8).
       **Owed to a local session:** a Gymnasium-tab screenshot for `docs/demo/`.*
-- [ ] **M5.8 Scenario suites + exit demos + review** — S-DECKGATE, S-MEMO,
+- [x] **M5.8 Scenario suites + exit demos + review** — S-DECKGATE, S-MEMO,
       S-BRIEF, S-MEETING, S-GYM (TEST-STRATEGY §3) as automated suites over
       the seams M5.1–M5.7 built; then the exit demos: a `review:deck` task
       refused `done` until its deck lands and the deck renders in-app; a
@@ -2497,6 +2497,40 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       company's own records**.
       *Docs: TEST-STRATEGY §3, SRS §6.3/§6.4. Risk: suites per-PR on fakes;
       real-engine demos are exit-review territory.*
+      *Evidence: `typecheck && lint && check-invariants` green; the five named
+      suites run **55 cases green** —
+      `npx vitest run test/scenarios/s-deckgate test/scenarios/s-memo`
+      `test/scenarios/s-brief test/scenarios/s-meeting test/scenarios/s-gym`
+      → 5 files, 55 passed (S-DECKGATE 7 · S-MEMO 11 · S-BRIEF 8 · S-MEETING 10 ·
+      S-GYM 19). Full suite 1883 passed / 6 skipped.
+      Every suite runs REAL spawned `fake-engine` processes filing from their
+      OWN outboxes over the real router and real git, against the **shipped**
+      endpoint dispatch: `src/main/odeon-endpoint.ts` was extracted so
+      `index.ts` and the rig call one factory, which is the M2 close-out lesson
+      applied before it could bite again.
+      **The exit demos, run through the real app in one session:**
+      `DEMO 1 close before the deck: todo` → `close after the deck: done` →
+      `deck archived: odeon/decks/t-exit-01-….html` ·
+      `DEMO 2 action held by: new-dependency` → `memo filed: m-…` →
+      `rejection reverses the action: denied` ·
+      `DEMO 3 brief archived: 2026-08-28T12-39-28-865Z.md` with
+      `every sentence carries refs: true` ·
+      `DEMO 4 floor: agent.mason` → `held (said early): [agent.scribe]` →
+      `transcript after the round: [human, agent.mason, agent.scribe]` →
+      `minutes: odeon/minutes/mt-….md` ·
+      `DEMO 5 gym ledger: ["GYM-001:proposed"]` ·
+      `DEMO 6 retro: odeon/retros/2026-08-28T12-39-28-982Z.md`.
+      **The real weekly retro, generated from this company’s own records**, is
+      archived at [docs/demo/m5-retro-report.md](demo/m5-retro-report.md):
+      window `log#1–log#32`, `agent.mason | 1 | 0 | 2 | 2.00`, and two findings
+      each citing a real log seq (`[log#16]`, `[log#14]`).
+      **The exit demo caught a real defect**: the ledger endpoint’s `task` log
+      row carried no `status`, so `computeMetrics` could never count a completed
+      task from the book of record — every org unit test passed because every
+      one synthesised the row it wanted. That is the seam-blindness class the M3
+      and M4 audits named, caught this time by running the thing. Fixed, with a
+      regression test that asserts the metric against a log the REAL endpoint
+      produced.*
 - [ ] **M5 exit review** — S-DECKGATE, S-MEMO, S-BRIEF, S-MEETING, S-GYM
       green in CI; the real retro report; PROGRESS + docs synced.
 
