@@ -868,7 +868,16 @@ async function boot(): Promise<void> {
       spend: Object.keys(agora?.registry().agents ?? {}).map((agentId) => ({
         agentId,
         tokens: totalOfSpend(agentId)
-      }))
+      })),
+      // FR-12.5: the standup reports the improvement slice.
+      ...(gymnasium === null
+        ? {}
+        : {
+            gymSlice: {
+              ...gymnasium.slice(),
+              open: gymnasium.rows().filter((row) => row.status === 'proposed').length
+            }
+          })
     }),
     orchestrator: () => agora?.registry().orchestratorId ?? null,
     deliver: (message) => hermes?.deliverFromHarness(message),

@@ -66,6 +66,17 @@ export interface BriefInput {
   readonly openMemos: readonly { readonly memoId: string }[]
   /** Cumulative tokens per agent, folded from the durable ledger (ADR-0011). */
   readonly spend: readonly { readonly agentId: string; readonly tokens: number }[]
+  /**
+   * The Gymnasium's budget slice (FR-12.5, ADR-0015 R3). The brief reports it
+   * so self-improvement spending is visible every standup rather than only
+   * when somebody goes looking — an ambient slice is one nobody notices
+   * growing.
+   */
+  readonly gymSlice?: {
+    readonly spentTokens: number
+    readonly tokensPerWeek: number
+    readonly open: number
+  }
 }
 
 /**
@@ -153,6 +164,20 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
       fact('health', `memo ${String(escalation['memoId'] ?? '?')} escalated to you`, [
         `log#${String(escalation.seq)}`
       ])
+    )
+  }
+
+  // 4b. The Gymnasium slice (FR-12.5): improvement is budgeted, not ambient,
+  //     and the standup is where the budget is seen.
+  if (input.gymSlice !== undefined) {
+    facts.push(
+      fact(
+        'health',
+        `the gymnasium has spent ${String(input.gymSlice.spentTokens)} of ` +
+          `${String(input.gymSlice.tokensPerWeek)} tokens this week, with ` +
+          `${String(input.gymSlice.open)} proposal(s) open`,
+        ['gym:slice']
+      )
     )
   }
 

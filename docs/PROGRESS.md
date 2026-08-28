@@ -2531,8 +2531,155 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       and M4 audits named, caught this time by running the thing. Fixed, with a
       regression test that asserts the metric against a log the REAL endpoint
       produced.*
-- [ ] **M5 exit review** — S-DECKGATE, S-MEMO, S-BRIEF, S-MEETING, S-GYM
+- [x] **M5 exit review** — S-DECKGATE, S-MEMO, S-BRIEF, S-MEETING, S-GYM
       green in CI; the real retro report; PROGRESS + docs synced.
+
+### M5 exit review (2026-08-28) — verdict: DONE
+
+Every criterion in IMPLEMENTATION M5 was verified **by running it**, against the
+committed tree.
+
+**Criterion 1 — "SRS §6.3 (deck) passes as S-DECKGATE."** MET. SRS §6.3 is the
+review test: "a task flagged `review:deck` cannot close without its deck; the
+deck renders in-app; a comment becomes a follow-up task." All three assert
+green, and the live app run showed the whole loop:
+
+```
+DEMO 1 close before the deck: todo      ← refused; the task did not move
+DEMO 1 close after the deck:  done
+DEMO 1 deck archived: odeon/decks/t-exit-01-2026-08-28T12-39-28-722Z.html
+```
+
+The comment clause is asserted in the suite: it reaches the orchestrator as
+mail and mints **no** task itself, because FR-4.2 gives the ledger one scribe.
+
+**Criterion 2 — "SRS §6.4 (memo) passes as S-MEMO."** MET. §6.4 is the memo
+test: "an agent adding a new npm dependency is blocked at the policy trigger
+until a memo exists; Artemis-approved memos show its countersignature;
+Architect rejection reverses the change." A REAL spawned agent really edits
+`package.json`, the shipped choke point holds it, and both benches are
+asserted — a delegated verdict carrying `countersigned: true` with its grant,
+and an Architect rejection returning `denied`:
+
+```
+DEMO 2 action held by: new-dependency
+DEMO 2 memo filed: m-2026-08-28-12-39-28-794-bf1f
+DEMO 2 rejection reverses the action: denied
+```
+
+**Criterion 3 — "S-BRIEF passes."** MET. Every narrative sentence must carry a
+ref that resolves to a fact the compiler issued; an invented citation refuses
+the whole brief and archives nothing; the ≤ 90 s budget is word-count math at
+VOICE-DESIGN's 150 wpm. `DEMO 3 every sentence carries refs: true`.
+
+**Criterion 4 — "S-MEETING passes."** MET. Turn order is enforced, not
+requested — the floor-holder alone is asked, an out-of-turn answer is HELD and
+released in attendee order, and the minutes print what never reached the floor:
+
+```
+DEMO 4 floor: agent.mason
+DEMO 4 held (said early): [ agent.scribe ]
+DEMO 4 transcript after the round: [ human, agent.mason, agent.scribe ]
+DEMO 4 minutes: odeon/minutes/mt-2026-08-28t12-39-28-876z-8495.md
+```
+
+**Criterion 5 — "a real weekly retro report generates."** MET, and archived at
+[docs/demo/m5-retro-report.md](demo/m5-retro-report.md). Generated from **this
+company's own records** in the exit-demo session — window `log#1–log#32`, every
+figure folded from `log.jsonl` and the cost ledger, every finding citing a real
+log seq:
+
+```
+| agent         | tasks done | rework | escalations | escalation rate |
+| agent.artemis |          0 |      0 |           0 |               — |
+| agent.mason   |          1 |      0 |           2 |            2.00 |
+
+- 1 memo(s) were rejected [log#16]
+- 1 memo(s) needed the Architect [log#14]
+```
+
+It ends with "What was decided / Nothing." — the layer computes and archives,
+and UC-12 keeps a human between the numbers and any action.
+
+**Criterion 6 — "S-GYM passes (proposal shape enforcement, architect-only
+verdicts, mechanical refusal of authority-widening proposals, rollback on
+regressed metric)."** MET, clause by clause: a proposal missing a metric,
+rollback or evidence is rejected before any human sees it; a verdict from
+`agent.artemis`, `agent.mason` or `human` is refused with the R1 reason while
+the row stays `proposed`; four widening classes are refused *before a verdict
+exists*, so no approver — the Architect included — can make one acceptable; and
+an unmeasurable metric ledgers `regressed` with `rollback: true`.
+
+**Gate:** `npm run typecheck` PASS · `npm run lint` PASS (zero warnings) ·
+`node scripts/check-invariants.cjs` PASS · `node scripts/check-attribution.cjs`
+PASS · the five suites **55 passed (55)** · full suite **1887 passed / 6
+skipped**.
+
+CI green on every M5 commit — runs 33152624246 (M5.1) · 33154688487 (M5.2) ·
+33160420476 (M5.3) · 33161721415 (M5.4) · 33163021861 (M5.5) · 33163764115
+(M5.6) · 33170534063 (M5.7) · 33172228794 (M5.8), all SUCCESS.
+
+The verdict itself is closed on a CI-green tree: run **33172756433** on
+`069b0bc` — docs integrity, typecheck·lint·test and commit attribution all
+SUCCESS, with the five S-suites running green on Linux there.
+
+**A gap the review itself found and closed.** IMPLEMENTATION M5 names "the
+standup brief's gym-slice section" and FR-12.5 requires the slice reported in
+briefings. `Gymnasium.slice()` existed but nothing put it in a brief. Closed
+here: `compileFacts` emits a `health` fact refd `gym:slice` naming what the
+slice has spent and how many proposals are open, wired in both `index.ts` and
+the scenario rig, with two tests (one asserting a company without a Gymnasium
+says nothing).
+
+**Two defects were found by RUNNING the thing, not by reading it:**
+
+1. *The briefing settled on refusal* (M5.4). `archiveBrief` closed the
+   outstanding ask unconditionally, so a refused narration made the refusal
+   terminal and the corrected one was rejected as answering a brief nobody had
+   asked for. The rule moved out of the wiring into
+   `BriefingJob.narrated(briefId, accepted)`, with two regression tests.
+2. *Org metrics could not count a completed task* (M5.8, found by the exit
+   demo). The ledger endpoint wrote no `status` on a `task` log row, so
+   `computeMetrics` matched nothing in production — every unit test passed
+   because every one synthesised the row it wanted. That is precisely the
+   seam-blindness class the M3 and M4 audits named. Fixed, with a regression
+   test that asserts the metric against a log the REAL endpoint produced.
+
+**Both carried items are CLOSED**: the agent↔task binding join in M5.1 (proven
+in the shipped app — `task.gates` written by the running harness for the first
+time, `status → done` refused while a gate is open) and `mayDecide`'s first
+production caller in M5.3 (memo triage, with the countersignature written by
+the harness rather than claimed by the decider).
+
+**Debt swept at close:** zero TODO/FIXME/HACK markers in
+`src|shims|scripts|test|prompts`; every M5 package ticked with evidence.
+The Odeon endpoint dispatch was extracted to `src/main/odeon-endpoint.ts` so
+`index.ts` and the scenario rig call one factory — the M2 close-out lesson
+applied before it could bite a second time.
+
+**Recorded, not fixed (for the Architect):**
+- `src/shared/breaker.ts` contains two **literal NUL bytes** (a span key
+  separator written raw rather than escaped), so git classifies a Watch-critical
+  file as binary and `git diff` shows only `Bin … bytes`. Pre-existing before
+  M5; the fix is a one-character-class change with identical semantics.
+- Four screenshots are owed to a local session for `docs/demo/`: the Decks,
+  Memos, Briefs, Odeon, Org and Gymnasium tabs. Every one of those surfaces is
+  asserted at the module boundary and exercised live through its IPC, but none
+  has a picture in the repo.
+- This machine runs 10 Windows-local test failures the reference platform does
+  not (real-process spawns into git worktrees, one POSIX-path fixture, and one
+  TZ-dependent case that passes under `TZ=UTC`). CI on Linux is green on every
+  commit; recorded so the next Windows session does not read them as new.
+
+**Carried into M6, recorded so they are not lost:**
+- The Herald speaks the brief (FR-7.1 names speech, an in-app card and remote
+  push; M5 built the card, and the artifact it will read from).
+- `odeon:queue` pushes on memo and meeting changes, but no badge consumes it on
+  the status strip yet — the panels poll.
+- The Gymnasium schedules no metric check of its own: `measure()` is driven by
+  the Architect through `gym:metricResult`. SDD §7.6 gives the scheduler that
+  booking, and it belongs with the Herald-era scheduler work.
+
 
 
 ## M6 — The Herald
