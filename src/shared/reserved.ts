@@ -45,11 +45,23 @@ export const LIBRARY_ENDPOINT = 'agent.library'
  */
 export const CLOSING_ENDPOINT = 'agent.closing'
 
+/**
+ * The Odeon's filing endpoint (ADR-0008, FR-7.2).
+ *
+ * SDD §2 gives `odeon/` to the harness alone, so an agent files an accountability
+ * artifact the only way it can say anything — a message from its own outbox to
+ * this address. That single rule is what makes the archive trustworthy: a deck
+ * cannot be back-dated, edited in place, or written for a task its author was
+ * never given.
+ */
+export const ODEON_ENDPOINT = 'agent.odeon'
+
 export const RESERVED_AGENT_IDS: readonly string[] = [
   HERMES_SENDER,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
-  CLOSING_ENDPOINT
+  CLOSING_ENDPOINT,
+  ODEON_ENDPOINT
 ]
 
 /** Contract: whether this id belongs to the harness rather than to a hire. */

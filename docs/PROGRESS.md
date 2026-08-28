@@ -2183,7 +2183,7 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       `status → done` refusal finally guards a field something fills. Artemis's
       reassignment of a stalled task is asserted through her own outbox, and the
       binding follows the new assignee.*
-- [ ] **M5.2 Deck template + task-close gate + deck viewer** — FR-7.2,
+- [x] **M5.2 Deck template + task-close gate + deck viewer** — FR-7.2,
       S-DECKGATE: a `review:deck` task is *mechanically unclosable* until a
       deck exists — the harness rejects `status→done` (the §4.2 guard's
       `review` half, now load-bearing); single-file HTML deck from the
@@ -2197,6 +2197,44 @@ codex/gemini hook wiring post-trust; a real-engine respawn demo.
       projection; S-DECKGATE per TEST-STRATEGY §3. Risk: the deck is an
       artifact an AGENT writes into its own outbox for the harness to
       archive — agents never write `odeon/` (SDD §2).*
+      *Evidence: `typecheck && lint && check-invariants` green; 56 new cases
+      (`test/shared/odeon.test.ts` 31, `test/main/odeon.test.ts` 25), and the
+      affected suites 154/154 and 264/264 across two runs.
+      The filing path is the SHIPPED one: an agent `propose`s to a reserved
+      **`agent.odeon`** endpoint from its own outbox, the real router carries it,
+      and the harness archives. Every test goes through that path, so one that
+      called `fileDeck()` past the router could not pass for the wrong reason.
+      **The agent supplies the six sections; the harness applies**
+      **`prompts/odeon/deck.html`** — the only way FR-7.2's "from the standard
+      template" is enforced rather than hoped for, and it keeps every word in
+      `prompts/` (invariant §8).
+      Refusals are complete and named: a missing OR EMPTY section (each of the
+      six, table-driven), an unknown section, a deck for a task assigned to
+      somebody else, a deck for a task carrying no `deck` obligation, a deck for
+      a task that does not exist, and a non-`propose` act bounced at the router
+      before the archive sees it.
+      **Append-only proven**: a revised deck is a SECOND file and the first is
+      re-read byte-for-byte after it; `artifacts.deck` names the newest while the
+      older stays on the shelf. Content is HTML-escaped on the way in and the
+      viewer's iframe carries no `allow-scripts` on the way out; path traversal
+      is refused four ways.
+      LIVE RUN THROUGH THE REAL APP — the whole S-DECKGATE loop:
+      `task review obligations: ["deck"]` ·
+      `close BEFORE a deck exists: todo` (refused, the task did not move) ·
+      `archived files: ["t-evidence-52-2026-08-28T08-03-09-101Z.html"]` ·
+      `artifacts.deck: odeon/decks/t-evidence-52-…html` ·
+      `deck bytes: 3111 | escaped: true` ·
+      `filed via outbox: true` (the agent never wrote `odeon/`) ·
+      `close AFTER the deck exists: done` ·
+      `after a REVISED deck: [...101Z.html, ...180Z.html]` · `odeon:decks() sees: 2`.
+      Viewer live run: `odeon.decks(): ["t-evidence-52b"]` ·
+      `odeon.deck(ref) bytes: 3076` · `traversal refused: true` ·
+      `comment queued to: agent.artemis` ·
+      `artemis received: {"from":"agent.odeon","to":"agent.artemis",`
+      `"act":"request","subject":"review comment on t-evidence-52b"}` ·
+      `tasks after the comment: 1 (unchanged: the ledger is hers)` — UC-05 step 4
+      routes the comment to the orchestrator and never mints a task itself.
+      **Owed to a local session:** a Decks-tab screenshot for `docs/demo/`.*
 - [ ] **M5.3 Memo policy engine + queues + verdict routing** — FR-7.3,
       §7.3, S-MEMO: policy triggers (new dependency, public API/schema
       change, security posture, spend) enforced at the existing gate layer —

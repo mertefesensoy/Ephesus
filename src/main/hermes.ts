@@ -6,7 +6,8 @@ import {
   CLOSING_ENDPOINT,
   HERMES_SENDER,
   LEDGER_ENDPOINT,
-  LIBRARY_ENDPOINT
+  LIBRARY_ENDPOINT,
+  ODEON_ENDPOINT
 } from '../shared/reserved'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
@@ -105,6 +106,18 @@ export interface HermesOptions {
    * things — the ledger's prompts are `prompts/hermes/`, the Library's are
    * `prompts/library/` (invariant §8 either way).
    */
+  /**
+   * The Odeon's filing endpoint (ADR-0008, FR-7.2). Same shape as the
+   * Library's, injected for the same reason: the router carries the message,
+   * the endpoint owns the archive, and their words live in different prompt
+   * directories (`prompts/odeon/` here — invariant §8 either way).
+   */
+  odeon?(message: Message): {
+    readonly ok: boolean
+    readonly reasons?: readonly string[]
+    readonly subject: string
+    readonly body: string
+  }
   library?(message: Message): {
     readonly ok: boolean
     readonly reasons?: readonly string[]
@@ -324,6 +337,27 @@ export class Hermes {
   }
 
   /**
+   * Hands an artifact filing to the Odeon and answers its author (ADR-0008,
+   * FR-7.2). Same contract as the other two endpoints: `propose` obligates a
+   * reply, and a refusal carries every reason so the next filing can be right.
+   */
+  private submitToOdeon(proposal: Message): void {
+    const outcome = this.options.odeon?.(proposal) ?? {
+      ok: false,
+      reasons: ['the odeon endpoint is not available'],
+      subject: 'odeon-unavailable',
+      body: JSON.stringify({ reasons: ['the odeon endpoint is not available'] })
+    }
+    this.replyFromHarness(
+      proposal,
+      outcome.ok ? 'agree' : 'refuse',
+      outcome.subject,
+      outcome.body,
+      ODEON_ENDPOINT
+    )
+  }
+
+  /**
    * Sends a `refuse` back to the sender and records the bounce (FR-3.4:
    * "never drop silently"). The refusal is delivered straight into the sender's
    * inbox rather than through its own outbox — the sender did not write it, and
@@ -525,6 +559,7 @@ export class Hermes {
       // was condensed when it was not.
       if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
       else if (route.endpoint === CLOSING_ENDPOINT) this.submitToClosing(parsed.message)
+      else if (route.endpoint === ODEON_ENDPOINT) this.submitToOdeon(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }

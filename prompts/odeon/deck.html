@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      /* Palette copied from UI-DESIGN §2; a deck is a single self-contained
+         file (ADR-0008) and cannot import the app's tokens. */
+      :root {
+        --parchment-100: #f7f2e4;
+        --marble-100: #f4ede0;
+        --marble-200: #e7dcc6;
+        --ink-900: #221a14;
+        --ink-700: #4a3b2c;
+        --ink-500: #7a6a55;
+        --ink-300: #b3a68e;
+        --aegean: #2e6f8e;
+        --gold: #d9a441;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        background: var(--parchment-100);
+        color: var(--ink-900);
+        font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', monospace;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      header {
+        border-bottom: 2px solid var(--ink-900);
+        padding-bottom: 12px;
+        margin-bottom: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        line-height: 1.3;
+      }
+      .meta {
+        color: var(--ink-700);
+        font-size: 12px;
+      }
+      .meta span + span::before {
+        content: ' · ';
+        color: var(--ink-300);
+      }
+      section {
+        background: var(--marble-100);
+        border: 1px solid var(--ink-500);
+        border-left: 4px solid var(--aegean);
+        padding: 16px 20px;
+        margin-bottom: 16px;
+      }
+      section.evidence {
+        border-left-color: var(--gold);
+        background: var(--marble-200);
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-700);
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: inherit;
+      }
+      footer {
+        margin-top: 24px;
+        padding-top: 12px;
+        border-top: 1px solid var(--ink-300);
+        color: var(--ink-500);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{title}}</h1>
+      <p class="meta">
+        <span>task {{taskId}}</span><span>{{author}}</span><span>{{generatedAt}}</span>
+      </p>
+    </header>
+
+    <section>
+      <h2>Goal</h2>
+      <pre>{{goal}}</pre>
+    </section>
+
+    <section>
+      <h2>What was built</h2>
+      <pre>{{built}}</pre>
+    </section>
+
+    <section>
+      <h2>Decisions</h2>
+      <pre>{{decisions}}</pre>
+    </section>
+
+    <section>
+      <h2>Trade-offs</h2>
+      <pre>{{tradeOffs}}</pre>
+    </section>
+
+    <section class="evidence">
+      <h2>Evidence</h2>
+      <pre>{{evidence}}</pre>
+    </section>
+
+    <section>
+      <h2>Open questions</h2>
+      <pre>{{openQuestions}}</pre>
+    </section>
+
+    <footer>
+      Archived immutably in the Odeon (ADR-0008, FR-7.2). Evidence is embedded, never linked to
+      mutable state.
+    </footer>
+  </body>
+</html>

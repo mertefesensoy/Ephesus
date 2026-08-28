@@ -7,6 +7,7 @@ import {
   pendingTasksFor,
   returnTasksOf,
   stallTask,
+  withDeck,
   withGate,
   type AppliedOp
 } from '../shared/ledger'
@@ -164,6 +165,23 @@ export class LedgerEndpoint {
    */
   boundTaskFor(agentId: string): string | null {
     return findBoundTask(this.tasks(), agentId)
+  }
+
+  /**
+   * Records an archived deck against its task (FR-7.2).
+   *
+   * The Odeon wrote the artifact; this makes the ledger agree, which is what
+   * `canCloseTask` reads. Splitting it this way keeps `tasks.json` behind one
+   * writer — the Odeon never edits the ledger, it asks.
+   */
+  noteDeck(taskId: string, deckRef: string): void {
+    const before = this.tasks()
+    const { ledger, recorded } = withDeck(before, taskId, deckRef, this.now().toISOString())
+    if (!recorded) return
+    this.options.store.writeTasks(ledger)
+    this.options.store.commitSoon(`ledger: deck recorded for ${taskId}`)
+    this.options.onLogEvent?.({ kind: 'task', event: 'deck-recorded', taskId, deckRef })
+    this.options.onChange?.()
   }
 
   /**

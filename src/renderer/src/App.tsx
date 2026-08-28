@@ -4,6 +4,7 @@ import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
+import { DecksPanel } from './DecksPanel'
 import { LedgerPanel } from './LedgerPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { WatchPanel } from './WatchPanel'
@@ -42,7 +43,9 @@ export function App(): ReactElement {
    * offering a tab for a subsystem that has not been built would be inventing
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
-  const [tab, setTab] = useState<'floor' | 'activity' | 'ledger' | 'memory' | 'watch'>('floor')
+  const [tab, setTab] = useState<'floor' | 'activity' | 'ledger' | 'decks' | 'memory' | 'watch'>(
+    'floor'
+  )
   /**
    * Open gates, for the status strip's badge (UI-DESIGN §4). `'error'` is a
    * distinct state from `null`: a stale gate count that keeps showing "none
@@ -221,7 +224,7 @@ export function App(): ReactElement {
         </span>
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
-        {(['floor', 'activity', 'ledger', 'memory', 'watch'] as const).map((name) => (
+        {(['floor', 'activity', 'ledger', 'decks', 'memory', 'watch'] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -247,6 +250,7 @@ export function App(): ReactElement {
         {tab === 'floor' && <FloorCanvas />}
         {tab === 'activity' && <ActivityPanel />}
         {tab === 'ledger' && <LedgerPanel />}
+        {tab === 'decks' && <DecksPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}

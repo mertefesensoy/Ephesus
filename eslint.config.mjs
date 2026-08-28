@@ -28,7 +28,11 @@ const rendererPatterns = [
 ]
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'out/**', 'dist/**'] },
+  // `.claude/worktrees/` holds agent scratch checkouts of this same repo
+  // (git-ignored via .git/info/exclude). Linting them makes every rule fire
+  // twice and puts a second tsconfig root under the project — prettier
+  // already ignores `.claude/`; this keeps eslint about this checkout too.
+  { ignores: ['node_modules/**', 'out/**', 'dist/**', '.claude/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,

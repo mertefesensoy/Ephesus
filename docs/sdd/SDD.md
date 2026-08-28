@@ -316,7 +316,11 @@ agora:    registry() tasks() board() log(afterSeq, limit) memory(id)
           // (ADR-0006's ladder, visible); registerKnowledge writes the shelf
           // file and commits it through the single committer (FR-6.4, ADR-0004)
 hermes:   threads(filter) compose(msgDraft)          // human-authored mail goes via Artemis
-odeon:    briefs() decks() memos(queue) verdict(memoId, v) convene(meeting) meetingSay(text)
+odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(memoId, v)
+          convene(meeting) meetingSay(text)
+          // deck(ref) is the viewer's read of one archived artifact; comment()
+          // files an Architect review comment as mail to the orchestrator — it
+          // never writes the ledger, which is hers (FR-5.2, UC-05 step 4)
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
 harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
