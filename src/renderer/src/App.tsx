@@ -5,6 +5,7 @@ import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
+import { MeetingPanel } from './MeetingPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
 import { LedgerPanel } from './LedgerPanel'
@@ -46,7 +47,7 @@ export function App(): ReactElement {
    * UI (BUILD-PROMPT §7); the rest arrive with their milestones.
    */
   const [tab, setTab] = useState<
-    'floor' | 'activity' | 'ledger' | 'briefs' | 'decks' | 'memos' | 'memory' | 'watch'
+    'floor' | 'activity' | 'ledger' | 'briefs' | 'decks' | 'memos' | 'odeon' | 'memory' | 'watch'
   >('floor')
   /**
    * Open gates, for the status strip's badge (UI-DESIGN §4). `'error'` is a
@@ -227,7 +228,17 @@ export function App(): ReactElement {
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
         {(
-          ['floor', 'activity', 'ledger', 'briefs', 'decks', 'memos', 'memory', 'watch'] as const
+          [
+            'floor',
+            'activity',
+            'ledger',
+            'briefs',
+            'decks',
+            'memos',
+            'odeon',
+            'memory',
+            'watch'
+          ] as const
         ).map((name) => (
           <button
             key={name}
@@ -257,6 +268,7 @@ export function App(): ReactElement {
         {tab === 'briefs' && <BriefsPanel />}
         {tab === 'decks' && <DecksPanel />}
         {tab === 'memos' && <MemosPanel />}
+        {tab === 'odeon' && <MeetingPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}

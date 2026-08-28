@@ -110,6 +110,11 @@ async function rig(): Promise<Rig> {
     prompts,
     ledger: (msg) => ledger.submit(msg),
     odeon: (msg) => {
+      // Production dispatches by act: `inform` is a meeting reply, not a
+      // filing, so it must never reach the deck archive.
+      if (msg.act === 'inform') {
+        return { ok: true, subject: 'meeting', body: 'not a filing' }
+      }
       const outcome = odeon.fileDeck(msg)
       if (outcome.ok) return { ok: true, subject: 'archived', body: outcome.ref }
       return {
@@ -327,7 +332,10 @@ describe('who may file a deck, and for what', () => {
     expect(r.inbox('agent.mason').at(-1)?.body).toContain('tradeOffs')
   })
 
-  it('bounces a non-propose act at the router, before the archive sees it', async () => {
+  it('never archives a deck sent as an `inform` — that act is a meeting reply', async () => {
+    // The odeon endpoint takes `propose` (a filing) and `inform` (a meeting
+    // answer, since the floor is handed out as a `query`). An `inform` must
+    // not be able to file an artifact by carrying a deck-shaped body.
     const r = await rig()
     const taskId = await r.createTask()
     r.post(

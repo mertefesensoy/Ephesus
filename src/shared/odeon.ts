@@ -54,6 +54,37 @@ export type MemoDecided =
   | { readonly ok: true; readonly gateVerdict: string }
   | { readonly ok: false; readonly reason: string }
 
+/** The live meeting as the panel sees it (FR-7.4). */
+export interface MeetingView {
+  readonly id: string
+  readonly agenda: string
+  readonly attendees: readonly string[]
+  /** Who may speak now — the one thing the driver owns. */
+  readonly floor: string | null
+  readonly transcript: readonly { from: string; text: string; at: string }[]
+  /** Said early, waiting for the floor. Shown, so nothing looks lost. */
+  readonly held: readonly { from: string; text: string; at: string }[]
+  readonly status: 'open' | 'closed'
+}
+
+/** One action item a meeting produced. */
+export interface MeetingAction {
+  readonly title: string
+  readonly assignee: string
+  readonly spec: string
+}
+
+export type ConveneOutcome =
+  { readonly ok: true; readonly id: string } | { readonly ok: false; readonly reason: string }
+
+export type MeetingSaid = {
+  readonly kind: 'accepted' | 'held' | 'refused'
+  readonly reason?: string
+}
+
+export type MeetingClosed =
+  { readonly ok: true; readonly ref: string } | { readonly ok: false; readonly reason: string }
+
 /** One archived brief, as the Briefs tab lists them. */
 export interface BriefRecord {
   readonly ref: string

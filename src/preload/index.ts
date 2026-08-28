@@ -26,6 +26,10 @@ import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type {
   BriefRecord,
+  ConveneOutcome,
+  MeetingClosed,
+  MeetingSaid,
+  MeetingView,
   DeckCommentOutcome,
   DeckRecord,
   MemoDecided,
@@ -71,6 +75,16 @@ const eph: EphApi = {
     state: () => ipcRenderer.invoke(IpcChannels.hooksState) as Promise<HooksState>
   },
   odeon: {
+    convene: (attendees, agenda) =>
+      ipcRenderer.invoke(IpcChannels.odeonConvene, {
+        attendees,
+        agenda
+      }) as Promise<ConveneOutcome>,
+    meeting: () => ipcRenderer.invoke(IpcChannels.odeonMeeting) as Promise<MeetingView | null>,
+    meetingSay: (text, to) =>
+      ipcRenderer.invoke(IpcChannels.odeonMeetingSay, { text, to }) as Promise<MeetingSaid>,
+    meetingClose: (actions) =>
+      ipcRenderer.invoke(IpcChannels.odeonMeetingClose, { actions }) as Promise<MeetingClosed>,
     briefs: () => ipcRenderer.invoke(IpcChannels.odeonBriefs) as Promise<readonly BriefRecord[]>,
     decks: () => ipcRenderer.invoke(IpcChannels.odeonDecks) as Promise<readonly DeckRecord[]>,
     deck: (ref) => ipcRenderer.invoke(IpcChannels.odeonDeck, { ref }) as Promise<string | null>,

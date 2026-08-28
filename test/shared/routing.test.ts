@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT } from '../../src/shared/reserved'
+import { LEDGER_ENDPOINT, LIBRARY_ENDPOINT, ODEON_ENDPOINT } from '../../src/shared/reserved'
 import {
   BROADCAST,
   HUMAN,
@@ -291,5 +291,34 @@ describe('the library endpoint (ADR-0006 layer 3)', () => {
     )
     expect(route.kind).toBe('bounce')
     if (route.kind === 'bounce') expect(route.reason).toContain('library endpoint takes')
+  })
+})
+
+describe('the Odeon endpoint takes filings and meeting answers (ADR-0008)', () => {
+  it('routes a `propose` filing to the endpoint', () => {
+    const route = routeMessage(message({ to: ODEON_ENDPOINT, act: 'propose' }), roster)
+    expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+
+  it('routes an `inform` there too — the floor is handed out as a `query`', () => {
+    // ADR-0003's act table makes the answer to a query an `inform`, so refusing
+    // one here would leave the meeting driver unable to hear its attendees.
+    const route = routeMessage(message({ to: ODEON_ENDPOINT, act: 'inform' }), roster)
+    expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+
+  it.each(['request', 'agree', 'refuse', 'done'] as const)('bounces a %s act', (act) => {
+    const route = routeMessage(message({ to: ODEON_ENDPOINT, act }), roster)
+    expect(route.kind).toBe('bounce')
+  })
+
+  it('lets ANY agent file, unlike the ledger', () => {
+    // Accountability only the orchestrator could file is accountability nobody
+    // owes. What an agent may file FOR is the endpoint's check, not the router's.
+    const route = routeMessage(
+      message({ from: 'agent.c', to: ODEON_ENDPOINT, act: 'propose' }),
+      roster
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
   })
 })

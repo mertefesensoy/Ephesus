@@ -5,6 +5,11 @@ import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
 import type {
   BriefRecord,
+  ConveneOutcome,
+  MeetingAction,
+  MeetingClosed,
+  MeetingSaid,
+  MeetingView,
   DeckCommentOutcome,
   DeckRecord,
   MemoDecided,
@@ -63,6 +68,10 @@ export const IpcChannels = {
   odeonDeck: 'odeon:deck',
   odeonComment: 'odeon:comment',
   odeonBriefs: 'odeon:briefs',
+  odeonConvene: 'odeon:convene',
+  odeonMeeting: 'odeon:meeting',
+  odeonMeetingSay: 'odeon:meeting-say',
+  odeonMeetingClose: 'odeon:meeting-close',
   odeonMemos: 'odeon:memos',
   odeonVerdict: 'odeon:verdict',
   // SDD §5's four channels, exactly. Write-only by construction (ADR-0010):
@@ -200,6 +209,17 @@ export interface EphApi {
     state: () => Promise<HooksState>
   }
   odeon: {
+    /** Convenes a meeting: attendees and one agenda line (FR-7.4). */
+    convene: (attendees: readonly string[], agenda: string) => Promise<ConveneOutcome>
+    /** The live meeting, or null. The panel is a projection of it. */
+    meeting: () => Promise<MeetingView | null>
+    /**
+     * The Architect takes the floor (UC-07 step 3). `to` hands it on; leaving
+     * it out makes the interjection an aside that costs nobody their turn.
+     */
+    meetingSay: (text: string, to?: string) => Promise<MeetingSaid>
+    /** Closes the meeting: minutes archived, action items sent to the scribe. */
+    meetingClose: (actions: readonly MeetingAction[]) => Promise<MeetingClosed>
     /** Every archived standup brief, newest first (FR-7.1). */
     briefs: () => Promise<readonly BriefRecord[]>
     /** Every archived review deck, newest first (FR-7.2). */
