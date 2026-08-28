@@ -127,25 +127,22 @@ Within a milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-28, M5 close-out audit):** M0–M5 are COMPLETE
-> and every milestone is AUDITED at close by execution + design-conformance
-> review (verdicts in `docs/PROGRESS.md`). The M5 close-out audit re-proved all
-> six exit criteria by running them (55/55 M5 suites, 135 scenario cases,
-> ledger parser proven against the live archive) and landed five fixes — the
-> load-bearing one: the Gymnasium ledger's `renderRow` dropped the Measured
-> column, so every rewrite erased measured outcomes (R2 mechanically false);
-> `GymRow.measured` + round-trip regressions close it. The Stoa's machinery is
-> designed and its first cycle already ran during M5 (RB-001 → GYM-002/003,
-> approved and landed): ADR-0017–0020 are accepted, FR-13/FR-14 are in the
-> SRS, and `docs/stoa/` + `/research` + `/improve` are live build-phase tools.
-> **Resume at M5b.1.** The detailed M5b package plan (M5b.1–M5b.6: docs per
-> package, tests owed, risks) is in `docs/PROGRESS.md` — read it before
-> coding. M5b.1 is the watchlist + `stoa.ts` core; M5b.5 is the floor-art
-> intake — the Architect HAS purchased LimeZu Modern Interiors v41.4 + Modern
-> Office Revamped (2026-08-28): 16×16 sheets go in the gitignored drop, tile
-> maps are authored per pack, Kenney staging retires, ATTRIBUTION.md carries
-> the credit; the sheets never enter the repo. Minor choices already made are
-> in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> **Build state (updated 2026-08-28, M5b close):** M0–M5 and **M5b are
+> COMPLETE**, every milestone audited at close by execution (verdicts in
+> `docs/PROGRESS.md`). M5b built the Stoa and company modes: the watchlist and
+> reading desk, the read-only secret-free researcher plan, brief validation
+> that refuses an uncited finding before a human sees it, `directed`/
+> `improving` with SRS §6.9's proof gate, the brief→proposal citation link, and
+> the floor's licensed art. S-STOA and S-MODE are green in CI and the exit demo
+> ran a real cycle through the app — a URL registered on the desk, RB-002
+> archived with its citations and the source's own instruction REPORTED not
+> obeyed, and GYM-006 in the Architect's queue citing it (run 33192290049).
+> **Resume at M6 — the Herald.** Its package list is derived at milestone start
+> (BUILD-PROMPT §5); the carried items are in `docs/PROGRESS.md` under M6.
+> Four defects were found by RUNNING the thing during M5b, none by the unit
+> suite: read the M5b exit review before assuming a green suite means a working
+> seam. Minor choices already made are in `docs/DECISIONS-LOG.md`; do not
+> re-litigate them silently.
 > Standing Architect directives already folded into the docs: Artemis ranks,
 > the Architect verdicts (ADR-0015 R1 — everywhere, the Stoa included);
 > company mode `improving` is proof-gated (SRS §6.9) and Architect-only;
@@ -153,10 +150,12 @@ it is how the next session knows where to resume).
 > codex/gemini stay `pty-heuristic` with hook wiring owed to a local
 > trust-persisting session; the `memory`, `stoa` and `shutdown` log kinds are
 > in SDD §4.3; MemPalace stays an optional external on the visible ladder.
-> Due 2026-09-11 (book in the M5b exit review if unmeasured): the
-> GYM-002/003/004 metric sweep + GYM-003's live-quit evidence run.
+> Due 2026-09-11 (did NOT fall inside the M5b run — carried): the
+> GYM-002/003/004 metric sweep + GYM-003's live-quit evidence run. GYM-001's
+> own check is due 2026-09-25.
 > Owed to local sessions (recorded, never faked): the Memory panel screenshot;
-> codex/gemini hook wiring post-trust; a real-engine respawn demo.
+> codex/gemini hook wiring post-trust; a real-engine respawn demo; E-STOA's
+> LLM-judged half; a study that records its own pin from a real checkout.
 > Dogfooding is ON (since M3 exit): Ephesus agents help build Ephesus.
 
 ### M0 packages (do these first)

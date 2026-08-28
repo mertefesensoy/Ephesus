@@ -2980,8 +2980,9 @@ Every exit criterion verified **by execution**, not by inspection.
 | E-STOA recorded | 15/15 — the rubric's own discrimination test, over `test/fixtures/stoa-source/` |
 | One real research cycle through the app | the three `docs/demo/m5b-cycle-*.png` captures + the archived `RB-002` + `GYM-006` on the ledger citing it |
 | PROGRESS + docs synced | this file, DECISIONS-LOG, SDD §2/§4.7/§9, ATTRIBUTION, and `docs/implementations/2026-08-28-m5b-stoa-and-modes.md` |
+| The INTEGRATED stack green in CI | run **33192290049** on `feature/m5b-6-suites-exit` — all six packages plus the drop-guard fix, on ubuntu |
 
-**Three defects found by running the thing, all fixed in-milestone:**
+**Four defects found by running the thing, all fixed in-milestone:**
 
 1. `Gymnasium.append()` deleted everything below its table (M5b.3) — FR-14.5's
    mode section would have vanished at the next proposal.
@@ -2993,7 +2994,13 @@ Every exit criterion verified **by execution**, not by inspection.
    company that inherited a build-phase archive. Every unit test passed because
    each synthesised the log it wanted.
 
-All three are the seam-blindness class the M3, M4 and M5 audits each found a
+4. The drop-validation block guarded every check on "a map exists" (M5b.6) —
+   committing the maps meant CI had maps and, correctly, no sheets, so the two
+   checks that open a PNG failed on ubuntu while passing locally. Found by CI
+   on the push, fixed, and verified both ways: 33 cases with the sheets moved
+   aside, 35 with them present.
+
+The first three are the seam-blindness class the M3, M4 and M5 audits each found a
 different way: correct halves that only disagree when the running system puts
 them side by side. The M5b answer was the same one that worked before — run the
 demo, and believe the demo over the suite.
