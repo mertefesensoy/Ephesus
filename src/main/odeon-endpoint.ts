@@ -188,19 +188,43 @@ export function wireOdeonEndpoint(deps: OdeonEndpointDeps): (message: Message) =
       decidedBy: may.countersignature.by
     })
     deps.onQueueChanged?.()
+    // Invariant §8: the reply is read by an LLM, so the words come from
+    // prompts/odeon/ like every sibling path (M5 close-out audit, finding 3).
+    const words = deps.prompts
+    if (words === null) {
+      return {
+        ok: true,
+        subject: 'odeon',
+        body: JSON.stringify({ memoId: parsed.filing.memoId, verdict: parsed.filing.verdict })
+      }
+    }
+    const vars = {
+      memoId: parsed.filing.memoId,
+      verdict: parsed.filing.verdict,
+      authority: may.countersignature.under
+    }
     return {
       ok: true,
-      subject: `memo ${parsed.filing.memoId}: ${parsed.filing.verdict}`,
-      body: `Recorded, countersigned under ${may.countersignature.under}.`
+      subject: words
+        .render(path.join('odeon', 'verdict-recorded-subject.md'), vars)
+        .trim()
+        .slice(0, 200),
+      body: words.render(path.join('odeon', 'verdict-recorded.md'), vars).trim()
     }
   }
 
   function refuseVerdict(reasons: readonly string[]): EndpointAnswer {
+    const words = deps.prompts
+    if (words === null) {
+      return { ok: false, reasons, subject: 'odeon', body: JSON.stringify({ reasons }) }
+    }
     return {
       ok: false,
       reasons,
-      subject: 'odeon: verdict not recorded',
-      body: JSON.stringify({ reasons })
+      subject: words.read(path.join('odeon', 'verdict-refuse-subject.md')).trim().slice(0, 200),
+      body: words
+        .render(path.join('odeon', 'verdict-refuse.md'), { reasons: bullets(reasons) })
+        .trim()
     }
   }
 

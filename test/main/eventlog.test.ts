@@ -25,7 +25,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty-two documented kinds', () => {
+  it('carries the twenty-four documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -42,6 +42,9 @@ describe('log line format (SDD §4.3)', () => {
       'meeting',
       'breaker',
       'budget',
+      // SDD §4.3 has listed `memory` since the M4 close (Architect-ratified);
+      // the code list omitted it until the M5 close-out audit (finding 11).
+      'memory',
       // Added in M3.7: FR-5.5 requires everything Artemis decides under
       // delegated authority to be auditable, and no existing kind carried it.
       'orchestrator',
@@ -49,6 +52,9 @@ describe('log line format (SDD §4.3)', () => {
       'secret-rotated',
       'profile',
       'gym',
+      // The Stoa's research cycle (SDD §7.7) — listed at the M5 close-out so
+      // M5b.2's first emitter finds its kind documented, not invented.
+      'stoa',
       // Added by GYM-003: closing time's begin / ack / complete (SDD §4.3).
       'shutdown',
       'error'

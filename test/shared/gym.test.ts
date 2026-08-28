@@ -53,6 +53,7 @@ function row(over: Partial<GymRow> = {}): GymRow {
     proposedAt: '2026-08-28T10:00:00.000Z',
     decidedBy: null,
     decidedAt: null,
+    measured: null,
     outcome: null,
     ...over
   }
@@ -256,6 +257,26 @@ describe('the seeded ledger is read, links and all (merge regression)', () => {
     )[0]
     expect(row).toBeDefined()
     expect(renderRow({ ...row!, status: 'approved' })).toContain('[GYM-002](./proposals/x.md)')
+  })
+
+  it('emits every column the header names — Measured and Outcome survive a rewrite', () => {
+    // M5 close-out audit, finding 1: renderRow wrote SEVEN cells under the
+    // eight-column header, so any rewrite silently erased every Measured cell
+    // and misfiled Outcome under Measured — ADR-0015 R2 ("every measured
+    // outcome is a permanent ledger row") was mechanically false. This is the
+    // round-trip the owed R2 tests never asserted (finding 10).
+    const seeded = parseLedger(
+      '| [GYM-002](./proposals/x.md) | X | landed | metric | 2026-08-28 | 2026-08-28 (Architect) | due 2026-09-11 | |'
+    )[0]
+    expect(seeded).toBeDefined()
+    expect(seeded!.measured).toBe('due 2026-09-11')
+
+    const rewritten = renderRow({ ...seeded!, status: 'validated', outcome: 'metric met' })
+    // '', eight data cells, '' — one per header column, none dropped.
+    expect(rewritten.split('|')).toHaveLength(10)
+    const back = parseLedger(rewritten)[0]
+    expect(back?.measured).toBe('due 2026-09-11')
+    expect(back?.outcome).toBe('metric met')
   })
 
   it('still reads a bare id', () => {

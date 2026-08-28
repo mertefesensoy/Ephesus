@@ -379,4 +379,16 @@ describe('the brief reports the Gymnasium slice (FR-12.5, ADR-0015 R3)', () => {
   it('says nothing about a Gymnasium that is not running', () => {
     expect(compileFacts(EMPTY).some((fact) => fact.refs.includes('gym:slice'))).toBe(false)
   })
+
+  it('says the spend is unattributed when the figure is missing, never zero', () => {
+    // Finding 2 of the M5 close-out audit: a constant 0 narrated as data is
+    // the invisible-degradation class invariant §7 forbids.
+    const facts = compileFacts({
+      ...EMPTY,
+      gymSlice: { spentTokens: null, tokensPerWeek: 200_000, open: 1 }
+    })
+    const slice = facts.find((fact) => fact.refs.includes('gym:slice'))
+    expect(slice?.what).toContain('not yet attributed')
+    expect(slice?.what).not.toContain('spent 0')
+  })
 })
