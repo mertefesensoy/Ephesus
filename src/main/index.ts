@@ -28,7 +28,10 @@ import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
+import { stoaCadenceTick } from './stoa-cadence'
 import { checkIntake, checkStudiable } from '../shared/stoa'
+import { isImprovementRole } from '../shared/mode'
+import type { SourceView } from '../shared/stoa-view'
 import { wireOdeonEndpoint } from './odeon-endpoint'
 import { OrgLayer, RETRO_EVERY_MS } from './org'
 import { orgChart as orgChartOf } from '../shared/org'
@@ -1000,9 +1003,9 @@ async function boot(): Promise<void> {
    * that never misbehaved.
    */
   const isImprovementWork = (agentId: string): boolean => {
-    // `agents` is a record keyed by id, not a list.
-    const name = (agora?.registry().agents[agentId]?.role ?? '').toLowerCase()
-    return name.includes('research') || name.includes('improv')
+    // `agents` is a record keyed by id, not a list. The role test itself is
+    // shared and exact (isImprovementRole — M5b close-out audit, finding 12).
+    return isImprovementRole(agora?.registry().agents[agentId]?.role ?? '')
   }
 
   // The company mode (ADR-0018, FR-14). The switch that decides whether the
@@ -1045,22 +1048,14 @@ async function boot(): Promise<void> {
     id: 'stoa-cadence',
     everyMs: STOA_EVERY_MS,
     enabled: () => modes?.mode() === 'improving',
+    // The SHIPPED tick (stoa-cadence.ts) — the suites exercise the same body
+    // this wiring runs (M5b close-out audit, finding 5).
     run: () => {
-      const next = stoa?.sources().find((entry) => entry.pin !== null)
-      if (next === undefined) {
-        agora?.appendLog({ kind: 'stoa', event: 'cadence-idle', because: 'no studiable source' })
-        return
-      }
-      const planned = stoa?.plan(next.id)
-      agora?.appendLog({
-        kind: 'stoa',
-        event: 'cadence-fired',
-        sourceId: next.id,
-        // FR-14.1: a record produced by autonomous initiative carries the mode
-        // it ran under, so a later reader can tell what the company did
-        // because it was asked from what it did on its own.
-        mode: modes?.mode() ?? 'directed',
-        planned: planned?.ok ?? false
+      stoaCadenceTick({
+        sources: () => stoa?.sources() ?? [],
+        plan: (sourceId) => stoa?.plan(sourceId) ?? { ok: false },
+        mode: () => modes?.mode() ?? 'directed',
+        appendLog: (draft) => agora?.appendLog(draft)
       })
     }
   })
@@ -1501,23 +1496,38 @@ async function boot(): Promise<void> {
       },
     stoaWatchlist: () => {
       const list = stoa?.watchlist() ?? { sources: [], retired: [] }
+      // Field-picked, not spread: the response is the VIEW type and nothing
+      // more — a spread leaked `registeredBy`, a field the projection does not
+      // declare (M5b close-out audit, finding 13; the projection and the type
+      // must agree even when the leak is harmless).
+      const view = (
+        entry: (typeof list.sources)[number],
+        over: { retired: boolean; blocked: string | null }
+      ): SourceView => ({
+        id: entry.id,
+        url: entry.url,
+        kind: entry.kind,
+        tags: [...entry.tags],
+        license: entry.license,
+        pin: entry.pin,
+        registeredAt: entry.registeredAt,
+        notes: entry.notes,
+        retired: over.retired,
+        blocked: over.blocked,
+        intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
+      })
       // Retired rows are listed too, marked — the desk shows a struck-through
       // row rather than a hole where a source used to be (FR-13.1's habit).
       return [
-        ...list.sources.map((entry) => ({
-          ...entry,
-          tags: [...entry.tags],
-          retired: false,
-          blocked: checkStudiable(entry).allowed ? null : checkStudiable(entry).because,
-          intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
-        })),
-        ...list.retired.map((entry) => ({
-          ...entry,
-          tags: [...entry.tags],
-          retired: true,
-          blocked: 'retired from the watchlist',
-          intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
-        }))
+        ...list.sources.map((entry) =>
+          view(entry, {
+            retired: false,
+            blocked: checkStudiable(entry).allowed ? null : checkStudiable(entry).because
+          })
+        ),
+        ...list.retired.map((entry) =>
+          view(entry, { retired: true, blocked: 'retired from the watchlist' })
+        )
       ]
     },
     // FR-13.1 / R1: `architect` is supplied HERE, by main, because a call on

@@ -134,6 +134,45 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Status
 
+**M5b complete — the learning company, on a licensed floor.** The Stoa is in
+the product: repositories the Architect registers by URL on the **reading
+desk** (tagged, licensed, pinned), a researcher plan that is read-only and
+secret-free *by construction*, briefs whose every finding must cite a path at
+the pinned commit or die before a human sees them, and proposals that must
+cite the brief they descend from. Company modes gate autonomy: `improving`
+cannot be switched on until the §6.9 proof gate reads its evidence off the
+ledger, the mode is visible everywhere, and a rung-3 breaker stop on
+improvement work reverts it. The floor now paints from the purchased LimeZu
+packs — [see it](./docs/demo/m5b-floor-limezu.png) — with the sheets kept out
+of the repo per licence and the credit on the status strip.
+
+```
+EVIDENCE registered: src-munder-difflin pin=b91a49f license=MIT
+EVIDENCE plan: commit=b91a49f readOnly=true envGrants=[]
+EVIDENCE brief archived: RB-001 "Closing time and the hook-return…"
+EVIDENCE ledger: GYM-001 … status=proposed cites=RB-001
+```
+
+The M5b demo view is in [`docs/demo/`](./docs/demo/): the reading desk and a
+brief on screen (`m5b-stoa-desk` · `m5b-stoa-brief`), the three cycle captures
+(`m5b-cycle-1/2/3`), the LimeZu floor, and — from the close-out audit — the
+research cycle re-run against a **real, remotely-verifiable pin**
+([`m5b-cycle-real-source.txt`](./docs/demo/m5b-cycle-real-source.txt)): the
+audit caught the original demo citing a commit that existed in no repository,
+the record was amended, and the chain re-proven end to end. Four in-milestone
+defects were found by running the demo; the audit added five more fixes, every
+one with a named regression test. Evidence trail in
+[`docs/PROGRESS.md`](./docs/PROGRESS.md); full record in
+[the M5b record](./docs/implementations/2026-08-28-m5b-stoa-and-modes.md).
+
+Next: **M6 — the floor's face + the Herald** (citizens at the MD-grade §5.1
+spec, stations that are facts, act-colored envelope flights — then the spoken
+company). The art spec landed as UI-DESIGN v2 at the M5b close.
+
+---
+
+*The previous milestone's story:*
+
 **M5 complete — the accountable company.** A `review:deck` task is
 *mechanically unclosable* until its deck is archived; a new dependency is held
 at the choke point until a memo exists and is verdict-ed — Artemis decides
@@ -169,10 +208,6 @@ two-agent audit (execution + design conformance); it re-proved every exit
 criterion and caught one real ledger-column defect, fixed with regression
 tests. Evidence trail in [`docs/PROGRESS.md`](./docs/PROGRESS.md); full
 record in [the M5 record](./docs/implementations/2026-08-28-m5-accountable-company.md).
-
-Next: **M5b — the Stoa + company modes** (the learning company: the reading
-desk, governed research, the proof gate before standing autonomy — and the
-purchased LimeZu floor art lands). Then M6, the Herald.
 
 ## License & lineage
 

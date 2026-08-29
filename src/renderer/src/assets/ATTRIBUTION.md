@@ -40,11 +40,14 @@ this is a quality decision rather than a licence one — §7's bar is the LimeZu
 line, and keeping two half-mapped packs around invites painting one pack's
 frames from the other's sheet.
 
-## Tileset drop (gitignored)
+## Tileset drop
 
 ```
-src/renderer/src/assets/tileset/*.png          the sheet(s)
-src/renderer/src/assets/tileset/*.tiles.json   which tile paints what
+src/renderer/src/assets/tileset/*.png          the sheet(s) — GITIGNORED (the
+                                               licence forbids redistributing them)
+src/renderer/src/assets/tileset/*.tiles.json   which tile paints what — COMMITTED
+                                               (our own work; a fresh clone needs
+                                               the maps to adopt a restored sheet)
 ```
 
 Both are discovered at build time by `src/renderer/src/floor/tileset.ts` — no

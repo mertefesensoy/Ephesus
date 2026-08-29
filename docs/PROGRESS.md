@@ -2835,7 +2835,9 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       (`directed`/`improving`); `gym.mode()/setMode(m)` architect-verified in
       the handler; first-enable proof-gate check reading ONLY the gym ledger +
       log (SRS §6.9 numbers verbatim); scheduler consults the mode before the
-      Stoa/Gymnasium cadences fire; mode tag on autonomous records (FR-14.1);
+      ~~Stoa/Gymnasium cadences~~ Stoa cadence *(corrected at the close-out
+      audit: only a Stoa cadence trigger exists — the gym cadence is M7's per
+      IMPLEMENTATION)* fires; mode tag on autonomous records (FR-14.1);
       status-strip mode chip; breaker rung-3 auto-revert (FR-14.5).
       *Docs: ADR-0018 (normative), FR-14, SDD §9. Tests: S-MODE per
       TEST-STRATEGY §3 — premature enable refused listing missing evidence;
@@ -2919,7 +2921,10 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       the do-not-use list (free tier, RPG-Maker build, and the character
       generator that is never run — rule 3). `*.tiles.json` is now committed
       while the sheets stay ignored, so the restore path is reproducible.
-      `test/renderer/tileset.test.ts` 36/36, including a new block that
+      `test/renderer/tileset.test.ts` ~~36/36~~ 33-or-35 depending on whether
+      the local drop holds the sheets *(corrected at the close-out audit — the
+      exit review's own drop-guard numbers, re-reproduced there)*, including a
+      new block that
       validates the REAL drop when present — frame bounds, columns, integer
       scale, sheet existence — and is inert in CI where the drop is empty.
       Local suite 2136 passed with exactly the 9 documented Windows
@@ -2978,7 +2983,7 @@ Every exit criterion verified **by execution**, not by inspection.
 | S-STOA green in CI | run 33186729216 (ubuntu), 18 cases; 20 after M5b.4 added the brief-citing pair |
 | S-MODE green in CI | run 33188310155 (ubuntu), 13 cases |
 | E-STOA recorded | 15/15 — the rubric's own discrimination test, over `test/fixtures/stoa-source/` |
-| One real research cycle through the app | the three `docs/demo/m5b-cycle-*.png` captures + the archived `RB-002` + `GYM-006` on the ledger citing it |
+| One real research cycle through the app | ~~the three `docs/demo/m5b-cycle-*.png` captures + the archived `RB-002` + `GYM-006` on the ledger citing it~~ **AMENDED at the close-out audit:** the original demo was machinery-real but **source-fake beyond its disclosed stand-in** — pin `9f3c1de` does not exist in the repository the watchlist named, and the GYM-006↔RB-002 pairing survived in no artifact ("on the ledger" was inaccurate: it was in the queue of an ephemeral home). The row is satisfied by the close-out re-run against a REAL pin instead: [`m5b-cycle-real-source.txt`](demo/m5b-cycle-real-source.txt) — munder-difflin @ `b91a49f`, verified remotely (`gh api`) and locally in-run, register → plan → brief → citing proposal through the shipped path, the pairing in the log |
 | PROGRESS + docs synced | this file, DECISIONS-LOG, SDD §2/§4.7/§9, ATTRIBUTION, and `docs/implementations/2026-08-28-m5b-stoa-and-modes.md` |
 | The INTEGRATED stack green in CI | run **33192290049** on `feature/m5b-6-suites-exit` — all six packages plus the drop-guard fix, on ubuntu |
 
@@ -3020,13 +3025,150 @@ implementation — the desk's pin field is the Architect's route, not the study'
 ledger checks + GYM-003's live-quit evidence run) falls inside this
 milestone's window — book it in the exit review if unmeasured by then.
 
-## M6 — The Herald
+### M5b close-out audit (2026-08-29) — verdict: DONE, with the record amended and audit fixes landed
 
-- [ ] Package list derived at milestone start
-- [ ] M6 exit — SRS §6.2 + §6.5 live; S-FAILOVER scripted pass
-      *(Carried from M5: the Herald speaks the brief; `odeon:queue` badge;
-      gym metric-check scheduling + gym-spend attribution ride the M6
-      scheduler work — see the M5 exit review and close-out audit.)*
+Independent two-agent audit at milestone close, the M0–M5 pattern:
+
+- **spec-verifier** (verification by execution): the machinery half VERIFIED —
+  gate green (attribution over 121 commits) · S-STOA 20 / S-MODE 13 / E-STOA 15
+  exactly as recorded · 194 M5b cases green together · all full-suite failures
+  classified into the recorded environmental set, every extra green in
+  isolation · three of four in-milestone defect regressions named and passing ·
+  intake clean (sheets ignored, maps committed, ATTRIBUTION complete) · CI
+  green on `ed46cad`. **But the "one real research cycle" exit row was
+  NOT verified as written:** the demo's pin `9f3c1de` exists in no repository
+  the watchlist named, the cited path is another repo's layout, and the
+  GYM-006↔RB-002 pairing survived in no artifact. The disclosed stand-in
+  covered the engine, not the source.
+- **doc-guardian** (design conformance): **no invariant violations** — R1/R2/R3
+  enforced mechanically, §6.9 verbatim and pinned, atomic/append-only/tokens
+  clean, art intake fully conformant, characters procedural — plus five
+  deviations and a tail of contained/nit findings, listed below.
+
+**The record is amended, and the row re-proven** (evidence integrity is the
+audit's first duty to itself): the exit-review row now says what the original
+demo was, and the cycle was re-run at close against a REAL source — munder-
+difflin @ `b91a49f`, verified on GitHub and against a local clone inside the
+run — through the same shipped path, captured to
+[`docs/demo/m5b-cycle-real-source.txt`](demo/m5b-cycle-real-source.txt).
+
+**Findings FIXED at close (regression tests named; gate after fixes: typecheck
+PASS · lint PASS · invariants PASS · touched suites 113/113):**
+
+1. **`Stoa.brief(id)` skipped first-run seeding** — a fresh home whose first
+   Stoa-touching action was a proposal citing a seeded brief false-refused it
+   (the M5 audit's half-seeded-seam class, one method over). Seeds like
+   `briefs()` now; first-call regression test.
+2. **The cadence trigger's body was exercised by nothing** — S-MODE and the
+   scheduler suite each rebuilt it inline (the rig's own copy-of-the-wiring
+   defect class). Extracted to `stoa-cadence.ts`; the suites and `index.ts`
+   run the same shipped tick, which also logs `sourceId`/`planned` asserted
+   end-to-end.
+3. **The FR-14.5 role heuristic was an untested substring test in `index.ts`**
+   — `includes('improv')` would have reverted the mode over a stop on a
+   mission hire named "process-improver-docs". Now `isImprovementRole` in
+   `shared/mode.ts`: exact roles from ADR-0019's vocabulary, table-tested with
+   the audit's own counter-example.
+4. **`stoaWatchlist` leaked `registeredBy` past the view type** — field-picked
+   projection now; the response is the `SourceView` and nothing more.
+5. **SDD drift corrected:** §7.7's proof-gate location (modes.ts, not
+   watch/gates.ts) + the cadence-heartbeat build-state note (an autonomous
+   no-op must not read as work); §1.1 gains the `modes.ts` row;
+   ATTRIBUTION's drop section no longer lists the committed maps as
+   gitignored; M5b.3's "cadences" plural and M5b.5's "36/36" corrected in
+   place above.
+
+**Recorded, not fixed (DECISIONS-LOG, with reasons):** FR-14.1's mode tag
+rides one record type until M7 gives it more autonomous acts to tag; the §6.9
+`stoaSeeded` count reads log events only (a seeded archive under-counts — the
+strict direction, waitable); Stoa spend attribution owed beside the gym-spend
+deferral (M6.7); no path advances a pin yet ("Architect advances it" needs a
+`stoa:pin` channel or the study-recorded pin — both on the owed list);
+`prompts/stoa/rank.md`/`study-refused.md` are loaded by nothing until the
+Artemis-ranking leg lands; the plan's `question` line is serialization-plus-
+connective (invariant-§8-adjacent); the reading-desk pin fix has no renderer
+regression test (no DOM harness exists — owed with M6.1's renderer work).
+
+## M6 — The floor's face + the Herald (plan drafted 2026-08-29 at M5b close)
+
+Derived per BUILD-PROMPT §5 from IMPLEMENTATION M6 + ADR-0007 + SDD §8 +
+VOICE-DESIGN + UI-DESIGN v2 (§5.1–§5.7, §9 — landed at this close-out) +
+TEST-STRATEGY §3/§4/§5. **Art first** (Architect decision 2026-08-29): the
+company's face reaches the licensed-art bar before the voice lands. Execute in
+order; every package tests against the fake engine per-PR.
+
+- [ ] **M6.1 Citizens v2 — the MD-grade procedural sprite** — implement
+      UI-DESIGN §5.1 (anatomy, 8 drawn directions, 4-frame cycles, stepped
+      ±1 px bob phased to the 250 ms tile walk) and §5.2 (status overlays as
+      pure projections of the SDD §6 avatar states). Role silhouettes per the
+      §5.1 table; `terracotta` stays Artemis-reserved. Characters remain
+      procedural — ATTRIBUTION rule 3 untouched (Architect decision
+      2026-08-29, the licensed-character alternative offered and declined).
+      Owed from the M5b audit: the reading desk gets its first renderer-side
+      regression coverage with whatever DOM/harness this package establishes.
+      *Docs: UI-DESIGN §5.1/§5.2, SDD §6. Tests: state→overlay table total
+      over every avatar state; ≤5 colors per direction/frame/role; silhouette
+      distinctness; determinism; bob sampled at frame boundaries only. Risk:
+      overlays are projections — none may own a timer-driven opinion.*
+- [ ] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
+      LimeZu maps (states idle/in-use/highlighted; the desk inbox-tray flag IS
+      `pendingMailCount` made visible; the Watch brazier IS an open gate; the
+      Odeon fills when a meeting gathers) + §5.7 furnishings as place
+      identity, static, riding the `*.tiles.json` maps.
+      *Docs: UI-DESIGN §5.4/§5.7, SDD §6 stations. Tests: station-state model
+      pure and event-driven; tray-flag parity with `pendingMailCount`;
+      brazier parity with open gates; map validation on the compositions.
+      Risk: a station that animates without an event-plane fact is invented
+      motion.*
+- [ ] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
+      CLASS, dropped with the 3-frame fade), §5.5 envelope flights
+      (act-colored, 400 ms stepped arc, divert turns toward the temple,
+      bounce wobbles), §5.6's three budgeted particles, §8 reduced-motion
+      parity for all of it.
+      *Docs: UI-DESIGN §5.3/§5.5/§5.6, §6 additions. Tests: pure vfx reducers;
+      the reduced-motion information-parity suite covers envelope→tray-flash
+      and walk→teleport; token↔tool-class table total. Risk: no vfx state
+      `log.jsonl` cannot reconstruct (NFR-13 spirit).*
+- [ ] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
+      (SpeechToText / TextToSpeech / DuplexVoice), `policy.ts` (PTT always;
+      barge-in ≤ 250 ms; repeat-back for destructive/spend; failover
+      healthy→degraded→cooldown).
+      *Docs: ADR-0007 (normative), SDD §8, FR-8.1/8.3. Tests: voice
+      conformance over recorded fixtures (TEST-STRATEGY §5); policy pure.
+      Risk: transcribe the ADR interface, don't extend it (the M1.1 lesson).*
+- [ ] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
+      streamed TTS; persona/phrase book as `prompts/herald/*` per VOICE-DESIGN
+      (invariant §8).
+      *Docs: ADR-0007, VOICE-DESIGN, FR-8.1/8.5. Tests: adapter conformance on
+      fixtures; the §5 tripwire keeps key reads inside herald/. Risk: keys via
+      the broker only; absent keys = visible text-only degradation.*
+- [ ] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
+      mid-session failover ≤ 3 s with the one-line notice (FR-8.2); both down
+      → text-only banner, zero non-audio loss (FR-8.6).
+      *Docs: ADR-0007, FR-8.2/8.6, SDD §7.4. Tests: scripted S-FAILOVER
+      halves; the budget on fixture clocks. Risk: failover is the POLICY's
+      decision — adapters report health, never decide.*
+- [ ] **M6.7 The spoken company + carried items** — briefings spoken from the
+      SAME archived artifact the card shows; voice approvals with repeat-back;
+      meeting narration; optional local wake word. Closes the carried items:
+      the `odeon:queue` status-strip badge; **gym metric-check scheduling**
+      (SDD §7.6's booking); **gym-spend + Stoa-spend attribution** (the
+      honest-null from the M5/M5b close-outs gains its real source) — all on
+      this package's scheduler work.
+      *Docs: FR-7.1, FR-8.4, SDD §7.2/§7.6. Tests: brief-read-not-recompiled;
+      repeat-back required for destructive/spend; metric check booked on
+      `landed`; `slice()` reports a number again with its source named. Risk:
+      the Herald narrates records — an invented sentence is the E-BRIEF-FAITH
+      failure.*
+- [ ] **M6.8 Suites + exit review** — S-FAILOVER green in CI; SRS §6.2 (spoken
+      standup ≤ 90 s, every claim traceable) and §6.5 (key pulled
+      mid-conversation → Realtime continues ≤ 3 s) demonstrated live; a floor
+      screenshot at the v2 bar beside the M5b one; **book the 2026-09-11
+      metric sweep** (GYM-002/003/004 + GYM-003's live-quit evidence — it
+      falls inside this milestone's window; GYM-001's check is due
+      2026-09-25).
+- [ ] **M6 exit review** — SRS §6.2 + §6.5 live; S-FAILOVER scripted pass; the
+      v2 floor evidence; PROGRESS + docs synced.
 
 ## M7 — The Harbor + missions
 

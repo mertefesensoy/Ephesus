@@ -435,6 +435,12 @@ export class Stoa {
 
   /** One brief's text, as archived. Null when unknown. */
   brief(id: string): string | null {
+    // Seed first, exactly as `briefs()` does. Without this, a fresh home whose
+    // FIRST Stoa-touching action was a proposal citing a seeded brief refused
+    // it — `briefExists` asked before anything had brought the build-phase
+    // archive across (M5b close-out audit, finding 2; the M5 audit's
+    // half-seeded-seam class, one method over).
+    this.watchlist()
     const dir = this.briefsDir()
     if (!existsSync(dir)) return null
     for (const name of readdirSync(dir)) {

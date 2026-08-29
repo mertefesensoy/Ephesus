@@ -65,7 +65,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning | 0012 |
 | `org.ts` | Departments, hire-template versioning, per-agent metrics, review/retro reports | — |
 | `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |
-| `stoa.ts` | Watchlist accessors (Architect-only mutation, enforced in the handler like `gym.verdict`), researcher spawn plans (read-only checkout, no secret grants), brief validation (uncited finding ⇒ rejected pre-human), brief archive, the Stoa cadence (a scheduler client, mode-gated) | 0017, 0018 |
+| `stoa.ts` | Watchlist accessors (Architect-only mutation, enforced in the handler like `gym.verdict`), researcher spawn plans (read-only checkout, no secret grants), brief validation (uncited finding ⇒ rejected pre-human), brief archive. The cadence tick itself is `stoa-cadence.ts` (a scheduler client, mode-gated — shipped body, exercised by the suites) | 0017, 0018 |
+| `modes.ts` | `CompanyModes` (ADR-0018): mode persistence through `config.json`'s atomic path, the §6.9 proof-gate check over the gym ledger + log (constants in `shared/mode.ts`), ledgered mode changes, the breaker's rung-3 revert (roles per `isImprovementRole`) | 0018 |
 | `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) with idempotent ticks — a trigger fires at most once per interval and is never re-entered while running. `reflection.ts` is its first client: it asks an agent to condense its own memory (ADR-0006 layer 3) and applies what the agent proposes back to the reserved `agent.library` endpoint — the harness never summarizes (ADR-0005) | 0006, 0005 |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
@@ -471,8 +472,15 @@ scheduler (stoa cadence — fires autonomously only in mode `improving`) ─or�
   ─► Artemis reviews + ranks candidates ─► GYM proposal(s) filed citing the brief
   ─► from here §7.6 unchanged: Artemis pre-screens, the Architect verdicts
 
+Build state (M5b, recorded at the close-out audit): the cadence half above is a
+HEARTBEAT — `stoa-cadence.ts` picks a source, builds the plan, and logs
+(`cadence-fired`, mode-tagged); the researcher-SPAWN leg that turns the plan
+into a running study is M7's, with the Recursive Improvement profile (§7.8).
+Until then, autonomous cycles produce visible records, not briefs.
+
 mode change (UC-15): architect requests `improving`
-  ─► watch/gates.ts checks the proof gate (SRS §6.9) against gym ledger + log ONLY
+  ─► modes.ts (`CompanyModes`) checks the proof gate (SRS §6.9, constants in
+     shared/mode.ts) against gym ledger + log ONLY
        ─ evidence missing ──► refusal listing exactly what is missing
        ─ met ──► mode flips · status strip + next brief state it · autonomous records
                  tagged with the mode from here on (FR-14.1)
