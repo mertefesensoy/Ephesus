@@ -3134,7 +3134,7 @@ order; every package tests against the fake engine per-PR.
       renderer-side regression, on a `react-dom/server` static-markup harness
       that adds no dependency (a jsdom upgrade for interaction coverage is a
       must-ask in the session report, not taken here).
-- [ ] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
+- [x] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
       LimeZu maps (states idle/in-use/highlighted; the desk inbox-tray flag IS
       `pendingMailCount` made visible; the Watch brazier IS an open gate; the
       Odeon fills when a meeting gathers) + §5.7 furnishings as place
@@ -3144,6 +3144,32 @@ order; every package tests against the fake engine per-PR.
       brazier parity with open gates; map validation on the compositions.
       Risk: a station that animates without an event-plane fact is invented
       motion.*
+      **Done 2026-08-29** (`feature/m6-2-stations`). `shared/stations.ts` is the
+      §5.4 state model: `stationView()` cannot return anything but `idle`
+      without also returning the `because` — the event-plane fact, in words —
+      so "no station animates on a timer alone" is enforced by the return type
+      rather than by discipline, and `stationCensus()` is the same facts as §8
+      text. The three named facts are wired to the things they are: the tray
+      flag IS `pendingMailCount` (new on `AvatarUpdate`, from ONE source in
+      main that also feeds the autonomy loop and the `avatars:list` handler);
+      the brazier IS `watch.approvals().length`; the Odeon fills one bench per
+      attendee. `floorPlan()` now claims each station's whole FOOTPRINT — the
+      Odeon was 96×64 in the document and 32×32 on the floor until this
+      package. Compositions (§5.4) and furnishings (§5.7) are optional
+      `*.tiles.json` fields validated against the catalog, so a pack swap never
+      touches code and CI validates them with no sheets present.
+      **The live floor found what the suite could not, again:** with footprints
+      landed the painter still painted per tile, so a 64×32 desk came out as
+      two desks (a row of them read as one slab) and a 2×2 station showed four
+      markers — fixed by giving `PlanCell` a `part`. *Evidence:*
+      `docs/demo/m6-2-stations.svg`, painted by the shipped painter and station
+      art with real facts injected (1 gate open → brazier lit; desks 1–3 hold
+      mail → flags up); `npm run dev` floor verified live, structures reading
+      as structures, zero console errors. *Tests:* `test/shared/stations.test.ts`
+      24 · `test/renderer/station-art.test.ts` 17 · `avatars:list` seam case in
+      `test/main/ipc-handlers.test.ts` — 188 green across the touched suites.
+      The seam case is MUTATION-CHECKED: dropping `pendingMail` from the
+      listing path fails it.
 - [ ] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
       CLASS, dropped with the 3-frame fade), §5.5 envelope flights
       (act-colored, 400 ms stepped arc, divert turns toward the temple,

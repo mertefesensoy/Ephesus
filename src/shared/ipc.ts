@@ -177,6 +177,18 @@ export const GATE_OPEN_CHANNEL = 'gate:open'
 export interface AvatarUpdate {
   readonly agentId: string
   readonly snapshot: AvatarSnapshot
+  /**
+   * Mail waiting in this agent's inbox — UI-DESIGN §5.4's desk tray flag, which
+   * IS `pendingMailCount` and not a look-alike. It rides the avatar update
+   * rather than a channel of its own because it is a fact about the same agent
+   * at the same moment: a separate channel could disagree with the snapshot,
+   * and the floor would show a raised flag on a citizen who had just consumed
+   * the mail.
+   *
+   * Deliberately NOT part of `AvatarSnapshot`: the snapshot is the SDD §6 state
+   * machine, and mail is not one of its states.
+   */
+  readonly pendingMail: number
 }
 
 /**

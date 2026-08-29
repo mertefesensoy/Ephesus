@@ -162,3 +162,114 @@ suite".
 - [SDD §6 — the avatar state machine](../sdd/SDD.md)
 - [PROGRESS — M6 plan and evidence](../PROGRESS.md)
 - [DECISIONS-LOG — 2026-08-29 M6.1 entries](../DECISIONS-LOG.md)
+
+---
+
+## M6.2 — Stations and furnishings v2 (UI-DESIGN §5.4, §5.7)
+
+### Problem / motivation
+
+§5.4 gives every station a **size** — the Odeon 96×64, the temple seat 64×64,
+a desk 64×32 — and three **states** whose rule is stated at the end of the
+section:
+
+> Every state maps to an event-plane fact; no station animates on a timer alone.
+
+Neither was true of the floor. Each station held exactly one 32×32 tile, so the
+size column was decorative; and nothing on the floor moved for a station at all,
+so the three facts §5.4 singles out — the desk's inbox tray, the Watch brazier,
+the Odeon filling — were invisible. The tray one matters most: it is the
+ADR-0013 wake watchdog made visible, and `pendingMailCount` did not reach the
+renderer at all.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/shared/stations.ts` | **New.** §5.4's state model: `stationView` / `stationViews`, `deskTray`, `stationCensus`. |
+| `src/shared/floor.ts` | `STATION_SIZES` + `stationTiles` + `stationFootprint`; `floorPlan()` claims footprints; `PlanCell` gains `part`; the Odeon anchor moves to col 16. |
+| `src/shared/tileset.ts` | Optional `compositions` (§5.4) and `furnishings` (§5.7); `validateCompositions`, `compositionFor`, `furnishingsOf`. |
+| `src/shared/ipc.ts` | `AvatarUpdate.pendingMail`. |
+| `src/main/index.ts`, `src/main/ipc.ts` | One `pendingMailFor` source feeding the autonomy loop, the push and the list handler. |
+| `src/renderer/src/floor/station-art.ts` | **New.** The marks: highlight outline, brazier flame, Odeon fill, working accent, desk tray. |
+| `src/renderer/src/floor/atlas.ts` | `compositionFrameFor` (row-major from the top-left), `furnishingFrame`. |
+| `src/renderer/src/floor/painter.ts` | `paintFurnishings`; per-cell painting now respects `part` so a structure paints as one structure. |
+| `src/renderer/src/floor/FloorCanvas.tsx` | Station layer, desk trays, gate/meeting facts, station census in the label. |
+| 3 test files | 24 + 17 cases, plus the `avatars:list` seam case. |
+
+### Implementation approach
+
+**The state model cannot invent a state.** `stationView(station, facts, nowMs)`
+returns `{ activity, frame, because }`, and `because` is the event-plane fact in
+words. Anything but `idle` requires one, so the §5.4 rule is a property of the
+return type rather than of the author's memory — a station somebody wants to
+animate decoratively has nothing to put in the field. `stationCensus()` renders
+the same values as text, which is how §8's information parity is satisfied
+without a second model to drift.
+
+Precedence is `in-use` > `highlighted` > `idle`. The two room-level facts are
+checked first, because a gate is open whether or not anyone is standing at the
+post — which is the entire point of showing it.
+
+**Footprints.** A station anchors on its `STATION_TILES` tile and extends right
+and **up**, exactly as the 32×48 citizen does, so the tile a walk targets is
+still the ground the structure stands on. `stationFootprint()` drops tiles
+outside the room, so a footprint can never claim a wall.
+
+**The map grew, not the code.** §5.4 compositions and §5.7 furnishings are
+optional fields on `*.tiles.json`. `validateCompositions` enforces two rules,
+both because the failure is otherwise silent: `frames.length === cols × rows`,
+and the footprint must equal `stationTiles(station)`. A broken entry degrades
+that station to its single frame and then to the procedural painter; it never
+throws. Both checks are map-only, so CI validates them with no sheets present —
+the M5b drop-guard rule (guard sheet-dependent checks on the sheet, not the map).
+
+### Design decisions
+
+- **`pendingMail` on `AvatarUpdate`, not on `AvatarSnapshot`.** The snapshot is
+  the SDD §6 machine and mail is not one of its states. It rides the addressed
+  wrapper so the count and the snapshot describe the same agent at the same
+  moment; a separate channel could disagree, and the floor would raise a flag on
+  a citizen who had just consumed the mail. One source in main feeds all three
+  consumers.
+- **Geometry in `floor.ts`, behaviour in `stations.ts`.** The plan needs the
+  sizes and the state model does not, so the dependency runs one way.
+- **Polling the meeting.** SDD §5's event list has a `gate:open` push but none
+  for a live meeting, so the Odeon fill polls `odeon.meeting()` at the cadence
+  the panels already use. This is the gap the `odeon:queue` badge carried item
+  names; it closes on M6.7's scheduler work rather than being papered over with
+  a new channel here.
+
+### Verification
+
+```bash
+npm run typecheck && npm run lint && node scripts/check-invariants.cjs
+npx vitest run test/shared/stations.test.ts test/renderer/ test/main/ipc-handlers.test.ts
+```
+
+188 green across the touched suites. Full suite: 2205 passed; 14 failures, all
+recorded — 9 deterministic Windows-local (agent-worktree 4, s-crash 3,
+claude-transcripts 1, cost 1) and 5 parallel-load flakes (s-closing, s-livelock
+×2, s-stoploop, s-wake), each verified green in isolation.
+
+| Mutant | Result |
+|---|---|
+| `avatars:list` drops `pendingMail` | the listing-path seam case FAILS |
+
+**Live run.** `npm run dev`, floor inspected in the browser: structures render
+as structures, no console errors. [`docs/demo/m6-2-stations.svg`](../demo/m6-2-stations.svg)
+is painted by the shipped painter and station art with facts injected — one gate
+open lights the brazier, desks 1–3 holding mail raise their flags.
+
+**The live floor caught the defect again.** With footprints landed and every
+test green, the painter still worked per tile: a 64×32 desk painted as two
+32 px desks, so a row of them read as one long slab, and a 2×2 station showed
+four gold markers instead of one. `PlanCell.part` fixed it. That is twice in
+this milestone — M6.1's citizens dissolved into the terrace, M6.2's stations
+were wallpaper — and both times every assertion passed.
+
+### Related docs
+
+- [UI-DESIGN §5.4, §5.7](../design/UI-DESIGN.md)
+- [SDD §5 IPC contract, §6 stations](../sdd/SDD.md)
+- [ADR-0013 — the autonomy loop the tray flag makes visible](../adr/)

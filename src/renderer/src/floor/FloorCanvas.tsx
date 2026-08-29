@@ -15,8 +15,19 @@ import {
   walkDurationMs
 } from '../../../shared/floor'
 import { badgeFor, floorCensus, glyphPixels, GLYPH_H, GLYPH_W } from '../../../shared/badges'
+import {
+  deskTray,
+  NO_FACTS,
+  stationCensus,
+  stationView,
+  type AvatarPresence,
+  type FloorFacts
+} from '../../../shared/stations'
+import { paintFurnishings } from './painter'
+import { stationMarks, stationOrigin, trayMarks } from './station-art'
 import { TEMPLE_SEAT, terraceSeat } from '../../../shared/seats'
 import type { AvatarUpdate } from '../../../shared/ipc'
+import { STATIONS } from '../../../shared/avatar'
 import { tokens } from '../tokens'
 import {
   CITIZEN_W,
@@ -39,6 +50,14 @@ import { steppedProgress, STEPS_PER_TILE } from './walk'
  * the snapshots stop arriving, the floor stops — it has nothing of its own to
  * animate from, which is what "never invents motion" (SDD §10) means in code.
  */
+
+/**
+ * How often the floor re-reads the live meeting. The Odeon fill is a projection
+ * of `odeon.meeting()`, which has no push channel in SDD §5's event list, so it
+ * is polled at the same cadence the panels use. M6.7's scheduler work closes
+ * this (the `odeon:queue` badge carried item).
+ */
+const MEETING_POLL_MS = 5_000
 
 /** Status colors from UI-DESIGN §2.4, one per avatar phase. */
 const PHASE_COLOR: Readonly<Record<string, number>> = {
@@ -153,6 +172,49 @@ function drawOverlay(g: Graphics, phase: string, phaseElapsedMs: number): void {
   }
 }
 
+/**
+ * The §5.4 station states, drawn. This function decides nothing: it asks
+ * `stationView` what each station is doing — which cannot answer anything but
+ * `idle` without naming the event-plane fact behind it — and then asks
+ * `stationMarks` what that looks like.
+ */
+function drawStations(g: Graphics, facts: FloorFacts, nowMs: number): void {
+  g.clear()
+  for (const station of STATIONS) {
+    // `desk` is the walk-timing anchor, not a drawn station; the drawn desks
+    // are the seats, and their trays are drawn separately.
+    if (station === 'desk') continue
+    const view = stationView(station, facts, nowMs)
+    if (view.activity === 'idle') continue
+    const origin = stationOrigin(station, STATION_TILES[station])
+    for (const mark of stationMarks(view, facts.meetingAttendees)) {
+      g.rect(origin.x + mark.x, origin.y + mark.y, mark.w, mark.h).fill(mark.color)
+    }
+  }
+}
+
+/**
+ * The desk inbox trays — §5.4's "flag UP while unread mail waits". One per
+ * citizen on the floor, at that citizen's own seat, because the flag is a fact
+ * about that agent's inbox and not about the room.
+ */
+function drawTrays(
+  g: Graphics,
+  live: ReadonlyMap<string, AvatarSnapshot>,
+  mail: ReadonlyMap<string, number>,
+  seats: ReadonlyMap<string, { role: string; seat: string }>
+): void {
+  for (const agentId of live.keys()) {
+    const seat = seats.get(agentId)?.seat
+    if (!seat) continue
+    const tile = seatTile(seat)
+    const origin = stationOrigin('desk', tile)
+    for (const mark of trayMarks(deskTray(mail.get(agentId) ?? 0))) {
+      g.rect(origin.x + mark.x, origin.y + mark.y, mark.w, mark.h).fill(mark.color)
+    }
+  }
+}
+
 /** What the last frame drew, so an interrupted walk resumes from where it is. */
 interface DrawState {
   x: number
@@ -234,7 +296,20 @@ export function FloorCanvas(): ReactElement {
   const [population, setPopulation] = useState(0)
   const avatarsRef = useRef<Map<string, AvatarSnapshot>>(new Map())
   const seatsRef = useRef<Map<string, { role: string; seat: string }>>(new Map())
-  const [census, setCensus] = useState(() => floorCensus([]))
+  /**
+   * §5.4's desk tray flag IS `pendingMailCount`, so it arrives with the avatar
+   * update that carries the same agent's snapshot — one moment, one fact.
+   */
+  const mailRef = useRef<Map<string, number>>(new Map())
+  /** The two room-level facts §5.4 names: an open gate, a gathered meeting. */
+  const factsRef = useRef<{ openGates: number; meetingAttendees: number }>({
+    openGates: 0,
+    meetingAttendees: 0
+  })
+  // Seeded with the same two halves `refresh()` writes, so the label reads the
+  // same way before the first snapshot arrives as it does after — a window with
+  // no bridge yet must not silently drop the station half of §8's parity.
+  const [census, setCensus] = useState(() => `${floorCensus([])} · ${stationCensus(NO_FACTS, 0)}`)
   const [overflow, setOverflow] = useState(0)
   const [tileset] = useState(tilesetState)
   const [sheetError, setSheetError] = useState<string | null>(null)
@@ -249,9 +324,78 @@ export function FloorCanvas(): ReactElement {
   const refresh = useCallback((): void => {
     const live = avatarsRef.current
     setPopulation(live.size)
-    setCensus(floorCensus([...live.values()].map((snapshot) => snapshot.phase)))
+    // §8 information parity: what a station's animation says must also be
+    // reachable in words, or the floor's newest information is available only
+    // to people who can watch pixels move (NFR-15).
+    setCensus(
+      `${floorCensus([...live.values()].map((snapshot) => snapshot.phase))} · ${stationCensus(
+        floorFacts(),
+        Date.now()
+      )}`
+    )
     setOverflow(sharingDesks([...live.keys()].map((id) => seatsRef.current.get(id)?.seat ?? '')))
   }, [])
+
+  /**
+   * The facts the §5.4 station model is allowed to see, assembled from what
+   * main has told this window. Nothing here is renderer opinion: every field
+   * traces to a snapshot, an approvals queue or a live meeting.
+   */
+  const floorFacts = useCallback((): FloorFacts => {
+    const avatars: AvatarPresence[] = [...avatarsRef.current.values()].map((snapshot) => ({
+      station: snapshot.station,
+      walking: snapshot.walking,
+      phase: snapshot.phase
+    }))
+    return {
+      avatars,
+      openGates: factsRef.current.openGates,
+      meetingAttendees: factsRef.current.meetingAttendees,
+      // Hover selection is UI-DESIGN §5's camera work, not M6.2's — the model
+      // takes it, and the floor has nothing to put there yet.
+      hovered: null
+    }
+  }, [])
+
+  /**
+   * The Watch brazier IS an open gate and the Odeon fills when a meeting
+   * gathers (§5.4), so the floor reads both facts from the same channels the
+   * panels do — never a second copy of either queue.
+   *
+   * `gate:open` pushes a nudge and the queue is re-read, which is the pattern
+   * the approvals panel already uses. The meeting has no push channel of its
+   * own (SDD §5's event list), so it is polled at the same cadence the panels
+   * poll — the `odeon:queue` badge carried item covers that gap and lands in
+   * M6.7.
+   */
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    let live = true
+    const reread = (): void => {
+      void eph.watch.approvals().then((gates) => {
+        if (!live) return
+        factsRef.current = { ...factsRef.current, openGates: gates.length }
+        refresh()
+      })
+      void eph.odeon.meeting().then((meeting) => {
+        if (!live) return
+        factsRef.current = {
+          ...factsRef.current,
+          meetingAttendees: meeting ? meeting.attendees.length : 0
+        }
+        refresh()
+      })
+    }
+    reread()
+    const off = eph.watch.onGateChange(reread)
+    const timer = setInterval(reread, MEETING_POLL_MS)
+    return () => {
+      live = false
+      off()
+      clearInterval(timer)
+    }
+  }, [refresh])
 
   // Roles decide silhouettes (§7) and seats decide desks (§5); the cards are
   // the only place either lives.
@@ -272,12 +416,19 @@ export function FloorCanvas(): ReactElement {
   useEffect(() => {
     const eph = window.eph
     if (!eph) return
+    const note = (update: AvatarUpdate): void => {
+      avatarsRef.current.set(update.agentId, update.snapshot)
+      mailRef.current.set(update.agentId, update.pendingMail)
+    }
+    // Both read paths set the mail count, not just this one: the M5b close-out's
+    // standing lesson is that a fact supplied on the listing path and not on the
+    // push (or the reverse) is a seam no unit test sees.
     void eph.avatars.list().then((updates: readonly AvatarUpdate[]) => {
-      for (const update of updates) avatarsRef.current.set(update.agentId, update.snapshot)
+      for (const update of updates) note(update)
       refresh()
     })
     return eph.avatars.onChange((update) => {
-      avatarsRef.current.set(update.agentId, update.snapshot)
+      note(update)
       refresh()
     })
   }, [refresh])
@@ -341,6 +492,16 @@ export function FloorCanvas(): ReactElement {
         app.stage.addChild(sheetTiles)
         drawRoom(ops, room, sheet, sheetTiles)
 
+        // §5.7 furnishings sit over the floor and under everything that moves:
+        // place identity, static, and only ever from the pack's own map.
+        drawRoom(paintFurnishings(map), room, sheet, sheetTiles)
+
+        // The §5.4 station layer, redrawn each tick because its states are
+        // projections of facts that change. It sits under the citizens so a
+        // brazier never paints over the guard standing at it.
+        const stationLayer = new Graphics()
+        app.stage.addChild(stationLayer)
+
         const citizens = new Container()
         app.stage.addChild(citizens)
         const sprites = new Map<string, Graphics>()
@@ -349,6 +510,8 @@ export function FloorCanvas(): ReactElement {
         app.ticker.add(() => {
           const now = Date.now()
           const live = avatarsRef.current
+          drawStations(stationLayer, floorFacts(), now)
+          drawTrays(stationLayer, live, mailRef.current, seatsRef.current)
           let index = 0
           for (const [agentId, snapshot] of live) {
             let sprite = sprites.get(agentId)

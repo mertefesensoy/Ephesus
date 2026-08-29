@@ -178,12 +178,28 @@ const steerNotes = new SteerNotes({
   }
 })
 
+/**
+ * The one place the mail count is read. The autonomy loop (ADR-0013), the push
+ * below and the `avatars:list` handler all go through it, so the floor's desk
+ * tray, the wake watchdog and a freshly-opened window can never disagree about
+ * how much mail is waiting.
+ *
+ * That it is ONE source is the point: the M5b close-out's standing lesson is
+ * that a fact supplied on the listing path and not on the others (or the
+ * reverse) is a seam no unit test sees.
+ */
+const pendingMailFor = (agentId: string): number => hermes?.pendingMailCount(agentId) ?? 0
+
 const avatarDirector = new AvatarDirector({
   // The floor and the autonomy loop read the SAME fact about pending work, so
   // they can never disagree about whether an agent is done (ADR-0013).
-  hasPendingWork: (agentId: string) => (hermes?.pendingMailCount(agentId) ? true : false),
+  hasPendingWork: (agentId: string) => pendingMailFor(agentId) > 0,
   onChange: (agentId: string, snapshot: AvatarSnapshot) => {
-    mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, { agentId, snapshot })
+    mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, {
+      agentId,
+      snapshot,
+      pendingMail: pendingMailFor(agentId)
+    })
     // The queue flushes off the same snapshots the floor draws, so held text
     // goes out exactly when the avatar says the agent is free (FR-1.3).
     commandQueue.observe(agentId, snapshot)
@@ -1422,6 +1438,7 @@ async function boot(): Promise<void> {
           )
         )
         .filter((spend): spend is NonNullable<typeof spend> => spend !== undefined),
+    pendingMailFor,
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),

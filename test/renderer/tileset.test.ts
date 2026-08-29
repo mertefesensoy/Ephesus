@@ -38,7 +38,7 @@ function map() {
 }
 
 function cell(over: Partial<PlanCell> = {}): PlanCell {
-  return { col: 0, row: 0, kind: 'wall', of: null, ...over }
+  return { col: 0, row: 0, kind: 'wall', of: null, part: null, ...over }
 }
 
 describe('the tile map is validated like any other file the harness reads', () => {
@@ -108,11 +108,11 @@ describe('atlas arithmetic', () => {
   })
 
   it('prefers a pack’s specific station tile over its generic one', () => {
-    expect(frameKeysFor(cell({ kind: 'station', of: 'odeon' }))).toEqual([
+    expect(frameKeysFor(cell({ kind: 'station', of: 'odeon', part: null }))).toEqual([
       'station:odeon',
       'station'
     ])
-    expect(frameIndexFor(map(), cell({ kind: 'station', of: 'odeon' }))).toBe(21)
+    expect(frameIndexFor(map(), cell({ kind: 'station', of: 'odeon', part: null }))).toBe(21)
     expect(frameIndexFor(map(), cell({ kind: 'station', of: 'shelf' }))).toBe(20)
   })
 

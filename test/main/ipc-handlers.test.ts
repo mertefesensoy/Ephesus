@@ -39,8 +39,15 @@ const PACKAGING = {
   rollback: 'rebuild'
 }
 
+interface RigOptions {
+  /** Avatar snapshots the director would hand back, keyed by agent id. */
+  readonly avatars?: Map<string, unknown>
+  /** What `pendingMailFor` answers — UI-DESIGN §5.4's desk tray flag. */
+  readonly pendingMail?: (agentId: string) => number
+}
+
 /** Registers the real handlers over a real GateManager. */
-async function rig(): Promise<{
+async function rig(options: RigOptions = {}): Promise<{
   gates: GateManager
   logs: Record<string, unknown>[]
   call(channel: string, payload?: unknown): Promise<unknown>
@@ -51,7 +58,7 @@ async function rig(): Promise<{
   registerIpc({
     ptyManager: {} as never,
     agents: {} as never,
-    avatars: { list: () => new Map() } as never,
+    avatars: { list: () => options.avatars ?? new Map() } as never,
     commands: { list: () => [] } as never,
     agora: {} as never,
     secrets: {} as never,
@@ -60,6 +67,7 @@ async function rig(): Promise<{
     humanQueue: () => [],
     dismissFromHumanQueue: () => true,
     breakerState: () => [],
+    pendingMailFor: options.pendingMail ?? ((): number => 0),
     hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),
     agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] }),
     memoryView: (agentId: string) => ({
@@ -272,5 +280,43 @@ describe('the Library group validates before it acts (ADR-0006, invariant §2)',
     await expect(
       call('agora:register-knowledge', { name: 'runbook', text: 'body' })
     ).resolves.toEqual([])
+  })
+})
+
+describe('avatars:list carries the desk tray fact (UI-DESIGN §5.4)', () => {
+  const snapshot = {
+    phase: 'idle',
+    station: 'desk',
+    origin: 'desk',
+    walking: false,
+    resume: null,
+    resumeStation: null,
+    waitingOn: null,
+    sinceMs: 0
+  }
+
+  it('reports each agent’s pendingMail, from the same source the push uses', async () => {
+    const { call } = await rig({
+      avatars: new Map([
+        ['a-1', snapshot],
+        ['a-2', snapshot]
+      ]),
+      pendingMail: (agentId) => (agentId === 'a-1' ? 3 : 0)
+    })
+    // The listing path is the one a freshly-opened window reads. M5b's standing
+    // lesson is that a fact supplied on one read path and not the others is a
+    // seam no unit test sees — so the count must be here, not only on the push.
+    await expect(call('avatars:list')).resolves.toEqual([
+      { agentId: 'a-1', snapshot, pendingMail: 3 },
+      { agentId: 'a-2', snapshot, pendingMail: 0 }
+    ])
+  })
+
+  it('answers zero rather than undefined when nothing is waiting', async () => {
+    const { call } = await rig({ avatars: new Map([['a-1', snapshot]]) })
+    const updates = (await call('avatars:list')) as { pendingMail: number }[]
+    // `undefined` would raise no flag either, but it would also make
+    // `deskTray(update.pendingMail)` a lie by accident rather than by fact.
+    expect(updates[0]?.pendingMail).toBe(0)
   })
 })
