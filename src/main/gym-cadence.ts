@@ -36,8 +36,17 @@ import type { GymRow } from '../shared/gym'
  */
 export const GYM_CHECK_EVERY_MS = 24 * 60 * 60 * 1000
 
-/** The Measured cell before a check has run — `due YYYY-MM-DD` (ADR-0015 R2). */
-const DUE = /^due\s+(\d{4}-\d{2}-\d{2})$/
+/**
+ * The Measured cell before a check has run — `due YYYY-MM-DD` (ADR-0015 R2),
+ * optionally followed by a human note.
+ *
+ * The note matters. GYM-003's cell reads `due 2026-09-11 (live-quit evidence
+ * owed with the metric check)`, and an anchored `$` match skipped it — so the
+ * one row the M6 window singles out was the one row that would never have been
+ * booked. Found by running this against the REAL ledger during the exit review
+ * rather than against rows a test wrote for itself.
+ */
+const DUE = /^due\s+(\d{4}-\d{2}-\d{2})\b/
 
 export interface MetricCheckDue {
   readonly id: string

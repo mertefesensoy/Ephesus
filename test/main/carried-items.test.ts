@@ -57,8 +57,22 @@ describe('the Gymnasium’s metric check is BOOKED (SDD §7.6)', () => {
     }
   })
 
+  it('reads the date through a human note beside it (the real GYM-003 cell)', () => {
+    // The defect the M6 exit review caught by running this against the REAL
+    // ledger: GYM-003's cell is `due 2026-09-11 (live-quit evidence owed with
+    // the metric check)`, and an anchored match skipped it — so the ONE row the
+    // M6 window singles out was the one row that would never have been booked.
+    // Rows a test writes for itself are tidy; the ledger is not.
+    const noted = row({
+      id: 'GYM-003',
+      measured: 'due 2026-09-11 (live-quit evidence owed with the metric check)'
+    })
+    expect(metricChecksDue([noted], '2026-09-11').map((d) => d.id)).toEqual(['GYM-003'])
+    expect(metricChecksDue([noted], '2026-09-10')).toEqual([])
+  })
+
   it('skips a malformed Measured cell rather than inventing a date', () => {
-    for (const measured of [null, '', 'soon', '2026-09-11', 'due tomorrow']) {
+    for (const measured of [null, '', 'soon', '2026-09-11', 'due tomorrow', 'due 2026-9-1']) {
       expect(metricChecksDue([row({ measured })], '2026-12-31'), String(measured)).toEqual([])
     }
   })
