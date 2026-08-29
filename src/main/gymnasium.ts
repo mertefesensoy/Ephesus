@@ -317,13 +317,13 @@ export class Gymnasium {
   slice(): {
     readonly spentTokens: number | null
     readonly tokensPerWeek: number
-    readonly source: string | null
+    readonly spendSource: string | null
   } {
     const spend = this.options.gymSpend
     return {
       spentTokens: spend ? spend().tokens : null,
       tokensPerWeek: (this.options.slice ?? DEFAULT_GYM_SLICE).tokensPerWeek,
-      source: spend ? spend().source : null
+      spendSource: spend ? spend().source : null
     }
   }
 

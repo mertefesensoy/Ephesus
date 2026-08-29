@@ -1,3 +1,5 @@
+import { compileFacts } from '../../src/shared/brief'
+import { TASKS_SCHEMA_VERSION } from '../../src/shared/tasks'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -228,8 +230,29 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     // from, because the brief is read aloud and there is no card to hover.
     expect(rig({ spend: 25 }).gym.slice()).toMatchObject({
       spentTokens: 25,
-      source: 'cost ledger — 1 agent (a-1)'
+      spendSource: 'cost ledger — 1 agent (a-1)'
     })
+  })
+
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // The producer emitted `source`; `BriefInput.gymSlice` reads `spendSource`.
+  // Both sides had passing tests and the feature was dead, because object
+  // spread bypasses excess-property checking and nothing ran the two together.
+  // This drives the REAL slice into the REAL compiler, which is the only shape
+  // of test that could have caught it.
+  it('names its source in the compiled brief, through the real seam', () => {
+    const slice = rig({ spend: 25 }).gym.slice()
+    const facts = compileFacts({
+      events: [],
+      ledger: { tasks: [], schemaVersion: TASKS_SCHEMA_VERSION },
+      openGates: [],
+      openMemos: [],
+      spend: [],
+      // Spread exactly as `src/main/index.ts` composes it.
+      gymSlice: { ...slice, open: 0 }
+    })
+    const fact = facts.find((f) => f.refs.includes('gym:slice'))
+    expect(fact?.what).toContain('cost ledger')
   })
 
   it('reports NULL, not zero, when nothing attributes gym spend yet', () => {
@@ -237,7 +260,7 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     // source, and the brief was narrating the resulting constant 0 as if it
     // were a ledger figure. A missing measurement must read as missing.
     expect(rig().gym.slice().spentTokens).toBeNull()
-    expect(rig().gym.slice().source).toBeNull()
+    expect(rig().gym.slice().spendSource).toBeNull()
   })
 })
 

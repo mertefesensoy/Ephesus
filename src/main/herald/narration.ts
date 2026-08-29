@@ -1,7 +1,8 @@
 import { BRIEF_MAX_SECONDS, BRIEF_WPM, spokenSeconds } from '../../shared/brief'
 import type { MeetingView } from '../../shared/odeon'
 import type { OpenGate } from '../../shared/gates'
-import { checkRepeatBack, needsRepeatBack, repeatBackToken } from './policy'
+import { checkRepeatBack, needsRepeatBack, repeatBackChallenge, repeatBackToken } from './policy'
+import type { RepeatBackChallenge } from './policy'
 import type { Phrasebook } from './phrasebook'
 import type { HeraldSession } from './session'
 
@@ -114,6 +115,15 @@ export interface VoiceApprovalAsk {
   readonly line: string
   /** The exact words that will count as a confirmation, or null. */
   readonly token: string | null
+  /**
+   * The issued repeat-back, or null when this gate needs none.
+   *
+   * The caller holds it between the ask and the answer, and passes it back to
+   * `checkVoiceApproval`. That is the whole reason answering is single-use: the
+   * check verifies the challenge that was ISSUED rather than re-deriving one,
+   * so a replayed or lapsed answer has something to fail against.
+   */
+  readonly challenge: RepeatBackChallenge | null
 }
 
 /**
@@ -123,16 +133,37 @@ export interface VoiceApprovalAsk {
  * comes from the phrase book (invariant §8). A gate that needs no repeat-back
  * still gets asked — it simply gets no token, and a plain answer settles it.
  */
-export function voiceApprovalAsk(gate: OpenGate, phrasebook: Phrasebook): VoiceApprovalAsk {
+export function voiceApprovalAsk(
+  gate: OpenGate,
+  phrasebook: Phrasebook,
+  issue: { readonly nowMs: number; readonly nonce: string }
+): VoiceApprovalAsk {
   if (!needsRepeatBack(gate.kind) && !gate.requiresRepeatBack) {
-    return { line: phrasebook.line('approve-ask', { what: gate.packaging.what }), token: null }
+    return {
+      line: phrasebook.line('approve-ask', { what: gate.packaging.what }),
+      token: null,
+      challenge: null
+    }
   }
-  const token = repeatBackToken({ kind: gate.kind, what: gate.packaging.what })
-  return { line: phrasebook.line('repeat-back', { what: gate.packaging.what, token }), token }
+  const challenge = repeatBackChallenge(
+    { kind: gate.kind, what: gate.packaging.what },
+    issue.nowMs,
+    issue.nonce
+  )
+  return {
+    line: phrasebook.line('repeat-back', { what: gate.packaging.what, token: challenge.token }),
+    token: challenge.token,
+    challenge
+  }
 }
 
 export type VoiceApproval =
-  | { readonly ok: true; readonly repeatBackConfirmed: boolean }
+  | {
+      readonly ok: true
+      readonly repeatBackConfirmed: boolean
+      /** The nonce the caller marks spent, so the same answer cannot be replayed. */
+      readonly nonce?: string
+    }
   | { readonly ok: false; readonly line: string; readonly because: string }
 
 /**
@@ -150,12 +181,30 @@ export type VoiceApproval =
 export function checkVoiceApproval(
   gate: OpenGate,
   spoken: string,
-  phrasebook: Phrasebook
+  phrasebook: Phrasebook,
+  answering: {
+    readonly challenge: RepeatBackChallenge | null
+    readonly nowMs: number
+    readonly spent?: ReadonlySet<string>
+  }
 ): VoiceApproval {
-  const ask = voiceApprovalAsk(gate, phrasebook)
-  if (ask.token === null) return { ok: true, repeatBackConfirmed: false }
-  const check = checkRepeatBack(spoken, ask.token)
-  if (check.confirmed) return { ok: true, repeatBackConfirmed: true }
+  if (!needsRepeatBack(gate.kind) && !gate.requiresRepeatBack) {
+    return { ok: true, repeatBackConfirmed: false }
+  }
+  // A gate that needs a repeat-back and was answered without one being issued
+  // is refused, not waved through: "no challenge" must never read as "no
+  // challenge required".
+  if (answering.challenge === null) {
+    return {
+      ok: false,
+      because: 'mismatch',
+      line: phrasebook.line('repeat-back-refused-mismatch', {
+        token: repeatBackToken({ kind: gate.kind, what: gate.packaging.what })
+      })
+    }
+  }
+  const check = checkRepeatBack(spoken, answering.challenge, answering.nowMs, answering.spent)
+  if (check.confirmed) return { ok: true, repeatBackConfirmed: true, nonce: check.nonce }
   return {
     ok: false,
     because: check.because,
@@ -163,7 +212,7 @@ export function checkVoiceApproval(
       check.because === 'bare-assent'
         ? 'repeat-back-refused-bare-assent'
         : 'repeat-back-refused-mismatch',
-      { token: ask.token }
+      { token: answering.challenge.token }
     )
   }
 }

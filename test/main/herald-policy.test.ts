@@ -16,6 +16,7 @@ import {
   initialFailover,
   needsRepeatBack,
   reduceFailover,
+  repeatBackChallenge,
   repeatBackToken,
   voiceAvailable,
   type FailoverSnapshot
@@ -99,14 +100,31 @@ describe('repeat-back (FR-8.4)', () => {
     expect(other).not.toBe(token)
   })
 
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // The token used to carry the first three words of the gate's subject, which
+  // read as faithful to FR-8.4's example and was not: gates that differ only in
+  // their tail collapsed onto one token. The amount of a SPEND gate — the whole
+  // subject of the approval — was never in the words approving it.
+  it('distinguishes gates that differ only in their tail (FR-8.4)', () => {
+    const nine = repeatBackToken({ kind: 'destructive', what: 'delete branch release/9' })
+    const ten = repeatBackToken({ kind: 'destructive', what: 'delete branch release/10' })
+    expect(nine).not.toBe(ten)
+
+    const small = repeatBackToken({ kind: 'spend', what: 'raise the daily cap to $80' })
+    const large = repeatBackToken({ kind: 'spend', what: 'raise the daily cap to $8000' })
+    expect(small).not.toBe(large)
+    // The amount is IN the words, or the repeat-back is not of the spend.
+    expect(large).toContain('8000')
+  })
+
   it('falls back to the gate kind when the description has no usable words', () => {
     expect(repeatBackToken({ kind: 'destructive', what: '!!! ***' })).toBe('confirm destructive')
   })
 
   it('REJECTS a bare yes, and says that is why', () => {
-    const token = repeatBackToken({ kind: 'destructive', what: 'delete branch' })
+    const c = repeatBackChallenge({ kind: 'destructive', what: 'delete branch' }, 0, 'n')
     for (const bare of ['yes', 'Yes.', 'yeah', 'ok', 'sure', 'go ahead', 'do it', 'confirm']) {
-      const check = checkRepeatBack(bare, token)
+      const check = checkRepeatBack(bare, c, 0)
       expect(check.confirmed, bare).toBe(false)
       // The reason has to name the failure, or the Herald cannot explain
       // itself — and "I did not hear you" would be a lie.
@@ -114,18 +132,56 @@ describe('repeat-back (FR-8.4)', () => {
     }
   })
 
-  it('accepts the token, inside a sentence, however it is punctuated', () => {
-    const token = repeatBackToken({ kind: 'destructive', what: 'delete branch release/9' })
-    for (const said of [token, `${token}, please`, `Right — ${token}.`, token.toUpperCase()]) {
-      expect(checkRepeatBack(said, token).confirmed, said).toBe(true)
+  it('accepts the token spoken exactly, however it is cased or punctuated', () => {
+    const c = repeatBackChallenge({ kind: 'destructive', what: 'delete branch release/9' }, 0, 'n')
+    for (const said of [c.token, `${c.token}.`, c.token.toUpperCase(), ` ${c.token} `]) {
+      expect(checkRepeatBack(said, c, 0).confirmed, said).toBe(true)
     }
   })
 
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // `said.includes(wanted)` accepted the token anywhere in the utterance, so a
+  // spoken REFUSAL — which necessarily quotes the token — approved the gate.
+  // Proven by execution at the M6 head before this fix.
+  it('REFUSES an utterance that merely CONTAINS the token (FR-8.4)', () => {
+    const c = repeatBackChallenge({ kind: 'destructive', what: 'delete branch release/9' }, 0, 'n')
+    for (const said of [
+      `no, do not ${c.token}`,
+      `${c.token} — wait, no`,
+      `do not ${c.token} yet`,
+      `${c.token}, please` // courtesy costs a retry; a refusal costs a branch
+    ]) {
+      const check = checkRepeatBack(said, c, 0)
+      expect(check.confirmed, said).toBe(false)
+      if (!check.confirmed) expect(check.because, said).toBe('mismatch')
+    }
+  })
+
+  it('REFUSES a lapsed asking and a replayed answer', () => {
+    const c = repeatBackChallenge({ kind: 'destructive', what: 'delete branch' }, 1_000, 'n-7')
+    expect(checkRepeatBack(c.token, c, 1_000).confirmed).toBe(true)
+    // One second before the deadline it still stands; at it, it does not.
+    expect(checkRepeatBack(c.token, c, c.expiresAtMs - 1).confirmed).toBe(true)
+    expect(checkRepeatBack(c.token, c, c.expiresAtMs)).toEqual({
+      confirmed: false,
+      because: 'expired'
+    })
+    expect(checkRepeatBack(c.token, c, 1_000, new Set(['n-7']))).toEqual({
+      confirmed: false,
+      because: 'replayed'
+    })
+  })
+
+  it('hands back the nonce so the caller can spend it', () => {
+    const c = repeatBackChallenge({ kind: 'spend', what: 'raise the cap' }, 0, 'n-42')
+    expect(checkRepeatBack(c.token, c, 0)).toEqual({ confirmed: true, nonce: 'n-42' })
+  })
+
   it('refuses silence and a mismatch, distinctly', () => {
-    const token = repeatBackToken({ kind: 'spend', what: 'raise the cap' })
-    expect(checkRepeatBack('', token)).toEqual({ confirmed: false, because: 'empty' })
-    expect(checkRepeatBack('   ', token)).toEqual({ confirmed: false, because: 'empty' })
-    expect(checkRepeatBack('confirm something else', token)).toEqual({
+    const c = repeatBackChallenge({ kind: 'spend', what: 'raise the cap' }, 0, 'n')
+    expect(checkRepeatBack('', c, 0)).toEqual({ confirmed: false, because: 'empty' })
+    expect(checkRepeatBack('   ', c, 0)).toEqual({ confirmed: false, because: 'empty' })
+    expect(checkRepeatBack('confirm something else', c, 0)).toEqual({
       confirmed: false,
       because: 'mismatch'
     })

@@ -13,6 +13,7 @@ import {
   speakBrief,
   voiceApprovalAsk
 } from '../../src/main/herald/narration'
+import { REPEAT_BACK_TTL_MS } from '../../src/main/herald/policy'
 import { fakeVoiceAdapter } from '../fakes/fake-voice'
 import { GATE_SCHEMA_VERSION, type OpenGate } from '../../src/shared/gates'
 import type { MeetingView } from '../../src/shared/odeon'
@@ -157,8 +158,10 @@ describe('voice approvals need the words (FR-8.4)', () => {
       ...over
     }) as OpenGate
 
+  const ISSUE = { nowMs: 1_000, nonce: 'n-1' }
+
   it('asks for a token specific to the gate, in the phrase book’s words', () => {
-    const ask = voiceApprovalAsk(gate(), phrasebook())
+    const ask = voiceApprovalAsk(gate(), phrasebook(), ISSUE)
     expect(ask.token).toContain('confirm')
     expect(ask.token).toContain('delete')
     // The sentence is config; only the token is the policy's (invariant §8).
@@ -167,7 +170,11 @@ describe('voice approvals need the words (FR-8.4)', () => {
   })
 
   it('REFUSES a bare yes, and the gate stays open', () => {
-    const result = checkVoiceApproval(gate(), 'yes', phrasebook())
+    const ask = voiceApprovalAsk(gate(), phrasebook(), ISSUE)
+    const result = checkVoiceApproval(gate(), 'yes', phrasebook(), {
+      challenge: ask.challenge,
+      nowMs: ISSUE.nowMs
+    })
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.because).toBe('bare-assent')
@@ -176,17 +183,70 @@ describe('voice approvals need the words (FR-8.4)', () => {
     }
   })
 
-  it('accepts the repeated-back words', () => {
-    const ask = voiceApprovalAsk(gate(), phrasebook())
-    const result = checkVoiceApproval(gate(), `Right, ${ask.token}.`, phrasebook())
-    expect(result).toEqual({ ok: true, repeatBackConfirmed: true })
+  it('accepts the repeated-back words, spoken exactly', () => {
+    const ask = voiceApprovalAsk(gate(), phrasebook(), ISSUE)
+    const result = checkVoiceApproval(gate(), ask.token as string, phrasebook(), {
+      challenge: ask.challenge,
+      nowMs: ISSUE.nowMs
+    })
+    expect(result).toEqual({ ok: true, repeatBackConfirmed: true, nonce: 'n-1' })
+  })
+
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // Before the fix, `checkRepeatBack` matched the token ANYWHERE inside what
+  // was said. A spoken refusal quotes the token, so the refusal approved the
+  // gate. This is the single most dangerous input FR-8.4 exists to reject.
+  it('REFUSES a spoken refusal that quotes the token (FR-8.4)', () => {
+    const ask = voiceApprovalAsk(gate(), phrasebook(), ISSUE)
+    for (const refusal of [
+      `no, do not ${ask.token as string}`,
+      `${ask.token as string} — actually, no, stop`,
+      `I did not say ${ask.token as string}`
+    ]) {
+      const result = checkVoiceApproval(gate(), refusal, phrasebook(), {
+        challenge: ask.challenge,
+        nowMs: ISSUE.nowMs
+      })
+      expect(result.ok, refusal).toBe(false)
+    }
+  })
+
+  it('REFUSES an answer to a lapsed asking, and a replayed one', () => {
+    const ask = voiceApprovalAsk(gate(), phrasebook(), ISSUE)
+    const said = ask.token as string
+    const lapsed = checkVoiceApproval(gate(), said, phrasebook(), {
+      challenge: ask.challenge,
+      nowMs: ISSUE.nowMs + REPEAT_BACK_TTL_MS
+    })
+    expect(lapsed.ok).toBe(false)
+    if (!lapsed.ok) expect(lapsed.because).toBe('expired')
+
+    const replayed = checkVoiceApproval(gate(), said, phrasebook(), {
+      challenge: ask.challenge,
+      nowMs: ISSUE.nowMs,
+      spent: new Set(['n-1'])
+    })
+    expect(replayed.ok).toBe(false)
+    if (!replayed.ok) expect(replayed.because).toBe('replayed')
+  })
+
+  it('REFUSES a gate that needs a repeat-back when none was issued', () => {
+    // "No challenge" must never read as "no challenge required".
+    const result = checkVoiceApproval(gate(), 'confirm delete branch release 9', phrasebook(), {
+      challenge: null,
+      nowMs: ISSUE.nowMs
+    })
+    expect(result.ok).toBe(false)
   })
 
   it('needs no repeat-back for an ordinary gate, and says so by asking plainly', () => {
     const plain = gate({ kind: 'tool-permission', requiresRepeatBack: false })
-    const ask = voiceApprovalAsk(plain, phrasebook())
+    const ask = voiceApprovalAsk(plain, phrasebook(), ISSUE)
     expect(ask.token).toBeNull()
-    expect(checkVoiceApproval(plain, 'yes', phrasebook())).toEqual({
+    expect(ask.challenge).toBeNull()
+    expect(
+      checkVoiceApproval(plain, 'yes', phrasebook(), { challenge: null, nowMs: ISSUE.nowMs })
+    ).toEqual({
       ok: true,
       repeatBackConfirmed: false
     })
@@ -196,8 +256,14 @@ describe('voice approvals need the words (FR-8.4)', () => {
     // FR-8.4 names destructive AND spend. A policy that only honoured the
     // gate's own flag would let a spend approval through on a bare "yes".
     const spend = gate({ kind: 'spend', requiresRepeatBack: false })
-    expect(voiceApprovalAsk(spend, phrasebook()).token).not.toBeNull()
-    expect(checkVoiceApproval(spend, 'sure', phrasebook()).ok).toBe(false)
+    const ask = voiceApprovalAsk(spend, phrasebook(), ISSUE)
+    expect(ask.token).not.toBeNull()
+    expect(
+      checkVoiceApproval(spend, 'sure', phrasebook(), {
+        challenge: ask.challenge,
+        nowMs: ISSUE.nowMs
+      }).ok
+    ).toBe(false)
   })
 })
 

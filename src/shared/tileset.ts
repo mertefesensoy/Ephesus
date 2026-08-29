@@ -196,6 +196,12 @@ export function resolveTileset(
     return { ...base, note: `${PROCEDURAL} (tile map names a missing sheet: ${parsed.map.sheet})` }
   }
 
+  // A composition that is silently the wrong size degrades that station to the
+  // procedural painter, and invariant §7 says every degradation is visible. The
+  // M6 close-out audit found this function had only test callers, so the
+  // fallback `compositionFor` performs was real and the "says so" half was not.
+  const problems = validateCompositions(parsed.map)
+
   return {
     installed: true,
     sheets: urls,
@@ -203,7 +209,11 @@ export function resolveTileset(
     map: parsed.map,
     // The credit rides the same line as the name: a licence term nobody can
     // see is a licence term nobody is honouring.
-    note: `tileset: ${parsed.map.name}${parsed.map.credit === undefined ? '' : ` — ${parsed.map.credit}`}`
+    note:
+      `tileset: ${parsed.map.name}${parsed.map.credit === undefined ? '' : ` — ${parsed.map.credit}`}` +
+      (problems.length === 0
+        ? ''
+        : ` — ${String(problems.length)} procedural: ${problems.join('; ')}`)
   }
 }
 /** One station's composition, as a pack ships it (UI-DESIGN §5.4). */

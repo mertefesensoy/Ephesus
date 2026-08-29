@@ -670,12 +670,12 @@ is precisely the artifact that already passed `checkNarrative` (SDD §7.2).
 | `src/main/gym-cadence.ts` | **New.** SDD §7.6's metric-check booking. |
 | `src/shared/attribution.ts` | **New.** Spend by scope, with its source named. |
 | `src/main/gymnasium.ts` | `slice()` returns a number and a `source`. |
-| `src/shared/brief.ts` | The brief prints the spend source. |
+| `src/shared/brief.ts` | The brief prints the spend source. **CORRECTED at the close-out audit: it did not** — `slice()` emitted `source`, this file read `spendSource`, and nothing set it. Fixed on `fix/m6-closeout-audit`. |
 | `src/main/index.ts` | Wires the gym cadence trigger and the real spend source. |
 | `src/renderer/src/StatusBadge.tsx` | **New.** `CountBadge`, shared by gates and memos. |
 | `src/renderer/src/App.tsx` | The `odeon:queue` badge — push plus poll. |
 | `src/shared/config.ts` | `wakeWordEnabled` (setting only — see below). |
-| 3 test files | 33 cases. |
+| 3 test files | ~~33~~ **34** cases *(corrected at the close-out audit: M6.8 added the GYM-003 note case without updating this count)*. |
 
 ### Implementation approach
 
@@ -715,7 +715,7 @@ the M5b audit's substring trap cannot reopen here.
 npx vitest run test/main/herald-narration.test.ts test/main/carried-items.test.ts test/renderer/
 ```
 
-33 cases green. Full suite: 2357 passed; 11 failures, all recorded — 9
+~~33~~ **34** cases green *(and that command actually runs 142 across 9 files — it globs `test/renderer/`; corrected at the close-out audit)*. Full suite: 2357 passed; 11 failures, all recorded — 9
 deterministic Windows-local and 2 s-stoploop flakes (8/8 in isolation).
 
 **Live run.** `npm run dev`: the `memos:` badge is on the status strip beside

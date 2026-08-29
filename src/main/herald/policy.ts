@@ -95,52 +95,110 @@ export function needsRepeatBack(gateKind: string): boolean {
 /** Bare assents FR-8.4 rejects — "a bare 'yes' is rejected". */
 const BARE_ASSENTS = ['yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'go ahead', 'do it', 'confirm']
 
+/** Normalizes spoken or written text to the form tokens are compared in. */
+function spokenForm(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /**
  * Contract: the exact token the Architect must speak, derived from the gate.
  *
  * A token, not a sentence: the SENTENCE that asks for it lives in
  * `prompts/herald/repeat-back.md` (invariant §8 — the Herald's words are
  * config). What this function owns is the safety property, which is that the
- * token is specific to THIS gate. "confirm" alone would be a bare assent with
- * extra steps.
+ * token identifies THIS gate and no other. "confirm" alone would be a bare
+ * assent with extra steps.
+ *
+ * The token carries the gate's WHOLE subject. It used to carry the first three
+ * words, which read as faithful to FR-8.4's example ("say confirm delete") and
+ * was not: `delete branch release/9` and `delete branch release/10` produced one
+ * token, and every spend gate collapsed to `confirm raise the daily` — so the
+ * amount, which IS the subject of a spend approval, was absent from the words
+ * confirming it. The M6 close-out audit found both by execution. FR-8.4's
+ * example was amended with this change.
  */
 export function repeatBackToken(gate: { readonly kind: string; readonly what: string }): string {
-  const subject = gate.what
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(' ')
+  const subject = spokenForm(gate.what)
   return `confirm ${subject || gate.kind}`.trim()
 }
 
-export type RepeatBackCheck =
-  | { readonly confirmed: true }
-  | { readonly confirmed: false; readonly because: 'bare-assent' | 'mismatch' | 'empty' }
+/** How long an issued repeat-back stays answerable (FR-8.4). */
+export const REPEAT_BACK_TTL_MS = 120_000
 
 /**
- * Contract: whether what the Architect said confirms the repeat-back.
+ * An issued repeat-back: the words to say, and the identity of THIS asking.
+ *
+ * The nonce is never spoken — a spoken nonce would make the Architect read
+ * digits aloud to approve a gate. It exists so the harness can tell one asking
+ * from the next: answering is single-use, and the same correct words cannot
+ * approve the same gate twice or answer an asking that has already lapsed.
+ */
+export interface RepeatBackChallenge {
+  readonly token: string
+  readonly nonce: string
+  readonly issuedAtMs: number
+  readonly expiresAtMs: number
+}
+
+/** Contract: issue a repeat-back for a gate. Pure — clock and nonce injected. */
+export function repeatBackChallenge(
+  gate: { readonly kind: string; readonly what: string },
+  nowMs: number,
+  nonce: string
+): RepeatBackChallenge {
+  return {
+    token: repeatBackToken(gate),
+    nonce,
+    issuedAtMs: nowMs,
+    expiresAtMs: nowMs + REPEAT_BACK_TTL_MS
+  }
+}
+
+export type RepeatBackRefusal = 'bare-assent' | 'mismatch' | 'empty' | 'expired' | 'replayed'
+
+export type RepeatBackCheck =
+  | { readonly confirmed: true; readonly nonce: string }
+  | { readonly confirmed: false; readonly because: RepeatBackRefusal }
+
+/**
+ * Contract: whether what the Architect said answers THIS repeat-back.
  *
  * Refusing a bare assent explicitly (rather than just failing to match) is the
  * point of FR-8.4: the Architect saying "yes" to a destructive gate is the
  * exact input the clause exists to reject, and the refusal reason has to say so
  * or the Herald cannot explain itself.
  *
- * Matching is case- and punctuation-insensitive and allows the token to sit
- * inside a longer sentence, because "confirm delete branch, please" is a
- * confirmation and pretending otherwise would train the Architect to bark.
+ * The match is EXACT after normalization. It used to accept the token anywhere
+ * inside a longer sentence, so that "confirm delete branch, please" would pass
+ * — a defensible courtesy that also meant **"no, do not confirm delete branch
+ * release 9" approved the gate**, because the refusal contains the token. The
+ * M6 close-out audit proved that by running it. A confirmation the Architect
+ * can give by accident, while saying the opposite, is not a confirmation; the
+ * cost is that a trailing "please" now fails, which is the correct side to err
+ * on for the only spoken act that cannot be undone.
+ *
+ * `spent` holds the nonces already used. Passing it is what makes answering
+ * single-use rather than merely intended to be.
  */
-export function checkRepeatBack(spoken: string, token: string): RepeatBackCheck {
-  const said = spoken
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+export function checkRepeatBack(
+  spoken: string,
+  challenge: RepeatBackChallenge,
+  nowMs: number,
+  spent: ReadonlySet<string> = new Set()
+): RepeatBackCheck {
+  const said = spokenForm(spoken)
   if (said === '') return { confirmed: false, because: 'empty' }
   if (BARE_ASSENTS.includes(said)) return { confirmed: false, because: 'bare-assent' }
-  const wanted = token.toLowerCase().replace(/\s+/g, ' ').trim()
-  return said.includes(wanted) ? { confirmed: true } : { confirmed: false, because: 'mismatch' }
+  if (nowMs >= challenge.expiresAtMs) return { confirmed: false, because: 'expired' }
+  if (spent.has(challenge.nonce)) return { confirmed: false, because: 'replayed' }
+  const wanted = spokenForm(challenge.token)
+  return said === wanted
+    ? { confirmed: true, nonce: challenge.nonce }
+    : { confirmed: false, because: 'mismatch' }
 }
 
 // ── Failover (ADR-0007, FR-8.2, NFR-3) ──────────────────────────────────────

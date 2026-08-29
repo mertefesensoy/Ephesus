@@ -9,6 +9,8 @@ import {
   attributedTokens,
   attributionSource
 } from '../../src/shared/attribution'
+import { compileFacts } from '../../src/shared/brief'
+import { TASKS_SCHEMA_VERSION } from '../../src/shared/tasks'
 
 /**
  * The three carried items the M5 and M5b close-outs left for M6.7's scheduler
@@ -162,6 +164,38 @@ describe('gym and Stoa spend are ATTRIBUTED (FR-12.5, R3)', () => {
     expect(gym.source).toContain('cost ledger')
     expect(gym.source).toContain('iris')
     expect(gym.source).toContain('pallas')
+  })
+
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // Both halves of this were correct and had tests, and the feature was dead:
+  // `Gymnasium.slice()` emitted `source`, `BriefInput.gymSlice` read
+  // `spendSource`, and nothing anywhere set it. Object spread bypasses excess-
+  // property checking, so `typecheck` stayed green and the true branch at
+  // `brief.ts` was unreachable. No test spanned the seam — this one does.
+  it('hands the brief the field the BRIEF reads, so the source is spoken', () => {
+    const roster = [
+      { agentId: 'iris', role: 'researcher' },
+      { agentId: 'pallas', role: 'improver' }
+    ]
+    const gym = attributeSpend(roster, 'gymnasium', tokensFor)
+    // Exactly the shape `src/main/index.ts` composes: the slice, spread.
+    const gymSlice = {
+      spentTokens: gym.tokens,
+      tokensPerWeek: 200_000,
+      spendSource: gym.source,
+      open: 2
+    }
+    const facts = compileFacts({
+      events: [],
+      ledger: { tasks: [], schemaVersion: TASKS_SCHEMA_VERSION },
+      openGates: [],
+      openMemos: [],
+      spend: [],
+      gymSlice
+    })
+    const slice = facts.find((fact) => fact.refs.includes('gym:slice'))
+    expect(slice?.what).toContain('cost ledger')
+    expect(slice?.what).toContain('iris')
   })
 
   it('says so when nobody is doing the work — a measurement, not a gap', () => {
