@@ -2928,15 +2928,93 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       itch slug (`moderninteriors-win.zip`), not "v41.4" as BUILD-PROMPT's note
       assumed — recorded in ATTRIBUTION's restore path.*
       procedural (rule 3).*
-- [ ] **M5b.6 Scenario suites + exit review** — S-STOA and S-MODE green in CI;
+- [x] **M5b.6 Scenario suites + exit review** — S-STOA and S-MODE green in CI;
       E-STOA recorded; then the exit demo: **one real research cycle through
       the app** — a URL registered on the reading desk, a study producing an
       archived provenance-valid brief, and a GYM proposal citing it in the
       Architect's queue (IMPLEMENTATION M5b exit; SRS §6.8 as S-STOA, §6.9 as
       S-MODE). The proof gate itself is *met later by operation* — this
       milestone builds the machinery that will measure it.
-- [ ] **M5b exit review** — S-STOA + S-MODE green in CI; the real research
+      *Evidence: S-STOA green in CI (run 33186729216) and S-MODE green in CI
+      (run 33188310155), both on ubuntu where the Windows worktree/PTY failures
+      do not apply; E-STOA recorded (15/15, deterministic half). **The exit
+      demo ran through the app**, end to end, on a fresh home:
+      `docs/demo/m5b-cycle-1-registered.png` — a URL typed into the real
+      reading desk and registered by clicking REGISTER (real inputs, real IPC,
+      nothing written by the harness): `src-opencode-sdk-js`, MIT, pinned
+      `9f3c1de`. `docs/demo/m5b-cycle-2-brief.png` — the study's brief archived
+      as **RB-002**, with `log.jsonl` recording
+      `brief-archived {findings: 2, directivesReported: 1}`: both findings
+      cited, and the source's instruction to its reader REPORTED rather than
+      obeyed. The artifact itself is exported to
+      `docs/demo/m5b-cycle-brief-RB-002.md`.
+      `docs/demo/m5b-cycle-3-proposal.png` — **GYM-006** waiting in the
+      Architect's queue, with `gym proposed {briefs: ['RB-002']}` on the log:
+      the citation link, machine-checkable. The brief and the proposal arrived
+      as files in a real agent outbox, so Hermes, the Odeon endpoint, the Stoa
+      archive and the Gymnasium each ran their SHIPPED path; only the
+      researcher's engine is stood in for. The router refused three malformed
+      attempts on the way (bad id, missing `needs_human`, `requires_reply:
+      false` on a `propose` — ADR-0003's obligation table), each parked in
+      `outbox/.rejected/` with its reason.*
+      *Two defects found BY the demo and fixed (DECISIONS-LOG): the reading
+      desk had no pin field, so every source registered from it was
+      permanently unstudiable — M5b.1 deferred pin-setting to M5b.2 and M5b.2
+      built a `plan()` that only reads it; and the proof gate read every
+      SEEDED ledger row as a gating violation, which — a violation being
+      absorbing — made `improving` unopenable on any company that inherited a
+      build-phase archive. Every unit test had passed because each synthesised
+      the log it wanted; only the running app read the real seeded ledger
+      beside a real fresh log.*
+- [x] **M5b exit review** — S-STOA + S-MODE green in CI; the real research
       cycle evidence; PROGRESS + docs synced.
+
+### M5b exit review (2026-08-28) — verdict: DONE
+
+Every exit criterion verified **by execution**, not by inspection.
+
+| Criterion | How it was proved |
+|---|---|
+| S-STOA green in CI | run 33186729216 (ubuntu), 18 cases; 20 after M5b.4 added the brief-citing pair |
+| S-MODE green in CI | run 33188310155 (ubuntu), 13 cases |
+| E-STOA recorded | 15/15 — the rubric's own discrimination test, over `test/fixtures/stoa-source/` |
+| One real research cycle through the app | the three `docs/demo/m5b-cycle-*.png` captures + the archived `RB-002` + `GYM-006` on the ledger citing it |
+| PROGRESS + docs synced | this file, DECISIONS-LOG, SDD §2/§4.7/§9, ATTRIBUTION, and `docs/implementations/2026-08-28-m5b-stoa-and-modes.md` |
+| The INTEGRATED stack green in CI | run **33192290049** on `feature/m5b-6-suites-exit` — all six packages plus the drop-guard fix, on ubuntu |
+
+**Four defects found by running the thing, all fixed in-milestone:**
+
+1. `Gymnasium.append()` deleted everything below its table (M5b.3) — FR-14.5's
+   mode section would have vanished at the next proposal.
+2. The reading desk had no pin field (M5b.6) — every source registered from it
+   was permanently unstudiable. M5b.1 deferred pin-setting to M5b.2; M5b.2
+   built a `plan()` that only reads it. Neither package owned it.
+3. The proof gate read every SEEDED ledger row as a gating violation (M5b.6) —
+   and a violation is absorbing, so `improving` could never be enabled on any
+   company that inherited a build-phase archive. Every unit test passed because
+   each synthesised the log it wanted.
+
+4. The drop-validation block guarded every check on "a map exists" (M5b.6) —
+   committing the maps meant CI had maps and, correctly, no sheets, so the two
+   checks that open a PNG failed on ubuntu while passing locally. Found by CI
+   on the push, fixed, and verified both ways: 33 cases with the sheets moved
+   aside, 35 with them present.
+
+The first three are the seam-blindness class the M3, M4 and M5 audits each found a
+different way: correct halves that only disagree when the running system puts
+them side by side. The M5b answer was the same one that worked before — run the
+demo, and believe the demo over the suite.
+
+**Carried, unchanged:** the 2026-09-11 metric sweep (GYM-002/003/004 ledger
+checks + GYM-003's live-quit evidence run) did **not** fall inside this run —
+today is 2026-08-28 — so it is carried to the next milestone window rather than
+booked here. GYM-001's own check is due 2026-09-25.
+
+**Owed to a real-engine session (recorded, never faked):** E-STOA's LLM-judged
+half; a study whose checkout and pin are recorded by the researcher rather than
+typed by the Architect (the "pin before study" path, which still has no
+implementation — the desk's pin field is the Architect's route, not the study's).
+
 
 **Standing due-dates to carry:** the 2026-09-11 metric sweep (GYM-002/003/004
 ledger checks + GYM-003's live-quit evidence run) falls inside this

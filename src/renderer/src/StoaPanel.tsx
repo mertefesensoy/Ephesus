@@ -94,6 +94,7 @@ export function StoaPanel(): ReactElement {
   const [url, setUrl] = useState('')
   const [tags, setTags] = useState('')
   const [license, setLicense] = useState('unverified')
+  const [pin, setPin] = useState('')
   const [notes, setNotes] = useState('')
 
   const refresh = useCallback((): void => {
@@ -124,20 +125,29 @@ export function StoaPanel(): ReactElement {
       .map((tag) => tag.trim())
       .filter((tag) => tag.length > 0)
     eph.stoa
-      // `pin: null` — the Architect registers a source; the first study records
-      // the commit it ran against (FR-13.2, "pin before study").
-      .register({ url: url.trim(), tags: parsedTags, license: license.trim(), pin: null, notes })
+      .register({
+        url: url.trim(),
+        tags: parsedTags,
+        license: license.trim(),
+        // Empty means unpinned, which is a legal state and NOT studiable
+        // (FR-13.2). Offering the field matters: without it every source
+        // registered from this desk would be permanently unstudiable, because
+        // nothing else on the Architect's side can set a pin.
+        pin: pin.trim() === '' ? null : pin.trim(),
+        notes
+      })
       .then((result) => {
         setOutcome(result.ok ? `registered ${result.id}` : result.reason)
         if (result.ok) {
           setUrl('')
           setTags('')
+          setPin('')
           setNotes('')
         }
         refresh()
       })
       .catch((err: unknown) => setError(String(err)))
-  }, [url, tags, license, notes, refresh])
+  }, [url, tags, license, pin, notes, refresh])
 
   const retire = useCallback(
     (id: string): void => {
@@ -195,6 +205,13 @@ export function StoaPanel(): ReactElement {
         onChange={(ev) => setLicense(ev.target.value)}
         placeholder="license as verified — or 'unverified'"
         aria-label="license"
+      />
+      <input
+        style={field}
+        value={pin}
+        onChange={(ev) => setPin(ev.target.value)}
+        placeholder="pinned commit — leave empty to register unstudiable until pinned"
+        aria-label="pin"
       />
       <input
         style={field}

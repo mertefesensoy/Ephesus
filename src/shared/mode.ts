@@ -82,9 +82,10 @@ export interface GymLogEvent {
  * hold a gate.
  *
  * A "gating violation" is the one condition that cannot be fixed by waiting: a
- * proposal that reached `landed` or beyond without an Architect `approved`
- * event on the log. If that has ever happened the loop is not merely immature,
- * it is broken, and no amount of further evidence should open this gate.
+ * proposal that reached `landed` or beyond with NO Architect verdict anywhere —
+ * neither an `approved` event on the log nor a Decided date on its ledger row.
+ * If that has ever happened the loop is not merely immature, it is broken, and
+ * no amount of further evidence should open this gate.
  */
 export function checkProofGate(
   rows: readonly GymRow[],
@@ -110,9 +111,17 @@ export function checkProofGate(
   const landedOrBeyond = rows.filter(
     (row) => row.status === 'landed' || row.status === 'validated' || row.status === 'regressed'
   )
+  // A verdict counts when EITHER the log carries the `approved` event or the
+  // ledger row carries a Decided date. Both are permitted inputs (FR-14.3), and
+  // requiring the log alone was wrong in a way only a live run could show: a
+  // ledger seeded from the build-phase archive (FR-12.6) inherits rows that
+  // WERE decided by the Architect — the archive records the date — while the
+  // fresh log has no events for them at all. Every seeded row therefore read as
+  // a gating violation, and since a violation is absorbing, the gate could
+  // never open on any company that inherited an archive. That is every company.
   const gatingViolations = landedOrBeyond
-    .filter((row) => !approved.has(row.id))
-    .map((row) => `${row.id} reached ${row.status} with no Architect approval on the log`)
+    .filter((row) => !approved.has(row.id) && (row.decidedAt ?? '').trim() === '')
+    .map((row) => `${row.id} reached ${row.status} with no Architect verdict on the ledger or log`)
 
   const missing: string[] = []
   if (measured.length < PROOF_GATE.fullLoop) {
