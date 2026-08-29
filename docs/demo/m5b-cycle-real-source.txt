@@ -1,0 +1,45 @@
+M5b close-out — the research cycle, re-run against a REAL source (2026-08-29)
+
+WHY THIS EXISTS. The close-out audit found the original exit-demo cycle was
+source-fake beyond its disclosed stand-in: the pinned commit 9f3c1de does not
+exist in the repository the watchlist named, the cited path belongs to another
+repo's layout, and the GYM-006→RB-002 citation survived in no artifact. The
+machinery half of that demo was real; the source half was not, and the record
+did not say so. This run repeats the cycle through the SAME shipped path with
+every link independently verifiable. Honest scope: the researcher's ENGINE is
+stood in by the fake engine (a real spawned process filing through its own
+outbox — the same disclosed stand-in as the original demo); the SOURCE, the
+PIN, and every CITATION are real.
+
+THE SOURCE IS REAL — verified remotely:
+  $ gh api repos/chaitanyagiri/munder-difflin/commits/b91a49f
+  b91a49fc0896cb95058ff74b7910820452b3bb42 Merge pull request #362 from chaitanyagiri/wall/additions
+
+…and locally, inside the run itself (a clone AT the pin; each cited path
+asserted to exist before anything else ran):
+
+EVIDENCE source clone HEAD: b91a49fc0896cb95058ff74b7910820452b3bb42
+EVIDENCE registered: src-munder-difflin pin=b91a49f license=MIT
+EVIDENCE plan: commit=b91a49f readOnly=true envGrants=[]
+EVIDENCE brief archived: RB-001 "Closing time and the hook-return control channel, re-verified"
+EVIDENCE ledger: GYM-001 "Record the provenance re-verification cycle" status=proposed cites=RB-001
+
+WHAT EACH LINE PROVES.
+- register → the Architect-only registrar accepted the real URL with the real
+  pin and the verified MIT license (FR-13.1).
+- plan → the study plan is at the pin, read-only, with an empty grant list the
+  API cannot even express filling (FR-13.2, NFR-17).
+- brief archived → a REAL spawned process filed the brief as mail through the
+  Odeon endpoint; validation passed because the commit matches the watchlist
+  pin and every finding cites a path that exists at that commit (FR-13.3). The
+  findings are RB-001's — the study whose improvements (GYM-002 closing-time's
+  sibling, GYM-003) already landed, so the chain closes on work that shipped.
+- ledger → the proposal citing the brief was minted onto the gym ledger, and
+  the `gym`/`proposed` log event carries `briefs: [RB-001]` — the pairing the
+  proof gate counts, in the book of record (FR-13.4, NFR-13).
+
+Run mechanics: a temporary vitest evidence file driving the scenario rig's
+SHIPPED wiring (the same startCompany the S-suites use — real git, real socket,
+real spawned process), deleted after this capture per the documented
+temporary-evidence pattern. Ids (RB-001/GYM-001) are the rig's fresh temp home
+numbering, not the repo archive's.

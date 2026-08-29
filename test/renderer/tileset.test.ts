@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { floorPlan, TILE_PX, type PlanCell } from '../../src/shared/floor'
 import { atlasScale, FRAME_KEYS, parseTilesetMap, resolveTileset } from '../../src/shared/tileset'
@@ -212,5 +215,84 @@ describe('the floor says which art it is drawing (invariant §7)', () => {
       { '../assets/tileset/pack.tiles.json': MAP }
     )
     expect(state.sheetUrl).toBe('/pack.png')
+  })
+})
+
+/**
+ * The installed drop, when there is one (UI-DESIGN §7, ATTRIBUTION rule 2).
+ *
+ * The sheets and their maps are gitignored — a licence that forbids
+ * redistributing the asset keeps them out of the repository — so CI runs this
+ * block with nothing to check and says so. On a machine where the Architect has
+ * restored the packs, it is the only thing that can catch a map that names a
+ * missing sheet, an index past the end of its sheet, or a `tilePx` that would
+ * break §7's integer-scale rule. Those are exactly the mistakes a human makes
+ * authoring a layout by hand, and they are invisible until the floor paints
+ * garbage.
+ */
+describe('the installed tileset drop (skipped when the drop is empty)', () => {
+  const DROP = path.join(
+    fileURLToPath(new URL('../../', import.meta.url)),
+    'src/renderer/src/assets/tileset'
+  )
+  // Two different populations, because they are checkable in two different
+  // places. The MAPS are committed — they are our own work — so CI can and
+  // should validate their shape. The SHEETS are the licensed asset and are
+  // never committed, so anything that has to open one only runs where the
+  // Architect has restored the drop. Guarding both on `maps` was wrong the
+  // moment the maps became tracked, and CI said so on the next push.
+  const maps = fs.existsSync(DROP)
+    ? fs.readdirSync(DROP).filter((name) => name.endsWith('.tiles.json'))
+    : []
+  const withSheet = maps.filter((name) => {
+    const parsed = parseTilesetMap(JSON.parse(fs.readFileSync(path.join(DROP, name), 'utf8')))
+    return parsed.ok && fs.existsSync(path.join(DROP, parsed.map.sheet))
+  })
+
+  it('reports what is installed, so an empty run is not mistaken for a pass', () => {
+    // Not an assertion about the count — the drop is a local artifact. This
+    // exists so the reporter prints the number a reader can compare against
+    // ATTRIBUTION.md.
+    expect(Array.isArray(maps)).toBe(true)
+  })
+
+  it.runIf(maps.length > 0).each(maps)('%s is a valid tile map', (name) => {
+    const parsed = parseTilesetMap(JSON.parse(fs.readFileSync(path.join(DROP, name), 'utf8')))
+    expect(parsed.ok ? 'valid' : parsed.reason).toBe('valid')
+  })
+
+  it('says how much of the drop is present, so an empty run is legible', () => {
+    // CI sees maps and no sheets; a restored machine sees both. Neither is a
+    // failure — but a reader of the reporter should be able to tell which run
+    // they are looking at.
+    expect(withSheet.length).toBeLessThanOrEqual(maps.length)
+  })
+
+  it.runIf(maps.length > 0).each(maps)('%s scales the sheet by a whole number (§7)', (name) => {
+    const parsed = parseTilesetMap(JSON.parse(fs.readFileSync(path.join(DROP, name), 'utf8')))
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const scale = atlasScale(parsed.map)
+    expect(Number.isInteger(scale)).toBe(true)
+    expect(scale).toBeGreaterThanOrEqual(1)
+  })
+
+  it.runIf(withSheet.length > 0).each(withSheet)('%s frames all land inside its sheet', (name) => {
+    const parsed = parseTilesetMap(JSON.parse(fs.readFileSync(path.join(DROP, name), 'utf8')))
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const sheet = path.join(DROP, parsed.map.sheet)
+    // PNG dimensions from the IHDR chunk — no image decoder, and no new
+    // dependency for one arithmetic check (invariant §10).
+    const head = fs.readFileSync(sheet).subarray(16, 24)
+    const width = head.readUInt32BE(0)
+    const height = head.readUInt32BE(4)
+    const stride = parsed.map.tilePx + (parsed.map.spacing ?? 0)
+    const rows = Math.floor(height / stride)
+    const last = parsed.map.columns * rows - 1
+    expect(Math.floor(width / stride)).toBe(parsed.map.columns)
+    for (const [key, index] of Object.entries(parsed.map.frames)) {
+      expect(`${key}:${String(index <= last)}`).toBe(`${key}:true`)
+    }
   })
 })

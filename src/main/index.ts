@@ -26,6 +26,12 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
+import { STOA_EVERY_MS, Stoa } from './stoa'
+import { CompanyModes } from './modes'
+import { stoaCadenceTick } from './stoa-cadence'
+import { checkIntake, checkStudiable } from '../shared/stoa'
+import { isImprovementRole } from '../shared/mode'
+import type { SourceView } from '../shared/stoa-view'
 import { wireOdeonEndpoint } from './odeon-endpoint'
 import { OrgLayer, RETRO_EVERY_MS } from './org'
 import { orgChart as orgChartOf } from '../shared/org'
@@ -44,7 +50,7 @@ import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
-import { initHome } from './config'
+import { getHome, initHome, saveConfig } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
 import { CodexAdapter } from './engines/codex'
@@ -91,6 +97,8 @@ let briefing: BriefingJob | null = null
 let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
 let gymnasium: Gymnasium | null = null
+let stoa: Stoa | null = null
+let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -688,6 +696,14 @@ async function boot(): Promise<void> {
         } catch (err) {
           reportDegradation('breaker', `could not stall the task of ${agentId}: ${String(err)}`)
         }
+        // FR-14.5: a rung-3 stop on gym/stoa work reverts the company to
+        // `directed` automatically, visibly, and on the ledger. The revert is
+        // attributed to the breaker rather than to the Architect, so nobody
+        // later reads it as a change of mind — and `everEnabled` is preserved,
+        // because a safety stop is not a demotion.
+        if (isImprovementWork(agentId)) {
+          modes?.revertOnBreaker(`${agentId} stopped at rung ${String(report.rung)}`)
+        }
       },
       // ADR-0011 rung 2: "lower its remaining budget". The set is consulted by
       // the budget watcher's agents() below, so the constraint lifts with the
@@ -875,7 +891,13 @@ async function boot(): Promise<void> {
         : {
             gymSlice: {
               ...gymnasium.slice(),
-              open: gymnasium.rows().filter((row) => row.status === 'proposed').length
+              open: gymnasium.rows().filter((row) => row.status === 'proposed').length,
+              // FR-13.6 / FR-14.1: the Stoa's work and the company mode ride
+              // the same standup section as the budget they share.
+              ...(stoa === null
+                ? {}
+                : { stoa: { sources: stoa.sources().length, briefs: stoa.briefs().length } }),
+              mode: modes?.mode() ?? 'directed'
             }
           })
     }),
@@ -939,12 +961,103 @@ async function boot(): Promise<void> {
   gymnasium = new Gymnasium({
     agoraRoot: agora.root,
     seedFrom: path.join(appRoot, 'docs', 'gymnasium'),
+    // FR-13.4: a proposal citing a brief must cite one that exists.
+    briefExists: (briefId) => stoa?.brief(briefId) !== null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
+  // The Stoa (ADR-0017, FR-13). Same seeding habit as the Gymnasium beside it:
+  // the watchlist and the briefs the build phase already produced cross into
+  // the running system together, so a seeded brief's source reference resolves.
+  stoa = new Stoa({
+    agoraRoot: agora.root,
+    seedFrom: path.join(appRoot, 'docs', 'stoa'),
+    // A watched source is checked out under the harness home, never inside the
+    // Agora and never in `worktrees/` — those belong to the company's own
+    // repositories (ADR-0004, NFR-17). Both roots are passed so the refusal is
+    // checked rather than assumed.
+    scratchRoot: path.join(home.root, 'scratch'),
+    worktreesRoot: path.join(home.root, 'worktrees'),
+    prompts: promptStore,
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    commitSoon: (subject) => agora?.commitSoon(subject),
+    onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
+  /**
+   * Is this agent doing Gymnasium/Stoa work? (FR-14.5)
+   *
+   * Attributed by ROLE, which is what the roster actually records. A stop is
+   * only allowed to revert the company mode when the stopped agent was one of
+   * the two roles autonomy creates — otherwise a rung-3 stop on ordinary
+   * mission work would switch off self-improvement for reasons that had
+   * nothing to do with it, and the Architect would be left re-enabling a mode
+   * that never misbehaved.
+   */
+  const isImprovementWork = (agentId: string): boolean => {
+    // `agents` is a record keyed by id, not a list. The role test itself is
+    // shared and exact (isImprovementRole — M5b close-out audit, finding 12).
+    return isImprovementRole(agora?.registry().agents[agentId]?.role ?? '')
+  }
+
+  // The company mode (ADR-0018, FR-14). The switch that decides whether the
+  // company acts without being asked, so it reads and writes `config.json`
+  // through the same atomic path everything else does, and its gate reads only
+  // the Gymnasium ledger and the `gym` events — never a computed cache.
+  modes = new CompanyModes({
+    // Read through `getHome()` rather than the boot-time snapshot: a mode set
+    // during this run must be what the next read sees.
+    read: () => ({
+      mode: getHome().config.mode,
+      everEnabled: getHome().config.everEnabledImproving ?? false
+    }),
+    write: (patch) => {
+      saveConfig({ mode: patch.mode, everEnabledImproving: patch.everEnabled })
+    },
+    rows: () => gymnasium?.rows() ?? [],
+    gymEvents: () =>
+      (agora?.readLog() ?? [])
+        .filter((entry) => entry['kind'] === 'gym')
+        .map((entry) => ({
+          event: entry['event'],
+          gymId: entry['gymId'],
+          evidence: entry['evidence']
+        })),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    recordOnLedger: (change) => gymnasium?.recordModeChange(change),
+    onChanged: () => mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+  })
+
+  // The Stoa cadence (SDD §7.7): fires autonomously ONLY in `improving`
+  // (FR-14.4). The gate is the scheduler's `enabled` predicate rather than a
+  // check inside the job, so autonomy is switched off at the one place that
+  // starts autonomous work — a job that policed itself would be a job that
+  // could forget to.
+  scheduler.add({
+    id: 'stoa-cadence',
+    everyMs: STOA_EVERY_MS,
+    enabled: () => modes?.mode() === 'improving',
+    // The SHIPPED tick (stoa-cadence.ts) — the suites exercise the same body
+    // this wiring runs (M5b close-out audit, finding 5).
+    run: () => {
+      stoaCadenceTick({
+        sources: () => stoa?.sources() ?? [],
+        plan: (sourceId) => stoa?.plan(sourceId) ?? { ok: false },
+        mode: () => modes?.mode() ?? 'directed',
+        appendLog: (draft) => agora?.appendLog(draft)
+      })
+    }
   })
 
   scheduler.add(reflection.trigger())
@@ -1009,6 +1122,7 @@ async function boot(): Promise<void> {
       return wireOdeonEndpoint({
         odeon: archive,
         gymnasium,
+        stoa,
         briefing,
         prompts: promptStore,
         mayDecide: (request) =>
@@ -1362,6 +1476,72 @@ async function boot(): Promise<void> {
       },
     gymMetricResult: (id, measured) =>
       gymnasium?.measure(id, measured) ?? { ok: false, reason: 'the gymnasium is not available' },
+    gymMode: () => {
+      const gate = modes?.gate() ?? { met: false, missing: ['the mode driver is not available'] }
+      return {
+        mode: modes?.mode() ?? 'directed',
+        gateMet: gate.met,
+        missing: [...gate.missing],
+        everEnabled: getHome().config.everEnabledImproving ?? false
+      }
+    },
+    // FR-14.2 / R1 again: `architect` is supplied HERE, by main. This is the
+    // switch that decides whether the company acts without being asked, so the
+    // renderer names no actor and there is nothing for it to claim.
+    gymSetMode: (mode) =>
+      modes?.setMode(mode, 'architect') ?? {
+        ok: false,
+        reason: 'the mode driver is not available',
+        missing: []
+      },
+    stoaWatchlist: () => {
+      const list = stoa?.watchlist() ?? { sources: [], retired: [] }
+      // Field-picked, not spread: the response is the VIEW type and nothing
+      // more — a spread leaked `registeredBy`, a field the projection does not
+      // declare (M5b close-out audit, finding 13; the projection and the type
+      // must agree even when the leak is harmless).
+      const view = (
+        entry: (typeof list.sources)[number],
+        over: { retired: boolean; blocked: string | null }
+      ): SourceView => ({
+        id: entry.id,
+        url: entry.url,
+        kind: entry.kind,
+        tags: [...entry.tags],
+        license: entry.license,
+        pin: entry.pin,
+        registeredAt: entry.registeredAt,
+        notes: entry.notes,
+        retired: over.retired,
+        blocked: over.blocked,
+        intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
+      })
+      // Retired rows are listed too, marked — the desk shows a struck-through
+      // row rather than a hole where a source used to be (FR-13.1's habit).
+      return [
+        ...list.sources.map((entry) =>
+          view(entry, {
+            retired: false,
+            blocked: checkStudiable(entry).allowed ? null : checkStudiable(entry).because
+          })
+        ),
+        ...list.retired.map((entry) =>
+          view(entry, { retired: true, blocked: 'retired from the watchlist' })
+        )
+      ]
+    },
+    // FR-13.1 / R1: `architect` is supplied HERE, by main, because a call on
+    // the window bridge is the Architect with certainty. The renderer never
+    // names a registrar, so there is nothing for it to claim.
+    stoaRegister: (draft) =>
+      stoa?.register({ ...draft, tags: [...draft.tags] }, 'architect') ?? {
+        ok: false,
+        reason: 'the stoa is not available'
+      },
+    stoaRetire: (id) =>
+      stoa?.retire(id, 'architect') ?? { ok: false, reason: 'the stoa is not available' },
+    stoaBriefs: () => (stoa?.briefs() ?? []).map((row) => ({ ...row })),
+    stoaBrief: (id) => stoa?.brief(id) ?? null,
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {

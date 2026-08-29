@@ -127,25 +127,32 @@ Within a milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
-> **Build state (updated 2026-08-28, M5 close-out audit):** M0–M5 are COMPLETE
-> and every milestone is AUDITED at close by execution + design-conformance
-> review (verdicts in `docs/PROGRESS.md`). The M5 close-out audit re-proved all
-> six exit criteria by running them (55/55 M5 suites, 135 scenario cases,
-> ledger parser proven against the live archive) and landed five fixes — the
-> load-bearing one: the Gymnasium ledger's `renderRow` dropped the Measured
-> column, so every rewrite erased measured outcomes (R2 mechanically false);
-> `GymRow.measured` + round-trip regressions close it. The Stoa's machinery is
-> designed and its first cycle already ran during M5 (RB-001 → GYM-002/003,
-> approved and landed): ADR-0017–0020 are accepted, FR-13/FR-14 are in the
-> SRS, and `docs/stoa/` + `/research` + `/improve` are live build-phase tools.
-> **Resume at M5b.1.** The detailed M5b package plan (M5b.1–M5b.6: docs per
-> package, tests owed, risks) is in `docs/PROGRESS.md` — read it before
-> coding. M5b.1 is the watchlist + `stoa.ts` core; M5b.5 is the floor-art
-> intake — the Architect HAS purchased LimeZu Modern Interiors v41.4 + Modern
-> Office Revamped (2026-08-28): 16×16 sheets go in the gitignored drop, tile
-> maps are authored per pack, Kenney staging retires, ATTRIBUTION.md carries
-> the credit; the sheets never enter the repo. Minor choices already made are
-> in `docs/DECISIONS-LOG.md`; do not re-litigate them silently.
+> **Build state (updated 2026-08-29, M5b close-out audit):** M0–M5 and **M5b
+> are COMPLETE and AUDITED** (two-agent close-out verdicts in
+> `docs/PROGRESS.md`). M5b built the Stoa and company modes — watchlist +
+> reading desk, read-only secret-free researcher plan, brief validation that
+> refuses an uncited finding pre-human, `directed`/`improving` behind SRS
+> §6.9's proof gate, the brief→proposal citation link, the licensed floor.
+> S-STOA 20 / S-MODE 13 / E-STOA 15 green in CI (run 33192502418).
+> **The close-out audit's headline:** the exit demo's research cycle cited a
+> pin that existed in no repository — the record was AMENDED and the cycle
+> re-run against a real, remotely-verified pin
+> (`docs/demo/m5b-cycle-real-source.txt`). Lesson now standing: an exit
+> demo's EXTERNAL references get the same verification its internal ones do.
+> Five audit fixes landed with named regressions (Stoa.brief seeding; the
+> shipped cadence tick in `stoa-cadence.ts`; exact `isImprovementRole`;
+> the SourceView projection; SDD/ATTRIBUTION sync). The cadence in
+> `improving` is a HEARTBEAT until M7 wires the researcher spawn — SDD §7.7
+> carries the note.
+> **Resume at M6.1.** The M6 plan (M6.1–M6.8, **art first, then the Herald**)
+> is in `docs/PROGRESS.md` — read it AND UI-DESIGN v2 (§5.1–§5.7, §9, landed
+> at this close-out: the normative citizen/station/envelope/particle specs the
+> art packages implement) before coding. Characters stay PROCEDURAL — the
+> licensed packs' character sets are unused by Architect decision (2026-08-29,
+> ATTRIBUTION rule 3 reaffirmed). Five audits running: read the M5b exit
+> review's seam-blindness list before assuming a green suite means a working
+> seam. Minor choices already made are in `docs/DECISIONS-LOG.md`; do not
+> re-litigate them silently.
 > Standing Architect directives already folded into the docs: Artemis ranks,
 > the Architect verdicts (ADR-0015 R1 — everywhere, the Stoa included);
 > company mode `improving` is proof-gated (SRS §6.9) and Architect-only;
@@ -153,10 +160,15 @@ it is how the next session knows where to resume).
 > codex/gemini stay `pty-heuristic` with hook wiring owed to a local
 > trust-persisting session; the `memory`, `stoa` and `shutdown` log kinds are
 > in SDD §4.3; MemPalace stays an optional external on the visible ladder.
-> Due 2026-09-11 (book in the M5b exit review if unmeasured): the
-> GYM-002/003/004 metric sweep + GYM-003's live-quit evidence run.
+> Due 2026-09-11 (falls inside the M6 window — booked in M6.8): the
+> GYM-002/003/004 metric sweep + GYM-003's live-quit evidence run. GYM-001's
+> own check is due 2026-09-25.
 > Owed to local sessions (recorded, never faked): the Memory panel screenshot;
-> codex/gemini hook wiring post-trust; a real-engine respawn demo.
+> codex/gemini hook wiring post-trust; a real-engine respawn demo; E-STOA's
+> LLM-judged half; a study that records its own pin from a real checkout (and
+> until then, no path advances a pin — `stoa:pin` is on the owed list);
+> Stoa + gym spend attribution (M6.7); a renderer regression for the reading
+> desk once M6.1 establishes a DOM harness.
 > Dogfooding is ON (since M3 exit): Ephesus agents help build Ephesus.
 
 ### M0 packages (do these first)

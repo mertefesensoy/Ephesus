@@ -5,6 +5,8 @@ import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
 import type { GymDecided, GymRowView } from './gym-view'
+import type { BriefView, SourceView, StoaCurated } from './stoa-view'
+import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -77,6 +79,22 @@ export const IpcChannels = {
   gymProposal: 'gym:proposal',
   gymVerdict: 'gym:verdict',
   gymMetricResult: 'gym:metric-result',
+  // The company mode (SDD §5 `gym: mode() setMode(m)`, ADR-0018). `setMode` is
+  // architect-only and enforced in the handler, like `gym:verdict`: the
+  // renderer names no actor, so there is no field an untrusted surface could
+  // set to claim one.
+  gymMode: 'gym:mode',
+  gymSetMode: 'gym:set-mode',
+  // The Stoa's surface (SDD §5 `stoa:`), exactly the five documented channels.
+  // `register`/`retire` are Architect-only (FR-13.1) and enforced in the
+  // handler, not here — the renderer names no registrar, so there is no field
+  // an untrusted surface could set. There is deliberately no channel that sets
+  // a pin: SDD §7.7 puts that inside the study flow.
+  stoaWatchlist: 'stoa:watchlist',
+  stoaRegister: 'stoa:register',
+  stoaRetire: 'stoa:retire',
+  stoaBriefs: 'stoa:briefs',
+  stoaBrief: 'stoa:brief',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -272,6 +290,38 @@ export interface EphApi {
     verdict: (id: string, verdict: 'approved' | 'rejected') => Promise<GymDecided>
     /** Records the measured outcome; null means it could not be measured. */
     metricResult: (id: string, measured: string | null) => Promise<GymDecided>
+    /** The company mode, plus what the proof gate would say (FR-14.1). */
+    mode: () => Promise<ModeView>
+    /**
+     * Sets the company mode (FR-14.2). ARCHITECT-ONLY, enforced in the handler.
+     * The first `improving` enable is refused unless SRS §6.9's evidence is on
+     * the record, and the refusal lists exactly what is missing.
+     */
+    setMode: (mode: 'directed' | 'improving') => Promise<ModeSet>
+  }
+  stoa: {
+    /** Every registered source, plus retired ones marked as such (FR-13.1). */
+    watchlist: () => Promise<readonly SourceView[]>
+    /**
+     * Registers one source. ARCHITECT-ONLY, enforced in the handler for the
+     * same reason `gym.verdict` is: main supplies `architect` because a call
+     * on the window bridge IS the Architect, and the draft carries no id, no
+     * registrar and no timestamp for anyone to claim. Agents may propose a
+     * source in a report or a brief; no agent path reaches this channel.
+     */
+    register: (draft: {
+      url: string
+      tags: readonly string[]
+      license: string
+      pin: string | null
+      notes: string
+    }) => Promise<StoaCurated>
+    /** Retires one source — it moves to the retired list, never deleted. */
+    retire: (id: string) => Promise<StoaCurated>
+    /** Every archived brief (FR-13.4), newest id first. */
+    briefs: () => Promise<readonly BriefView[]>
+    /** One brief's text, as archived and immutable. */
+    brief: (id: string) => Promise<string | null>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */

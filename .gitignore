@@ -6,8 +6,13 @@ out/
 .env
 .env.*
 
-# Licensed art drop (UI-DESIGN §7, see src/renderer/src/assets/ATTRIBUTION.md)
+# Licensed art drop (UI-DESIGN §7, see src/renderer/src/assets/ATTRIBUTION.md).
+# The SHEETS are the licensed asset and never enter the repository. The
+# `*.tiles.json` maps are not: a layout is our own work — a table of integers
+# describing where things sit on somebody else's sheet — and committing it is
+# what makes ATTRIBUTION's restore path reproducible rather than a story.
 src/renderer/src/assets/tileset/*
 !src/renderer/src/assets/tileset/.gitkeep
+!src/renderer/src/assets/tileset/*.tiles.json
 src/renderer/public/fonts/*
 !src/renderer/public/fonts/README.md

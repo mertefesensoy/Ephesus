@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "LimeZu Modern Office Revamped (Room Builder 16x16)",
+  "credit": "LimeZu — limezu.itch.io",
+  "sheet": "limezu-office-room-builder.png",
+  "tilePx": 16,
+  "columns": 16,
+  "frames": {
+    "wall": 85,
+    "floor-a": 122,
+    "floor-b": 154,
+    "path": 125,
+    "temple": 186
+  }
+}

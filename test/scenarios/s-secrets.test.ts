@@ -108,6 +108,18 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       gymProposal: () => null,
       gymVerdict: () => ({ ok: false, reason: 'no gymnasium' }),
       gymMetricResult: () => ({ ok: false, reason: 'no gymnasium' }),
+      gymMode: () => ({
+        mode: 'directed' as const,
+        gateMet: false,
+        missing: [],
+        everEnabled: false
+      }),
+      gymSetMode: () => ({ ok: false, reason: 'no modes', missing: [] }),
+      stoaWatchlist: () => [],
+      stoaRegister: () => ({ ok: false, reason: 'no stoa' }),
+      stoaRetire: () => ({ ok: false, reason: 'no stoa' }),
+      stoaBriefs: () => [],
+      stoaBrief: () => null,
       orgChart: () => [],
       orgMetrics: () => ({ metrics: [], findings: [] }),
       retros: () => [],

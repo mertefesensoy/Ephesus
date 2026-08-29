@@ -16,6 +16,7 @@ import {
   type VerdictName
 } from '../shared/gym'
 import type { Message } from '../shared/message'
+import { citedBriefIds } from '../shared/stoa-brief'
 
 /**
  * The Gymnasium's driver (ADR-0015, FR-12, SDD §7.6).
@@ -38,6 +39,14 @@ export interface GymnasiumOptions {
   /** Tokens gym work has spent this week, folded from the ledger (R3). */
   gymSpend?(): number
   readonly slice?: { readonly tokensPerWeek: number }
+  /**
+   * Does this research brief exist in the archive? (FR-13.4)
+   *
+   * Wired to the Stoa. Absent means "no Stoa" and brief citations go
+   * unchecked — a degradation of the check, not of the proposal: a company
+   * with no research department has no briefs to mis-cite.
+   */
+  briefExists?(briefId: string): boolean
   /** `log` kind `gym` (SDD §4.3) — every transition. */
   onLogEvent?(draft: { kind: 'gym' } & Record<string, unknown>): void
   commitSoon?(subject: string): void
@@ -126,6 +135,24 @@ export class Gymnasium {
     const parsed = parseGymProposal(message.body)
     if (!parsed.ok) return this.refuse(message, parsed.reasons)
 
+    // FR-13.4: a brief is evidence, and a proposal that says it descends from
+    // one must cite a brief that exists. A citation to an unarchived RB id is
+    // the uncited-finding problem wearing a different hat — it looks like
+    // provenance and resolves to nothing.
+    const cited = citedBriefIds(parsed.proposal.evidence)
+    const missing = this.options.briefExists
+      ? cited.filter((briefId) => !this.options.briefExists?.(briefId))
+      : []
+    if (missing.length > 0) {
+      return this.refuse(
+        message,
+        missing.map(
+          (briefId) =>
+            `evidence cites ${briefId}, which is not in the Stoa archive; a proposal cites a brief that exists (FR-13.4)`
+        )
+      )
+    }
+
     const widening = checkWidening(parsed.proposal)
     if (widening.refused) {
       // Logged as its own event: an attempt to widen authority is exactly the
@@ -171,7 +198,11 @@ export class Gymnasium {
       gymId: id,
       by: message.from,
       class: parsed.proposal.class,
-      evidence: [...parsed.proposal.evidence]
+      evidence: [...parsed.proposal.evidence],
+      // Recorded on the event so the proof gate can count Stoa-seeded
+      // proposals (SRS §6.9) from the log alone, without re-reading every
+      // proposal document.
+      briefs: cited
     })
     this.options.commitSoon?.(`gymnasium: ${id} proposed`)
     return { ok: true, id }
@@ -280,6 +311,50 @@ export class Gymnasium {
   }
 
   /**
+   * Records a company-mode change on the ledger document (FR-14.5, UC-15).
+   *
+   * On the ledger and not merely in the log, because UC-15's postcondition
+   * says every mode change is in both — and because the ledger is the document
+   * a human opens to ask "how did this company come to be running itself?".
+   *
+   * It lives in its own section under the proposals table rather than as a row
+   * in it: a mode change is not a proposal, and forcing it into eight columns
+   * meant for one would corrupt the table the parser and the reader both rely
+   * on. The Gymnasium writes it because the Gymnasium owns this file — one
+   * writer, no second opinion about what the ledger says.
+   */
+  recordModeChange(change: {
+    readonly from: string
+    readonly to: string
+    readonly by: string
+    readonly reason: string
+    readonly at: string
+  }): void {
+    const text = this.read().replace(/[\n]+$/, '')
+    const line = `| ${change.at} | ${change.from} → ${change.to} | ${change.by} | ${change.reason} |`
+    if (text.includes(MODE_HEADING)) {
+      writeFileAtomic(this.ledgerPath(), `${text}\n${line}\n`)
+      return
+    }
+    writeFileAtomic(
+      this.ledgerPath(),
+      [
+        text,
+        '',
+        MODE_HEADING,
+        '',
+        'Every change of company mode (ADR-0018), with who made it and why.',
+        'Append-only, like everything else here.',
+        '',
+        '| When | Change | By | Reason |',
+        '|---|---|---|---|',
+        line,
+        ''
+      ].join('\n')
+    )
+  }
+
+  /**
    * Adds or updates a row, and rewrites the table.
    *
    * The FILE is append-only in the sense ADR-0015 means: no row is ever
@@ -293,16 +368,24 @@ export class Gymnasium {
     if (rows.length < existing.length) {
       throw new Error('gymnasium: a ledger write would have lost a row')
     }
-    const header = this.read().split('\n')
-    const tableAt = header.findIndex((line) => line.startsWith('| ID |'))
+    const lines = this.read().split('\n')
+    const tableAt = lines.findIndex((line) => line.startsWith('| ID |'))
     const preamble =
-      tableAt === -1 ? EMPTY_LEDGER.split('\n').slice(0, -3) : header.slice(0, tableAt)
+      tableAt === -1 ? EMPTY_LEDGER.split('\n').slice(0, -3) : lines.slice(0, tableAt)
+    // Everything BELOW the table survives the rewrite. The first version of
+    // this function kept only the preamble, so any section a human — or the
+    // mode recorder (FR-14.5) — added under the table was silently deleted by
+    // the next proposal. The ledger is a document, and a document that eats
+    // its own footer is not a record.
+    let after = tableAt === -1 ? lines.length : tableAt
+    while (after < lines.length && (lines[after] ?? '').startsWith('|')) after += 1
+    const postamble = tableAt === -1 ? [] : lines.slice(after)
     const text = [
       ...preamble,
       '| ID | Title | Status | Success metric | Proposed | Decided | Measured | Outcome |',
       '|---|---|---|---|---|---|---|---|',
       ...rows.map(renderRow),
-      ''
+      ...(postamble.length > 0 ? postamble : [''])
     ].join('\n')
     writeFileAtomic(this.ledgerPath(), text)
   }
@@ -373,6 +456,9 @@ export class Gymnasium {
     return { ok: false, reasons }
   }
 }
+
+/** The heading the mode-change section lives under. */
+const MODE_HEADING = '## Mode changes'
 
 const EMPTY_LEDGER = [
   '# Gymnasium ledger — self-improvement record',

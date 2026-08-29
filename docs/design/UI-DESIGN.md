@@ -127,10 +127,148 @@ multiples; no faux bold/italic.
   district banner (e.g. "Skeleton Crew — myapp").
 - Camera: pan/zoom, double-click avatar to focus + open its context stack.
 
+*Sections §5.1–§5.7 and §9 below were added 2026-08-29 (UI-DESIGN v2): the
+specification depth is adapted from Munder Difflin's design system (MIT,
+credited in the README lineage); every token, size, and value is Ephesus's own.*
+
+### 5.1 Citizen sprite specification (normative)
+
+The §7 bar made exact. Cell **32×48 px** on the 32×32 tile grid; the sprite's
+feet own the bottom 4 rows; head-room rows 0–7 are reserved for overlays
+(§5.2), never for the body.
+
+- **Directions:** 8, drawn — diagonals are frames, not runtime flips (a flip
+  breaks asymmetric silhouettes: a satchel, a scroll case).
+- **Walk cycle:** 4 frames per direction (idle, step-A, idle, step-B), 125 ms
+  per frame stepped — two full frames per 250 ms tile walk (§6), so a citizen
+  never slides between poses.
+- **Bob:** ±1 px vertical, phased with the foot cycle, sampled at frame
+  boundaries only (never render-time sine). Standing citizens do not bob —
+  §6 forbids ambient idle motion.
+- **Palette:** ≤ 5 colors per sprite: `skin`, `hair`, `primary` (the agent's
+  §2.3 accent), `secondary` (tunic trim), plus the `ink-900` outline. The
+  status badge is drawn OUTSIDE the sprite budget as a §8 double-encoding
+  marker.
+- **Role silhouettes** (identity is shape first, color second — ATTRIBUTION
+  rule 3 keeps characters procedural). Each role carries one signature
+  element readable at 1×:
+
+| Role | Silhouette element |
+|---|---|
+| Orchestrator (Artemis) | Laurel circlet, 2 px; `terracotta` reserved |
+| Scribe / docs | Scroll case slung on the back, 3×8 px |
+| Builder / code | Tool belt, 2 px waist band |
+| Researcher (Stoa) | Shoulder satchel + tablet, 4×5 px |
+| Watch / safety | Cloak clasp, 2×2 px at the collar |
+| Herald / voice | Lyre pin, 3×3 px at the chest |
+
+### 5.2 Status overlays (rows 0–7, above the head)
+
+8×8 px, one at a time, driven ONLY by the SDD §6 avatar machine — an overlay
+is a *projection of a state*, never an animation with its own opinion.
+
+| Avatar state | Overlay | Frames |
+|---|---|---|
+| `thinking` | three dots cycling `·` `··` `···` | 3 × 200 ms |
+| `working` | the tool-class token held (§5.3); small sparkle every 800 ms | 2 |
+| `waiting` | sand-glass, slow turn | 2 × 400 ms |
+| `blocked` | `!` in `status-blocked`, blink | 2 × 300 ms |
+| `success` | star burst in `gold`, then gone | 4 (250 ms total) |
+| `looping` | tight spiral in `status-looping` | 2 × 200 ms |
+| `compacting` | box lid closing | 3 × 300 ms |
+| `ghost` | none — sprite at 50 % opacity | — |
+| `idle` / `alert` | none | — |
+
+### 5.3 Carrying tokens (tool results made visible)
+
+Walking desk-ward after a tool completes, the citizen carries a 6–8 px token
+at hand height, dropped onto the desk with a 3-frame fade on arrival. Keyed by
+**tool class** (the shim's classification — core never sees a tool name), in
+Ephesus vocabulary:
+
+| Tool class | Token |
+|---|---|
+| file (read/edit/write) | folded papyrus scroll — `marble-50` + `ink-700` |
+| shell | wax tablet with `>_` — `ink-900` |
+| web / fetch | small amphora — `aegean` + `aegean-light` |
+| search | magnifier — `ink-900` + `marble-50` |
+| harbor / mcp | diamond in the integration's accent |
+| ledger / board | tally tablet, 3 tick marks — `olive` |
+
+### 5.4 Station catalog & states
+
+Stations are tile-composed structures (LimeZu maps where the packs fit,
+8-color drawn tiles where they don't). Sizes on the 32 px grid:
+
+| Station | Size | Visual |
+|---|---|---|
+| Desk (per agent) | 64×32 | desk + seat + **inbox tray, flag UP while unread mail waits** — the wake watchdog made visible |
+| File shelf | 64×48 | scroll shelf, 3 rows |
+| Terminal bench | 32×48 | bench + tablet on a stand, blinking 2 px caret |
+| Web portal | 48×48 | harbor arch, `aegean` water dither (2-frame) |
+| Harbor kiosk (MCP) | 48×48 | modular stall; mini-pennant per integration |
+| Agora board | 32×48 | notice board, wax notes in a 3-accent rotation |
+| The Odeon | 96×64 | semicircle of benches; **fills when a meeting gathers** |
+| Watch post | 32×48 | brazier; **flame lit while a gate is open** |
+| Temple seat (Artemis) | 64×64 | columned niche, `terracotta` roof |
+
+States: **idle** (static) · **in use** (2-frame animation + §5.6 sparkle) ·
+**highlighted** (1 px `marble-50` outline while hovered or while its citizen
+approaches). Every state maps to an event-plane fact; no station animates on a
+timer alone.
+
+### 5.5 The envelope (Hermes made visible)
+
+The §5 scene-grammar rule made exact: every delivery flies an 8×6 envelope
+desk→desk, 400 ms stepped arc, color = speech act:
+
+| Act | Envelope |
+|---|---|
+| `request` / `query` | `aegean` — asks |
+| `inform` / `done` | `olive` — answers |
+| `propose` | `gold` — needs a verdict |
+| `agree` | `laurel` |
+| `refuse` / bounce | `wine`, wobble frame on landing |
+| broadcast | three envelopes fanning out |
+| divert (hop cap) | the envelope turns mid-flight toward the temple |
+
+Landing drops into the recipient's inbox tray (§5.4); the flag stays up until
+the mail is consumed. Reduced motion (§8): the flight becomes a one-frame
+flash on both trays — information parity, not decoration parity.
+
+### 5.6 Particles (three, budgeted)
+
+Each tied to a logged event; ≤ 2 systems live per citizen:
+
+- **Sparkle** — tool/task success: 4 pixel stars from the desk, 250 ms.
+- **Dust** — station arrival: 3 arcing dots, 300 ms.
+- **Tray pulse** — unread mail: the tray flag scales +1 px, one frame, every
+  800 ms while mail waits.
+
+Nothing else. No weather, no fireflies, no screen shake.
+
+### 5.7 Furnishings (place identity, not ambience)
+
+The licensed packs may furnish rooms **as identity**: furniture says what
+happens there (shelves say library, benches say odeon, crates say harbor).
+Furnishings are static — §1.2 bans decorative *motion*, and the review rule
+("decorative-only is cut") applies to anything that moves without meaning.
+Per-district furnishing lists ride the `*.tiles.json` maps, so a pack swap
+never touches code.
+
 ## 6. Motion rules
 
 - Durations: 120 ms (state flips), 250 ms (walks per tile, success flash), 400 ms
-  (panel open). Easing: stepped (4–6 frames), never smooth cubic — this is pixel art.
+  (panel open, envelope flight). Easing: stepped (4–6 frames), never smooth cubic —
+  this is pixel art.
+- Walk speed: 128 px/s exactly (one 32 px tile per 250 ms). Speed is a constant —
+  hurry is shown by *skipping stations*, never by faster legs.
+- Pathing: straight-line lerp tile-center to tile-center (the M1.5 walk clock);
+  A* around furniture is a recorded candidate, not owed.
+- Sprite frames step at 125 ms; UI state flips at 120 ms; nothing tweens.
+- **Forbidden motion:** spring physics, bounce, parallax, ambient idle motion on
+  panels or standing citizens, easing curves on sprites. Animation belongs to the
+  floor (citizens, envelopes, stations, particles); the panel layer is still.
 - The floor pauses all animation when the window is hidden (NFR-1 power budget).
 - Toasts only for events that already have a log line; a toast is a *pointer* to the
   log, never the only record.
@@ -155,7 +293,10 @@ licensed tileset plus procedural characters — Ephesus takes the same path:
   characters), but at Munder Difflin portrait fidelity: real 8-direction walk cycles
   (4+ frames per direction), distinct silhouettes per role, ≤ 5 colors per sprite
   from the §2 palette. The M0 placeholder rectangle-citizen does not meet this bar
-  and is replaced by the M1 floor-art package.
+  and is replaced by the M1 floor-art package. **§5.1 is the normative sprite
+  specification** (anatomy, frames, bob, silhouettes); this bullet states the bar,
+  §5.1 says how it is met (reaffirmed 2026-08-29 — the licensed packs' character
+  sets stay unused by Architect decision, rule 3 intact).
 - **Stations & icons:** stations composed from the tileset where it fits, drawn as
   8-color tiles where it doesn't. Icon set: 12×12 px, 1px ink-900 outline, filled
   with accent colors.
@@ -171,3 +312,19 @@ palette-mapping pass; anything decorative-only is still cut in review.
   navigation, `a` approvals. Voice is additive, never required.
 - Reduced-motion setting: walks become teleports + labels; envelopes become list
   flashes; information parity is a test case, not a hope.
+
+## 9. Copy voice
+
+The Herald's civic register (VOICE-DESIGN) governs every string the Architect
+reads. Rules: use the agent's *name*, never "the agent"; ≤ 12 words for system
+feedback; no emoji (we have icons); exclamation marks only for completions;
+proper punctuation always.
+
+| Don't | Do |
+|---|---|
+| "Agent is currently performing a Read operation on SPEC.md" | "Mason is reading SPEC.md" |
+| "An error has occurred" | "Mason hit a snag" |
+| "Permission denied" | "Mason needs your approval" |
+| "The operation completed successfully" | "Mason is done" |
+| "Loading…" | "One moment" |
+| "You have 3 unread notifications ✨" | "Three items need you" |

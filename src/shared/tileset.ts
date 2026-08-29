@@ -40,7 +40,17 @@ export const tilesetMapSchema = z
     schemaVersion: z.literal(TILESET_SCHEMA_VERSION),
     /** Human credit, echoed into the UI so an installed pack names itself. */
     name: z.string().min(1).max(120),
-    /** Sheet file name inside the drop, e.g. `kenney-roguelike-indoors.png`. */
+    /**
+     * The credit the pack's licence REQUIRES, shown in the floor's status strip
+     * (UI-DESIGN §7: "license terms and credits are mandatory").
+     *
+     * It ships with the pack for the same reason the layout does: the credit is
+     * a term of *that* licence, and a credit hard-coded in the app would be
+     * wrong the moment somebody swapped the pack. Optional — a CC0 pack owes
+     * none — and when present the floor prints it beside the pack name.
+     */
+    credit: z.string().min(1).max(200).optional(),
+    /** Sheet file name inside the drop, e.g. `limezu-interiors-room-builder.png`. */
     sheet: z.string().min(1).max(160),
     /** Source tile size. §7's integer-scale rule is enforced below. */
     tilePx: z.number().int().positive().max(TILE_PX),
@@ -140,6 +150,8 @@ export function resolveTileset(
     sheets: urls,
     sheetUrl,
     map: parsed.map,
-    note: `tileset: ${parsed.map.name}`
+    // The credit rides the same line as the name: a licence term nobody can
+    // see is a licence term nobody is honouring.
+    note: `tileset: ${parsed.map.name}${parsed.map.credit === undefined ? '' : ` — ${parsed.map.credit}`}`
   }
 }
