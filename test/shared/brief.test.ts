@@ -392,3 +392,49 @@ describe('the brief reports the Gymnasium slice (FR-12.5, ADR-0015 R3)', () => {
     expect(slice?.what).not.toContain('spent 0')
   })
 })
+
+describe('the standup folds the Stoa into the gym slice (FR-13.6, FR-14.1)', () => {
+  it('reports the sources watched and the briefs archived', () => {
+    const facts = compileFacts({
+      ...EMPTY,
+      gymSlice: {
+        spentTokens: null,
+        tokensPerWeek: 200_000,
+        open: 1,
+        stoa: { sources: 3, briefs: 2 },
+        mode: 'directed'
+      }
+    })
+    const stoa = facts.find((f) => f.refs.includes('stoa:watchlist'))
+    // ADR-0017 R4: research is spent out of the Gymnasium's budget, so it is
+    // reported in the same section rather than somewhere nobody is looking.
+    expect(stoa?.what).toContain('3 source(s)')
+    expect(stoa?.what).toContain('2 brief(s)')
+  })
+
+  it('states the company mode in every brief', () => {
+    const facts = compileFacts({
+      ...EMPTY,
+      gymSlice: {
+        spentTokens: null,
+        tokensPerWeek: 200_000,
+        open: 0,
+        mode: 'improving'
+      }
+    })
+    // FR-14.1: so "did we do this because we were asked?" is answerable from
+    // the brief alone.
+    expect(facts.find((f) => f.refs.includes('gym:mode'))?.what).toContain('improving mode')
+  })
+
+  it('says nothing about the Stoa when there is no research department', () => {
+    const facts = compileFacts({
+      ...EMPTY,
+      gymSlice: { spentTokens: null, tokensPerWeek: 200_000, open: 0 }
+    })
+    // A row of zeroes would read as "the Stoa did nothing this week", which is
+    // a different fact from "there is no Stoa".
+    expect(facts.some((f) => f.refs.includes('stoa:watchlist'))).toBe(false)
+    expect(facts.some((f) => f.refs.includes('gym:mode'))).toBe(false)
+  })
+})

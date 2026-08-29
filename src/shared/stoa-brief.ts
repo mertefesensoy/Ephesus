@@ -254,3 +254,23 @@ export function briefFileName(id: string, title: string): string {
 }
 
 export { briefIdSchema }
+
+/**
+ * Contract: the brief ids a proposal's evidence refs cite (FR-13.4).
+ *
+ * A proposal seeded by research must SAY so, by id, in the one field FR-12.1
+ * already makes load-bearing. That is what makes a brief "linkable from the
+ * proposals it seeded" without a second index to fall out of date: the link is
+ * the citation, and the citation is already required to exist.
+ *
+ * Matched loosely inside each ref so `"RB-014 finding 2"` counts — an author
+ * naming which finding they built on is being MORE precise, and a matcher that
+ * demanded a bare id would punish them for it.
+ */
+export function citedBriefIds(evidence: readonly string[]): readonly string[] {
+  const found = new Set<string>()
+  for (const ref of evidence) {
+    for (const match of ref.matchAll(/RB-\d{3,}/g)) found.add(match[0])
+  }
+  return [...found].sort()
+}

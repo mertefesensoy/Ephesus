@@ -16,6 +16,7 @@ import {
   type VerdictName
 } from '../shared/gym'
 import type { Message } from '../shared/message'
+import { citedBriefIds } from '../shared/stoa-brief'
 
 /**
  * The Gymnasium's driver (ADR-0015, FR-12, SDD §7.6).
@@ -38,6 +39,14 @@ export interface GymnasiumOptions {
   /** Tokens gym work has spent this week, folded from the ledger (R3). */
   gymSpend?(): number
   readonly slice?: { readonly tokensPerWeek: number }
+  /**
+   * Does this research brief exist in the archive? (FR-13.4)
+   *
+   * Wired to the Stoa. Absent means "no Stoa" and brief citations go
+   * unchecked — a degradation of the check, not of the proposal: a company
+   * with no research department has no briefs to mis-cite.
+   */
+  briefExists?(briefId: string): boolean
   /** `log` kind `gym` (SDD §4.3) — every transition. */
   onLogEvent?(draft: { kind: 'gym' } & Record<string, unknown>): void
   commitSoon?(subject: string): void
@@ -126,6 +135,24 @@ export class Gymnasium {
     const parsed = parseGymProposal(message.body)
     if (!parsed.ok) return this.refuse(message, parsed.reasons)
 
+    // FR-13.4: a brief is evidence, and a proposal that says it descends from
+    // one must cite a brief that exists. A citation to an unarchived RB id is
+    // the uncited-finding problem wearing a different hat — it looks like
+    // provenance and resolves to nothing.
+    const cited = citedBriefIds(parsed.proposal.evidence)
+    const missing = this.options.briefExists
+      ? cited.filter((briefId) => !this.options.briefExists?.(briefId))
+      : []
+    if (missing.length > 0) {
+      return this.refuse(
+        message,
+        missing.map(
+          (briefId) =>
+            `evidence cites ${briefId}, which is not in the Stoa archive; a proposal cites a brief that exists (FR-13.4)`
+        )
+      )
+    }
+
     const widening = checkWidening(parsed.proposal)
     if (widening.refused) {
       // Logged as its own event: an attempt to widen authority is exactly the
@@ -171,7 +198,11 @@ export class Gymnasium {
       gymId: id,
       by: message.from,
       class: parsed.proposal.class,
-      evidence: [...parsed.proposal.evidence]
+      evidence: [...parsed.proposal.evidence],
+      // Recorded on the event so the proof gate can count Stoa-seeded
+      // proposals (SRS §6.9) from the log alone, without re-reading every
+      // proposal document.
+      briefs: cited
     })
     this.options.commitSoon?.(`gymnasium: ${id} proposed`)
     return { ok: true, id }
