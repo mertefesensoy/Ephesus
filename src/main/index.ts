@@ -26,7 +26,8 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
-import { Stoa } from './stoa'
+import { STOA_EVERY_MS, Stoa } from './stoa'
+import { CompanyModes } from './modes'
 import { checkIntake, checkStudiable } from '../shared/stoa'
 import { wireOdeonEndpoint } from './odeon-endpoint'
 import { OrgLayer, RETRO_EVERY_MS } from './org'
@@ -46,7 +47,7 @@ import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
-import { initHome } from './config'
+import { getHome, initHome, saveConfig } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
 import { CodexAdapter } from './engines/codex'
@@ -94,6 +95,7 @@ let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
 let gymnasium: Gymnasium | null = null
 let stoa: Stoa | null = null
+let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -691,6 +693,14 @@ async function boot(): Promise<void> {
         } catch (err) {
           reportDegradation('breaker', `could not stall the task of ${agentId}: ${String(err)}`)
         }
+        // FR-14.5: a rung-3 stop on gym/stoa work reverts the company to
+        // `directed` automatically, visibly, and on the ledger. The revert is
+        // attributed to the breaker rather than to the Architect, so nobody
+        // later reads it as a change of mind — and `everEnabled` is preserved,
+        // because a safety stop is not a demotion.
+        if (isImprovementWork(agentId)) {
+          modes?.revertOnBreaker(`${agentId} stopped at rung ${String(report.rung)}`)
+        }
       },
       // ADR-0011 rung 2: "lower its remaining budget". The set is consulted by
       // the budget watcher's agents() below, so the constraint lifts with the
@@ -969,6 +979,82 @@ async function boot(): Promise<void> {
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
+  /**
+   * Is this agent doing Gymnasium/Stoa work? (FR-14.5)
+   *
+   * Attributed by ROLE, which is what the roster actually records. A stop is
+   * only allowed to revert the company mode when the stopped agent was one of
+   * the two roles autonomy creates — otherwise a rung-3 stop on ordinary
+   * mission work would switch off self-improvement for reasons that had
+   * nothing to do with it, and the Architect would be left re-enabling a mode
+   * that never misbehaved.
+   */
+  const isImprovementWork = (agentId: string): boolean => {
+    // `agents` is a record keyed by id, not a list.
+    const name = (agora?.registry().agents[agentId]?.role ?? '').toLowerCase()
+    return name.includes('research') || name.includes('improv')
+  }
+
+  // The company mode (ADR-0018, FR-14). The switch that decides whether the
+  // company acts without being asked, so it reads and writes `config.json`
+  // through the same atomic path everything else does, and its gate reads only
+  // the Gymnasium ledger and the `gym` events — never a computed cache.
+  modes = new CompanyModes({
+    // Read through `getHome()` rather than the boot-time snapshot: a mode set
+    // during this run must be what the next read sees.
+    read: () => ({
+      mode: getHome().config.mode,
+      everEnabled: getHome().config.everEnabledImproving ?? false
+    }),
+    write: (patch) => {
+      saveConfig({ mode: patch.mode, everEnabledImproving: patch.everEnabled })
+    },
+    rows: () => gymnasium?.rows() ?? [],
+    gymEvents: () =>
+      (agora?.readLog() ?? [])
+        .filter((entry) => entry['kind'] === 'gym')
+        .map((entry) => ({
+          event: entry['event'],
+          gymId: entry['gymId'],
+          evidence: entry['evidence']
+        })),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    recordOnLedger: (change) => gymnasium?.recordModeChange(change),
+    onChanged: () => mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+  })
+
+  // The Stoa cadence (SDD §7.7): fires autonomously ONLY in `improving`
+  // (FR-14.4). The gate is the scheduler's `enabled` predicate rather than a
+  // check inside the job, so autonomy is switched off at the one place that
+  // starts autonomous work — a job that policed itself would be a job that
+  // could forget to.
+  scheduler.add({
+    id: 'stoa-cadence',
+    everyMs: STOA_EVERY_MS,
+    enabled: () => modes?.mode() === 'improving',
+    run: () => {
+      const next = stoa?.sources().find((entry) => entry.pin !== null)
+      if (next === undefined) {
+        agora?.appendLog({ kind: 'stoa', event: 'cadence-idle', because: 'no studiable source' })
+        return
+      }
+      const planned = stoa?.plan(next.id)
+      agora?.appendLog({
+        kind: 'stoa',
+        event: 'cadence-fired',
+        sourceId: next.id,
+        // FR-14.1: a record produced by autonomous initiative carries the mode
+        // it ran under, so a later reader can tell what the company did
+        // because it was asked from what it did on its own.
+        mode: modes?.mode() ?? 'directed',
+        planned: planned?.ok ?? false
+      })
+    }
   })
 
   scheduler.add(reflection.trigger())
@@ -1387,6 +1473,24 @@ async function boot(): Promise<void> {
       },
     gymMetricResult: (id, measured) =>
       gymnasium?.measure(id, measured) ?? { ok: false, reason: 'the gymnasium is not available' },
+    gymMode: () => {
+      const gate = modes?.gate() ?? { met: false, missing: ['the mode driver is not available'] }
+      return {
+        mode: modes?.mode() ?? 'directed',
+        gateMet: gate.met,
+        missing: [...gate.missing],
+        everEnabled: getHome().config.everEnabledImproving ?? false
+      }
+    },
+    // FR-14.2 / R1 again: `architect` is supplied HERE, by main. This is the
+    // switch that decides whether the company acts without being asked, so the
+    // renderer names no actor and there is nothing for it to claim.
+    gymSetMode: (mode) =>
+      modes?.setMode(mode, 'architect') ?? {
+        ok: false,
+        reason: 'the mode driver is not available',
+        missing: []
+      },
     stoaWatchlist: () => {
       const list = stoa?.watchlist() ?? { sources: [], retired: [] }
       // Retired rows are listed too, marked — the desk shows a struck-through

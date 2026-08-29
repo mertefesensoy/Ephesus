@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { AgoraHealth, ConfigSnapshot, HooksState } from '../../shared/ipc'
+import type { ModeView } from '../../shared/mode-view'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { ActivityPanel } from './ActivityPanel'
 import { CommandBar } from './CommandBar'
@@ -70,6 +71,13 @@ export function App(): ReactElement {
    * invariant §7 does not allow.
    */
   const [openGates, setOpenGates] = useState<number | 'error' | null>(null)
+  /**
+   * The company mode (FR-14.1 — "visible at all times in the UI"). Null while
+   * it is still being read; the strip shows nothing rather than guessing
+   * `directed`, because claiming the safe mode when the real one is unknown is
+   * a degradation failing as good news (invariant §7).
+   */
+  const [mode, setMode] = useState<ModeView | null>(null)
   // A newly spawned agent is selected only when nothing is: an agent appearing
   // must never yank the Architect's attention off the one they are watching.
   const onAgentSeen = useCallback((agentId: string) => {
@@ -142,6 +150,23 @@ export function App(): ReactElement {
       .get()
       .then((snapshot) => setBridge({ kind: 'ready', snapshot }))
       .catch((err: unknown) => setBridge({ kind: 'unavailable', reason: String(err) }))
+  }, [])
+
+  // FR-14.1: the company mode is visible at ALL times. Polled on the same slow
+  // cadence as the other strip facts, and left null on failure rather than
+  // shown as `directed` — a mode nobody could read is not a mode that is off.
+  useEffect(() => {
+    const read = (): void => {
+      const eph = window.eph
+      if (!eph) return
+      eph.gym
+        .mode()
+        .then(setMode)
+        .catch(() => setMode(null))
+    }
+    read()
+    const timer = setInterval(read, 5_000)
+    return () => clearInterval(timer)
   }, [])
 
   return (
@@ -236,6 +261,17 @@ export function App(): ReactElement {
             >
               ⚠ agora: {agoraIssues(health).length} issue
               {agoraIssues(health).length === 1 ? '' : 's'}
+            </span>
+          )}
+          {mode !== null && (
+            <span
+              style={{
+                marginLeft: '8px',
+                color:
+                  mode.mode === 'improving' ? 'var(--eph-status-working)' : 'var(--eph-ink-500)'
+              }}
+            >
+              {' · '}mode: {mode.mode}
             </span>
           )}
         </span>

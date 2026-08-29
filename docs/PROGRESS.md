@@ -2831,7 +2831,7 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       that pass in isolation — verified against the clean baseline, no
       regressions. The endpoint now takes SIX filings; `kind:'research-brief'`
       because `brief` is the standup narration's (DECISIONS-LOG).*
-- [ ] **M5b.3 Company modes + proof gate** — `config.json` mode field
+- [x] **M5b.3 Company modes + proof gate** — `config.json` mode field
       (`directed`/`improving`); `gym.mode()/setMode(m)` architect-verified in
       the handler; first-enable proof-gate check reading ONLY the gym ledger +
       log (SRS §6.9 numbers verbatim); scheduler consults the mode before the
@@ -2842,6 +2842,23 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       fixture ledger meeting §6.9 enables; no agent-side path can set the
       mode; auto-revert lands on the ledger. Risk: the gate reads the book of
       record, never a computed cache (invariant §11's spirit).*
+      *Evidence: S-MODE green 13/13 (`test/scenarios/s-mode.test.ts`), with the
+      passing ledger BUILT by driving the shipped endpoint and verdict path —
+      three proposals through proposed → verdict → landed → measured, two
+      validated, one citing `RB-001` — so the gate reads a ledger the company
+      actually produced. Every clause covered: an empty ledger refuses listing
+      what is missing; two-through-the-loop still refuses; four non-architect
+      actors are refused on a PASSING ledger; no filing at the Odeon reaches the
+      mode at all; the Stoa cadence does not fire in `directed` and its record
+      carries `mode: improving` when it does (FR-14.1); a rung-3 revert lands on
+      the ledger document attributed to `breaker` and preserves `everEnabled` so
+      restoring is not a re-proof. 45 unit cases (`test/shared/mode.test.ts` 32,
+      `test/main/modes.test.ts` 13) + 2 scheduler-gate cases + 3 ledger
+      regressions. **Latent defect found and fixed:** `Gymnasium.append()`
+      deleted everything below its table, so FR-14.5's mode section would have
+      vanished at the next proposal — the M5 close-out finding-1 class one row
+      further down (DECISIONS-LOG). Local suite 2104 passed; the 12 failures are
+      the documented Windows worktree/PTY + TZ set and load-flakes.*
 - [ ] **M5b.4 Brief → proposal flow + E-STOA** — Artemis's ranking playbook
       (`prompts/`), proposals citing brief ids in evidence refs (FR-13.4), the
       standup brief's gym-slice section folds the Stoa in (FR-13.6); E-STOA

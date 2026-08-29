@@ -24,6 +24,8 @@ import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
+import type { ModeSet, ModeView } from '../shared/mode-view'
+import { companyModeSchema } from '../shared/mode'
 import { registerDraftSchema, sourceIdSchema, briefIdSchema } from '../shared/stoa'
 import type {
   BriefRecord,
@@ -79,6 +81,8 @@ const gymIdOnlySchema = z.object({ id: z.string().min(1).max(32) }).strict()
 const gymVerdictSchema = z
   .object({ id: z.string().min(1).max(32), verdict: z.enum(['approved', 'rejected']) })
   .strict()
+
+const gymSetModeSchema = z.object({ mode: companyModeSchema }).strict()
 
 const stoaIdSchema = z.object({ id: sourceIdSchema }).strict()
 const stoaBriefIdSchema = z.object({ id: briefIdSchema }).strict()
@@ -199,6 +203,10 @@ export interface IpcDeps {
   gymVerdict(id: string, verdict: 'approved' | 'rejected'): GymDecided
   /** Records the measured outcome. */
   gymMetricResult(id: string, measured: string | null): GymDecided
+  /** The company mode and the proof gate's current answer (FR-14.1). */
+  gymMode(): ModeView
+  /** Sets the mode. The actor is always the Architect (FR-14.2). */
+  gymSetMode(mode: 'directed' | 'improving'): ModeSet
   /** Every watchlist source, retired ones included and marked (FR-13.1). */
   stoaWatchlist(): readonly SourceView[]
   /** Registers a source. The registrar is always the Architect (FR-13.1). */
@@ -349,6 +357,16 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.gymMetricResult, (_ev, raw: unknown): GymDecided => {
     const { id, measured } = gymMetricSchema.parse(raw)
     return deps.gymMetricResult(id, measured)
+  })
+  ipcMain.handle(IpcChannels.gymMode, (): ModeView => deps.gymMode())
+  ipcMain.handle(IpcChannels.gymSetMode, (_ev, raw: unknown): ModeSet => {
+    const { mode } = gymSetModeSchema.parse(raw)
+    // FR-14.2, enforced HERE: the payload carries no actor, and main supplies
+    // `architect` because a call arriving on the window bridge IS the
+    // Architect. This is the switch that decides whether the company acts
+    // without being asked, so it gets the same treatment as `gym:verdict` and
+    // `stoa:register` — there is no field to forge.
+    return deps.gymSetMode(mode)
   })
   ipcMain.handle(IpcChannels.stoaWatchlist, (): readonly SourceView[] => deps.stoaWatchlist())
   ipcMain.handle(IpcChannels.stoaRegister, (_ev, raw: unknown): StoaCurated => {

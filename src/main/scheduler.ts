@@ -26,6 +26,19 @@ export interface Trigger {
    * job that failed once is not a job that should stop being scheduled.
    */
   run(now: Date): Promise<void> | void
+  /**
+   * Whether this trigger may fire right now. Absent means "always".
+   *
+   * This is how the company mode reaches the scheduler (ADR-0018, FR-14.4,
+   * SDD §9): the Stoa and Gymnasium cadences answer `false` in `directed`, so
+   * autonomous initiative is switched off at the ONE place that starts
+   * autonomous work rather than at each job's own discretion.
+   *
+   * A disabled trigger is skipped WITHOUT stamping its clock, so enabling the
+   * mode does not have to wait out an interval that elapsed while nothing was
+   * allowed to run.
+   */
+  enabled?(): boolean
 }
 
 export interface SchedulerOptions {
@@ -90,6 +103,10 @@ export class Scheduler {
 
     for (const registered of this.triggers.values()) {
       if (registered.running) continue
+      // Checked before the interval, and without stamping the clock: a
+      // cadence that was forbidden for a week should fire when it is allowed
+      // again, not sit out one more interval for having been asked while off.
+      if (registered.trigger.enabled?.() === false) continue
       if (
         registered.lastFiredMs !== null &&
         nowMs - registered.lastFiredMs < registered.trigger.everyMs

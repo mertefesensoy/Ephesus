@@ -62,6 +62,24 @@ to run on its own initiative.
 | `test/scenarios/s-stoa.test.ts` | NEW. S-STOA, 18 cases. |
 | `test/shared/stoa-brief.test.ts` | NEW. 31 cases over the brief shape, the watchlist checks and the archive rendering. |
 
+### M5b.3 — Company modes + the proof gate
+
+| File | What it does |
+|---|---|
+| `src/shared/mode.ts` | NEW. `CompanyMode`, `PROOF_GATE` (SRS §6.9's numbers, named), `checkProofGate`, `checkModeSetter`, `gateApplies`. |
+| `src/shared/mode-view.ts` | NEW. Zod-free renderer types. |
+| `src/shared/config.ts` | `mode` and `everEnabledImproving`, both optional so existing configs stay valid. |
+| `src/main/modes.ts` | NEW. `CompanyModes`: `mode()`, `gate()`, `setMode(to, by)`, `revertOnBreaker(detail)`. |
+| `src/main/config.ts` | `saveConfig(patch)` — validates the merged config, writes atomically, refreshes the cache. |
+| `src/main/gymnasium.ts` | `recordModeChange()`, and `append()` now preserves everything below its table. |
+| `src/main/scheduler.ts` | `Trigger.enabled?()` — the gate autonomy is switched off at. |
+| `src/main/index.ts` | Constructs the driver; the mode-gated Stoa cadence; the rung-3 auto-revert on the breaker's `returnTask` effect. |
+| `src/shared/ipc.ts`, `src/main/ipc.ts`, `src/preload/index.ts` | `gym:mode` / `gym:set-mode`, architect-supplied in the handler. |
+| `src/renderer/src/App.tsx` | The status-strip mode chip (FR-14.1). |
+| `src/renderer/src/GymPanel.tsx` | The mode card: what the gate still wants, and the enable/revert buttons. |
+| `docs/sdd/SDD.md` | §2 and §9 record the ledger's mode section and the scheduler predicate. |
+| `test/shared/mode.test.ts`, `test/main/modes.test.ts`, `test/scenarios/s-mode.test.ts` | 32 + 13 + 13 cases. |
+
 ---
 
 ## Implementation Approach
@@ -136,11 +154,58 @@ watchlist is unchanged and the brief refused — because the only registrar in t
 system is the Architect on the window bridge, and there is no channel an agent
 could even be refused on.
 
+### M5b.3
+
+**Turning autonomy on is hard; turning it off is trivial.** That asymmetry is
+the whole design. The first enable is refused until SRS §6.9's evidence is on
+the record; reverting is never gated, never refused, and the breaker can do it
+without asking. A gate on the way *out* would be a gate that traps the Architect
+in autonomy.
+
+**The gate reads two things and has two parameters.** `checkProofGate(rows,
+gymEvents)` — the Gymnasium ledger and the `gym` events, exactly as FR-14.3
+requires. There is no cache to consult and no counter to trust, which is
+invariant §11's spirit applied to a gate rather than to a cost figure.
+
+**One clause cannot be waited out.** Every other requirement is satisfiable by
+doing more work. "A proposal reached `landed` with no Architect approval on the
+log" means the loop is broken, not immature, so it refuses permanently and names
+the row.
+
+**The mode reaches the scheduler as a predicate.** `Trigger.enabled?()` is
+checked before the interval and without stamping the clock, so autonomy is
+switched off at the single place that starts autonomous work — and a cadence
+that was forbidden for a week fires when it is allowed again rather than sitting
+out one more interval.
+
+**A latent defect surfaced by building on it.** `Gymnasium.append()` rebuilt the
+ledger as `preamble + table` and dropped everything after, so the mode-change
+section FR-14.5 requires would have been deleted by the next proposal. Nothing
+had ever written below the table, so nothing had noticed. `append()` now keeps
+the postamble, with three regressions.
+
 ---
 
 ## Mathematical / Statistical Details
 
-Not applicable to M5b.1 — no formula, statistical test, or numeric algorithm is
+**M5b.3 — the proof gate.** Not statistics, but a counting rule worth stating
+in plain English, since it decides whether a company may act unsupervised. Let
+*L* be the Gymnasium ledger's rows and *E* the `gym` events on the log. Define:
+
+- **measured** = rows whose status is `validated` or `regressed` (both are
+  post-measurement; a measured miss still completed the loop);
+- **validated** = measured rows whose status is `validated`;
+- **seeded** = measured rows whose `proposed` event carries an evidence ref
+  matching `RB-\d{3,}`;
+- **violations** = rows at `landed` or beyond with no `approved` event in *E*.
+
+The gate opens iff |measured| ≥ 3 **and** |validated| ≥ 2 **and** |seeded| ≥ 1
+**and** |violations| = 0. The first three thresholds are SRS §6.9 verbatim and
+live in the exported `PROOF_GATE` constant so the check and its tests read the
+same figures. The fourth is not a threshold but an absorbing condition: once a
+violation exists, no additional evidence can open the gate.
+
+Otherwise not applicable to M5b.1 — no formula, statistical test, or numeric algorithm is
 involved. The only computed values are an id slug (last URL path segment,
 lower-cased, non-alphanumerics collapsed to `-`, capped at 48 chars, prefixed
 `src-`, with a `-2`, `-3`, … suffix minted on collision) and the brief-id successor

@@ -110,6 +110,10 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  events ride the `orchestrator` log kind)
     gymnasium/
       LEDGER.md              # permanent self-improvement ledger (seeded from the
+                             #  repo's docs/gymnasium/ at first run — FR-12.6).
+                             #  Carries the proposals table AND, below it, the
+                             #  `## Mode changes` section (ADR-0018, FR-14.5).
+                             #  Everything under the table survives a rewrite
       proposals/GYM-*.md     #  repo's docs/gymnasium/ at first run — FR-12.6)
     stoa/
       watchlist.json         # architect-curated external sources (§4.7); mutated
@@ -534,7 +538,14 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   a `breaker`/`steer-channel` log event (GYM-002, `watch/steer-notes.ts`).
 - **Telemetry**: every tool call becomes a span (agent, tool, duration, outcome) →
   waterfall UI; spans are local-only (NFR-10).
-- **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`;
+- **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`
+  (with `everEnabledImproving`, since the proof gate is a FIRST-enable check —
+  M5b.3); every change is written to a **`## Mode changes` section under the
+  Gymnasium ledger's proposals table**, not as a row in it: a mode change is not
+  a proposal and would corrupt the eight columns the parser reads. The scheduler
+  consults the mode through a `Trigger.enabled()` predicate, so autonomy is
+  switched off at the one place that STARTS autonomous work rather than inside
+  each cadence.
   `gym.setMode` is architect-verified in the handler (the `gym.verdict` pattern);
   the first `improving` enable is checked against the proof gate (SRS §6.9) read
   from the gym ledger + log only; the scheduler consults the mode before firing
