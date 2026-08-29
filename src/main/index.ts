@@ -26,6 +26,8 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
+import { Stoa } from './stoa'
+import { checkIntake, checkStudiable } from '../shared/stoa'
 import { wireOdeonEndpoint } from './odeon-endpoint'
 import { OrgLayer, RETRO_EVERY_MS } from './org'
 import { orgChart as orgChartOf } from '../shared/org'
@@ -91,6 +93,7 @@ let briefing: BriefingJob | null = null
 let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
 let gymnasium: Gymnasium | null = null
+let stoa: Stoa | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
 // can file a memo; the helpers are top-level because the endpoint dispatch
@@ -947,6 +950,20 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('odeon', detail)
   })
 
+  // The Stoa (ADR-0017, FR-13). Same seeding habit as the Gymnasium beside it:
+  // the watchlist and the briefs the build phase already produced cross into
+  // the running system together, so a seeded brief's source reference resolves.
+  stoa = new Stoa({
+    agoraRoot: agora.root,
+    seedFrom: path.join(appRoot, 'docs', 'stoa'),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    commitSoon: (subject) => agora?.commitSoon(subject),
+    onDegraded: (detail) => reportDegradation('odeon', detail)
+  })
+
   scheduler.add(reflection.trigger())
   // The scheduler’s second client (SDD §7.2).
   scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
@@ -1362,6 +1379,39 @@ async function boot(): Promise<void> {
       },
     gymMetricResult: (id, measured) =>
       gymnasium?.measure(id, measured) ?? { ok: false, reason: 'the gymnasium is not available' },
+    stoaWatchlist: () => {
+      const list = stoa?.watchlist() ?? { sources: [], retired: [] }
+      // Retired rows are listed too, marked — the desk shows a struck-through
+      // row rather than a hole where a source used to be (FR-13.1's habit).
+      return [
+        ...list.sources.map((entry) => ({
+          ...entry,
+          tags: [...entry.tags],
+          retired: false,
+          blocked: checkStudiable(entry).allowed ? null : checkStudiable(entry).because,
+          intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
+        })),
+        ...list.retired.map((entry) => ({
+          ...entry,
+          tags: [...entry.tags],
+          retired: true,
+          blocked: 'retired from the watchlist',
+          intakeBlocked: checkIntake(entry).allowed ? null : checkIntake(entry).because
+        }))
+      ]
+    },
+    // FR-13.1 / R1: `architect` is supplied HERE, by main, because a call on
+    // the window bridge is the Architect with certainty. The renderer never
+    // names a registrar, so there is nothing for it to claim.
+    stoaRegister: (draft) =>
+      stoa?.register({ ...draft, tags: [...draft.tags] }, 'architect') ?? {
+        ok: false,
+        reason: 'the stoa is not available'
+      },
+    stoaRetire: (id) =>
+      stoa?.retire(id, 'architect') ?? { ok: false, reason: 'the stoa is not available' },
+    stoaBriefs: () => (stoa?.briefs() ?? []).map((row) => ({ ...row })),
+    stoaBrief: (id) => stoa?.brief(id) ?? null,
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {

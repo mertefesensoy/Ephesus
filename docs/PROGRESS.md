@@ -2765,7 +2765,7 @@ in order; every package tests against the fake engine per-PR. The Architect's
 2026-08-28 decision: the milestone also carries the floor-art intake (M5b.5) —
 the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
 
-- [ ] **M5b.1 Watchlist + `stoa.ts` core** — `agora/stoa/` layout (SDD §2);
+- [x] **M5b.1 Watchlist + `stoa.ts` core** — `agora/stoa/` layout (SDD §2);
       watchlist schema §4.7 (schemaVersion 1, strict, validators in
       `src/shared/`); accessors with **Architect-only mutation enforced in the
       handler** (the `gym.verdict` pattern — FR-13.1); seeding from the repo's
@@ -2777,6 +2777,26 @@ the LimeZu purchase (Modern Interiors + Modern Office Revamped) is made.
       seeding; non-architect register/retire refused at the handler; UI stays
       a projection. Risk: the id/pin/license fields are the provenance chain —
       no field invented beyond §4.7.*
+      *Evidence: 70/70 new cases green (`test/shared/stoa.test.ts` 43 —
+      table-driven §4.7 schema incl. strict-reject of a smuggled
+      `registeredBy`, seed-table reader, R1 refusals, studiable/intake gates;
+      `test/main/stoa.test.ts` 27 — seeding, register/retire, damaged file,
+      read-only archive surface). LIVE Electron run against a temp
+      `EPH_HOME`: the STOA tab seeded 3 sources from `docs/stoa/WATCHLIST.md`
+      and `RB-001` from `briefs/` in the SAME seed;
+      `docs/demo/m5b-stoa-desk.png` shows `src-hermes-agent` refusing study
+      ("no pinned commit … FR-13.2") and intake ("license is unverified …
+      FR-13.5") while `src-munder-difflin` carries MIT @ `b91a49f`;
+      `docs/demo/m5b-stoa-brief.png` shows RB-001 read back with its cited
+      findings. The agora committed `stoa: seed the watchlist from the
+      build-phase archive` through the single committer, tree clean, and
+      `log.jsonl` carried the first-ever `kind:stoa` event
+      (`event:seeded, sources:3, briefs:1`). Two doc gaps closed rather than
+      guessed (DECISIONS-LOG): retirement is a `retired` sibling array — no
+      entry field invented — and `pin` is nullable so an unpinned entry is
+      registerable but NOT studiable; SDD §4.7 updated for both. The `stoa:`
+      IPC group is exactly SDD §5's five channels (no `stoa:pin` — §7.7 puts
+      pin-setting in M5b.2's study flow).*
 - [ ] **M5b.2 Researcher spawn + brief validation** — read-only study spawn
       plan: clone the pinned source into scratch (never a worktree of the
       Agora; no secret grants — NFR-17, enforced in the plan builder);

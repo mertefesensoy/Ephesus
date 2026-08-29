@@ -23,6 +23,8 @@ import {
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
+import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
+import { registerDraftSchema, sourceIdSchema, briefIdSchema } from '../shared/stoa'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -77,6 +79,16 @@ const gymIdOnlySchema = z.object({ id: z.string().min(1).max(32) }).strict()
 const gymVerdictSchema = z
   .object({ id: z.string().min(1).max(32), verdict: z.enum(['approved', 'rejected']) })
   .strict()
+
+const stoaIdSchema = z.object({ id: sourceIdSchema }).strict()
+const stoaBriefIdSchema = z.object({ id: briefIdSchema }).strict()
+/**
+ * The register payload is the DRAFT and nothing else — no id, no registrar, no
+ * timestamp. `.strict()` means a renderer that tried to smuggle
+ * `registeredBy: 'artemis'` past the boundary is rejected at the boundary
+ * rather than quietly ignored (FR-13.1).
+ */
+const stoaRegisterSchema = z.object({ draft: registerDraftSchema }).strict()
 
 const gymMetricSchema = z
   .object({ id: z.string().min(1).max(32), measured: z.string().max(2_000).nullable() })
@@ -187,6 +199,22 @@ export interface IpcDeps {
   gymVerdict(id: string, verdict: 'approved' | 'rejected'): GymDecided
   /** Records the measured outcome. */
   gymMetricResult(id: string, measured: string | null): GymDecided
+  /** Every watchlist source, retired ones included and marked (FR-13.1). */
+  stoaWatchlist(): readonly SourceView[]
+  /** Registers a source. The registrar is always the Architect (FR-13.1). */
+  stoaRegister(draft: {
+    url: string
+    tags: readonly string[]
+    license: string
+    pin: string | null
+    notes: string
+  }): StoaCurated
+  /** Retires a source — moved to the retired list, never deleted. */
+  stoaRetire(id: string): StoaCurated
+  /** Every archived brief (FR-13.4). */
+  stoaBriefs(): readonly BriefView[]
+  /** One archived brief's text. */
+  stoaBrief(id: string): string | null
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -321,6 +349,25 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.gymMetricResult, (_ev, raw: unknown): GymDecided => {
     const { id, measured } = gymMetricSchema.parse(raw)
     return deps.gymMetricResult(id, measured)
+  })
+  ipcMain.handle(IpcChannels.stoaWatchlist, (): readonly SourceView[] => deps.stoaWatchlist())
+  ipcMain.handle(IpcChannels.stoaRegister, (_ev, raw: unknown): StoaCurated => {
+    const { draft } = stoaRegisterSchema.parse(raw)
+    // FR-13.1 / ADR-0017 R1, enforced HERE, exactly as `gym:verdict` enforces
+    // its own: main supplies `architect` downstream because a call arriving on
+    // the window bridge IS the Architect. The Stoa can never widen its own
+    // reading list, so there is no channel an agent could reach and no field
+    // on this one that would let a caller claim to be somebody else.
+    return deps.stoaRegister({ ...draft, tags: [...draft.tags] })
+  })
+  ipcMain.handle(IpcChannels.stoaRetire, (_ev, raw: unknown): StoaCurated => {
+    const { id } = stoaIdSchema.parse(raw)
+    return deps.stoaRetire(id)
+  })
+  ipcMain.handle(IpcChannels.stoaBriefs, (): readonly BriefView[] => deps.stoaBriefs())
+  ipcMain.handle(IpcChannels.stoaBrief, (_ev, raw: unknown): string | null => {
+    const { id } = stoaBriefIdSchema.parse(raw)
+    return deps.stoaBrief(id)
   })
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())

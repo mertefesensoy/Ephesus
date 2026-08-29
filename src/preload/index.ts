@@ -26,6 +26,7 @@ import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
+import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -116,6 +117,18 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.gymVerdict, { id, verdict }) as Promise<GymDecided>,
     metricResult: (id, measured) =>
       ipcRenderer.invoke(IpcChannels.gymMetricResult, { id, measured }) as Promise<GymDecided>
+  },
+  stoa: {
+    watchlist: () =>
+      ipcRenderer.invoke(IpcChannels.stoaWatchlist) as Promise<readonly SourceView[]>,
+    // The draft and nothing more: no registrar field crosses this bridge,
+    // because FR-13.1's authority is main's to assert, not the renderer's to
+    // claim.
+    register: (draft) =>
+      ipcRenderer.invoke(IpcChannels.stoaRegister, { draft }) as Promise<StoaCurated>,
+    retire: (id) => ipcRenderer.invoke(IpcChannels.stoaRetire, { id }) as Promise<StoaCurated>,
+    briefs: () => ipcRenderer.invoke(IpcChannels.stoaBriefs) as Promise<readonly BriefView[]>,
+    brief: (id) => ipcRenderer.invoke(IpcChannels.stoaBrief, { id }) as Promise<string | null>
   },
   org: {
     chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,
