@@ -380,3 +380,105 @@ whole vocabulary rendered from the shipped modules, including the parity lines.
 - [UI-DESIGN §5.3, §5.5, §5.6, §8](../design/UI-DESIGN.md)
 - [ADR-0003 — the mail indirection the envelope makes visible](../adr/)
 - [TEST-STRATEGY §4 — reduced-motion parity](../TEST-STRATEGY.md)
+
+---
+
+## M6.4 — The Herald seam and its policy layer (ADR-0007, SDD §8)
+
+### Problem / motivation
+
+Nothing of the Herald existed: no `src/main/herald/`, no `prompts/herald/`. The
+milestone's second half needs a place for the two adapters to plug into, and —
+more importantly — a place for the decisions that must not live in an adapter.
+ADR-0007 states the division in one sentence:
+
+> The policy layer is where all safety-relevant voice behavior lives
+> (repeat-back for destructive approvals, FR-8.4) — provider adapters stay dumb
+> pipes.
+
+The risk the package plan names is the M1.1 lesson: *transcribe the ADR
+interface, don't extend it.*
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/main/herald/seam.ts` | **New.** ADR-0007's three interfaces, the fault taxonomy, `VoiceAdapter`. |
+| `src/main/herald/policy.ts` | **New.** Modes, barge-in, repeat-back, the failover reducer. |
+| `prompts/herald/persona.md`, `phrasebook.md` | **New.** The Herald's words, as config. |
+| `test/conformance/voice-conformance.ts` | **New.** The TEST-STRATEGY §5 suite. |
+| `test/conformance/voice-adapters.test.ts` | **New.** Runs it over both providers. |
+| `test/fakes/fake-voice.ts`, `test/fixtures/voice/*.json` | **New.** Recorded fixtures. |
+| `test/main/herald-policy.test.ts` | **New** — 24 cases. |
+
+### Implementation approach
+
+**The seam is a transcription.** `SpeechToText` (streaming transcription +
+endpointing), `TextToSpeech` (streamed audio with cancel), optional
+`DuplexVoice` — the three ADR-0007 names, with the shapes those words imply and
+nothing else. Endpointing stays inside the adapter because providers differ
+wildly in how they decide an utterance is over, and re-implementing it above the
+seam would make every adapter fight the policy layer.
+
+**Adapters report; they never decide.** There is no `shouldFailover()`, no
+retry, no provider preference anywhere on the seam. An adapter's whole
+obligation on failure is to classify the fault as `auth`, `transient` or
+`latency-breach`. The conformance suite asserts those methods are *absent* by
+name, so the boundary is checked rather than merely intended.
+
+**The failover machine is one-way.** A fault burns its provider for the session;
+`healthy → degraded → cooldown`; failback is manual, because a provider that
+failed auth will fail it again and one that breached latency will do it under
+the same load — a timer-based recovery would flap the session. A stale fault
+from a provider already left is ignored, or it would burn the provider just
+switched *to*. `cooldown` is the honest end state: no provider, voice off, and
+FR-8.6 says everything else carries on in text.
+
+**Repeat-back splits the safety property from the sentence.**
+`repeatBackToken()` derives `confirm <first three words of the action>` from the
+gate — specific, because "confirm" alone would be a bare assent with extra
+steps. `checkRepeatBack()` refuses a bare assent with `because: 'bare-assent'`
+rather than a generic mismatch, so the Herald can explain itself. The *asking*
+sentence lives in the phrase book; the policy emits a key, never prose, and a
+test greps the policy source to keep it that way.
+
+### Design decisions
+
+- **Three fault classes, not more.** They are exactly the three the policy
+  treats differently; anything finer would be a distinction the reducer cannot
+  act on.
+- **Fixtures ship before adapters.** Same reasoning as BUILD-PROMPT's M1.2 (fake
+  engine before the real adapter's tests): a suite authored beside its first
+  adapter agrees with it by construction. The fixtures record each provider's
+  *own* error shape — ElevenLabs' HTTP envelopes and Realtime's session events —
+  rather than a normalised one, because an adapter that classified only one
+  shape would pass a suite written against the other.
+- **A phrase-book key as the notice.** FR-8.2 wants a one-line notice; invariant
+  §8 wants the line in `prompts/`. `notice: 'switching-provider'` satisfies
+  both, and a test asserts the notice contains no space — i.e. is a key.
+
+### Verification
+
+```bash
+npx vitest run test/main/herald-policy.test.ts test/conformance/
+```
+
+24 + 20 cases green. Full suite: 2281 passed; 12 failures, all recorded — 9
+deterministic Windows-local and 3 parallel-load flakes (odeon, s-livelock,
+s-stoploop), which passed 36/36 when re-run together.
+
+| Mutant | Result |
+|---|---|
+| `checkRepeatBack` accepts a bare "yes" | the FR-8.4 case FAILS |
+| the stale-fault guard removed | two failover cases FAIL |
+
+**No live provider was called, and none should have been.** The conformance
+suite runs on recordings by design (TEST-STRATEGY §5); ADR-0007 keeps live smoke
+tests opt-in with keys. The live proofs SRS §6.5 owes are M6.8's business.
+
+### Related docs
+
+- [ADR-0007 — the voice seam](../adr/ADR-0007-herald-voice-seam.md)
+- [SDD §8 — the Herald's component design](../sdd/SDD.md)
+- [VOICE-DESIGN — persona, modes, conversation policy](../design/VOICE-DESIGN.md)
+- [TEST-STRATEGY §5 — conformance suites](../TEST-STRATEGY.md)

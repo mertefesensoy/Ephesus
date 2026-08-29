@@ -3200,13 +3200,35 @@ order; every package tests against the fake engine per-PR.
       console errors, the canvas label now reading both census halves.
       *Tests:* `test/shared/vfx.test.ts` 24 · `test/main/vfx-seam.test.ts` 6 —
       2237 passed overall.
-- [ ] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
+- [x] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
       (SpeechToText / TextToSpeech / DuplexVoice), `policy.ts` (PTT always;
       barge-in ≤ 250 ms; repeat-back for destructive/spend; failover
       healthy→degraded→cooldown).
       *Docs: ADR-0007 (normative), SDD §8, FR-8.1/8.3. Tests: voice
       conformance over recorded fixtures (TEST-STRATEGY §5); policy pure.
       Risk: transcribe the ADR interface, don't extend it (the M1.1 lesson).*
+      **Done 2026-08-29** (`feature/m6-4-herald-seam`). `herald/seam.ts` is
+      ADR-0007's three interfaces and nothing else — and carries no
+      `shouldFailover`, `retry` or provider preference, which the conformance
+      suite asserts by name: adapters classify a fault and hand it up, the
+      policy decides. `herald/policy.ts` holds the four safety behaviours:
+      push-to-talk always available (FR-8.3), barge-in unconditional at 250 ms
+      keeping the unspoken remainder, repeat-back whose TOKEN is derived from
+      the gate while the SENTENCE lives in `prompts/herald/phrasebook.md`
+      (invariant §8 — a test greps the policy source for spoken prose), and a
+      one-way failover machine (healthy→degraded→cooldown, manual failback,
+      stale faults ignored). Persona and phrase book landed under
+      `prompts/herald/`; FR-8.5's homage-not-clone clause is asserted.
+      *Tests:* `test/main/herald-policy.test.ts` 24 · the conformance harness
+      `test/conformance/voice-conformance.ts` run over both providers'
+      RECORDED fixtures (`test/fixtures/voice/*.json` — real error shapes and
+      measured latencies, no key, no network, and a case asserting no
+      secret-shaped string got into a recording) via
+      `test/fakes/fake-voice.ts`, 20 cases. The fake ships BEFORE the adapters
+      for the M1.2 reason: a suite authored beside its first adapter agrees
+      with it by construction. Two mutation checks: making a bare "yes"
+      approve a destructive gate fails the FR-8.4 case; letting a stale fault
+      through fails two failover cases. 2281 passed overall.
 - [ ] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
       streamed TTS; persona/phrase book as `prompts/herald/*` per VOICE-DESIGN
       (invariant §8).
