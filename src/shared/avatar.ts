@@ -69,6 +69,22 @@ export const STATION_FOR_TOOL_CLASS: Readonly<Record<ToolClass, Station>> = {
 }
 
 /**
+ * The inverse of the station map. It exists because §5.3's carrying token is
+ * keyed by tool CLASS while an avatar snapshot carries only the STATION it is
+ * walking away from — and the map is injective, so the class is recoverable
+ * without adding a field to the snapshot (or teaching the floor a tool name).
+ */
+export const TOOL_CLASS_FOR_STATION: Readonly<Partial<Record<Station, ToolClass>>> =
+  Object.fromEntries(
+    Object.entries(STATION_FOR_TOOL_CLASS).map(([toolClass, station]) => [station, toolClass])
+  ) as Readonly<Partial<Record<Station, ToolClass>>>
+
+/** Contract: the tool class a station serves, or null for `desk` and the rest. */
+export function toolClassForStation(station: Station): ToolClass | null {
+  return TOOL_CLASS_FOR_STATION[station] ?? null
+}
+
+/**
  * Contract: maps a class to its station; anything unrecognised maps to `desk`.
  * An unclassified tool is a degradation, not a crash — the avatar works at its
  * desk instead of walking somewhere invented, which is the honest rendering of

@@ -3170,7 +3170,7 @@ order; every package tests against the fake engine per-PR.
       `test/main/ipc-handlers.test.ts` — 188 green across the touched suites.
       The seam case is MUTATION-CHECKED: dropping `pendingMail` from the
       listing path fails it.
-- [ ] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
+- [x] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
       CLASS, dropped with the 3-frame fade), §5.5 envelope flights
       (act-colored, 400 ms stepped arc, divert turns toward the temple,
       bounce wobbles), §5.6's three budgeted particles, §8 reduced-motion
@@ -3179,6 +3179,27 @@ order; every package tests against the fake engine per-PR.
       the reduced-motion information-parity suite covers envelope→tray-flash
       and walk→teleport; token↔tool-class table total. Risk: no vfx state
       `log.jsonl` cannot reconstruct (NFR-13 spirit).*
+      **Done 2026-08-29** (`feature/m6-3-vfx`). `shared/vfx.ts` is the model:
+      §5.3 tokens keyed by tool CLASS and total over `ToolClass` (the class is
+      recovered from the station a citizen leaves, so the floor never learns a
+      tool NAME — a regression checks that no Claude-ism resolves to a token);
+      §5.5 envelopes built from LOG ENTRIES, identity from `msgId`, colour from
+      `act`, start from `ts`, with the hop-cap divert turning to the temple at
+      the halfway step and a bounce wobbling in wine; §5.6's three systems and
+      a test that there is no fourth; §8 parity asserted as EQUALITY between
+      `envelopeInfo(f)` and `reduceEnvelope(f).info`, not as the presence of a
+      label. Reduced motion reads `prefers-reduced-motion`, live.
+      **The seam is tested by running it:** `test/main/vfx-seam.test.ts`
+      delivers real mail through the real Hermes into a real `log.jsonl` and
+      asks the model what flies — and the mutation shows why it exists, since
+      renaming Hermes's `msgId` leaves the 24-case unit suite fully green while
+      three seam cases fail. *Evidence:* `docs/demo/m6-3-vfx.svg` (tokens,
+      the 3-frame fade, an envelope per act, bounce/divert/broadcast, the
+      stepped arc with the temple turn, the three particles, and the parity
+      lines) rendered from the shipped modules; `npm run dev` floor live, zero
+      console errors, the canvas label now reading both census halves.
+      *Tests:* `test/shared/vfx.test.ts` 24 · `test/main/vfx-seam.test.ts` 6 —
+      2237 passed overall.
 - [ ] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
       (SpeechToText / TextToSpeech / DuplexVoice), `policy.ts` (PTT always;
       barge-in ≤ 250 ms; repeat-back for destructive/spend; failover

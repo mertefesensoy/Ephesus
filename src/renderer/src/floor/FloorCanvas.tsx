@@ -27,7 +27,22 @@ import { paintFurnishings } from './painter'
 import { stationMarks, stationOrigin, trayMarks } from './station-art'
 import { TEMPLE_SEAT, terraceSeat } from '../../../shared/seats'
 import type { AvatarUpdate } from '../../../shared/ipc'
-import { STATIONS } from '../../../shared/avatar'
+import { STATIONS, toolClassForStation } from '../../../shared/avatar'
+import {
+  ENVELOPE_MS,
+  budgetParticles,
+  envelopeFor,
+  envelopePose,
+  fanOffsets,
+  particlesUnderReducedMotion,
+  reduceEnvelope,
+  tokenFade,
+  tokenFor,
+  PARTICLES,
+  type EnvelopeFlight,
+  type ParticleSystem
+} from '../../../shared/vfx'
+import { colorOf, envelopeSprite, particleSprite, tokenSprite } from './vfx-art'
 import { tokens } from '../tokens'
 import {
   CITIZEN_W,
@@ -58,6 +73,9 @@ import { steppedProgress, STEPS_PER_TILE } from './walk'
  * this (the `odeon:queue` badge carried item).
  */
 const MEETING_POLL_MS = 5_000
+
+/** §8: how long a tray flash stands in for a flight. One §6 state-flip tick. */
+const FLASH_MS = 120
 
 /** Status colors from UI-DESIGN §2.4, one per avatar phase. */
 const PHASE_COLOR: Readonly<Record<string, number>> = {
@@ -215,6 +233,113 @@ function drawTrays(
   }
 }
 
+/** Where an agent's desk sits, in pixels — an envelope's endpoint. */
+function deskPoint(seat: string): { x: number; y: number } {
+  const tile = seatTile(seat)
+  return { x: tile.col * TILE_PX + TILE_PX / 2, y: tile.row * TILE_PX }
+}
+
+interface VfxFrame {
+  readonly now: number
+  readonly avatars: ReadonlyMap<string, AvatarSnapshot>
+  readonly mail: ReadonlyMap<string, number>
+  readonly seats: ReadonlyMap<string, { role: string; seat: string }>
+  readonly flights: Map<string, EnvelopeFlight>
+  readonly flashes: Map<string, number>
+  readonly reducedMotion: boolean
+}
+
+/**
+ * §5.3 carrying tokens, §5.5 envelopes and §5.6 particles.
+ *
+ * Every branch here is downstream of a fact: a token exists because a citizen
+ * is walking desk-ward from a station whose tool class has one; an envelope
+ * exists because the log recorded a delivery; a particle exists because a
+ * phase or a mail count says so. There is nothing this function can draw on its
+ * own initiative — which is the vfx-layer reading of NFR-13.
+ */
+function drawVfx(g: Graphics, frame: VfxFrame): void {
+  g.clear()
+  const templeTile = STATION_TILES['temple-seat']
+  const temple = { x: templeTile.col * TILE_PX, y: templeTile.row * TILE_PX }
+
+  // ── §5.5 envelopes.
+  for (const [id, flight] of frame.flights) {
+    const elapsed = frame.now - flight.startedMs
+    if (elapsed > ENVELOPE_MS) {
+      frame.flights.delete(id)
+      continue
+    }
+    const from = deskPoint(frame.seats.get(flight.from)?.seat ?? '')
+    const to = deskPoint(frame.seats.get(flight.to)?.seat ?? '')
+    const pose = envelopePose(flight, from, to, temple, elapsed)
+    for (const offset of fanOffsets(flight)) {
+      for (const rect of envelopeSprite(colorOf(flight.color), flight.wobble, pose.step)) {
+        g.rect(pose.x + offset + rect.x, pose.y + rect.y, rect.w, rect.h).fill(rect.color)
+      }
+    }
+  }
+
+  // ── §8: under reduced motion the flight is replaced by one flash on both
+  // trays. Same information, different presentation — never a faster flight.
+  for (const [who, at] of frame.flashes) {
+    if (frame.now - at > FLASH_MS) {
+      frame.flashes.delete(who)
+      continue
+    }
+    const seat = frame.seats.get(who)?.seat
+    if (!seat) continue
+    const point = deskPoint(seat)
+    g.rect(point.x - 4, point.y - 6, 8, 4).fill(tokens.gold)
+  }
+
+  for (const [agentId, snapshot] of frame.avatars) {
+    const seat = frame.seats.get(agentId)?.seat
+    if (!seat) continue
+    const desk = deskPoint(seat)
+
+    // ── §5.3: walking desk-ward after a tool completes, the citizen carries
+    // the token for the CLASS of tool it used — recovered from the station it
+    // is leaving, never from a tool name.
+    if (snapshot.walking && snapshot.station === 'desk' && !frame.reducedMotion) {
+      const carried = tokenFor(toolClassForStation(snapshot.origin))
+      if (carried) {
+        for (const rect of tokenSprite(carried.kind)) {
+          g.rect(desk.x + rect.x, desk.y - 20 + rect.y, rect.w, rect.h).fill(rect.color)
+        }
+      }
+    }
+    // The 3-frame fade after it lands on the desk.
+    if (!snapshot.walking && snapshot.station === 'desk' && !frame.reducedMotion) {
+      const carried = tokenFor(toolClassForStation(snapshot.origin))
+      const alpha = tokenFade(frame.now - snapshot.sinceMs)
+      if (carried && alpha !== null) {
+        for (const rect of tokenSprite(carried.kind)) {
+          g.rect(desk.x + rect.x, desk.y + rect.y, rect.w, rect.h).fill(rect.color, alpha)
+        }
+      }
+    }
+
+    // ── §5.6: at most two systems per citizen, each tied to a logged fact.
+    const wanted: ParticleSystem[] = []
+    if (snapshot.phase === 'success') wanted.push('sparkle')
+    if (snapshot.phase === 'working' && !snapshot.walking) wanted.push('dust')
+    if ((frame.mail.get(agentId) ?? 0) > 0) wanted.push('tray-pulse')
+    const systems = frame.reducedMotion ? particlesUnderReducedMotion() : budgetParticles(wanted)
+    for (const system of systems) {
+      const spec = PARTICLES[system]
+      const elapsed = frame.now - snapshot.sinceMs
+      const step = spec.repeats
+        ? Math.floor((frame.now % spec.durationMs) / (spec.durationMs / 2))
+        : Math.floor((elapsed / spec.durationMs) * spec.count)
+      if (!spec.repeats && (elapsed < 0 || elapsed > spec.durationMs)) continue
+      for (const rect of particleSprite(system, step)) {
+        g.rect(desk.x + rect.x, desk.y + rect.y, rect.w, rect.h).fill(rect.color)
+      }
+    }
+  }
+}
+
 /** What the last frame drew, so an interrupted walk resumes from where it is. */
 interface DrawState {
   x: number
@@ -301,6 +426,25 @@ export function FloorCanvas(): ReactElement {
    * update that carries the same agent's snapshot — one moment, one fact.
    */
   const mailRef = useRef<Map<string, number>>(new Map())
+  /**
+   * §8's reduced-motion setting. Read from the OS preference rather than a new
+   * app setting: it is the signal the platform already gives, and honouring it
+   * needs no IPC. Live, because a reader may change it while the app is open.
+   */
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  )
+  // The log drain reads the setting without re-subscribing when it changes.
+  const reducedMotionRef = useRef(reducedMotion)
+  reducedMotionRef.current = reducedMotion
+  /**
+   * Envelopes in flight (§5.5). Keyed by message id, which is the LOG's id —
+   * nothing here is minted by the renderer, so replaying `log.jsonl` flies the
+   * same envelopes (NFR-13's spirit).
+   */
+  const flightsRef = useRef<Map<string, EnvelopeFlight>>(new Map())
+  /** Tray flashes standing in for flights under reduced motion (§8). */
+  const flashesRef = useRef<Map<string, number>>(new Map())
   /** The two room-level facts §5.4 names: an open gate, a gathered meeting. */
   const factsRef = useRef<{ openGates: number; meetingAttendees: number }>({
     openGates: 0,
@@ -396,6 +540,58 @@ export function FloorCanvas(): ReactElement {
       clearInterval(timer)
     }
   }, [refresh])
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!query) return
+    const onChange = (): void => setReducedMotion(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  /**
+   * §5.5 envelopes, read off the event log.
+   *
+   * An envelope exists because `log.jsonl` records a delivery, a bounce or a
+   * hop-cap divert — there is no other way to make one fly, which is what keeps
+   * the vfx layer reconstructible from the record. `log:append` nudges and the
+   * tail is re-read, the same pattern the Activity panel uses; the cursor means
+   * an entry is turned into a flight exactly once.
+   */
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    let live = true
+    let cursor = -1
+    const drain = (): void => {
+      void eph.agora.log(cursor, 64).then((entries) => {
+        if (!live) return
+        for (const entry of entries) {
+          cursor = Math.max(cursor, entry.seq)
+          const flight = envelopeFor(entry)
+          if (!flight) continue
+          if (reducedMotionRef.current) {
+            // §8: the flight does not happen; both trays flash once, carrying
+            // the same information the moving form would have.
+            const flash = reduceEnvelope(flight)
+            for (const who of flash.at) flashesRef.current.set(who, Date.now())
+          } else {
+            flightsRef.current.set(flight.id, { ...flight, startedMs: Date.now() })
+          }
+        }
+      })
+    }
+    // Seed from the tail, then follow — a window opened mid-run must not
+    // replay the whole day's mail as a storm of envelopes.
+    void eph.agora.log(-1, 1).then((entries) => {
+      cursor = entries[0]?.seq ?? -1
+    })
+    const off = eph.agora.onAppend(drain)
+    return () => {
+      live = false
+      off()
+    }
+  }, [])
 
   // Roles decide silhouettes (§7) and seats decide desks (§5); the cards are
   // the only place either lives.
@@ -504,6 +700,11 @@ export function FloorCanvas(): ReactElement {
 
         const citizens = new Container()
         app.stage.addChild(citizens)
+
+        // §5.5/§5.6 ride above the citizens: an envelope passes over the floor,
+        // and a sparkle is meant to be seen.
+        const vfxLayer = new Graphics()
+        app.stage.addChild(vfxLayer)
         const sprites = new Map<string, Graphics>()
         const drawStates = new Map<string, DrawState>()
 
@@ -512,6 +713,15 @@ export function FloorCanvas(): ReactElement {
           const live = avatarsRef.current
           drawStations(stationLayer, floorFacts(), now)
           drawTrays(stationLayer, live, mailRef.current, seatsRef.current)
+          drawVfx(vfxLayer, {
+            now,
+            avatars: live,
+            mail: mailRef.current,
+            seats: seatsRef.current,
+            flights: flightsRef.current,
+            flashes: flashesRef.current,
+            reducedMotion: reducedMotionRef.current
+          })
           let index = 0
           for (const [agentId, snapshot] of live) {
             let sprite = sprites.get(agentId)

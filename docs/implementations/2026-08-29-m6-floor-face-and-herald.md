@@ -273,3 +273,110 @@ were wallpaper — and both times every assertion passed.
 - [UI-DESIGN §5.4, §5.7](../design/UI-DESIGN.md)
 - [SDD §5 IPC contract, §6 stations](../sdd/SDD.md)
 - [ADR-0013 — the autonomy loop the tray flag makes visible](../adr/)
+
+---
+
+## M6.3 — Messaging and motion vfx (UI-DESIGN §5.3, §5.5, §5.6, §8)
+
+### Problem / motivation
+
+Three of the floor's four moving parts did not exist. A citizen walked back from
+a station empty-handed, so a finished tool left no trace; Hermes delivered mail
+with nothing visible crossing the room, so the system's central mechanism — the
+indirection that *is* the design (ADR-0003) — was invisible; and §8's
+reduced-motion clause ("information parity is a test case, not a hope") had
+neither a test nor an implementation.
+
+The risk the package plan names is the interesting one: *no vfx state
+`log.jsonl` cannot reconstruct.* A floor that invents its own effect ids or
+reads its own clock is holding state the record cannot account for, which is the
+second source of truth ADR-0014 forbids.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/shared/vfx.ts` | **New.** §5.3 tokens, §5.5 envelopes, §5.6 particles, §8 reduction — all pure, all derived from log entries. |
+| `src/shared/avatar.ts` | `TOOL_CLASS_FOR_STATION` / `toolClassForStation` — the inverse of the §6 station map. |
+| `src/renderer/src/floor/vfx-art.ts` | **New.** The shapes, and the only place a colour token becomes a number. |
+| `src/renderer/src/floor/FloorCanvas.tsx` | Vfx layer; `log:append` subscription; `prefers-reduced-motion`. |
+| `test/shared/vfx.test.ts` | **New** — 24 cases. |
+| `test/main/vfx-seam.test.ts` | **New** — 6 cases against the real router. |
+| `docs/demo/m6-3-vfx.svg` | **New** — the whole vfx vocabulary, from the shipped modules. |
+
+### Implementation approach
+
+**An envelope exists because the log says a message moved.** `envelopeFor(entry)`
+takes a `LogEntry` and returns a flight or null. Its identity is `msgId`, its
+colour is `act`, its start is the entry's own `ts`. There is no other
+constructor. Replay `log.jsonl` and the same envelopes fly at the same moments —
+which is what makes the vfx layer reconstructible rather than merely plausible.
+
+The floor follows the existing `log:append` push and re-reads the tail, seeding
+its cursor from the newest entry so that opening a window mid-run does not
+replay the day's mail as a storm of envelopes.
+
+**Tokens are keyed by class, and the class is recovered, not carried.** §5.3
+keys tokens by tool class; an avatar snapshot carries only a station.
+`STATION_FOR_TOOL_CLASS` is injective, so `toolClassForStation` inverts it —
+no new field on the SDD §6 snapshot, and no path by which a tool *name* could
+reach the floor (NFR-12). A regression asserts that `Read`, `Bash`, `WebFetch`
+and friends resolve to nothing.
+
+**Parity is equality, not a label.** Every effect produces a `VfxInfo` — what it
+means, in the §9 register — and the reduced form produces the *identical* value:
+
+```ts
+expect(reduceEnvelope(flight).info).toEqual(envelopeInfo(flight))
+```
+
+That is checkable in a way "there is a label" is not: a label can exist and say
+nothing. Walks reduce to `progress: 1` plus the same `walkInfo`; particles are
+suppressed entirely, on the stated ground that each one's fact is already
+carried by a badge, a tray flag or a log line.
+
+### Design decisions
+
+- **§5.3's `search` row stays unreachable; §6's `meeting` class gets `null`.**
+  SDD §6's station map is the normative list of tool classes and has no
+  `search`. Inventing one to satisfy a design-doc row would be a schema change
+  smuggled in as art. Conversely `meeting` has no token in §5.3, so a citizen
+  returns from the Odeon carrying nothing — honest, where invented art would
+  not be. The table is total over `ToolClass`, so the compiler holds the line.
+- **`prefers-reduced-motion` rather than a new setting.** It is the signal the
+  platform already gives, it needs no IPC or config schema, and it is live.
+- **Colour tokens as names in shared code.** `ENVELOPE_COLOR` maps an act to a
+  §2 token *name*; `vfx-art.ts` resolves it. Invariant §12 stays true of shared
+  logic, and a test asserts every act's colour is a real token, not a hex.
+
+### Verification
+
+```bash
+npx vitest run test/shared/vfx.test.ts test/main/vfx-seam.test.ts
+```
+
+30 cases green. Full suite: 2237 passed; 12 failures, all recorded — 9
+deterministic Windows-local and 3 parallel-load flakes (odeon, s-livelock,
+s-stoploop), each verified green in isolation.
+
+**The seam test earns its place by demonstration.** `test/shared/vfx.test.ts`
+writes its own log entries, which is precisely the two-correct-halves blindness
+every milestone audit in this repository has found. So `test/main/vfx-seam.test.ts`
+delivers real mail through the real Hermes into a real `log.jsonl` and asks the
+model what flies. Renaming Hermes's `msgId` field shows the difference:
+
+| Suite | Under the mutation |
+|---|---|
+| `test/shared/vfx.test.ts` (writes its own entries) | 24 / 24 **green** |
+| `test/main/vfx-seam.test.ts` (reads the real log) | **3 cases fail** |
+
+**Live run.** `npm run dev`; canvas renders, zero console errors, and the
+accessible label now carries both halves — "Terraces floor: nobody on the floor ·
+stations: all quiet". [`docs/demo/m6-3-vfx.svg`](../demo/m6-3-vfx.svg) shows the
+whole vocabulary rendered from the shipped modules, including the parity lines.
+
+### Related docs
+
+- [UI-DESIGN §5.3, §5.5, §5.6, §8](../design/UI-DESIGN.md)
+- [ADR-0003 — the mail indirection the envelope makes visible](../adr/)
+- [TEST-STRATEGY §4 — reduced-motion parity](../TEST-STRATEGY.md)
