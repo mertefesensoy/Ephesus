@@ -19,6 +19,7 @@ import { TEMPLE_SEAT, terraceSeat } from '../../../shared/seats'
 import type { AvatarUpdate } from '../../../shared/ipc'
 import { tokens } from '../tokens'
 import {
+  CITIZEN_W,
   citizenSprite,
   directionFor,
   silhouetteFor,
@@ -26,6 +27,7 @@ import {
   type CitizenPalette,
   type Silhouette
 } from './citizen'
+import { overlayFor, overlayFrame, overlayPixels, OVERLAY_PX, OVERLAY_TOKEN_COLOR } from './overlay'
 import { paintPlan, type PaintOp } from './painter'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
@@ -98,6 +100,8 @@ function drawCitizen(
     silhouette: Silhouette
     palette: CitizenPalette
     phase: string
+    /** Milliseconds the avatar has been in this phase — the overlay's only clock. */
+    phaseElapsedMs: number
   }
 ): void {
   g.clear()
@@ -121,6 +125,31 @@ function drawCitizen(
   g.rect(10, -badgeH - 2, badgeW, 1).fill(tokens.ink900)
   for (const pixel of glyphPixels(badgeFor(opts.phase).glyph)) {
     g.rect(13 + pixel.x * 2, -badgeH + pixel.y * 2, 2, 2).fill(tokens.ink900)
+  }
+  drawOverlay(g, opts.phase, opts.phaseElapsedMs)
+}
+
+/**
+ * The §5.2 status overlay, in the head-room rows §5.1 keeps clear (0-7). It is
+ * a projection and nothing else: which mark comes from the phase, which frame
+ * comes from how long main says the phase has been current. This function owns
+ * no timer, so when the snapshots stop the overlay stops with them.
+ */
+function drawOverlay(g: Graphics, phase: string, phaseElapsedMs: number): void {
+  const spec = overlayFor(phase)
+  const frame = overlayFrame(spec, phaseElapsedMs)
+  if (frame === null) return
+  const swatch = OVERLAY_TOKEN_COLOR[spec.kind]
+  const color =
+    swatch === 'gold'
+      ? tokens.gold
+      : swatch === 'status'
+        ? (PHASE_COLOR[phase] ?? tokens.statusIdle)
+        : tokens.ink900
+  // Centred over the sprite, inside the eight reserved rows.
+  const originX = (CITIZEN_W - OVERLAY_PX) / 2
+  for (const pixel of overlayPixels(spec.kind, frame)) {
+    g.rect(originX + pixel.x, pixel.y, 1, 1).fill(color)
   }
 }
 
@@ -345,18 +374,27 @@ export function FloorCanvas(): ReactElement {
               frame: pose.frame,
               walking: snapshot.walking,
               silhouette: silhouetteFor(card?.role ?? ''),
+              // §5.1's five slots. The outline is always ink-900; `primary` is
+              // the agent's §2.3 accent (terracotta only in the temple seat);
+              // `secondary` is the trim every silhouette prop is cut from.
               palette: {
                 outline: tokens.ink900,
                 hair: tokens.ink700,
                 skin: tokens.sand,
-                accent,
-                detail: tokens.marble50
+                primary: accent,
+                secondary: tokens.marble50
               },
-              phase: snapshot.phase
+              phase: snapshot.phase,
+              // The overlay's whole clock: main stamped `sinceMs` when the
+              // phase began, so the frame on screen is a fact about the event
+              // plane, not about when this ticker happened to run.
+              phaseElapsedMs: now - snapshot.sinceMs
             })
             sprite.x = Math.round(pose.x)
             sprite.y = Math.round(pose.y) - 16
-            sprite.alpha = snapshot.phase === 'ghost' ? 0.45 : 1
+            // §5.2 gives the fade to the overlay table, so `ghost` at 50 % and
+            // `archived` at 0 are read from there rather than from a literal.
+            sprite.alpha = overlayFor(snapshot.phase).opacity
             sprite.visible = snapshot.phase !== 'archived'
             index += 1
           }
