@@ -956,6 +956,13 @@ async function boot(): Promise<void> {
   stoa = new Stoa({
     agoraRoot: agora.root,
     seedFrom: path.join(appRoot, 'docs', 'stoa'),
+    // A watched source is checked out under the harness home, never inside the
+    // Agora and never in `worktrees/` — those belong to the company's own
+    // repositories (ADR-0004, NFR-17). Both roots are passed so the refusal is
+    // checked rather than assumed.
+    scratchRoot: path.join(home.root, 'scratch'),
+    worktreesRoot: path.join(home.root, 'worktrees'),
+    prompts: promptStore,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
@@ -1026,6 +1033,7 @@ async function boot(): Promise<void> {
       return wireOdeonEndpoint({
         odeon: archive,
         gymnasium,
+        stoa,
         briefing,
         prompts: promptStore,
         mayDecide: (request) =>

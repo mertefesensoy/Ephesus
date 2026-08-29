@@ -292,18 +292,27 @@ describe('briefs are evidence, and immutable (FR-13.4)', () => {
 
   it('exposes no way to write one — the archive is read-only from here', () => {
     const { stoa } = rig()
-    const surface = Object.getOwnPropertyNames(Object.getPrototypeOf(stoa))
-    // An exhaustive list on purpose: this fails the day somebody adds a
-    // method, which forces the question "does the Stoa now write briefs?" to
-    // be answered deliberately rather than noticed later. FR-13.4 makes the
-    // archive immutable, so `brief`/`briefs` read and nothing writes.
-    expect(surface.sort()).toEqual(
+    const surface = Object.getOwnPropertyNames(Object.getPrototypeOf(stoa)).sort()
+    // An exhaustive list on purpose: it fails the day somebody adds a method,
+    // which forces the question "what writes the archive now?" to be answered
+    // deliberately rather than noticed later. It has already earned its keep —
+    // M5b.2 added `fileBrief`, and this assertion is where that was declared.
+    //
+    // `fileBrief` is the ONLY writer, and it is write-once: a second filing
+    // under an existing name is refused, never merged (FR-13.4), because the
+    // proposals citing a brief must keep resolving to the words their author
+    // read.
+    expect(surface).toEqual(
       [
         'brief',
         'briefs',
         'briefsDir',
         'constructor',
+        'fileBrief',
+        'instructionsFor',
+        'plan',
         'refuse',
+        'refuseBrief',
         'register',
         'retire',
         'seed',

@@ -15,6 +15,7 @@ import { ClosingTime } from '../../src/main/closing'
 import { LedgerEndpoint } from '../../src/main/ledger'
 import { Odeon } from '../../src/main/odeon'
 import { Gymnasium } from '../../src/main/gymnasium'
+import { Stoa } from '../../src/main/stoa'
 import { BriefingJob } from '../../src/main/briefing'
 import { MeetingDriver } from '../../src/main/meeting'
 import { OrgLayer } from '../../src/main/org'
@@ -89,6 +90,8 @@ export interface Company {
   readonly odeon: Odeon
   /** The Gymnasium and its ledger (ADR-0015). */
   readonly gymnasium: Gymnasium
+  /** The Stoa and its watchlist (ADR-0017) — the SHIPPED driver. */
+  readonly stoa: Stoa
   /** The standup job (FR-7.1). */
   readonly briefing: BriefingJob
   /** The meeting driver (FR-7.4). */
@@ -318,6 +321,17 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     onLogEvent: (draft) => agora.appendLog(draft)
   })
 
+  // The Stoa (ADR-0017), seeded from a fixture rather than the repo's real
+  // watchlist for the reason the Gymnasium seed gives above: the real one grows.
+  const stoa = new Stoa({
+    agoraRoot: agora.root,
+    seedFrom: path.join(REPO, 'test', 'fixtures', 'stoa-seed'),
+    scratchRoot: path.join(home, 'scratch'),
+    worktreesRoot: path.join(home, 'worktrees'),
+    prompts,
+    onLogEvent: (draft) => agora.appendLog(draft)
+  })
+
   const briefing = new BriefingJob({
     prompts,
     gather: (sinceSeq) => ({
@@ -364,6 +378,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   const odeonEndpoint = wireOdeonEndpoint({
     odeon,
     gymnasium,
+    stoa,
     briefing,
     prompts,
     mayDecide: (request) =>
@@ -494,6 +509,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     tasks,
     odeon,
     gymnasium,
+    stoa,
     briefing,
     meetings,
     org,

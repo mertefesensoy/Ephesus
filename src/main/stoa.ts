@@ -4,16 +4,28 @@ import { writeFileAtomic } from './fsx'
 import {
   EMPTY_WATCHLIST,
   STOA_SCHEMA_VERSION,
+  buildStudyPlan,
   checkRegistrar,
+  isSafeScratchPath,
+  nextBriefId,
   parseWatchlist,
   parseWatchlistMarkdown,
   registerDraftSchema,
   sourceIdFor,
   uniqueSourceId,
   type RegisterDraft,
+  type StudyPlan,
   type Watchlist,
   type WatchlistEntry
 } from '../shared/stoa'
+import {
+  briefFileName,
+  checkBriefAgainstSource,
+  parseResearchBrief,
+  renderBrief
+} from '../shared/stoa-brief'
+import type { Message } from '../shared/message'
+import type { PromptStore } from './prompts'
 
 /**
  * The Stoa's driver (ADR-0017, FR-13, SDD §4.7/§7.7).
@@ -43,12 +55,44 @@ export interface StoaOptions {
   readonly agoraRoot: string
   /** The repo's build-phase archive: `docs/stoa/` (FR-13.7). */
   readonly seedFrom: string
+  /**
+   * Where a study checks a watched source out. NEVER the Agora and never one
+   * of its worktrees (ADR-0004, NFR-17) — asserted, not assumed.
+   */
+  readonly scratchRoot?: string
+  /** `<home>/worktrees` — refused as a checkout target for the same reason. */
+  readonly worktreesRoot?: string
+  /**
+   * Invariant §8: the researcher's instructions — the injection rule included —
+   * are rendered from `prompts/stoa/`, never written as literals here. A study
+   * plan with no prompt store carries `instructions: null`, which is a visible
+   * degradation rather than a silently un-briefed researcher.
+   */
+  readonly prompts?: PromptStore | null
   /** `log` kind `stoa` (SDD §4.3) — every curation event. */
   onLogEvent?(draft: { kind: 'stoa' } & Record<string, unknown>): void
   commitSoon?(subject: string): void
   onDegraded?(detail: string): void
   now?(): Date
 }
+
+export type PlanOutcome =
+  | {
+      readonly ok: true
+      readonly plan: StudyPlan
+      /** The rendered study prompt, or null when no prompt store is wired. */
+      readonly instructions: string | null
+    }
+  | { readonly ok: false; readonly reason: string }
+
+export type FileBriefOutcome =
+  | {
+      readonly ok: true
+      readonly briefId: string
+      readonly findings: number
+      readonly commit: string
+    }
+  | { readonly ok: false; readonly reasons: readonly string[] }
 
 export type CurateOutcome =
   { readonly ok: true; readonly id: string } | { readonly ok: false; readonly reason: string }
@@ -192,6 +236,170 @@ export class Stoa {
     this.options.onLogEvent?.({ kind: 'stoa', event: 'retired', sourceId: id, by })
     this.options.commitSoon?.(`stoa: retire ${id}`)
     return { ok: true, id }
+  }
+
+  /**
+   * The read-only, secret-free plan for studying one source (FR-13.2, NFR-17).
+   *
+   * Contract: a PLAN, not a spawn. The caller executes it; this makes the
+   * security posture assertable without running anything, which is how S-STOA
+   * proves "no secret grants" rather than trusting a comment.
+   *
+   * The checkout path is checked against the Agora and `worktrees/` here, even
+   * though `buildStudyPlan` constructs it from a root this class supplies: the
+   * one place a third-party repository must never land is the company's own
+   * record, and a defence that depends on nobody passing the wrong root is not
+   * a defence.
+   */
+  plan(sourceId: string): PlanOutcome {
+    const entry = this.watchlist().sources.find((candidate) => candidate.id === sourceId)
+    if (entry === undefined) {
+      const retired = this.watchlist().retired.some((candidate) => candidate.id === sourceId)
+      return {
+        ok: false,
+        reason: retired
+          ? `${sourceId} is retired from the watchlist`
+          : `no source ${sourceId} on the watchlist`
+      }
+    }
+    const built = buildStudyPlan(
+      entry,
+      this.options.scratchRoot ?? path.join(this.stoaDir(), 'scratch')
+    )
+    if (!built.ok) {
+      this.options.onLogEvent?.({
+        kind: 'stoa',
+        event: 'study-refused',
+        sourceId,
+        because: built.reason
+      })
+      return built
+    }
+    const agoraRoot = this.options.agoraRoot
+    const worktrees = this.options.worktreesRoot ?? path.join(path.dirname(agoraRoot), 'worktrees')
+    if (!isSafeScratchPath(built.plan.cwd, agoraRoot, worktrees)) {
+      const reason = `stoa: refusing to check ${sourceId} out inside the Agora or its worktrees (ADR-0004, NFR-17)`
+      this.options.onLogEvent?.({ kind: 'stoa', event: 'study-refused', sourceId, because: reason })
+      return { ok: false, reason }
+    }
+    this.options.onLogEvent?.({
+      kind: 'stoa',
+      event: 'study-planned',
+      sourceId,
+      commit: built.plan.commit,
+      readOnly: built.plan.readOnly,
+      envGrants: built.plan.envGrants.length,
+      intakePermitted: built.plan.intakePermitted
+    })
+    return { ok: true, plan: built.plan, instructions: this.instructionsFor(built.plan) }
+  }
+
+  /**
+   * The researcher's briefing, rendered from `prompts/stoa/` (invariant §8).
+   *
+   * The injection rule lives in that file rather than in this one on purpose:
+   * NFR-17 is the instruction most likely to need rewording as real sources
+   * teach us how they phrase an attack, and a rule the Architect cannot edit
+   * without a rebuild is a rule that ages badly.
+   */
+  private instructionsFor(plan: StudyPlan): string | null {
+    const words = this.options.prompts
+    if (!words) {
+      this.options.onDegraded?.(
+        `stoa: no prompt store; the study plan for ${plan.sourceId} carries no researcher instructions`
+      )
+      return null
+    }
+    const intakeNote = words
+      .render(
+        path.join('stoa', plan.intakePermitted ? 'intake-permitted.md' : 'intake-refused.md'),
+        { license: plan.license }
+      )
+      .trim()
+    return words
+      .render(path.join('stoa', 'study.md'), {
+        sourceId: plan.sourceId,
+        url: plan.url,
+        commit: plan.commit,
+        question: plan.question,
+        license: plan.license,
+        cwd: plan.cwd,
+        intakeNote
+      })
+      .trim()
+  }
+
+  /**
+   * Takes one filed research brief and archives it, or refuses it (FR-13.3).
+   *
+   * Contract: the shape is enforced BEFORE any human is involved — the FR-12.2
+   * pattern applied to research. A finding with no citation is not a weak
+   * finding to argue about in review; it is a brief that does not exist yet,
+   * because the whole value of the archive is that a reader can open what it
+   * cites.
+   *
+   * Archiving is write-once. A brief is immutable (FR-13.4) and the proposals
+   * that cite it must keep resolving to the words their author read, so a
+   * second filing under an existing id is refused rather than merged.
+   */
+  fileBrief(message: Message): FileBriefOutcome {
+    const parsed = parseResearchBrief(message.body)
+    if (!parsed.ok) return this.refuseBrief(message, parsed.reasons)
+
+    const entry = this.watchlist().sources.find(
+      (candidate) => candidate.id === parsed.brief.sourceId
+    )
+    if (entry === undefined) {
+      return this.refuseBrief(message, [
+        `no source ${parsed.brief.sourceId} on the watchlist; a brief cites a source the Architect registered (FR-13.1)`
+      ])
+    }
+    const against = checkBriefAgainstSource(parsed.brief, entry)
+    if (!against.ok) return this.refuseBrief(message, against.reasons)
+
+    const dir = this.briefsDir()
+    mkdirSync(dir, { recursive: true })
+    const id = nextBriefId(this.briefs().map((row) => row.id))
+    const file = path.join(dir, briefFileName(id, parsed.brief.title))
+    if (existsSync(file)) {
+      return this.refuseBrief(message, [
+        `${id} is already archived; briefs are immutable (FR-13.4)`
+      ])
+    }
+    writeFileAtomic(file, renderBrief(id, parsed.brief, entry.url))
+
+    const directives = parsed.brief.findings.filter((finding) => finding.directive).length
+    this.options.onLogEvent?.({
+      kind: 'stoa',
+      event: 'brief-archived',
+      briefId: id,
+      sourceId: entry.id,
+      by: message.from,
+      commit: parsed.brief.commit,
+      findings: parsed.brief.findings.length,
+      // NFR-17: how many instructions the source aimed at its reader, and the
+      // fact that they were written down rather than acted on. A later reader
+      // auditing an incident wants this findable without opening the brief.
+      directivesReported: directives
+    })
+    this.options.commitSoon?.(`stoa: archive ${id}`)
+    return {
+      ok: true,
+      briefId: id,
+      findings: parsed.brief.findings.length,
+      commit: parsed.brief.commit
+    }
+  }
+
+  private refuseBrief(message: Message, reasons: readonly string[]): FileBriefOutcome {
+    this.options.onLogEvent?.({
+      kind: 'stoa',
+      event: 'brief-refused',
+      by: message.from,
+      msgId: message.id,
+      reasons: [...reasons]
+    })
+    return { ok: false, reasons }
   }
 
   /** Every archived brief, newest id first. Immutable once archived (FR-13.4). */
