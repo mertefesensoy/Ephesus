@@ -24,6 +24,49 @@ import type { BriefView, SourceView } from '../../shared/stoa-view'
 
 const REFRESH_MS = 5_000
 
+/** What the register form holds, before it becomes an IPC draft. */
+export interface RegisterFields {
+  readonly url: string
+  readonly tags: string
+  readonly license: string
+  readonly pin: string
+  readonly notes: string
+}
+
+/**
+ * Contract: the form's five fields as the `stoa:register` draft.
+ *
+ * Pure and exported because of a defect this exact mapping once had: M5b.1
+ * deferred pin-setting to the study flow and M5b.2 only ever READ the pin, so
+ * the panel hard-coded `pin: null` and every source registered from this desk
+ * was permanently unstudiable (FR-13.2). The fix is one expression, which is
+ * precisely the kind that regresses silently inside a component — so it lives
+ * here, where a table test can hold it.
+ *
+ * An empty or whitespace pin means unpinned, which is a legal and visibly
+ * refused state; it must never become the string `""`, which would read as a
+ * pin that exists.
+ */
+export function registerDraft(fields: RegisterFields): {
+  url: string
+  tags: readonly string[]
+  license: string
+  pin: string | null
+  notes: string
+} {
+  const pin = fields.pin.trim()
+  return {
+    url: fields.url.trim(),
+    tags: fields.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0),
+    license: fields.license.trim(),
+    pin: pin === '' ? null : pin,
+    notes: fields.notes
+  }
+}
+
 const panel = {
   fontFamily: 'var(--eph-face-data)',
   fontSize: '12px',
@@ -85,6 +128,70 @@ const heading = {
   margin: '12px 0 6px'
 } as const
 
+/**
+ * One watchlist row. Exported and presentational — props in, markup out — so
+ * the render harness can read the branches that only appear with data: the
+ * struck-through retired row, the two degradation notes, and above all the
+ * `pin: —` reading of an unpinned source, which is the visible half of the
+ * FR-13.2 state `registerDraft` produces.
+ */
+export function SourceRow({
+  row,
+  onRetire
+}: {
+  readonly row: SourceView
+  readonly onRetire: (id: string) => void
+}): ReactElement {
+  return (
+    <div style={card}>
+      <p
+        style={{
+          margin: '0 0 4px',
+          textDecoration: row.retired ? 'line-through' : 'none'
+        }}
+      >
+        <strong>{row.id}</strong> — {row.url}
+      </p>
+      <p style={note}>
+        {row.tags.join(' · ')} · {row.license} · pin: {row.pin ?? '—'}
+      </p>
+      {row.notes.length > 0 && <p style={note}>{row.notes}</p>}
+      {row.blocked !== null && <p style={note}>⚠ {row.blocked}</p>}
+      {row.intakeBlocked !== null && <p style={note}>⚠ {row.intakeBlocked}</p>}
+      {!row.retired && (
+        <button type="button" style={button} onClick={() => onRetire(row.id)}>
+          RETIRE
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** One archived brief, with the text once the Architect has opened it. */
+export function BriefCard({
+  row,
+  text,
+  onRead
+}: {
+  readonly row: BriefView
+  readonly text: string | undefined
+  readonly onRead: (id: string) => void
+}): ReactElement {
+  return (
+    <div style={card}>
+      <p style={{ margin: '0 0 4px' }}>
+        <strong>{row.id}</strong> — {row.title}
+      </p>
+      <button type="button" style={button} onClick={() => onRead(row.id)}>
+        READ
+      </button>
+      {text !== undefined && (
+        <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: '12px' }}>{text}</pre>
+      )}
+    </div>
+  )
+}
+
 export function StoaPanel(): ReactElement {
   const [sources, setSources] = useState<readonly SourceView[]>([])
   const [briefs, setBriefs] = useState<readonly BriefView[]>([])
@@ -120,22 +227,11 @@ export function StoaPanel(): ReactElement {
   const register = useCallback((): void => {
     const eph = window.eph
     if (!eph) return
-    const parsedTags = tags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0)
+    // Offering the pin field matters: without it every source registered from
+    // this desk would be permanently unstudiable, because nothing else on the
+    // Architect's side can set one. The mapping is `registerDraft` above.
     eph.stoa
-      .register({
-        url: url.trim(),
-        tags: parsedTags,
-        license: license.trim(),
-        // Empty means unpinned, which is a legal state and NOT studiable
-        // (FR-13.2). Offering the field matters: without it every source
-        // registered from this desk would be permanently unstudiable, because
-        // nothing else on the Architect's side can set a pin.
-        pin: pin.trim() === '' ? null : pin.trim(),
-        notes
-      })
+      .register(registerDraft({ url, tags, license, pin, notes }))
       .then((result) => {
         setOutcome(result.ok ? `registered ${result.id}` : result.reason)
         if (result.ok) {
@@ -227,45 +323,13 @@ export function StoaPanel(): ReactElement {
       <h3 style={heading}>WATCHLIST — {sources.filter((row) => !row.retired).length}</h3>
       {sources.length === 0 && <p style={note}>No sources registered.</p>}
       {sources.map((row) => (
-        <div key={row.id} style={card}>
-          <p
-            style={{
-              margin: '0 0 4px',
-              textDecoration: row.retired ? 'line-through' : 'none'
-            }}
-          >
-            <strong>{row.id}</strong> — {row.url}
-          </p>
-          <p style={note}>
-            {row.tags.join(' · ')} · {row.license} · pin: {row.pin ?? '—'}
-          </p>
-          {row.notes.length > 0 && <p style={note}>{row.notes}</p>}
-          {row.blocked !== null && <p style={note}>⚠ {row.blocked}</p>}
-          {row.intakeBlocked !== null && <p style={note}>⚠ {row.intakeBlocked}</p>}
-          {!row.retired && (
-            <button type="button" style={button} onClick={() => retire(row.id)}>
-              RETIRE
-            </button>
-          )}
-        </div>
+        <SourceRow key={row.id} row={row} onRetire={retire} />
       ))}
 
       <h3 style={heading}>BRIEFS — {briefs.length}</h3>
       {briefs.length === 0 && <p style={note}>No briefs archived.</p>}
       {briefs.map((row) => (
-        <div key={row.id} style={card}>
-          <p style={{ margin: '0 0 4px' }}>
-            <strong>{row.id}</strong> — {row.title}
-          </p>
-          <button type="button" style={button} onClick={() => read(row.id)}>
-            READ
-          </button>
-          {open[row.id] !== undefined && (
-            <pre style={{ whiteSpace: 'pre-wrap', margin: '8px 0 0', fontSize: '12px' }}>
-              {open[row.id]}
-            </pre>
-          )}
-        </div>
+        <BriefCard key={row.id} row={row} text={open[row.id]} onRead={read} />
       ))}
     </div>
   )

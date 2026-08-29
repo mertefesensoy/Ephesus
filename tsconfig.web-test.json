@@ -1,0 +1,13 @@
+{
+  // Renderer render-tests (M6.1's harness). They live outside tsconfig.node
+  // because they import `.tsx` components: the node project has no `jsx`
+  // setting and no DOM lib, and giving it either would loosen the whole
+  // main/shims/test surface to satisfy three files.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"]
+  },
+  "include": ["test/renderer/**/*.tsx", "src/renderer/src/**/*", "src/shared/**/*"]
+}

@@ -3097,7 +3097,7 @@ TEST-STRATEGY §3/§4/§5. **Art first** (Architect decision 2026-08-29): the
 company's face reaches the licensed-art bar before the voice lands. Execute in
 order; every package tests against the fake engine per-PR.
 
-- [ ] **M6.1 Citizens v2 — the MD-grade procedural sprite** — implement
+- [x] **M6.1 Citizens v2 — the MD-grade procedural sprite** — implement
       UI-DESIGN §5.1 (anatomy, 8 drawn directions, 4-frame cycles, stepped
       ±1 px bob phased to the 250 ms tile walk) and §5.2 (status overlays as
       pure projections of the SDD §6 avatar states). Role silhouettes per the
@@ -3110,6 +3110,30 @@ order; every package tests against the fake engine per-PR.
       over every avatar state; ≤5 colors per direction/frame/role; silhouette
       distinctness; determinism; bob sampled at frame boundaries only. Risk:
       overlays are projections — none may own a timer-driven opinion.*
+      **Done 2026-08-29** (`feature/m6-1-citizens-v2`). `citizen.ts` rewritten to
+      §5.1: the M1 mirror table is GONE — eight authored views, each with its own
+      head/torso/arm/leg geometry, `propSide` for shoulder-worn props and
+      `hairSide` for the skull mass, so a westward direction is drawn, not
+      flipped. 4 frames at `FRAME_MS = 125` (= 2 frames per the 250 ms tile,
+      asserted against `MS_PER_TILE`); ±1 px bob indexed by frame, never by a
+      clock; rows 0–7 clear at every bob phase; feet planted in 44–47. New
+      `floor/overlay.ts` = §5.2, total over all ten §6 states plus both
+      terminals, frame chosen by `nowMs − snapshot.sinceMs` so the overlay owns
+      no timer (NFR-13 spirit); `ghost` 50 % opacity now read from that table
+      rather than a literal `0.45`. **The live render found what the suite could
+      not:** the first sprite passed all 20 cases and dissolved into the floor
+      (`skin` = `sand` = `worldTerraceA`) — fixed with a 1 px ink silhouette
+      backing and a redrawn anatomy (hairline, neck, hem, sleeve+hand).
+      *Evidence:* `docs/demo/m6-1-citizens-v2.svg`, rendered from the shipped
+      modules; `npm run dev` booted the real app (floor + LimeZu tileset live).
+      *Tests:* `test/renderer/citizen.test.ts` 20 · `test/renderer/overlay.test.ts`
+      14 · `test/renderer/stoa-panel.test.tsx` 11 — 91 green across
+      `test/renderer/`. Both new regressions were MUTATION-CHECKED: reintroducing
+      the runtime flip fails the anti-flip case, and re-hard-coding `pin: null`
+      fails the pin case. *Owed item closed:* the reading desk's first
+      renderer-side regression, on a `react-dom/server` static-markup harness
+      that adds no dependency (a jsdom upgrade for interaction coverage is a
+      must-ask in the session report, not taken here).
 - [ ] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
       LimeZu maps (states idle/in-use/highlighted; the desk inbox-tray flag IS
       `pendingMailCount` made visible; the Watch brazier IS an open gate; the

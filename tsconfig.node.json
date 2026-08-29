@@ -16,5 +16,8 @@
     "test/**/*",
     "electron.vite.config.ts",
     "vitest.config.mts"
-  ]
+  ],
+  // Renderer render-tests are `.tsx` and belong to tsconfig.web-test.json:
+  // this project has no `jsx` setting and no DOM lib on purpose.
+  "exclude": ["test/renderer/**/*.tsx"]
 }
