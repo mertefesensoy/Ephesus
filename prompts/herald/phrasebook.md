@@ -30,3 +30,15 @@ I did not catch the confirmation. Say {{token}}.
 
 ## brief-close
 Details on any of these, or shall I carry on?
+
+## approve-ask
+{{what}}. Approve or deny?
+
+## meeting-open
+The Odeon is sitting. On the agenda: {{agenda}}.
+
+## meeting-floor
+{{who}}, the floor is yours.
+
+## meeting-closed
+That closes the meeting. The minutes are filed.

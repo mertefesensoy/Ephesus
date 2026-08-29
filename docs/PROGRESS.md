@@ -3284,7 +3284,7 @@ order; every package tests against the fake engine per-PR.
       transcript" is true either way. The suite was asserting the wrong half of
       "continuous". Fixed, and the case now asserts what the fallback was ASKED
       to say; mutation-checked. 2320 passed overall.
-- [ ] **M6.7 The spoken company + carried items** — briefings spoken from the
+- [x] **M6.7 The spoken company + carried items** — briefings spoken from the
       SAME archived artifact the card shows; voice approvals with repeat-back;
       meeting narration; optional local wake word. Closes the carried items:
       the `odeon:queue` status-strip badge; **gym metric-check scheduling**
@@ -3296,6 +3296,35 @@ order; every package tests against the fake engine per-PR.
       `landed`; `slice()` reports a number again with its source named. Risk:
       the Herald narrates records — an invented sentence is the E-BRIEF-FAITH
       failure.*
+      **Done 2026-08-29** (`feature/m6-7-spoken-company`). `herald/narration.ts`
+      parses the ARCHIVE — `narrationOf(markdown)` reads the sentences back out
+      of the artifact the Briefs card shows, so no path exists by which a
+      sentence absent from the archive could be spoken (E-BRIEF-FAITH made
+      structural, not trusted); the `## Source refs` appendix is excluded as
+      audit trail rather than narration. Voice approvals require the token for
+      destructive AND spend even when the gate itself did not ask, and a
+      refusal returns the line to say while leaving the gate open. Meeting
+      narration splits chair announcements (always) from replies (on request).
+      **All three carried items closed.** (1) `gym-cadence.ts` is SDD §7.6's
+      missing arrow: the tick raises every landed row whose window has closed,
+      on the record with its declared metric — it does not measure, because
+      booking a check and deciding what the number was are different jobs.
+      (2) `shared/attribution.ts` gives `slice()` a real number and a NAMED
+      source, folded from the durable ledger (invariant §11) by exact role;
+      the brief prints both, because it is read aloud and there is no card to
+      hover. (3) The `odeon:queue` push is finally consumed above the panels:
+      a `memos:` badge on the status strip, driven by the push AND the slow
+      poll, with `null`/`'error'`/`0` distinct so an unknown count never reads
+      as reassurance.
+      *Owed, not faked:* the wake word is a SETTING (`config.wakeWordEnabled`,
+      FR-8.3) and not a detector — no local wake-word engine is an approved
+      dependency, and one that only pretended to listen would be worse than the
+      gap. Push-to-talk is unaffected.
+      *Evidence:* `npm run dev` — the `memos:` badge is live on the strip
+      beside `gates:`, in the unread state with no bridge, which is the
+      invariant §7 behaviour the test pins. *Tests:*
+      `test/main/herald-narration.test.ts` 14 · `test/main/carried-items.test.ts`
+      15 · `test/renderer/status-strip.test.tsx` 4. 2357 passed overall.
 - [ ] **M6.8 Suites + exit review** — S-FAILOVER green in CI; SRS §6.2 (spoken
       standup ≤ 90 s, every claim traceable) and §6.5 (key pulled
       mid-conversation → Realtime continues ≤ 3 s) demonstrated live; a floor

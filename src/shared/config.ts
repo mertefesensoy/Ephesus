@@ -36,7 +36,22 @@ export const configSchema = z
      * been met and silently re-impose it — turning a safety stop into a
      * demotion nobody asked for.
      */
-    everEnabledImproving: z.boolean().optional()
+    everEnabledImproving: z.boolean().optional(),
+    /**
+     * The Herald's optional local wake word (FR-8.3, VOICE-DESIGN §2).
+     *
+     * Optional and absent-means-false, because off is the honest default:
+     * NFR-10 says no audio leaves the machine while idle, and a wake word is
+     * the one mode that has to be listening to work. Push-to-talk is always
+     * available whatever this says (`policy.activeModes`), so enabling it adds
+     * a way in and never removes one.
+     *
+     * DETECTION IS NOT BUILT. Turning this on today advertises the mode and
+     * nothing else — no local wake-word engine is an approved dependency, and
+     * shipping one that only pretended to listen would be worse than the gap.
+     * Recorded as owed in DECISIONS-LOG and PROGRESS rather than faked.
+     */
+    wakeWordEnabled: z.boolean().optional()
   })
   .strict()
 

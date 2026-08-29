@@ -82,7 +82,11 @@ function rig(over: { seed?: string | null; spend?: number } = {}): Rig {
     seedFrom,
     // Omitted when a case sets no spend, so slice() honestly reports the
     // missing attribution as null (finding 2) rather than a constant zero.
-    ...(over.spend === undefined ? {} : { gymSpend: () => over.spend as number }),
+    ...(over.spend === undefined
+      ? {}
+      : {
+          gymSpend: () => ({ tokens: over.spend as number, source: 'cost ledger — 1 agent (a-1)' })
+        }),
     onLogEvent: (draft) => logs.push(draft),
     onDegraded: (detail) => degradations.push(detail),
     now: () => new Date('2026-08-28T12:00:00.000Z')
@@ -219,8 +223,13 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     if (!outcome.ok) expect(outcome.reasons.join(' ')).toContain('R3')
   })
 
-  it('reports the slice for the standup brief (FR-12.5)', () => {
-    expect(rig({ spend: 25 }).gym.slice()).toMatchObject({ spentTokens: 25 })
+  it('reports the slice for the standup brief (FR-12.5), with its source', () => {
+    // M6.7 closed the carried item: the number is back AND says where it came
+    // from, because the brief is read aloud and there is no card to hover.
+    expect(rig({ spend: 25 }).gym.slice()).toMatchObject({
+      spentTokens: 25,
+      source: 'cost ledger — 1 agent (a-1)'
+    })
   })
 
   it('reports NULL, not zero, when nothing attributes gym spend yet', () => {
@@ -228,6 +237,7 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     // source, and the brief was narrating the resulting constant 0 as if it
     // were a ledger figure. A missing measurement must read as missing.
     expect(rig().gym.slice().spentTokens).toBeNull()
+    expect(rig().gym.slice().source).toBeNull()
   })
 })
 

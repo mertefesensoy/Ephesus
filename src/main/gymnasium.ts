@@ -37,7 +37,11 @@ export interface GymnasiumOptions {
   /** The repo's build-phase archive, seeded at first run (FR-12.6). */
   readonly seedFrom: string
   /** Tokens gym work has spent this week, folded from the ledger (R3). */
-  gymSpend?(): number
+  /**
+   * Gym spend, attributed and sourced (M6.7). Returning the SOURCE beside the
+   * number is what the M5 close-out asked for: the brief prints both.
+   */
+  gymSpend?(): { readonly tokens: number; readonly source: string }
   readonly slice?: { readonly tokensPerWeek: number }
   /**
    * Does this research brief exist in the archive? (FR-13.4)
@@ -167,7 +171,9 @@ export class Gymnasium {
       return { ok: false, reasons: widening.because }
     }
 
-    if (!withinSlice(this.options.gymSpend?.() ?? 0, this.options.slice ?? DEFAULT_GYM_SLICE)) {
+    if (
+      !withinSlice(this.options.gymSpend?.().tokens ?? 0, this.options.slice ?? DEFAULT_GYM_SLICE)
+    ) {
       // R3: improvement is budgeted, not ambient.
       const reason = 'the Gymnasium budget slice for this week is spent (R3)'
       return this.refuse(message, [reason])
@@ -298,15 +304,26 @@ export class Gymnasium {
     return null
   }
 
-  /** What the standup brief reports about the slice (R3, FR-12.5). */
-  slice(): { readonly spentTokens: number | null; readonly tokensPerWeek: number } {
+  /**
+   * What the standup brief reports about the slice (R3, FR-12.5).
+   *
+   * `spentTokens` is null only when nothing attributes gym spend at all —
+   * reporting zero would claim a measurement nobody had taken (invariant §7).
+   * Since M6.7 something does: `shared/attribution.ts` folds the DURABLE
+   * ledger over the improvement roles, so the figure survives a restart
+   * (invariant §11) and `source` names the agents it covers — a bare total
+   * invites the reader to trust a scope they cannot see.
+   */
+  slice(): {
+    readonly spentTokens: number | null
+    readonly tokensPerWeek: number
+    readonly source: string | null
+  } {
+    const spend = this.options.gymSpend
     return {
-      // Null, not zero, when nothing attributes gym spend yet — the brief
-      // must report the figure as missing rather than as a measurement
-      // (M5 close-out audit, finding 2; the wiring deferral is in
-      // DECISIONS-LOG and carried with the M6 scheduler work).
-      spentTokens: this.options.gymSpend ? this.options.gymSpend() : null,
-      tokensPerWeek: (this.options.slice ?? DEFAULT_GYM_SLICE).tokensPerWeek
+      spentTokens: spend ? spend().tokens : null,
+      tokensPerWeek: (this.options.slice ?? DEFAULT_GYM_SLICE).tokensPerWeek,
+      source: spend ? spend().source : null
     }
   }
 

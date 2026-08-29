@@ -647,3 +647,81 @@ proof is OWED to a local session.
 ### Related docs
 
 - [ADR-0007](../adr/ADR-0007-herald-voice-seam.md) · [TEST-STRATEGY §3 — S-FAILOVER](../TEST-STRATEGY.md) · [SRS §6.5](../srs/SRS.md)
+
+---
+
+## M6.7 — The spoken company and the three carried items
+
+### Problem / motivation
+
+The Herald could speak but had nothing to say, and three deferrals from earlier
+milestones came due here — all recorded honestly at the time, which means
+closing them requires proving the thing each deferral said was missing.
+
+The sharpest risk is E-BRIEF-FAITH: *the Herald narrates records*. An invented
+sentence in a spoken brief is a claim the company never checked, and the archive
+is precisely the artifact that already passed `checkNarrative` (SDD §7.2).
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/main/herald/narration.ts` | **New.** Brief narration, voice approvals, meeting lines. |
+| `src/main/gym-cadence.ts` | **New.** SDD §7.6's metric-check booking. |
+| `src/shared/attribution.ts` | **New.** Spend by scope, with its source named. |
+| `src/main/gymnasium.ts` | `slice()` returns a number and a `source`. |
+| `src/shared/brief.ts` | The brief prints the spend source. |
+| `src/main/index.ts` | Wires the gym cadence trigger and the real spend source. |
+| `src/renderer/src/StatusBadge.tsx` | **New.** `CountBadge`, shared by gates and memos. |
+| `src/renderer/src/App.tsx` | The `odeon:queue` badge — push plus poll. |
+| `src/shared/config.ts` | `wakeWordEnabled` (setting only — see below). |
+| 3 test files | 33 cases. |
+
+### Implementation approach
+
+**The narration parses the archive.** `narrationOf(markdown)` reads sentences
+back out of what `renderBriefMarkdown` wrote, and `speakBrief` hands the session
+only those strings. Taking a `BriefFiling` would have been easier and would have
+let the spoken brief drift from the written one — a drift nobody would notice
+until an audit read both.
+
+**The metric tick raises; it does not measure.** Booking a check and deciding
+what the number was are different jobs, and only the first is scheduling. A
+check stays due until somebody runs it, because the row stays `landed` — a
+booking that fired once and forgot would let a missed check disappear, and R2
+says the ledger is total.
+
+**Attribution takes a lookup, not rows.** Production passes the `CostLedger`'s
+own `spendFor(...).cumulativeTotals`; a test passes a table. One number, one
+route. The figure is durable (invariant §11) and attributed by exact role, so
+the M5b audit's substring trap cannot reopen here.
+
+### Design decisions
+
+- **Repeat-back for spend even when the gate did not ask.** FR-8.4 names
+  destructive *and* spend; `gate.requiresRepeatBack` answers a different
+  question. Requiring the token when either says so means a policy that had not
+  marked a spend gate cannot let one through on a bare "yes".
+- **`CountBadge` outside `App.tsx`.** Importing `App` pulls in xterm and Pixi,
+  which need a browser. Chrome carrying a rule worth pinning should be reachable
+  from the M6.1 harness without booting the shell.
+- **The wake word is a setting, not a detector — owed, not faked.** No local
+  wake-word engine is an approved dependency, and one that only pretended to
+  listen would be worse than the gap. Push-to-talk is unaffected.
+
+### Verification
+
+```bash
+npx vitest run test/main/herald-narration.test.ts test/main/carried-items.test.ts test/renderer/
+```
+
+33 cases green. Full suite: 2357 passed; 11 failures, all recorded — 9
+deterministic Windows-local and 2 s-stoploop flakes (8/8 in isolation).
+
+**Live run.** `npm run dev`: the `memos:` badge is on the status strip beside
+`gates:`, in the unread state with no bridge — the invariant §7 behaviour the
+test pins, seen rather than assumed.
+
+### Related docs
+
+- [SDD §7.2, §7.6](../sdd/SDD.md) · [VOICE-DESIGN §4–§5](../design/VOICE-DESIGN.md) · [ADR-0015](../adr/)
