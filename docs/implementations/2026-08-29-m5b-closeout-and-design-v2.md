@@ -59,8 +59,13 @@ read-path as the standing rule; heartbeat honesty in SDD §7.7).
 ## Verification
 
 - Gates green after fixes: typecheck · zero-warning lint · invariants; touched
-  suites **113/113** (stoa 28, stoa-cadence 7, modes 17, mode 31, S-MODE 13,
-  S-STOA 20 — counts as run); links resolve.
+  suites **113/113**, measured per file at the integration: stoa 28 ·
+  stoa-cadence 5 · modes 17 · mode 30 · S-MODE 13 · S-STOA 20. *(The first
+  draft of this line guessed the breakdown — 7 and 31 for stoa-cadence and
+  mode — and the guess did not even sum to its own total. Corrected against a
+  per-file run at the integration merge; the same class of unverified detail
+  the audit above caught in the exit evidence, caught here in this record.)*
+  Links resolve.
 - The re-run cycle: `gh api repos/chaitanyagiri/munder-difflin/commits/b91a49f`
   → the full sha; the in-run assertions (clone HEAD = pin, cited paths exist);
   the four EVIDENCE lines in the demo capture.
