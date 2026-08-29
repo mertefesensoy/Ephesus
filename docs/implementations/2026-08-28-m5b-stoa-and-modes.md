@@ -93,6 +93,21 @@ to run on its own initiative.
 | `test/evals/e-stoa.ts`, `test/evals/e-stoa.test.ts` | NEW. The rubric and the run that proves it discriminates. |
 | `test/scenarios/s-stoa.test.ts`, `test/scenarios/s-mode.test.ts`, `test/shared/brief.test.ts` | The citing cases; S-MODE now archives a real brief. |
 
+### M5b.5 — Floor art intake (the purchased LimeZu packs)
+
+| File | What it does |
+|---|---|
+| `src/shared/tileset.ts` | Adds `credit` — the attribution a pack's licence requires, printed by the floor's status strip. |
+| `src/renderer/src/assets/tileset/limezu-interiors.tiles.json` | NEW (committed). The active map: walls, two floors, paths, temple. |
+| `src/renderer/src/assets/tileset/limezu-office.tiles.json` | NEW (committed). The office pack's map. |
+| `.gitignore` | Sheets stay out; `*.tiles.json` comes in. |
+| `src/renderer/src/assets/ATTRIBUTION.md` | The two LimeZu rows with real licence terms, the exact restore path, the do-not-use list, and the Kenney retirement. |
+| `test/renderer/tileset.test.ts` | A block validating the REAL installed drop when one exists. |
+| `docs/demo/m5b-floor-limezu.png` | The live capture. |
+
+Not in the repository, by licence: `limezu-interiors-room-builder.png` and
+`limezu-office-room-builder.png` in the gitignored drop.
+
 ---
 
 ## Implementation Approach
@@ -219,6 +234,28 @@ it. A rubric nobody has tested against a deliberately bad answer will pass
 everything on the day it matters. Reporting the injection deliberately costs
 nothing, because a rubric that penalised it would teach researchers to stay
 quiet about injections.
+
+### M5b.5
+
+**Indices were measured, not guessed.** `src/shared/tileset.ts` says
+hard-coding frame indices for a pack you cannot see would be fiction that
+compiles. The first pass picked tiles by eye at 3× zoom and chose *border*
+tiles that would have tiled with visible seams. The second pass scored every
+candidate by per-channel colour variance, required full opacity, then rendered
+each chosen index back **from the index** — `x = i % columns`, `y = i / columns`
+— and tiled it 3×3, which proves the arithmetic and the seam at once.
+
+**Hue matters more than luminance for the ≤8-colour bar.** cream (240,240,200)
+and mint (189,241,229) differ by 8 in luminance and by half the colour wheel in
+hue; alternated per tile they read as a chessboard, not a floor. The final map
+pairs cream with marble-rose and reserves the indigo block for `temple`, where
+a distinct cooler tone is the intent.
+
+**The licence shapes the file layout.** LimeZu permits use and editing in any
+project and forbids redistributing the asset, and requires credit. So: sheets in
+the gitignored drop (never committed), maps committed (they are our own work and
+contain no asset data), and the credit declared *by the pack* in its own map so
+the status strip prints it and swapping packs cannot leave a stale credit behind.
 
 ---
 

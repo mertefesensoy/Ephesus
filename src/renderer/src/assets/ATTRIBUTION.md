@@ -24,10 +24,21 @@ is not shipped.**
 | Pixelify Sans (`@fontsource/pixelify-sans`, latin-400) | npm-pinned | Stefie Justprince | SIL OFL 1.1 | yes | UI body & labels (UI-DESIGN §3) |
 | IBM Plex Mono (`@fontsource/ibm-plex-mono`, latin-400) | npm-pinned | IBM / Bold Monday | SIL OFL 1.1 | yes | Data, logs, Odeon artifacts (UI-DESIGN §3) |
 
-| Kenney *Roguelike/RPG pack* (`kenney-roguelike-rpg.png`) | 2023 pack | Kenney (kenney.nl) | CC0 1.0 (license file in pack) | yes (public domain) | Staged in the tileset drop — interim floor sheets pending Architect review; LimeZu *Modern Interiors* replaces them after purchase |
-| Kenney *Roguelike Indoors* (`kenney-roguelike-indoors.png`) | 2023 pack | Kenney (kenney.nl) | CC0 1.0 (license file in pack) | yes (public domain) | Same as above |
+| LimeZu *Modern Interiors* — Room Builder 16×16 (`limezu-interiors-room-builder.png`) | full (paid) version, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Commercial asset licence (`LICENSE.txt` in the pack): use and edit in any commercial or non-commercial project; **resale or redistribution of the asset is forbidden**; **credit required** | **no** — used in the app, never redistributed as an asset (rule 2) | The floor's walls and floors (UI-DESIGN §7). Active pack. |
+| LimeZu *Modern Office Revamped* v1.2 — Room Builder 16×16 (`limezu-office-room-builder.png`) | v1.2, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — same as above | An alternative floor palette; installed and mapped, inactive while the interiors map sorts first. |
 
-Citizens remain procedural (never third-party — rule 3).
+Citizens remain procedural (never third-party — rule 3). The LimeZu purchase
+ships a character generator and character sheets; **neither is used, and the
+generator is never run**. That is not an oversight — rule 3 exists so that no
+likeness and no other IP's character can appear on the floor, and a purchased
+character pack is exactly the temptation it was written against.
+
+**Retired 2026-08-28:** the Kenney *Roguelike/RPG* and *Roguelike Indoors* packs
+(CC0) were interim staging while the licensed set was being chosen. They are out
+of the drop; nothing references them. Their CC0 terms would still permit use, so
+this is a quality decision rather than a licence one — §7's bar is the LimeZu
+line, and keeping two half-mapped packs around invites painting one pack's
+frames from the other's sheet.
 
 ## Tileset drop (gitignored)
 
@@ -38,6 +49,13 @@ src/renderer/src/assets/tileset/*.tiles.json   which tile paints what
 
 Both are discovered at build time by `src/renderer/src/floor/tileset.ts` — no
 code change is needed to adopt a pack.
+
+A pack whose licence **requires a credit** declares it in its own map, as
+`credit`, and the floor's status strip prints it beside the pack name — today,
+`tileset: LimeZu Modern Interiors (Room Builder 16x16) — LimeZu —
+limezu.itch.io`. The credit ships with the pack for the same reason the layout
+does: it is a term of *that* licence, and a credit hard-coded in the app would
+be wrong the moment somebody swapped the pack.
 
 A sheet alone is not enough: every pack lays its tiles out differently, so the
 pack's layout ships **with the pack**, as a tile map validated by
@@ -66,11 +84,25 @@ map, an invalid map (with the reason), or a map naming a sheet that is not
 there. A tileset that quietly failed to load would look exactly like one nobody
 had installed yet.
 
-**Restore path for a fresh clone:** purchase or obtain the tileset named in the
-table above, unzip its 16×16 sheets into the drop directory, write its
-`*.tiles.json` map, add its row here, and rebuild. The reference lineage in §7
-is LimeZu's *Modern Interiors*; a Mediterranean/antiquity-compatible set is
-preferred if one is available on comparable terms.
+**Restore path for a fresh clone** (exact, as performed on 2026-08-28):
+
+1. Buy *Modern Interiors* (full version) and *Modern Office Revamped* from
+   [limezu.itch.io](https://limezu.itch.io/) and download the Windows/desktop
+   archives. The interiors download is named by its itch slug
+   (`moderninteriors-win.zip`), not by its version.
+2. Copy exactly two files into `src/renderer/src/assets/tileset/`:
+   - `1_Interiors/16x16/Room_Builder_16x16.png` → `limezu-interiors-room-builder.png`
+   - `1_Room_Builder_Office/Room_Builder_Office_16x16.png` → `limezu-office-room-builder.png`
+3. The `*.tiles.json` maps are already in this repository's history — they are
+   the only part of the intake that may be committed, because a layout is our
+   own work and not the asset. Restore them beside the sheets.
+4. `npm test -- test/renderer/tileset.test.ts` — the drop block validates every
+   installed map against its actual sheet (frame bounds, columns, integer scale).
+
+**Do not use**, and why: `Modern_Interiors_Free_v2.2.zip` is the free tier and
+must never ship in place of the purchased set; `Modern_Interiors_RPG_Maker_Version.zip`
+is engine-formatted for RPG Maker and does not match this atlas layout; and
+`Character Generator 2.0 Setup.exe` is never run — see rule 3.
 
 ## Pixel fonts drop (gitignored)
 
