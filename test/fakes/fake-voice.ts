@@ -130,6 +130,10 @@ export function fakeVoiceAdapter(options: FakeVoiceOptions): VoiceAdapter {
                   const partial = fixture.transcript[0]
                   if (partial) handlers.onTranscript(partial)
                 },
+                say: (text: string) => {
+                  handlers.onSpoken(text)
+                  return Promise.resolve(text)
+                },
                 interrupt: () => handlers.onSpoken(''),
                 close: () => Promise.resolve()
               })

@@ -572,3 +572,78 @@ called live.
 ### Related docs
 
 - [ADR-0007](../adr/ADR-0007-herald-voice-seam.md) · [VOICE-DESIGN](../design/VOICE-DESIGN.md) · [TEST-STRATEGY §5](../TEST-STRATEGY.md)
+
+---
+
+## M6.6 — The Realtime fallback and S-FAILOVER (ADR-0007, FR-8.2, FR-8.6)
+
+### Problem / motivation
+
+M6.5 gave the Herald a voice; it gave it no second one. ADR-0007's whole
+argument for two providers is that "a single external dependency between the
+Architect and their company's mouth" means an outage silences the product. The
+fallback, and the machinery that reaches for it mid-sentence, are this package.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `src/main/herald/openai-realtime.ts` | **New.** `DuplexVoice`, and only that. |
+| `src/main/herald/session.ts` | **New.** Where policy and adapters meet. |
+| `src/main/herald/seam.ts` | `DuplexSession.say(text)`. |
+| `prompts/herald/realtime-model-id.md` | **New.** Realtime model, as config. |
+| `test/scenarios/s-failover.test.ts` | **New** — the S-FAILOVER suite, 11 cases. |
+
+### Implementation approach
+
+**The adapter stays incomplete on purpose.** It offers `duplex` and nothing
+else. ADR-0007 says "the policy layer maps the common conversation contract onto
+it", so `HeraldSession.speakWith` does: a `tts` adapter is spoken through, a
+duplex adapter is asked to `say`. An adapter that faked TTS to look complete
+would make the policy prefer it for capabilities it does not have.
+
+**`speak()` loops on the reducer, not on a counter.** It tries whatever provider
+the policy currently names, and on a classified fault hands it to
+`reduceFailover` and continues from what is left unspoken. It ends when the line
+is said or the reducer reaches cooldown — never after N tries, because "how many
+providers remain" is the reducer's knowledge.
+
+### Design decisions
+
+- **`DuplexSession.say()` is a completion, not an extension.** Second time this
+  milestone. The pattern is worth stating: transcribing an ADR's interface
+  *names* is not the same as transcribing its *contract*, and only writing an
+  adapter against the seam finds the difference.
+- **Transport injected everywhere.** `OpenAIRealtimeWebSocket` needs the
+  runtime's native `WebSocket` — Electron's Node has it, vitest's Node 20.16
+  does not. With no transport the adapter reports a fault and refuses, which is
+  a visible degradation rather than a crash inside the SDK.
+
+### Verification
+
+```bash
+npx vitest run test/scenarios/s-failover.test.ts
+```
+
+11 cases green, running the shipped adapters, reducer and session. Full suite:
+2320 passed; 15 failures, all recorded — 9 deterministic Windows-local and 6
+parallel-load flakes, 38/38 in isolation.
+
+**A defect the first green suite hid.** On a mid-utterance failure the session
+lost what ElevenLabs *had* said: `await handle.done()` rejects, so
+`spokenSoFar()` was never read, and the fallback re-spoke the whole line. All
+eleven cases passed anyway — because "the whole line reached the transcript" is
+true either way. The suite was asserting the wrong half of *continuous*.
+`speakWith` now credits the partial on the failure path, and the continuity case
+asserts what the fallback was **asked to say**:
+
+| Mutant | Result |
+|---|---|
+| partial credit dropped (fallback repeats the line) | the continuity case FAILS |
+
+**No live provider was called.** No keys in this environment; the live SRS §6.5
+proof is OWED to a local session.
+
+### Related docs
+
+- [ADR-0007](../adr/ADR-0007-herald-voice-seam.md) · [TEST-STRATEGY §3 — S-FAILOVER](../TEST-STRATEGY.md) · [SRS §6.5](../srs/SRS.md)

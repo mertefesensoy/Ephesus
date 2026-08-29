@@ -18,6 +18,7 @@ export const PERSONA_PATH = 'herald/persona.md'
 export const VOICE_ID_PATH = 'herald/voice-id.md'
 export const TTS_MODEL_PATH = 'herald/model-id.md'
 export const STT_MODEL_PATH = 'herald/stt-model-id.md'
+export const REALTIME_MODEL_PATH = 'herald/realtime-model-id.md'
 
 /** Contract: every `## key` section of a phrase book, trimmed. */
 export function parsePhrasebook(text: string): Readonly<Record<string, string>> {

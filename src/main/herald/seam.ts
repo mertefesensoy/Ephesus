@@ -130,6 +130,20 @@ export interface TextToSpeech {
 /** A duplex speech-to-speech session (ADR-0007's optional third interface). */
 export interface DuplexSession {
   write(frame: Uint8Array): void
+  /**
+   * Asks the session to speak a composed line, and resolves with what the
+   * provider reports having said.
+   *
+   * Added at M6.5/M6.6 for the same reason `onAudio` was: ADR-0007 says "the
+   * policy layer maps the common conversation contract onto it", and reading a
+   * brief aloud is part of that contract. A duplex session that could only
+   * carry captured audio could not be a TTS fallback at all — which is the one
+   * job ADR-0007 gives this provider.
+   *
+   * Both additions come from sentences already in the ADR; neither is a
+   * convenience the seam grew on its own.
+   */
+  say(text: string): Promise<string>
   /** The provider's own interrupt primitive — what barge-in maps onto. */
   interrupt(): void
   close(): Promise<void>

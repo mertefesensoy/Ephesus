@@ -3257,12 +3257,33 @@ order; every package tests against the fake engine per-PR.
       *Tests:* `test/main/herald-elevenlabs.test.ts` 23 · the conformance suite
       now runs the SHIPPED adapter beside the fixture fakes, 28 cases, with
       cancel latency measured on the real cancel path. 2311 passed overall.
-- [ ] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
+- [x] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
       mid-session failover ≤ 3 s with the one-line notice (FR-8.2); both down
       → text-only banner, zero non-audio loss (FR-8.6).
       *Docs: ADR-0007, FR-8.2/8.6, SDD §7.4. Tests: scripted S-FAILOVER
       halves; the budget on fixture clocks. Risk: failover is the POLICY's
       decision — adapters report health, never decide.*
+      **Done 2026-08-29** (`feature/m6-6-realtime-failover`). The Realtime
+      adapter implements `DuplexVoice` and only that — it does not fake TTS to
+      look complete, because ADR-0007 assigns the mapping to the policy layer,
+      where `HeraldSession.speakWith` now holds it. `session.ts` is where the
+      two halves meet: the policy decides (an adapter throws a classified
+      fault, `reduceFailover` says what happens), failover is mid-utterance and
+      CONTINUOUS (the fallback speaks the remainder), and every line reaches the
+      transcript whether or not audio carried it — FR-8.6's "functions fully in
+      text" as a guarantee rather than a banner.
+      **S-FAILOVER is green** (`test/scenarios/s-failover.test.ts`, 11 cases)
+      and runs the SHIPPED adapters and reducer, not a rig's copy: scripted
+      failure mid-utterance → Realtime continues inside the 3 s budget on a
+      fixture clock with one notice; all three fault classes fail over; no
+      self-failback after an hour; both down → text-only with the phrase-book
+      banner and zero non-audio loss.
+      **A defect the first green suite hid:** the mid-utterance failure was
+      losing what ElevenLabs HAD said, so the fallback re-spoke the whole line
+      — and every case still passed, because "the whole line reached the
+      transcript" is true either way. The suite was asserting the wrong half of
+      "continuous". Fixed, and the case now asserts what the fallback was ASKED
+      to say; mutation-checked. 2320 passed overall.
 - [ ] **M6.7 The spoken company + carried items** — briefings spoken from the
       SAME archived artifact the card shows; voice approvals with repeat-back;
       meeting narration; optional local wake word. Closes the carried items:
