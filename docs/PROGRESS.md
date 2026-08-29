@@ -3229,12 +3229,34 @@ order; every package tests against the fake engine per-PR.
       with it by construction. Two mutation checks: making a bare "yes"
       approve a destructive gate fails the FR-8.4 case; letting a stale fault
       through fails two failover cases. 2281 passed overall.
-- [ ] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
+- [x] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
       streamed TTS; persona/phrase book as `prompts/herald/*` per VOICE-DESIGN
       (invariant §8).
       *Docs: ADR-0007, VOICE-DESIGN, FR-8.1/8.5. Tests: adapter conformance on
       fixtures; the §5 tripwire keeps key reads inside herald/. Risk: keys via
       the broker only; absent keys = visible text-only degradation.*
+      **Done 2026-08-29** (`feature/m6-5-elevenlabs`). Provider SDKs added on
+      an ARCHITECT-APPROVED must-ask (the alternative was hand-rolling two
+      streaming protocols with no key here to verify either). The adapter is a
+      dumb pipe: streaming TTS with cancel, streaming STT whose endpointing
+      stays the provider's, an error taxonomy (401/403 → auth, 5xx → transient,
+      timeout → latency-breach), and no method through which it could decide
+      anything about failover. `spokenSoFar()` is a MEASUREMENT — the SDK's
+      character alignment, not a 150-wpm estimate — so VOICE-DESIGN §2's
+      "unspoken from here" mark is a fact. A missing key is a visible
+      degradation (`health()` reports `auth`, `speak()` refuses by name), and
+      the key arrives through an injected getter: `check-invariants.cjs`
+      permits `process.env` under `herald/`, so a test strips comments and
+      asserts the code does not use the permission. Voice id and model ids load
+      from `prompts/herald/*.md`, asserted absent from the adapter source.
+      **Two findings landed with it:** my own M6.4 seam was incomplete —
+      ADR-0007 says "streamed audio" and there was no sink, found by writing
+      the first adapter against it — and the voice-SDK lint tripwire was a
+      false positive on our own `herald/elevenlabs.ts` (gitignore glob
+      semantics), fixed and then verified in BOTH directions.
+      *Tests:* `test/main/herald-elevenlabs.test.ts` 23 · the conformance suite
+      now runs the SHIPPED adapter beside the fixture fakes, 28 cases, with
+      cancel latency measured on the real cancel path. 2311 passed overall.
 - [ ] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
       mid-session failover ≤ 3 s with the one-line notice (FR-8.2); both down
       → text-only banner, zero non-audio loss (FR-8.6).

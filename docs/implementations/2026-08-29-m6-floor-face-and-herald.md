@@ -482,3 +482,93 @@ tests opt-in with keys. The live proofs SRS §6.5 owes are M6.8's business.
 - [SDD §8 — the Herald's component design](../sdd/SDD.md)
 - [VOICE-DESIGN — persona, modes, conversation policy](../design/VOICE-DESIGN.md)
 - [TEST-STRATEGY §5 — conformance suites](../TEST-STRATEGY.md)
+
+---
+
+## M6.5 — The ElevenLabs adapter and the Herald's words (ADR-0007, VOICE-DESIGN)
+
+### Problem / motivation
+
+M6.4 built a seam with nothing plugged into it. The reference implementation
+ADR-0007 names — ElevenLabs, "chosen for voice quality and latency" — had to
+exist, and with it the persona and phrase book FR-8.5 and invariant §8 keep out
+of code.
+
+Building it required a decision the docs left open: **what transport?** This
+environment has no `ELEVENLABS_API_KEY` and no `OPENAI_API_KEY`, so a hand-rolled
+streaming client could be asserted only against fixtures written by the same
+hand that wrote the client. That is a BUILD-PROMPT §8.3 must-ask — a new
+dependency — and it was put to the Architect with three options and approved:
+add the provider SDKs.
+
+### What changed
+
+| File | Change |
+|---|---|
+| `package.json` | `@elevenlabs/elevenlabs-js@^2.65`, `openai@^7.8` (approved). |
+| `src/main/herald/elevenlabs.ts` | **New.** The adapter. |
+| `src/main/herald/phrasebook.ts` | **New.** Keys → sentences; persona and id loading. |
+| `src/main/herald/seam.ts` | `SpeakOptions.onAudio` — the sink the M6.4 transcription lacked. |
+| `prompts/herald/voice-id.md`, `model-id.md`, `stt-model-id.md` | **New.** Voice config. |
+| `eslint.config.mjs` | Voice/engine SDK patterns exclude relative specifiers. |
+| `test/main/herald-elevenlabs.test.ts` | **New** — 23 cases. |
+| `test/conformance/voice-adapters.test.ts` | The shipped adapter joins the suite. |
+
+### Implementation approach
+
+**The adapter decides nothing.** It streams audio out through `onAudio`, streams
+transcripts in, and classifies its own failures into the seam's three faults.
+Endpointing stays the provider's. There is no method on it through which it could
+express an opinion about failover, and both the conformance suite and a unit case
+assert those method names are absent.
+
+**`spokenSoFar()` is a measurement.** `streamWithTimestamps` returns character
+alignment, so the adapter accumulates the characters the provider actually
+produced audio for. VOICE-DESIGN §2's "unspoken from here" mark is therefore a
+fact rather than an estimate; and where alignment drifts from the text, the
+policy's `bargeIn` treats a non-prefix as "nothing was heard" — the safe
+direction, because claiming the Architect heard something they did not is the
+worse error.
+
+**The key is injected, never read.** `check-invariants.cjs` *permits*
+`process.env` under `herald/`, so the permission needed its own check: a test
+strips comments from the adapter and asserts the code does not use it.
+
+### Design decisions
+
+- **SDKs over a hand-rolled client.** Recorded in DECISIONS-LOG with the
+  approval. The deciding argument was verifiability, not convenience.
+- **Fix the lint pattern, don't rename the file.** SDD §8's diagram names
+  `elevenlabs.ts`; exempting the test directories would let a test import the
+  real SDK. Excluding relative specifiers is the narrow fix — a relative import
+  can never be an SDK import.
+
+### Verification
+
+```bash
+npx vitest run test/main/herald-elevenlabs.test.ts test/conformance/
+```
+
+23 + 28 cases green. Full suite: 2311 passed; 13 failures, all recorded — 9
+deterministic Windows-local and 4 parallel-load flakes, 25/25 in isolation.
+
+**Two findings, both from doing rather than reading.**
+
+1. *My own M6.4 seam was incomplete.* ADR-0007 says "streamed audio with cancel";
+   the transcription had the cancel and no way for audio to leave. Found by
+   writing an adapter against the seam — which is the argument for writing one
+   rather than admiring it.
+2. *The voice-SDK tripwire was a false positive on our own file.* eslint's
+   `no-restricted-imports` `group` uses gitignore semantics, so bare
+   `elevenlabs` matched `../../src/main/herald/elevenlabs`. Verified in **both**
+   directions after the fix: still errors on a real SDK import outside
+   `herald/`, no longer fires on the shipped adapter. A tripwire that stops
+   catching what it exists for is the defect this repo keeps finding.
+
+**No live provider was called.** There is no key in this environment, so the
+live proof is OWED to a local session and recorded as such — not simulated and
+called live.
+
+### Related docs
+
+- [ADR-0007](../adr/ADR-0007-herald-voice-seam.md) · [VOICE-DESIGN](../design/VOICE-DESIGN.md) · [TEST-STRATEGY §5](../TEST-STRATEGY.md)

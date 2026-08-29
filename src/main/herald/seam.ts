@@ -105,11 +105,26 @@ export interface SpeechHandle {
   spokenSoFar(): string
 }
 
+export interface SpeakOptions {
+  readonly voiceId?: string
+  /**
+   * Where the streamed audio goes. SDD §8 puts audio I/O in main with "a thin
+   * renderer visualizer", so the adapter produces bytes and something else
+   * plays them.
+   *
+   * Added at M6.5, when the first real adapter met this interface: ADR-0007
+   * says "streamed audio with cancel", and the M6.4 transcription had the
+   * cancel and no way for the audio to leave. Completing the sentence the ADR
+   * wrote — not extending it.
+   */
+  readonly onAudio?: (chunk: Uint8Array) => void
+}
+
 /** ADR-0007: "streamed audio with cancel". */
 export interface TextToSpeech {
   readonly provider: VoiceProviderId
   /** Begins speaking; resolves once audio has STARTED, not when it finishes. */
-  speak(text: string, opts?: { readonly voiceId?: string }): Promise<SpeechHandle>
+  speak(text: string, opts?: SpeakOptions): Promise<SpeechHandle>
 }
 
 /** A duplex speech-to-speech session (ADR-0007's optional third interface). */
