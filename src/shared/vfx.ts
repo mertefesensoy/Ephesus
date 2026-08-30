@@ -9,11 +9,25 @@ import type { LogEntry } from './log'
  * **Everything here is reconstructible from `log.jsonl`.** That is NFR-13's
  * spirit applied to the vfx layer, and it is why this module takes log entries
  * rather than events of its own invention: an envelope's identity is the
- * message id, its colour is the speech act, its start is the entry's own
- * timestamp. Replay the log and the same envelopes fly at the same moments. A
- * renderer that minted its own ids or read its own clock would be holding state
- * the record cannot account for — a second source of truth, which ADR-0014
- * forbids the floor.
+ * message id, its colour is the speech act, its kind is what the record says
+ * happened to it. A renderer that minted its own ids, parties or acts would be
+ * holding state the record cannot account for — a second source of truth, which
+ * ADR-0014 forbids the floor.
+ *
+ * **The one thing the renderer supplies is the presentation clock.**
+ * `envelopeFor` reads `startedMs` from the entry's own timestamp, and
+ * `envelopePose` is pure in it, so REPLAY is faithful: feed the same entries and
+ * the same envelopes fly the same way. The LIVE floor re-anchors each flight to
+ * the moment it observes the entry, because a flight lasts `ENVELOPE_MS` and a
+ * delivery seen later than that after it was logged would arrive already
+ * finished and never be seen at all. That is presentation timing, not truth —
+ * every fact still comes from the record.
+ *
+ * *(Corrected at M6.10 on an Architect decision. This comment used to promise
+ * "replay the log and the same envelopes fly at the same moments" and call a
+ * renderer clock forbidden, while `FloorCanvas` re-anchored every flight. The
+ * close-out audit found the contradiction; the code was right about what a live
+ * floor needs and the comment was claiming more than anything did.)*
  *
  * **Nothing here decides whether an effect happens.** These functions turn a
  * fact into a shape; a fact with no log entry produces nothing at all.

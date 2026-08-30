@@ -36,6 +36,7 @@ import {
   fanOffsets,
   particlesUnderReducedMotion,
   reduceEnvelope,
+  reduceWalk,
   tokenFade,
   tokenFor,
   PARTICLES,
@@ -57,6 +58,7 @@ import { overlayFor, overlayFrame, overlayPixels, OVERLAY_PX, OVERLAY_TOKEN_COLO
 import { paintPlan, type PaintOp } from './painter'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
+import { noteParity, parityLine, type ParityNotice } from './parity'
 
 /**
  * The Terraces floor (UI-DESIGN §5). It is a **projection**: every avatar's
@@ -363,10 +365,12 @@ interface DrawState {
  * nothing the renderer decides on its own about phase or destination.
  */
 function positionFor(
+  agentId: string,
   snapshot: AvatarSnapshot,
   seat: string,
   nowMs: number,
-  drawn: DrawState | undefined
+  drawn: DrawState | undefined,
+  reducedMotion: boolean
 ): DrawState & { frame: 0 | 1 | 2 | 3 } {
   // `desk` is the agent's OWN desk — its seat (SDD §4.1). Until M3.6 it was the
   // avatar's index in a Map, so a citizen changed desks whenever another agent
@@ -391,7 +395,15 @@ function positionFor(
 
   const duration = Math.max(walkDurationMs(snapshot.origin, snapshot.station), MS_PER_TILE)
   const steps = Math.max(1, Math.round((duration / MS_PER_TILE) * STEPS_PER_TILE))
-  const progress = steppedProgress(nowMs - snapshot.sinceMs, duration, steps)
+  // §8: "walks become teleports + labels". `reduceWalk` is the model's word for
+  // it — progress is 1 from the first frame, so the citizen is simply AT the
+  // destination and the interpolation never runs. The label half is the census
+  // (see `parity.ts`); this is the teleport half. Before M6.10 the renderer had
+  // no reduced-motion branch here at all, so §8's walk clause lived in the model
+  // and not on the floor.
+  const progress = reducedMotion
+    ? reduceWalk(agentId, snapshot.station).progress
+    : steppedProgress(nowMs - snapshot.sinceMs, duration, steps)
   const stepIndex = Math.round(progress * steps)
   return {
     x: fromX + (toX - fromX) * progress,
@@ -443,6 +455,8 @@ export function FloorCanvas(): ReactElement {
    * same envelopes (NFR-13's spirit).
    */
   const flightsRef = useRef<Map<string, EnvelopeFlight>>(new Map())
+  // §8 parity lines awaiting the next census (see `parity.ts`).
+  const noticesRef = useRef<readonly ParityNotice[]>([])
   /** Tray flashes standing in for flights under reduced motion (§8). */
   const flashesRef = useRef<Map<string, number>>(new Map())
   /** The two room-level facts §5.4 names: an open gate, a gathered meeting. */
@@ -471,11 +485,15 @@ export function FloorCanvas(): ReactElement {
     // §8 information parity: what a station's animation says must also be
     // reachable in words, or the floor's newest information is available only
     // to people who can watch pixels move (NFR-15).
+    // §8's third segment: what the suppressed animations would have said. It is
+    // empty whenever motion is on, or when nothing recent is pending, so the
+    // label never carries a standing "nothing happened".
+    const parity = parityLine(noticesRef.current, Date.now())
     setCensus(
       `${floorCensus([...live.values()].map((snapshot) => snapshot.phase))} · ${stationCensus(
         floorFacts(),
         Date.now()
-      )}`
+      )}${parity === '' ? '' : ` · ${parity}`}`
     )
     setOverflow(sharingDesks([...live.keys()].map((id) => seatsRef.current.get(id)?.seat ?? '')))
   }, [])
@@ -575,7 +593,20 @@ export function FloorCanvas(): ReactElement {
             // the same information the moving form would have.
             const flash = reduceEnvelope(flight)
             for (const who of flash.at) flashesRef.current.set(who, Date.now())
+            // The flash is a colour on two trays and says nothing on its own.
+            // `flash.info` is the sentence the FLIGHT would have carried, and
+            // before M6.10 it was computed here and dropped, so the reduced
+            // form rendered with no label at all — §8 parity asserted in the
+            // model and absent on the floor.
+            noticesRef.current = noteParity(noticesRef.current, flash.info, Date.now())
           } else {
+            // The flight is anchored where it was OBSERVED, not at the entry's
+            // own timestamp: a delivery seen more than one flight-length after
+            // it was logged would otherwise arrive already finished and never
+            // be seen at all. Every FACT still comes from the record — id,
+            // parties, act, colour, kind — so ADR-0014's "projection, never a
+            // second source of truth" holds; only the presentation clock is
+            // local, and `vfx.ts`'s contract says so since M6.10.
             flightsRef.current.set(flight.id, { ...flight, startedMs: Date.now() })
           }
         }
@@ -615,6 +646,17 @@ export function FloorCanvas(): ReactElement {
     const note = (update: AvatarUpdate): void => {
       avatarsRef.current.set(update.agentId, update.snapshot)
       mailRef.current.set(update.agentId, update.pendingMail)
+      // §8's label half. Under reduced motion the walk does not play, so the
+      // only place "Iris is at the shelf" exists is the census — the moving
+      // form carried it in pixels, and suppressing motion must not cost the
+      // reader the fact (UI-DESIGN §8, NFR-15).
+      if (reducedMotionRef.current && update.snapshot.walking) {
+        noticesRef.current = noteParity(
+          noticesRef.current,
+          reduceWalk(update.agentId, update.snapshot.station).info,
+          Date.now()
+        )
+      }
     }
     // Both read paths set the mail count, not just this one: the M5b close-out's
     // standing lesson is that a fact supplied on the listing path and not on the
@@ -739,7 +781,14 @@ export function FloorCanvas(): ReactElement {
               seat === TEMPLE_SEAT
                 ? tokens.terracotta
                 : (ACCENTS[index % ACCENTS.length] ?? tokens.aegean)
-            const pose = positionFor(snapshot, seat, now, previous)
+            const pose = positionFor(
+              agentId,
+              snapshot,
+              seat,
+              now,
+              previous,
+              reducedMotionRef.current
+            )
             drawStates.set(agentId, pose)
             drawCitizen(sprite, {
               dx: pose.x - (previous?.x ?? pose.x),

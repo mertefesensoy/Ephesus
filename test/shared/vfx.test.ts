@@ -260,9 +260,17 @@ describe('§8 reduced motion keeps information parity', () => {
   it('turns every envelope into a tray flash carrying the same information', () => {
     for (const flight of flights) {
       const reduced = reduceEnvelope(flight)
-      // Equality, not "there is a label": the still form must say exactly what
-      // the moving form said, or the parity claim is decoration.
-      expect(reduced.info, flight.kind).toEqual(envelopeInfo(flight))
+      // The M6 close-out audit found the assertion that stood here —
+      // `expect(reduced.info).toEqual(envelopeInfo(flight))` — was a TAUTOLOGY:
+      // `reduceEnvelope` returns `info: envelopeInfo(flight)`, so the equality
+      // could not fail for any input, and a mutation that symmetrically gutted
+      // both sides passed. Parity is now asserted against the facts the moving
+      // form carries, independently of the function producing it; the fuller
+      // treatment lives in `test/renderer/parity.test.ts`.
+      expect(reduced.info.text, flight.kind).toContain(flight.from)
+      expect(reduced.info.text, flight.kind).toContain(flight.to)
+      expect(reduced.info.text, flight.kind).toContain(flight.act)
+      expect(reduced.info.at, flight.kind).toEqual([flight.from, flight.to])
       expect(reduced.at).toEqual([flight.from, flight.to])
       expect(reduced.color).toBe(flight.color)
     }
