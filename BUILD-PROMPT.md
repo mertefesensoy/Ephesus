@@ -134,8 +134,16 @@ it is how the next session knows where to resume).
 > audit (spec-verifier + doc-guardian + an adversarial mutation pass) is in
 > `docs/PROGRESS.md`; read its verdict before anything else.
 >
-> **Resume at M6.9.** Two packages close M6:
-> **M6.9 wires the Herald** — `src/main/herald/` is 1 406 lines whose only
+> **Resume at M6.10.** **M6.9 is DEFERRED INDEFINITELY** by Architect decision
+> (2026-08-30) — the Herald is not an important function for now. Deferred, not
+> cancelled: the finding below stands, and the package is the fix whenever the
+> Architect calls for it. Do NOT start it, and do not treat the Herald's
+> unwired state as a bug to fix in passing. **Consequence:** all three of M6's
+> exit criteria are voice-live, so M6 cannot close on its criteria as written;
+> how it closes is an OPEN ARCHITECT DECISION that blocks M7 under §5. M6.10
+> does not depend on M6.9 and is the only remaining M6 work.
+>
+> **M6.9 (deferred) wires the Herald** — `src/main/herald/` is 1 406 lines whose only
 > importers are test files (`grep -rn "herald/" src/ | grep -v "^src/main/herald/"`
 > returns nothing). Register SDD §5's `herald` IPC group and the
 > `herald:transcript` push, construct both adapters in `index.ts` with `apiKey()`

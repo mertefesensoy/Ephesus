@@ -3350,9 +3350,26 @@ order; every package tests against the fake engine per-PR.
       audit (2026-08-29):** two of the three exit criteria in
       `docs/IMPLEMENTATION.md` are unmet and the third was never addressed —
       see the close-out audit below. BUILD-PROMPT §5: never start N+1 while
-      N's exit criteria fail. Closed by M6.9 + M6.10.
-- [ ] **M6.9 Wire the Herald into the application** — the subsystem M6.4–M6.7
-      built has NO production caller: 1 406 lines under `src/main/herald/`
+      N's exit criteria fail. ~~Closed by M6.9 + M6.10.~~ **M6.9 was deferred
+      indefinitely on 2026-08-30, so every remaining exit criterion is
+      unreachable by construction. M6.10 is the only remaining M6 work. How this
+      milestone closes — amend the criteria, waive them on the record, or hold
+      M6 open — is an OPEN ARCHITECT DECISION and blocks the M7 start under §5.**
+- [ ] **M6.9 Wire the Herald into the application** — **DEFERRED INDEFINITELY by
+      Architect decision (2026-08-30): the Herald is not an important function
+      for now.** Deferred, not cancelled and not descoped — the finding stands
+      exactly as the close-out audit recorded it, and this package is the fix
+      whenever the Architect calls for it. Nothing here is lost: the seam,
+      policy, adapters, session and narration are all built, tested and
+      conforming; they simply have no caller.
+      **Consequence, recorded rather than absorbed:** all three of M6's exit
+      criteria in `docs/IMPLEMENTATION.md` are voice-live, so while this is
+      deferred M6 cannot close on its criteria as written. How M6 closes is an
+      open Architect decision (see the deferral note under the close-out audit);
+      until it is taken, **M6.10 is the only remaining M6 work** and it does not
+      depend on this package.
+      *Original scope, unchanged and still owed:* the subsystem M6.4–M6.7 built
+      has NO production caller: 1 406 lines under `src/main/herald/`
       imported only by tests, no IPC channel, no preload surface, no
       construction in `index.ts`, no UI. Register SDD §5's `herald` IPC group
       (`pttStart`/`pttStop`/`speakBrief`/`config`) and the `herald:transcript`
