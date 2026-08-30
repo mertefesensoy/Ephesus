@@ -134,7 +134,15 @@ it is how the next session knows where to resume).
 > audit (spec-verifier + doc-guardian + an adversarial mutation pass) is in
 > `docs/PROGRESS.md`; read its verdict before anything else.
 >
-> **Resume at M6.10.** **M6.9 is DEFERRED INDEFINITELY** by Architect decision
+> **M6.10 is DONE (2026-08-30)** — all three of the audit's groups, every fix
+> mutation-checked with the audit's own mutations. So **every M6 package that is
+> going to be built has been**, and the milestone now waits on one Architect
+> decision rather than on any work: M6.9 is deferred, its three exit criteria are
+> voice-live and therefore unreachable, and how M6 closes (amend the criteria,
+> waive them on the record, or hold M6 open) is the ONLY thing standing between
+> here and M7.1. Do not start M7 until that is answered — §5 is explicit.
+>
+> **M6.9 is DEFERRED INDEFINITELY** by Architect decision
 > (2026-08-30) — the Herald is not an important function for now. Deferred, not
 > cancelled: the finding below stands, and the package is the fix whenever the
 > Architect calls for it. Do NOT start it, and do not treat the Herald's
@@ -215,8 +223,10 @@ it is how the next session knows where to resume).
 > COMMITTED generator for `docs/demo/*.svg`, whose renders are honest but
 > unreproducible from the repo; the M6 floor screenshot; wake-word detection; the
 > Memory panel screenshot; a real-engine respawn demo; E-STOA's LLM-judged half;
-> `stoa:pin`; the jsdom question; and BUILD-PROMPT §10's dependency list, which
-> never gained the two voice SDKs approved at M6.5.
+> `stoa:pin`. Two of that list CLOSED at M6.10: the jsdom question is answered
+> (yes — dev-only, pinned to `^26`, because 30 breaks on this toolchain's Node
+> 20), and §10's dependency list now carries both the voice SDKs approved at
+> M6.5 and jsdom.
 > Dogfooding is ON (since M3 exit): Ephesus agents help build Ephesus.
 
 ### M0 packages (do these first)
@@ -341,7 +351,7 @@ Next session starts at: M<x>.<n>
   `postinstall` rebuilding node-pty against Electron's ABI (electron-rebuild).
 - Core dependencies (these are pre-approved; anything else is §8): `electron`,
   `electron-vite`, `react`, `react-dom`, `typescript`, `pixi.js`, `@xterm/xterm`,
-  `node-pty`, `better-sqlite3`, `zustand`, `zod` (validators), `vitest`,
+  `node-pty`, `better-sqlite3`, `zustand`, `zod` (validators), `vitest`, `jsdom`,
   `@playwright/test`, `eslint`, `prettier`, `electron-builder`.
 - Also pre-approved by Architect directive (2026-08-26): **MemPalace** as an
   *optional external* Python 3.9+ tool for the Library (ADR-0016 — M4; every

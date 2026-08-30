@@ -3365,9 +3365,10 @@ order; every package tests against the fake engine per-PR.
       **Consequence, recorded rather than absorbed:** all three of M6's exit
       criteria in `docs/IMPLEMENTATION.md` are voice-live, so while this is
       deferred M6 cannot close on its criteria as written. How M6 closes is an
-      open Architect decision (see the deferral note under the close-out audit);
-      until it is taken, **M6.10 is the only remaining M6 work** and it does not
-      depend on this package.
+      open Architect decision (see the deferral note under the close-out audit).
+      ~~until it is taken, **M6.10 is the only remaining M6 work**~~ **M6.10
+      landed 2026-08-30, so no M6 work remains at all** — the milestone now waits
+      on that one decision and on nothing else.
       *Original scope, unchanged and still owed:* the subsystem M6.4–M6.7 built
       has NO production caller: 1 406 lines under `src/main/herald/`
       imported only by tests, no IPC channel, no preload surface, no
@@ -3385,7 +3386,7 @@ order; every package tests against the fake engine per-PR.
       the remainder; the shipped Realtime adapter joins the conformance suite,
       which its own comment has promised since M6.6. Risk: the seam is clean —
       wire it without teaching the adapters anything about failover.*
-- [ ] **M6.10 Close the false guarantees** — the adversarial pass ran 22
+- [x] **M6.10 Close the false guarantees** — the adversarial pass ran 22
       mutations against M6's recorded claims and 18 survived. Each survivor is
       a test that cannot fail when the thing it protects breaks: the
       E-BRIEF-FAITH property asserted against one hard-coded archive (an
@@ -3404,6 +3405,55 @@ order; every package tests against the fake engine per-PR.
       `FloorCanvas.tsx`; `deliverFromHarness` joins the vfx seam. Risk: fixing
       the TEST without fixing the renderer would make the guarantee more
       convincing and no more true.*
+      **Done 2026-08-30** (`feature/m6-10-false-guarantees`), in the audit's
+      three groups. **A — three REAL renderer defects**, not weak tests: §8's
+      walk→teleport had no renderer branch at all (`reduceWalk` was never
+      imported by `FloorCanvas`); the tray flash computed `reduceEnvelope(…).info`
+      and dropped it; and `vfx.ts` promised "replay the log and the same
+      envelopes fly at the same moments" while the renderer re-anchored every
+      flight. The first two now land their labels on the census behind the canvas
+      `aria-label` — the floor's declared parity surface, ONE surface because two
+      cannot drift (Architect decision 2026-08-30) — through a new pure
+      `floor/parity.ts`. The third was the COMMENT's fault: a flight lasts
+      400 ms, so a delivery observed later than that would arrive already
+      finished and never be seen. The contract now says replay is faithful
+      because `envelopePose` is pure in `startedMs`, while the live floor anchors
+      at observation and every FACT still comes from the record — ADR-0014 holds.
+      **B — six guarantees that could not fail.** E-BRIEF-FAITH was asserted
+      against ONE hard-coded archive and is now a property over generated ones
+      (verbatim, AND the count); the `## Source refs` exclusion turned out to be
+      dead code, so its case writes the appendix as plain sentences, which is
+      what makes the exclusion load-bearing. `StationView` became a discriminated
+      union whose live arms carry a branded `StationReason` — `reasonFor('')` no
+      longer compiles, and weakening the field back to `string` fails
+      `npm run typecheck` with an unused-`@ts-expect-error`. `stationView` is
+      sampled across an hour. A `check-invariants` tripwire bans `Date.now`/
+      `new Date`/`setInterval`/`requestAnimationFrame` under
+      `src/renderer/src/floor/` outside `FloorCanvas.tsx`, comments exempt for
+      that rule alone — a tripwire that fired on its own rationale would teach
+      the next author to delete the rationale. The tool-NAME ban and the
+      invariant-§8 prose check were a six-name and a three-string blocklist;
+      both are structural now.
+      **C — the coverage gaps.** Continuity was asserted on one fault class, and
+      `auth` — the class SRS §6.5 names in as many words — was not it; every
+      class now asserts the fallback was asked for the REMAINDER. `failoverMs`
+      was `!= null && <= 3000`, which cannot tell a measurement from a zero: it
+      is asserted exactly, with a new case advancing past the budget to prove a
+      slow switch can fail it. `deliverFromHarness` joined the vfx seam. And the
+      renderer half of §5.4's facts, which had **no test of any kind**, got both
+      halves of the Architect's "both": the fold moved into a pure
+      `floor/facts.ts` (the component's three refs became one `FloorState`), and
+      `jsdom@^26` landed dev-only on an approved must-ask so `FloorCanvas` is
+      mounted for real — pinned to 26 because 30 cannot start a vitest worker on
+      this toolchain's Node 20.
+      *Every fix mutation-checked with the audit's OWN mutations.* The
+      re-speak-on-auth, the zeroed `failoverMs`, the harness `msgId` rename, the
+      phase-derived tray flag, the carried-maximum brazier, the timer-driven
+      station, the tool-name alias table, the symmetric parity gut and all three
+      E-BRIEF-FAITH mutations now fail. *Tests:* `test/renderer/parity.test.ts` 8
+      · `test/renderer/facts.test.ts` 10 · `test/renderer/floor-canvas.test.tsx`
+      3 (jsdom) · strengthened cases in `stations` (+5), `vfx`, `vfx-seam` (+2),
+      `s-failover` (+1), `herald-narration` (+4), `herald-policy`, `tileset`.
 
 ### M6 exit review (2026-08-29) — verdict: ~~DONE, with two live proofs OWED~~ **SUPERSEDED by the close-out audit below**
 
