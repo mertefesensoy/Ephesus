@@ -20,7 +20,6 @@ import {
   NO_FACTS,
   stationCensus,
   stationView,
-  type AvatarPresence,
   type FloorFacts
 } from '../../../shared/stations'
 import { paintFurnishings } from './painter'
@@ -59,6 +58,7 @@ import { paintPlan, type PaintOp } from './painter'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
 import { noteParity, parityLine, type ParityNotice } from './parity'
+import { EMPTY_FLOOR, factsOf, noteAvatar, noteGates, noteMeeting, type FloorState } from './facts'
 
 /**
  * The Terraces floor (UI-DESIGN §5). It is a **projection**: every avatar's
@@ -431,13 +431,7 @@ export function FloorCanvas(): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
   const [initError, setInitError] = useState<string | null>(null)
   const [population, setPopulation] = useState(0)
-  const avatarsRef = useRef<Map<string, AvatarSnapshot>>(new Map())
   const seatsRef = useRef<Map<string, { role: string; seat: string }>>(new Map())
-  /**
-   * §5.4's desk tray flag IS `pendingMailCount`, so it arrives with the avatar
-   * update that carries the same agent's snapshot — one moment, one fact.
-   */
-  const mailRef = useRef<Map<string, number>>(new Map())
   /**
    * §8's reduced-motion setting. Read from the OS preference rather than a new
    * app setting: it is the signal the platform already gives, and honouring it
@@ -459,11 +453,14 @@ export function FloorCanvas(): ReactElement {
   const noticesRef = useRef<readonly ParityNotice[]>([])
   /** Tray flashes standing in for flights under reduced motion (§8). */
   const flashesRef = useRef<Map<string, number>>(new Map())
-  /** The two room-level facts §5.4 names: an open gate, a gathered meeting. */
-  const factsRef = useRef<{ openGates: number; meetingAttendees: number }>({
-    openGates: 0,
-    meetingAttendees: 0
-  })
+  /**
+   * The floor's facts, folded by the pure reducers in `facts.ts`.
+   *
+   * They were assembled inline here until M6.10, which meant the renderer half
+   * of §5.4's named facts had no test: the close-out audit broke the tray flag
+   * and the brazier in this file and every suite stayed green.
+   */
+  const factsRef = useRef<FloorState>(EMPTY_FLOOR)
   // Seeded with the same two halves `refresh()` writes, so the label reads the
   // same way before the first snapshot arrives as it does after — a window with
   // no bridge yet must not silently drop the station half of §8's parity.
@@ -480,7 +477,7 @@ export function FloorCanvas(): ReactElement {
    * actually on the floor, not over every card ever seen.
    */
   const refresh = useCallback((): void => {
-    const live = avatarsRef.current
+    const live = factsRef.current.avatars
     setPopulation(live.size)
     // §8 information parity: what a station's animation says must also be
     // reachable in words, or the floor's newest information is available only
@@ -503,21 +500,7 @@ export function FloorCanvas(): ReactElement {
    * main has told this window. Nothing here is renderer opinion: every field
    * traces to a snapshot, an approvals queue or a live meeting.
    */
-  const floorFacts = useCallback((): FloorFacts => {
-    const avatars: AvatarPresence[] = [...avatarsRef.current.values()].map((snapshot) => ({
-      station: snapshot.station,
-      walking: snapshot.walking,
-      phase: snapshot.phase
-    }))
-    return {
-      avatars,
-      openGates: factsRef.current.openGates,
-      meetingAttendees: factsRef.current.meetingAttendees,
-      // Hover selection is UI-DESIGN §5's camera work, not M6.2's — the model
-      // takes it, and the floor has nothing to put there yet.
-      hovered: null
-    }
-  }, [])
+  const floorFacts = useCallback((): FloorFacts => factsOf(factsRef.current), [])
 
   /**
    * The Watch brazier IS an open gate and the Odeon fills when a meeting
@@ -537,15 +520,12 @@ export function FloorCanvas(): ReactElement {
     const reread = (): void => {
       void eph.watch.approvals().then((gates) => {
         if (!live) return
-        factsRef.current = { ...factsRef.current, openGates: gates.length }
+        factsRef.current = noteGates(factsRef.current, gates)
         refresh()
       })
       void eph.odeon.meeting().then((meeting) => {
         if (!live) return
-        factsRef.current = {
-          ...factsRef.current,
-          meetingAttendees: meeting ? meeting.attendees.length : 0
-        }
+        factsRef.current = noteMeeting(factsRef.current, meeting)
         refresh()
       })
     }
@@ -644,8 +624,7 @@ export function FloorCanvas(): ReactElement {
     const eph = window.eph
     if (!eph) return
     const note = (update: AvatarUpdate): void => {
-      avatarsRef.current.set(update.agentId, update.snapshot)
-      mailRef.current.set(update.agentId, update.pendingMail)
+      factsRef.current = noteAvatar(factsRef.current, update)
       // §8's label half. Under reduced motion the walk does not play, so the
       // only place "Iris is at the shelf" exists is the census — the moving
       // form carried it in pixels, and suppressing motion must not cost the
@@ -752,13 +731,13 @@ export function FloorCanvas(): ReactElement {
 
         app.ticker.add(() => {
           const now = Date.now()
-          const live = avatarsRef.current
+          const live = factsRef.current.avatars
           drawStations(stationLayer, floorFacts(), now)
-          drawTrays(stationLayer, live, mailRef.current, seatsRef.current)
+          drawTrays(stationLayer, live, factsRef.current.mail, seatsRef.current)
           drawVfx(vfxLayer, {
             now,
             avatars: live,
-            mail: mailRef.current,
+            mail: factsRef.current.mail,
             seats: seatsRef.current,
             flights: flightsRef.current,
             flashes: flashesRef.current,
