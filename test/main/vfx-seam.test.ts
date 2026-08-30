@@ -183,3 +183,42 @@ describe('an envelope flies because the real router logged a real delivery', () 
     for (const flight of first) expect(flight?.startedMs).toBeGreaterThan(0)
   })
 })
+
+describe('the OTHER delivery path also flies (M6.10)', () => {
+  it('turns a harness-authored delivery into a flight', async () => {
+    // The M6 close-out audit found this seam drove only `Hermes.deliver`. But
+    // `deliverFromHarness` writes a `delivery` entry too — it is how every
+    // endpoint's answer and every reflection request reaches an agent — and
+    // renaming `msgId` on THAT path broke nothing, because nothing looked.
+    // NFR-13 is not "the router's mail is reconstructible"; it is all of it.
+    const r = await rig()
+    const sent = message({ act: 'agree' })
+    r.hermes.deliverFromHarness(sent)
+
+    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    expect(entry, 'deliverFromHarness logged no delivery').toBeDefined()
+
+    const flight = envelopeFor(entry as never)
+    expect(flight).not.toBeNull()
+    expect(flight?.id).toBe(sent.id)
+    expect(flight?.from).toBe(sent.from)
+    expect(flight?.to).toBe(sent.to)
+    expect(flight?.act).toBe('agree')
+    // §5.5: `agree` is laurel — a verdict granted.
+    expect(flight?.color).toBe('laurel')
+    expect(flight?.kind).toBe('deliver')
+  })
+
+  it('carries §8 parity on the harness path too', async () => {
+    const r = await rig()
+    const sent = message({ act: 'inform' })
+    r.hermes.deliverFromHarness(sent)
+    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const flight = envelopeFor(entry as never)
+    expect(flight).not.toBeNull()
+    if (!flight) return
+    const said = reduceEnvelope(flight).info.text
+    expect(said).toContain(sent.from)
+    expect(said).toContain(sent.to)
+  })
+})

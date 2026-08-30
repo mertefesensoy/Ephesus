@@ -139,8 +139,34 @@ describe('S-FAILOVER — a provider fails mid-utterance', () => {
     expect(notices).toHaveLength(1)
     expect(notices[0]).toContain('Switching voice provider')
     // NFR-3 / SRS 6.5: the fallback is speaking within 3 s.
-    expect(result.failoverMs).not.toBeNull()
+    //
+    // The EXACT figure, not just "under budget": the close-out audit noted that
+    // `!= null && <= 3000` cannot tell a real measurement from a constant zero,
+    // so a broken clock would have passed. The only time advanced in this test
+    // is the 400 ms in `onNotice`, so 400 is the whole measurement.
+    expect(result.failoverMs).toBe(400)
     expect(result.failoverMs ?? Infinity).toBeLessThanOrEqual(FAILOVER_BUDGET_MS)
+  })
+
+  it('MEASURES a switch that misses the budget, rather than reporting it clean', async () => {
+    // The converse of the case above, and the reason it matters: if the budget
+    // assertion is to mean anything, a slow switch has to be able to fail it.
+    const c = clock()
+    const session = new HeraldSession({
+      adapters: [elevenlabs({ upTo: 11, failWith: { statusCode: 503 } }), realtime()],
+      phrasebook: phrasebook(),
+      now: c.now,
+      onNotice: () => c.advance(FAILOVER_BUDGET_MS + 1_200)
+    })
+
+    const result = await session.speak(LINE)
+
+    expect(result.failoverMs).toBe(FAILOVER_BUDGET_MS + 1_200)
+    expect(result.failoverMs ?? 0).toBeGreaterThan(FAILOVER_BUDGET_MS)
+    // Still continuous: missing the budget is a latency fact to report, not a
+    // reason to drop the rest of the sentence (FR-8.6).
+    expect(result.entry.text).toBe(LINE)
+    expect(result.entry.unspoken).toBe('')
   })
 
   it('keeps the transcript continuous — the fallback finishes the sentence', async () => {
@@ -176,14 +202,25 @@ describe('S-FAILOVER — a provider fails mid-utterance', () => {
       fault === 'latency-breach'
         ? (Object.assign(new Error('request timed out'), { name: 'TimeoutError' }) as never)
         : { statusCode: status }
+    const saidByFallback: string[] = []
     const session = new HeraldSession({
-      adapters: [elevenlabs({ upTo: 5, failWith }), realtime()],
+      adapters: [
+        elevenlabs({ upTo: 5, failWith }),
+        realtime({ onSay: (text) => saidByFallback.push(text) })
+      ],
       phrasebook: phrasebook(),
       now: c.now
     })
-    await session.speak(LINE)
+    const result = await session.speak(LINE)
     expect(session.state().provider).toBe('openai-realtime')
     expect(session.state().reason).toBe(fault)
+    // The M6 close-out audit found continuity asserted on ONE fault class
+    // (transient). `auth` is the class SRS §6.5 actually names — "pulling the
+    // ElevenLabs key mid-conversation" — so the case that mattered most was
+    // the one not covered. The fallback finishes the sentence for EVERY class.
+    expect(saidByFallback, fault).toEqual([LINE.slice(5)])
+    expect(result.entry.text, fault).toBe(LINE)
+    expect(result.entry.unspoken, fault).toBe('')
   })
 
   it('does not fail back on its own (ADR-0007)', async () => {
