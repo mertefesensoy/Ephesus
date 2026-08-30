@@ -18,6 +18,8 @@ import {
   deskTray,
   stationCensus,
   stationView,
+  reasonFor,
+  type StationView,
   stationViews,
   type AvatarPresence,
   type FloorFacts
@@ -282,5 +284,66 @@ describe('the station census (§8 information parity)', () => {
       expect(line, view.station).toContain(view.station)
       expect(line, view.because).toContain(view.because)
     }
+  })
+})
+
+describe('the §5.4 guarantee is in the TYPE, not in the prose (M6.10)', () => {
+  // The M6 close-out audit found the record claiming this guarantee was
+  // "enforced by the return type" when it was not: `because: string` accepted
+  // `''`, and a probe building a live view with an empty reason compiled.
+  // These two cases are compile-time regressions — if either line stops
+  // erroring, `npm run typecheck` fails, which is exactly the alarm wanted.
+
+  it('refuses a live station view with no fact behind it', () => {
+    const probe: StationView = {
+      station: 'shelf',
+      activity: 'in-use',
+      frame: 1,
+      // @ts-expect-error — '' is not a StationReason: a station cannot be live
+      // without naming the event-plane fact that made it live.
+      because: ''
+    }
+    expect(probe.activity).toBe('in-use')
+  })
+
+  it('refuses to brand the empty string as a reason', () => {
+    // @ts-expect-error — NonEmpty<''> is never.
+    const empty = reasonFor('')
+    expect(empty).toBe('')
+  })
+
+  it('still brands a real, computed reason', () => {
+    expect(reasonFor('1 gate open')).toBe('1 gate open')
+  })
+})
+
+describe('no station animates on a timer alone (§5.4, sampled)', () => {
+  it('stays idle at every moment across an hour, given no facts', () => {
+    // The mutation the audit landed: `if (Math.floor(nowMs / 60_000) % 2 === 1)
+    // return inUse('ambient')`. Every case passed, because nothing sampled
+    // `nowMs` past a single value. A station with no fact is idle at EVERY
+    // moment, and that is what "no station animates on a timer alone" means.
+    for (const station of STATIONS) {
+      for (let nowMs = 0; nowMs <= 3_600_000; nowMs += 7_919) {
+        const view = stationView(station, NO_FACTS, nowMs)
+        expect(view.activity, `${station} @ ${String(nowMs)}`).toBe('idle')
+        expect(view.because, `${station} @ ${String(nowMs)}`).toBe('')
+      }
+    }
+  })
+
+  it('varies ONLY the frame as the clock moves, when a fact holds it live', () => {
+    // The converse: with a fact, the state is fixed and only the 2-frame
+    // animation advances. A view whose activity or reason drifted with the
+    // clock would be inventing motion.
+    const live = { ...NO_FACTS, openGates: 1 }
+    const seenFrames = new Set<number | null>()
+    for (let nowMs = 0; nowMs <= 10_000; nowMs += 125) {
+      const view = stationView('watch-post', live, nowMs)
+      expect(view.activity).toBe('in-use')
+      expect(view.because).toBe('1 gate open')
+      seenFrames.add(view.frame)
+    }
+    expect(seenFrames.size).toBe(STATION_FRAMES)
   })
 })

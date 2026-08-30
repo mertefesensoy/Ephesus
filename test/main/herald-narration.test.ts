@@ -17,7 +17,11 @@ import { REPEAT_BACK_TTL_MS } from '../../src/main/herald/policy'
 import { fakeVoiceAdapter } from '../fakes/fake-voice'
 import { GATE_SCHEMA_VERSION, type OpenGate } from '../../src/shared/gates'
 import type { MeetingView } from '../../src/shared/odeon'
-import { BRIEF_MAX_SECONDS, renderBriefMarkdown } from '../../src/shared/brief'
+import {
+  BRIEF_MAX_SECONDS,
+  BRIEF_SCHEMA_VERSION,
+  renderBriefMarkdown
+} from '../../src/shared/brief'
 
 /**
  * The Herald narrating RECORDS — FR-7.1, FR-8.4, VOICE-DESIGN §4–§5.
@@ -300,5 +304,101 @@ describe('meeting narration (FR-7.4, VOICE-DESIGN §5)', () => {
     const lines = meetingLines(meeting({ status: 'closed', floor: null }), phrasebook())
     expect(lines.at(-1)?.text).toContain('minutes')
     expect(lines.at(-1)?.always).toBe(true)
+  })
+})
+
+describe('E-BRIEF-FAITH as a PROPERTY, not one hard-coded archive (M6.10)', () => {
+  /**
+   * The M6 close-out audit landed three mutations against this claim and all
+   * three survived, because the property was asserted against exactly one
+   * three-sentence archive: an invented summary appended to the narration, a
+   * punctuation rewrite of every spoken line, and the removal of the Source-refs
+   * exclusion. A property that holds for one input is an example, not a
+   * property — so these cases generate archives instead.
+   */
+
+  // Deliberately awkward material: em-dashes and double spaces (the mutation
+  // that rewrote punctuation), quotes, digits, unicode, and section counts on
+  // both sides of the "several sentences" boundary.
+  const bodies = [
+    'The release shipped overnight.',
+    'Mason closed the cache work — at last.',
+    'Iris  filed  two  briefs.',
+    'The gate on "release/9" is waiting.',
+    'Pallas spent 12,400 tokens.',
+    'Ελλάδα: the archive survived a restart.'
+  ]
+
+  const archiveOf = (count: number): string =>
+    renderBriefMarkdown(
+      'b-1',
+      {
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        kind: 'brief',
+        briefId: 'b-1',
+        sentences: bodies.slice(0, count).map((text, i) => ({
+          section: i === 0 ? 'headline' : i % 2 === 0 ? 'done' : 'blocked',
+          text,
+          refs: [`log:${String(i)}`]
+        }))
+      },
+      bodies.slice(0, count).map((text, i) => ({
+        section: i === 0 ? 'headline' : i % 2 === 0 ? 'done' : 'blocked',
+        what: text,
+        refs: [`log:${String(i)}`]
+      })) as never,
+      '2026-08-29T09:00:00.000Z'
+    )
+
+  it('speaks every sentence VERBATIM, for every archive size', () => {
+    for (let count = 1; count <= bodies.length; count += 1) {
+      const markdown = archiveOf(count)
+      for (const sentence of narrationOf(markdown)) {
+        // Verbatim: not "contains the words", not "looks similar". The
+        // punctuation-rewrite mutation changed em-dashes to commas and every
+        // case still passed, because nothing compared the spoken string to the
+        // archive character for character.
+        expect(markdown, `size ${String(count)}: ${sentence.text}`).toContain(sentence.text)
+      }
+    }
+  })
+
+  it('speaks EXACTLY as many sentences as were written', () => {
+    // The mutation that appended an invented summary survived because nothing
+    // counted. A brief that says one thing more than the archive holds is the
+    // E-BRIEF-FAITH failure, whether or not each individual line is real.
+    for (let count = 1; count <= bodies.length; count += 1) {
+      expect(narrationOf(archiveOf(count)), `size ${String(count)}`).toHaveLength(count)
+    }
+  })
+
+  it('invents nothing for an archive with no sentences at all', () => {
+    expect(narrationOf(archiveOf(0))).toEqual([])
+  })
+
+  it('EXCLUDES the Source refs appendix even when it is not written as bullets', () => {
+    // The exclusion (`section = 'source refs' ? null`) was dead code: today's
+    // appendix is bullets, and the unrelated `startsWith('-')` rule filtered it
+    // first, so deleting the exclusion changed nothing and the audit's mutation
+    // survived. This archive writes the appendix as plain sentences, which is
+    // what makes the exclusion load-bearing — the audit trail must never be
+    // read aloud, whatever shape the writer gives it.
+    const markdown = [
+      '# brief',
+      '',
+      '## headline',
+      '',
+      'The release shipped overnight. [log:1]',
+      '',
+      '## Source refs',
+      '',
+      'headline: The release shipped overnight. [log:1]',
+      'done: Mason closed the cache work. [log:2]',
+      ''
+    ].join('\n')
+    const spoken = narrationOf(markdown)
+    expect(spoken).toHaveLength(1)
+    expect(spoken[0]?.section).toBe('headline')
+    expect(spoken.some((s) => s.section?.toLowerCase() === 'source refs')).toBe(false)
   })
 })

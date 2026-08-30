@@ -68,18 +68,62 @@ export const NO_FACTS: FloorFacts = {
   hovered: null
 }
 
-export interface StationView {
-  readonly station: Station
-  readonly activity: StationActivity
-  /** Frame of the 2-frame in-use animation; null whenever nothing animates. */
-  readonly frame: number | null
-  /**
-   * The event-plane fact this state projects, in words — §9's register, and
-   * the text half of §8's information parity. Empty only for `idle`, which
-   * projects the absence of a fact.
-   */
-  readonly because: string
+/**
+ * A station's reason: the event-plane fact behind a live state, in words —
+ * §9's register, and the text half of §8's information parity.
+ *
+ * Branded, and constructible only through `reasonFor`, so a live `StationView`
+ * cannot be assembled without one. The M6 close-out audit found the record
+ * claiming this guarantee was "enforced by the return type" when it was not:
+ * `because: string` is satisfied by `''`, and a probe constructing a live view
+ * with an empty reason compiled. Architect decision 2026-08-30: put the
+ * guarantee in the type, so the claim becomes true for every future caller
+ * rather than for the ones a test happens to cover.
+ */
+export type StationReason = string & { readonly __stationReason: unique symbol }
+
+/** Rejects the empty string at compile time; any other string passes. */
+type NonEmpty<T extends string> = T extends '' ? never : T
+
+/**
+ * Contract: name the fact behind a live station state.
+ *
+ * The constraint does the work at zero runtime cost: `reasonFor('')` fails to
+ * compile because `NonEmpty<''>` is `never`, while a computed string (every
+ * real reason here comes from `plural`, which always carries a count) infers
+ * `string` and passes. There is no runtime throw — a design error should not
+ * become a runtime surprise on a floor that is only a projection.
+ */
+export function reasonFor<T extends string>(text: NonEmpty<T>): StationReason {
+  return text as unknown as StationReason
 }
+
+/**
+ * One station's state. A discriminated union, because the two halves have
+ * genuinely different shapes: only `in-use` animates, and only a live state has
+ * a fact behind it. `idle` projects the ABSENCE of a fact, which is why it
+ * alone carries the empty reason.
+ */
+export type StationView =
+  | {
+      readonly station: Station
+      readonly activity: 'idle'
+      readonly frame: null
+      readonly because: ''
+    }
+  | {
+      readonly station: Station
+      readonly activity: 'in-use'
+      /** Frame of the 2-frame in-use animation. */
+      readonly frame: number
+      readonly because: StationReason
+    }
+  | {
+      readonly station: Station
+      readonly activity: 'highlighted'
+      readonly frame: null
+      readonly because: StationReason
+    }
 
 const plural = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`
@@ -94,7 +138,7 @@ const plural = (n: number, one: string, many: string): string =>
  */
 export function stationView(station: Station, facts: FloorFacts, nowMs: number): StationView {
   const frame = Math.floor(Math.max(nowMs, 0) / STATION_FRAME_MS) % STATION_FRAMES
-  const inUse = (because: string): StationView => ({
+  const inUse = (because: StationReason): StationView => ({
     station,
     activity: 'in-use',
     frame,
@@ -105,19 +149,19 @@ export function stationView(station: Station, facts: FloorFacts, nowMs: number):
   // citizen standing there. Both are checked first: a gate is open whether or
   // not anyone is at the post, which is the whole point of showing it.
   if (station === 'watch-post' && facts.openGates > 0) {
-    return inUse(plural(facts.openGates, 'gate open', 'gates open'))
+    return inUse(reasonFor(plural(facts.openGates, 'gate open', 'gates open')))
   }
   if (station === 'odeon' && facts.meetingAttendees > 0) {
-    return inUse(plural(facts.meetingAttendees, 'in session', 'in session'))
+    return inUse(reasonFor(plural(facts.meetingAttendees, 'in session', 'in session')))
   }
 
   const working = facts.avatars.filter(
     (a) => a.station === station && !a.walking && a.phase === 'working'
   ).length
-  if (working > 0) return inUse(plural(working, 'working here', 'working here'))
+  if (working > 0) return inUse(reasonFor(plural(working, 'working here', 'working here')))
 
   if (facts.hovered === station) {
-    return { station, activity: 'highlighted', frame: null, because: 'selected' }
+    return { station, activity: 'highlighted', frame: null, because: reasonFor('selected') }
   }
   const approaching = facts.avatars.filter((a) => a.station === station && a.walking).length
   if (approaching > 0) {
@@ -125,7 +169,7 @@ export function stationView(station: Station, facts: FloorFacts, nowMs: number):
       station,
       activity: 'highlighted',
       frame: null,
-      because: plural(approaching, 'on the way', 'on the way')
+      because: reasonFor(plural(approaching, 'on the way', 'on the way'))
     }
   }
 

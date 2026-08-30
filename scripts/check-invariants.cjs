@@ -109,6 +109,34 @@ function walk(dir, out = []) {
   return out
 }
 
+/**
+ * Invariant §6 / UI-DESIGN §6 — the floor's model modules own no clock.
+ *
+ * `src/renderer/src/floor/` is projections: which frame, which pose, which
+ * overlay all follow from a time the CALLER supplies, so replaying the same
+ * snapshots draws the same floor and a test can pin a moment. The M6 close-out
+ * audit mutated the overlay frame and the walk bob to read `Date.now()` and
+ * every case stayed green — a module reading its own clock is exactly the
+ * "second source of truth" ADR-0014 forbids, and it is invisible to a suite
+ * that never advances a clock.
+ *
+ * `FloorCanvas.tsx` is exempt: it is the component, not a model. It owns the
+ * ticker, and it is where `Date.now()` legitimately enters and is passed down.
+ */
+const FLOOR_MODEL_DIR = 'src/renderer/src/floor/'
+const RENDERER_CLOCK =
+  /\bDate\.now\s*\(|\bnew Date\s*\(|\bsetInterval\s*\(|\brequestAnimationFrame\s*\(/
+const CLOCK_ALLOWLIST = new Set(['src/renderer/src/floor/FloorCanvas.tsx'])
+/** Path separators differ by platform; the rules above are written with `/`. */
+const slashed = (rel) => rel.split(path.sep).join('/')
+/**
+ * Comment lines, skipped for the clock rule ONLY. These modules document the
+ * clock they refuse to own, and a tripwire that fired on its own rationale
+ * would teach the next author to delete the rationale. Every other rule here
+ * still reads comments — a secret-shaped string is a leak wherever it sits.
+ */
+const IS_COMMENT = /^\s*(\/\/|\/\*|\*)/
+
 const failures = []
 for (const dir of SEARCH_DIRS) {
   const appRules = !SECRET_RULES_ONLY.includes(dir)
@@ -130,6 +158,16 @@ for (const dir of SEARCH_DIRS) {
         failures.push(
           `${rel}:${i + 1}  UPDATE/DELETE against cost_ledger — the ledger is append-only (invariant §5, ADR-0011)`
         )
+      }
+      const floorModel =
+        slashed(rel).startsWith(FLOOR_MODEL_DIR) && !CLOCK_ALLOWLIST.has(slashed(rel))
+      if (appRules && floorModel && !IS_COMMENT.test(line)) {
+        const clock = line.match(RENDERER_CLOCK)
+        if (clock) {
+          failures.push(
+            `${rel}:${i + 1}  ${clock[0]} in a floor model — UI-DESIGN §6 makes these projections; take the clock as an argument (M6.10)`
+          )
+        }
       }
       if (rel === SELF) return
       if (!ENV_SECRET_ALLOWED_DIRS.some((dir) => rel.startsWith(dir + path.sep))) {

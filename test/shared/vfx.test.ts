@@ -81,12 +81,40 @@ describe('§5.3 carrying tokens key off the tool CLASS', () => {
   })
 
   it('knows no tool NAMES — only classes (NFR-12)', () => {
-    // The floor must never learn a Claude-ism. If a tool name ever reaches
-    // this table, this is what fails.
-    const keys = Object.keys(TOKEN_FOR_TOOL_CLASS)
-    for (const claudeism of ['Read', 'Bash', 'Edit', 'WebFetch', 'Glob', 'Grep']) {
-      expect(keys, claudeism).not.toContain(claudeism)
-      expect(tokenFor(claudeism), claudeism).toBeNull()
+    // The M6 close-out audit landed an alias table (`Write`/`MultiEdit`/`Task`
+    // → a class) and this case stayed green, because it was a SIX-NAME
+    // BLOCKLIST: it could only catch the six Claude-isms somebody had thought
+    // of. The property is total, so the test is now total too — the table's
+    // keys ARE the tool classes, exactly, and nothing else resolves.
+    expect(Object.keys(TOKEN_FOR_TOOL_CLASS).sort()).toEqual([...TOOL_CLASSES].sort())
+
+    // Nothing outside the class list resolves to a token, whatever it is
+    // called. Sampled over real Claude-isms, other engines' vocabulary, and
+    // near-misses on the class names themselves.
+    const notClasses = [
+      'Read',
+      'Bash',
+      'Edit',
+      'WebFetch',
+      'Glob',
+      'Grep',
+      'Write',
+      'MultiEdit',
+      'NotebookEdit',
+      'Task',
+      'TodoWrite',
+      'run_command',
+      'apply_patch',
+      'File',
+      'FILE',
+      'file ',
+      ' file',
+      'files',
+      'shell_exec'
+    ]
+    for (const name of notClasses) {
+      expect((TOOL_CLASSES as readonly string[]).includes(name), name).toBe(false)
+      expect(tokenFor(name), name).toBeNull()
     }
   })
 

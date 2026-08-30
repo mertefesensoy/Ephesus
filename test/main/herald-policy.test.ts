@@ -316,11 +316,35 @@ describe('the Herald’s words are config (invariant §8)', () => {
       fileURLToPath(new URL('../../src/main/herald/policy.ts', import.meta.url)),
       'utf8'
     )
+    const seam = fs.readFileSync(
+      fileURLToPath(new URL('../../src/main/herald/seam.ts', import.meta.url)),
+      'utf8'
+    )
     // Strip comments — the ban is on prose the Herald would SAY, and the
     // documentation quotes the specs it implements.
-    const code = policy.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-    for (const line of ['Switching voice provider', 'One moment', 'All quiet']) {
-      expect(code, line).not.toContain(line)
+    const strip = (source: string): string =>
+      source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+
+    // The M6 close-out audit landed a new spoken sentence in `policy.ts` and
+    // this case stayed green, because it was a THREE-STRING BLOCKLIST: it could
+    // only catch the three sentences somebody had already thought of. The rule
+    // is now STRUCTURAL — what a spoken sentence looks like, rather than which
+    // ones we happen to know about.
+    //
+    // A sentence, for this purpose: a string literal holding several words that
+    // ends in sentence punctuation. Token names ('confirm delete branch'),
+    // phrase-book KEYS ('repeat-back-refused-mismatch') and fault classes are
+    // all short, unpunctuated, or hyphenated, so none of them trip it.
+    const SPOKEN = /['"`]([^'"`\n]*\s[^'"`\n]*[.!?])['"`]/g
+    for (const [file, source] of [
+      ['policy.ts', policy],
+      ['seam.ts', seam]
+    ] as const) {
+      const found = [...strip(source).matchAll(SPOKEN)].map((m) => m[1])
+      // Invariant §8: the Herald's words live in `prompts/herald/`, loaded —
+      // never as a literal here, where nobody can change the voice without a
+      // release.
+      expect(found, `${file} holds spoken prose: ${found.join(' | ')}`).toEqual([])
     }
   })
 
