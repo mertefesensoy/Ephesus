@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { statSync } from 'node:fs'
 import { app, BrowserWindow, dialog, screen, shell } from 'electron'
 import type { AgentCard } from '../shared/agents'
 import type { AvatarSnapshot } from '../shared/avatar'
@@ -26,7 +27,7 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
-import { ProfileStore } from './profiles'
+import { ProfileActivations, ProfileStore } from './profiles'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
 import { stoaCadenceTick } from './stoa-cadence'
@@ -102,6 +103,10 @@ let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
 let gymnasium: Gymnasium | null = null
 let stoa: Stoa | null = null
+// Profile activations (ADR-0012, M7.2). Late-bound like the rest: the Watch is
+// built before the AgentManager this needs, and the gate seam below reads
+// through the handle rather than capturing a value that does not exist yet.
+let activations: ProfileActivations | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -646,6 +651,10 @@ async function boot(): Promise<void> {
       }
       return loaded.policy
     },
+    // ADR-0012's stricter-wins composition, wired into every submission
+    // (FR-11.1, SDD §9). Null for an agent no profile owns, which sends the
+    // decision to the global policy alone — never to a permissive default.
+    profileAutonomy: (agentId, kind) => activations?.autonomyFor(agentId, kind) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
@@ -1407,6 +1416,48 @@ async function boot(): Promise<void> {
 
   // Spend is folded on a timer, not per hook: it is not a real-time quantity,
   // and a fold per tool call would re-read every transcript dozens of times a
+  // Profile activation (ADR-0012, FR-9.4, M7.2). Built after the AgentManager
+  // because it spawns through it, and after the scheduler because it arms
+  // triggers on it. Every judgment it makes — the plan, the composed autonomy —
+  // is `activationPlan`'s and was shown to the Architect before this ran.
+  activations = new ProfileActivations({
+    store: profiles,
+    globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
+    spawn: (request) => {
+      if (agentManager === null) return Promise.reject(new Error('agents: not started'))
+      return agentManager.spawn(request)
+    },
+    kill: (agentId) => agentManager?.kill(agentId),
+    addTrigger: (trigger) => scheduler.add(trigger),
+    removeTrigger: (triggerId) => scheduler.remove(triggerId),
+    targetExists: (target) => {
+      try {
+        return statSync(target).isDirectory()
+      } catch {
+        return false
+      }
+    },
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`profile ${String(draft['event'] ?? 'event')}`)
+    },
+    onTriggerFired: (instanceId, triggerId, agentId, playbook) => {
+      // SDD §7.5's first arrow: a profile trigger becomes work for the agent
+      // it names. The playbook is handed over as a REFERENCE — the harness
+      // never reads a runbook and never summarizes one (ADR-0005, ADR-0012).
+      agora?.appendLog({
+        kind: 'profile',
+        event: 'trigger-fired',
+        instanceId,
+        triggerId,
+        agentId,
+        playbook
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    }
+  })
+
   // minute for a figure nobody reads that often (SDD §11).
   budgetWatcher = new BudgetWatcher({
     ledger: costLedger,
@@ -1630,6 +1681,17 @@ async function boot(): Promise<void> {
     stoaBrief: (id) => stoa?.brief(id) ?? null,
     profilesList: () => profiles.list(),
     profilesInspect: (name) => profiles.load(name),
+    // `activations` is built in boot() before IPC is registered; the fallbacks
+    // are what a caller gets if that order ever changes — a refusal that names
+    // the reason, never a silent success or a crash mid-activation.
+    profilesPreview: (request) =>
+      activations?.preview(request) ?? { ok: false, reasons: ['profiles: not started'] },
+    profilesActivate: (request) =>
+      activations?.activate(request) ??
+      Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }),
+    profilesDeactivate: (instanceId) =>
+      activations?.deactivate(instanceId) ?? { ok: false, reason: 'profiles: not started' },
+    profilesInstances: () => activations?.instances() ?? [],
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {

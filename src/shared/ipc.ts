@@ -6,7 +6,13 @@ import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
 import type { GymDecided, GymRowView } from './gym-view'
 import type { BriefView, SourceView, StoaCurated } from './stoa-view'
-import type { ProfileLoad, ProfileSummary } from './profile-view'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from './profile-view'
+import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
@@ -103,6 +109,16 @@ export const IpcChannels = {
   // composition they depend on exists.
   profilesList: 'profiles:list',
   profilesInspect: 'profiles:inspect',
+  // SDD §5 lists `activate(name, target)` and `deactivate(instanceId)`.
+  // `preview` and `instances` are added beside them under the M3.1 rule — a new
+  // channel gets a doc line and a DECISIONS-LOG entry, or it does not ship.
+  // `preview` is not a convenience: it is the screen ADR-0012's safety story
+  // rests on, and it returns the SAME plan `activate` executes, so the two
+  // cannot drift.
+  profilesPreview: 'profiles:preview',
+  profilesActivate: 'profiles:activate',
+  profilesDeactivate: 'profiles:deactivate',
+  profilesInstances: 'profiles:instances',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -358,6 +374,18 @@ export interface EphApi {
      * deciding whether it may.
      */
     inspect: (name: string) => Promise<ProfileLoad>
+    /**
+     * What activating this profile on this target WOULD do — hires, grants,
+     * budgets, composed autonomy, triggers, repos — without doing any of it.
+     * The activation screen reads this; `activate` executes the same plan.
+     */
+    preview: (request: ActivationRequest) => Promise<ActivationPlanResult>
+    /** Activates it. All or nothing: a hire that cannot spawn unwinds the rest. */
+    activate: (request: ActivationRequest) => Promise<ActivationResult>
+    /** Tears one instance down — triggers disarmed first, then agents killed. */
+    deactivate: (instanceId: string) => Promise<{ ok: boolean; reason: string | null }>
+    /** Every live instance (FR-9.4: many profiles, many targets, one floor). */
+    instances: () => Promise<readonly ProfileInstanceView[]>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */

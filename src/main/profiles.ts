@@ -1,7 +1,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseProfile, profileNameSchema, type ProfileFiles } from '../shared/profile'
+import {
+  activationPlan,
+  instanceIdFor,
+  type ActivationPlan,
+  type ActivationPlanResult,
+  type ActivationRequest
+} from '../shared/profile-activation'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
+import type { AutonomyLevel, GateKind } from '../shared/gates'
+import type { SpawnRequest } from '../shared/agents'
+import type { Trigger } from './scheduler'
 
 /**
  * The profile store (SDD §1.1 `profiles.ts`, SDD §2 `~/.ephesus/profiles/<name>/`,
@@ -196,4 +206,233 @@ function readBundleFiles(
       harborJson: bodies.harborJson
     }
   }
+}
+
+/**
+ * A live profile instance — one bundle activated on one target (FR-9.4).
+ *
+ * The plan is kept beside the live ids rather than recomputed, so what an
+ * instance IS stays the thing the Architect was shown when they activated it.
+ * A recomputed plan would drift the moment the bundle on disk changed, and the
+ * agents already running would be running under terms nobody approved.
+ */
+export interface ProfileInstance {
+  readonly instanceId: string
+  readonly plan: ActivationPlan
+  /** Agent ids actually spawned, in the order they came up. */
+  readonly agentIds: readonly string[]
+  /** Scheduler trigger ids armed for this instance. */
+  readonly armed: readonly string[]
+  /**
+   * Event bindings this instance declares (`webhook`, `ci`, `health`).
+   *
+   * Recorded, and NOT armed: nothing publishes these events yet — the Harbor's
+   * `gh` ingestion is M7.3 and the webhook endpoint is M7.4. They are exposed
+   * so the subscriber that arrives can find them, and so the gap is a listed
+   * fact rather than a trigger the Architect believes is on duty.
+   */
+  readonly pendingEvents: readonly { readonly id: string; readonly event: string }[]
+  readonly activatedAt: string
+}
+
+export type ActivationResult =
+  | { readonly ok: true; readonly instance: ProfileInstance }
+  | { readonly ok: false; readonly reasons: readonly string[] }
+
+export interface ProfileActivationOptions {
+  readonly store: ProfileStore
+  /** The company-wide autonomy ceiling; a profile may only go lower (SDD §9). */
+  globalAutonomy(): AutonomyLevel
+  /** Spawns one hire. Rejecting unwinds the whole activation — see `activate`. */
+  spawn(request: SpawnRequest): Promise<unknown>
+  /** Kills one agent, on deactivation or on an unwind. */
+  kill(agentId: string): void
+  /** Arms a schedule trigger. */
+  addTrigger(trigger: Trigger): void
+  /** Disarms one, by id. */
+  removeTrigger(triggerId: string): void
+  /** True when this path is a directory the agents can work in. */
+  targetExists(path: string): boolean
+  now?(): Date
+  onLogEvent?(draft: { kind: 'profile' } & Record<string, unknown>): void
+  /** What an armed schedule trigger does when it fires. */
+  onTriggerFired?(instanceId: string, triggerId: string, agentId: string, playbook: string): void
+}
+
+/**
+ * Activation and deactivation (ADR-0012, FR-9.4, FR-11.1 — M7.2).
+ *
+ * The class owns three facts and no judgment: which instances are live, which
+ * agents belong to which, and which triggers are armed. Every decision —
+ * whether the target matches, what each hire becomes, what autonomy composes
+ * to — is `activationPlan`'s, computed pure and shown to the Architect BEFORE
+ * this class acts on it.
+ */
+export class ProfileActivations {
+  private readonly live = new Map<string, ProfileInstance>()
+
+  constructor(private readonly options: ProfileActivationOptions) {}
+
+  instances(): readonly ProfileInstance[] {
+    return [...this.live.values()].sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+  }
+
+  /**
+   * Contract: what activating this profile on this target WOULD do, without
+   * doing any of it. The activation screen's source, and `activate`'s own —
+   * one computation, so the preview cannot drift from the act.
+   */
+  preview(request: ActivationRequest): ActivationPlanResult {
+    const loaded = this.options.store.load(request.profile)
+    if (!loaded.ok) return { ok: false, reasons: loaded.reasons }
+    return activationPlan(loaded.bundle, request.target, this.options.globalAutonomy())
+  }
+
+  /**
+   * Contract: activates a profile on a target, or refuses with every reason.
+   *
+   * Activation is ALL OR NOTHING. If a hire fails to spawn, the ones already up
+   * are killed and the instance is refused — a half-activated crew is worse
+   * than none, because the Architect was shown a plan with an on-call agent in
+   * it and would have no reason to think that agent is missing.
+   */
+  async activate(request: ActivationRequest): Promise<ActivationResult> {
+    const instanceId = instanceIdFor(request.profile, request.target)
+    if (this.live.has(instanceId)) {
+      return { ok: false, reasons: [`profile "${instanceId}" is already active`] }
+    }
+    if (!this.options.targetExists(request.target.path)) {
+      return {
+        ok: false,
+        reasons: [`target "${request.target.path}" is not a directory on this machine`]
+      }
+    }
+
+    const planned = this.preview(request)
+    if (!planned.ok) return { ok: false, reasons: planned.reasons }
+    const { plan } = planned
+
+    const spawned: string[] = []
+    for (const hire of plan.hires) {
+      try {
+        await this.options.spawn(hire.spawn)
+        spawned.push(hire.agentId)
+      } catch (err) {
+        for (const id of spawned) this.options.kill(id)
+        const because = err instanceof Error ? err.message.split('\n')[0] : String(err)
+        this.options.onLogEvent?.({
+          kind: 'profile',
+          event: 'activation-failed',
+          instanceId,
+          agentId: hire.agentId,
+          because
+        })
+        return {
+          ok: false,
+          reasons: [
+            `hire "${hire.hire}" could not spawn: ${because} — nothing was activated`,
+            ...(spawned.length > 0
+              ? [`${String(spawned.length)} agent(s) already up were killed`]
+              : [])
+          ]
+        }
+      }
+    }
+
+    const armed: string[] = []
+    for (const trigger of plan.triggers) {
+      const everyMs = scheduleIntervalOf(trigger.when)
+      if (everyMs === null) continue
+      this.options.addTrigger({
+        id: trigger.id,
+        everyMs,
+        run: () => {
+          this.options.onTriggerFired?.(instanceId, trigger.id, trigger.agentId, trigger.playbook)
+        }
+      })
+      armed.push(trigger.id)
+    }
+
+    const instance: ProfileInstance = {
+      instanceId,
+      plan,
+      agentIds: spawned,
+      armed,
+      pendingEvents: plan.triggers
+        .filter((trigger) => scheduleIntervalOf(trigger.when) === null)
+        .map((trigger) => ({ id: trigger.id, event: trigger.when })),
+      activatedAt: (this.options.now?.() ?? new Date()).toISOString()
+    }
+    this.live.set(instanceId, instance)
+    this.options.onLogEvent?.({
+      kind: 'profile',
+      event: 'activated',
+      instanceId,
+      profile: plan.profile,
+      profileVersion: plan.profileVersion,
+      target: plan.targetRef,
+      agents: spawned,
+      armed,
+      // The composed levels, not the requested ones: the book of record should
+      // say what the crew may actually do, and a clamped request is a fact
+      // worth being able to find later.
+      autonomy: Object.fromEntries(plan.autonomy.map((row) => [row.kind, row.effective])),
+      clamped: plan.autonomy.filter((row) => row.clamped).map((row) => row.kind)
+    })
+    return { ok: true, instance }
+  }
+
+  /**
+   * Contract: tears one instance down — triggers disarmed first, then agents
+   * killed. Refuses an id that is not live rather than reporting success.
+   *
+   * Triggers first, deliberately: disarming after killing leaves a window in
+   * which a trigger fires at an agent that no longer exists.
+   */
+  deactivate(instanceId: string): { readonly ok: boolean; readonly reason: string | null } {
+    const instance = this.live.get(instanceId)
+    if (instance === undefined) return { ok: false, reason: `no active profile "${instanceId}"` }
+    for (const triggerId of instance.armed) this.options.removeTrigger(triggerId)
+    for (const agentId of instance.agentIds) this.options.kill(agentId)
+    this.live.delete(instanceId)
+    this.options.onLogEvent?.({
+      kind: 'profile',
+      event: 'deactivated',
+      instanceId,
+      agents: instance.agentIds,
+      disarmed: instance.armed
+    })
+    return { ok: true, reason: null }
+  }
+
+  /**
+   * Contract: the autonomy an agent actually has for a gate class — the
+   * composed level, or null when the agent belongs to no profile.
+   *
+   * This is the seam that makes FR-11.1 real rather than merely computed:
+   * `GateRequest.profileAutonomy` is the field `decideGate` composes with, and
+   * until something answered this question it was a field nothing ever set.
+   * Null means "not a profile agent", and the caller then uses the global
+   * policy alone — NOT a default of `autonomous`, which is why this returns
+   * null rather than a level.
+   */
+  autonomyFor(agentId: string, kind: GateKind): AutonomyLevel | null {
+    for (const instance of this.live.values()) {
+      if (!instance.agentIds.includes(agentId)) continue
+      return instance.plan.autonomy.find((row) => row.kind === kind)?.effective ?? null
+    }
+    return null
+  }
+}
+
+/**
+ * Reads a schedule interval back out of a plan's `when` line, or null when the
+ * trigger is event-bound. The plan renders `when` for humans; this is the one
+ * place that turns it back into a number, so the two cannot disagree about
+ * which triggers are armable.
+ */
+function scheduleIntervalOf(when: string): number | null {
+  const minutes = /^every (\d+) min$/.exec(when)?.[1]
+  if (minutes === undefined) return null
+  return Number(minutes) * 60_000
 }

@@ -25,7 +25,13 @@ import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
-import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from '../shared/profile-view'
+import type { ActivationPlanResult } from '../shared/profile-activation'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
@@ -138,7 +144,18 @@ const eph: EphApi = {
   profiles: {
     list: () => ipcRenderer.invoke(IpcChannels.profilesList) as Promise<readonly ProfileSummary[]>,
     inspect: (name) =>
-      ipcRenderer.invoke(IpcChannels.profilesInspect, { name }) as Promise<ProfileLoad>
+      ipcRenderer.invoke(IpcChannels.profilesInspect, { name }) as Promise<ProfileLoad>,
+    preview: (request) =>
+      ipcRenderer.invoke(IpcChannels.profilesPreview, request) as Promise<ActivationPlanResult>,
+    activate: (request) =>
+      ipcRenderer.invoke(IpcChannels.profilesActivate, request) as Promise<ActivationResult>,
+    deactivate: (instanceId) =>
+      ipcRenderer.invoke(IpcChannels.profilesDeactivate, { instanceId }) as Promise<{
+        ok: boolean
+        reason: string | null
+      }>,
+    instances: () =>
+      ipcRenderer.invoke(IpcChannels.profilesInstances) as Promise<readonly ProfileInstanceView[]>
   },
   org: {
     chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,

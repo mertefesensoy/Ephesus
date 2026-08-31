@@ -17,6 +17,7 @@ import {
   openGateSchema,
   parseGatePolicy,
   repeatBackRequired,
+  type AutonomyLevel,
   type GateDecision,
   type GateKind,
   type GatePackaging,
@@ -62,6 +63,21 @@ export interface GateManagerOptions {
    * machine-readable tag itself, which is data rather than prose.
    */
   refusalReason?(because: 'channel' | 'repeat-back'): string
+  /**
+   * The autonomy a PROFILE has granted this agent for this class, or null when
+   * the agent belongs to no active profile (ADR-0012, FR-11.1 — M7.2).
+   *
+   * Resolved here rather than passed in by every caller, and that is the whole
+   * reason it exists. `GateRequest.profileAutonomy` shipped at M3 and nothing
+   * ever set it; a field the call site has to remember is a field that gets
+   * forgotten, and a forgotten one means an agent whose profile TIGHTENED a
+   * class quietly gets the looser company default — an escalation relative to
+   * the plan the Architect approved at activation.
+   *
+   * Null means "no profile owns this agent", NOT "no restriction": the global
+   * policy then applies alone, which is where deny-by-default already lives.
+   */
+  profileAutonomy?(agentId: string, kind: GateKind): AutonomyLevel | null
 }
 
 /** What a caller asks for when it needs an action gated. */
@@ -101,7 +117,21 @@ export class GateManager {
    */
   submit(submission: GateSubmission, context: { repeatBackConfirmed?: boolean } = {}): GateOutcome {
     const policy = this.options.policy()
-    const decision = evaluateGate(policy, submission, context)
+    // Composition is applied HERE, to every submission, rather than trusted to
+    // arrive on it. When both a caller and a profile have an opinion the
+    // STRICTER one is taken — composition can only ever narrow (SDD §9).
+    const granted = this.options.profileAutonomy?.(submission.agentId, submission.kind) ?? null
+    const composed: GateSubmission =
+      granted === null
+        ? submission
+        : {
+            ...submission,
+            profileAutonomy:
+              submission.profileAutonomy === undefined
+                ? granted
+                : composeAutonomy(submission.profileAutonomy, granted)
+          }
+    const decision = evaluateGate(policy, composed, context)
     if (decision.allow) {
       this.options.onLogEvent?.({
         kind: 'gate',
@@ -119,7 +149,7 @@ export class GateManager {
     // bury the queue and turn `log.jsonl` into a metronome. The FIRST packaging
     // is kept: it is the one the Architect is being asked about.
     const existing = this.list().find(
-      (open) => open.agentId === submission.agentId && open.kind === submission.kind
+      (open) => open.agentId === composed.agentId && open.kind === composed.kind
     )
     if (existing) return { held: true, gate: existing, decision }
 

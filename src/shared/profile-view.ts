@@ -1,4 +1,5 @@
 import type { ProfileBundle } from './profile'
+import type { ActivationPlan } from './profile-activation'
 
 /**
  * What the renderer is told about mission profiles (SDD §5 `profiles:`).
@@ -37,3 +38,28 @@ export interface ProfileSummary {
 export type ProfileLoad =
   | { readonly ok: true; readonly bundle: ProfileBundle; readonly source: 'home' | 'builtin' }
   | { readonly ok: false; readonly name: string; readonly reasons: readonly string[] }
+
+/**
+ * One live instance, as the floor and the profiles panel see it.
+ *
+ * Carries the PLAN it was activated under, not a freshly computed one: the
+ * bundle on disk may have changed since, and what the Architect approved is
+ * what these agents are actually running under.
+ */
+export interface ProfileInstanceView {
+  readonly instanceId: string
+  readonly plan: ActivationPlan
+  readonly agentIds: readonly string[]
+  readonly armed: readonly string[]
+  /**
+   * Event bindings declared but NOT armed — nothing publishes `webhook`, `ci`
+   * or `health` yet (the Harbor is M7.3). Shown rather than hidden, so the gap
+   * is a listed fact instead of a watcher the Architect believes is on duty.
+   */
+  readonly pendingEvents: readonly { readonly id: string; readonly event: string }[]
+  readonly activatedAt: string
+}
+
+export type ActivationResult =
+  | { readonly ok: true; readonly instance: ProfileInstanceView }
+  | { readonly ok: false; readonly reasons: readonly string[] }

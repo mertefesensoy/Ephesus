@@ -347,7 +347,19 @@ odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(mem
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
 harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
-profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
+profiles: list() inspect(name) activate(request) deactivate(instanceId)
+          preview(request) instances()
+          // list() rows an INVALID bundle too (`valid: false`) — a profile that
+          // vanished when its JSON broke would look uninstalled. inspect() is
+          // pure: it activates nothing. `request` is `{ profile, target:
+          // { kind, id, path } }` — no document says how a target ref resolves
+          // to a local path, so the Architect names the directory, as they
+          // already do for a bare spawn, and main validates it. preview()
+          // returns the SAME plan activate() executes (hires, grants, budgets,
+          // composed autonomy, triggers, repos), so the screen ADR-0012's
+          // safety story rests on cannot drift from the act. Added at M7.1/M7.2
+          // under the M3.1 rule: a doc line and a DECISIONS-LOG entry, or it
+          // does not ship
 org:      chart() orgMetrics()                       // reviews()/applyReview land with
                                                      // UC-12's full loop (M7-era)
 gym:      ledger() proposal(id) verdict(id, v) metricResult(id, r)   // verdicts: architect-only (FR-12.3)

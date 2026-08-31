@@ -3850,7 +3850,7 @@ Architect approved at M6.5.
       draft's mutations were duds that changed no behaviour and were rewritten
       until they bit — recorded because a dud mutation proves nothing and
       reports as success.
-- [ ] **M7.2 Activation, targets, and autonomy composition** — instantiate a
+- [x] **M7.2 Activation, targets, and autonomy composition** — instantiate a
       profile's hires as agents bound to a TARGET (repo/app); the same profile
       activatable per-target more than once; multiple profiles coexisting on
       one floor (FR-9.4). Autonomy composes with the global Watch defaults so
@@ -3864,6 +3864,48 @@ Architect approved at M6.5.
       profiles on one floor never share an agent. Risk: an autonomy level that
       composes by "profile wins" is a silent privilege escalation — assert the
       direction of composition, not merely its presence.*
+      *Evidence: `typecheck && lint && check-invariants` green; 38 new cases
+      (`test/shared/profile-activation.test.ts` 16,
+      `test/main/profile-activation.test.ts` 22, four of them a REAL
+      `GateManager` wired to a REAL `ProfileActivations`); full suite **2489
+      passed / 6 skipped**. Failures: the recorded 9 Windows-local deterministic
+      ones, unchanged, plus `s-stoploop` (2) and `hermes` (1) under parallel
+      load — hermes passes 40/40 and s-stoploop 8/8 in isolation, and neither
+      touches this package.*
+      **Production call path:** `src/main/index.ts:1421` constructs
+      `ProfileActivations` over the AgentManager, the scheduler and the real
+      `gate-policy.json`; `src/main/index.ts:641` gives `GateManager` its
+      `profileAutonomy` seam; `src/main/index.ts:1687-1697` binds the four deps;
+      `src/main/ipc.ts:414-434` registers `profiles:preview|activate|deactivate|
+      instances`; `src/preload/index.ts:141-153` exposes them. **No renderer
+      caller yet** — the activation SCREEN is not built; `preview` returns
+      everything it needs and nothing renders it. Recorded, not hidden.
+      **Two things this package made reachable that were not:** `effectivePolicy`
+      and `GateRequest.profileAutonomy` shipped at M3 and had no production
+      caller at all — the composition was correct arithmetic nothing could
+      invoke. `GateManager` now resolves it for EVERY submission rather than
+      trusting each call site to pass it, because a field the caller must
+      remember is a field that gets forgotten, and forgetting it silently gives
+      an agent whose profile TIGHTENED a class the looser company default.
+      *Proved by RUNNING the real app:* booted `npx electron .` against a temp
+      `EPH_HOME` carrying a real `gate-policy.json` (`autonomy: supervised`) and
+      a bundle asking for `autonomous` with `destructive: manual`.
+      `preview` returned `destructive → effective manual, clamped false` (the
+      profile's tightening honoured) and every other class
+      `requested autonomous → effective supervised, clamped true` (the profile's
+      widening refused and SAID SO). The temporary `EVIDENCE` log was removed
+      before commit.
+      *Mutation-checked, 18/18 killed*, including both directions of the
+      composition — "profile wins" (the escalation this line names) and "global
+      wins" (which would silently drop a profile's own tightening) — plus id
+      collisions across targets and across profiles, id truncation, the failed
+      -spawn unwind, deactivation leaving triggers armed, `autonomyFor` answering
+      after deactivation or defaulting to `autonomous`, and the Watch ceasing to
+      consult the profile at all. One survivor was found and closed: an event
+      trigger could be REPORTED as armed while nothing armed it, because no
+      assertion compared `instance.armed` against what the scheduler was
+      actually given — the UI would have shown a watcher on duty that no clock
+      would ever fire.
 - [ ] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
       registered repos ingested via the `gh` CLI under the agent's own auth
       (FR-10.1); every remote-originated directive tagged `remote` in

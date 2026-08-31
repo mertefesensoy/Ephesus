@@ -27,7 +27,18 @@ import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
 import { companyModeSchema } from '../shared/mode'
 import { registerDraftSchema, sourceIdSchema, briefIdSchema } from '../shared/stoa'
-import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from '../shared/profile-view'
+import {
+  activationRequestSchema,
+  instanceIdSchema,
+  type ActivationPlanResult,
+  type ActivationRequest
+} from '../shared/profile-activation'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -231,6 +242,11 @@ export interface IpcDeps {
   profilesList(): readonly ProfileSummary[]
   /** One bundle, or every reason it was refused. Reading activates nothing. */
   profilesInspect(name: string): ProfileLoad
+  /** What activating would do — the screen's source and `activate`'s own. */
+  profilesPreview(request: ActivationRequest): ActivationPlanResult
+  profilesActivate(request: ActivationRequest): Promise<ActivationResult>
+  profilesDeactivate(instanceId: string): { ok: boolean; reason: string | null }
+  profilesInstances(): readonly ProfileInstanceView[]
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -411,6 +427,25 @@ export function registerIpc(deps: IpcDeps): void {
     const { name } = profileNamePayloadSchema.parse(raw)
     return deps.profilesInspect(name)
   })
+  ipcMain.handle(IpcChannels.profilesPreview, (_ev, raw: unknown): ActivationPlanResult => {
+    return deps.profilesPreview(activationRequestSchema.parse(raw))
+  })
+  ipcMain.handle(
+    IpcChannels.profilesActivate,
+    async (_ev, raw: unknown): Promise<ActivationResult> => {
+      // Validated before anything spawns. The renderer names the target
+      // directory, exactly as it already does for a bare spawn — and exactly
+      // as there, main is the one that checks it.
+      return deps.profilesActivate(activationRequestSchema.parse(raw))
+    }
+  )
+  ipcMain.handle(IpcChannels.profilesDeactivate, (_ev, raw: unknown) => {
+    const { instanceId } = z.object({ instanceId: instanceIdSchema }).strict().parse(raw)
+    return deps.profilesDeactivate(instanceId)
+  })
+  ipcMain.handle(IpcChannels.profilesInstances, (): readonly ProfileInstanceView[] =>
+    deps.profilesInstances()
+  )
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())
   ipcMain.handle(IpcChannels.orgRetros, (): readonly RetroRow[] => deps.retros())
