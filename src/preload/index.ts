@@ -25,6 +25,7 @@ import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
@@ -133,6 +134,11 @@ const eph: EphApi = {
     retire: (id) => ipcRenderer.invoke(IpcChannels.stoaRetire, { id }) as Promise<StoaCurated>,
     briefs: () => ipcRenderer.invoke(IpcChannels.stoaBriefs) as Promise<readonly BriefView[]>,
     brief: (id) => ipcRenderer.invoke(IpcChannels.stoaBrief, { id }) as Promise<string | null>
+  },
+  profiles: {
+    list: () => ipcRenderer.invoke(IpcChannels.profilesList) as Promise<readonly ProfileSummary[]>,
+    inspect: (name) =>
+      ipcRenderer.invoke(IpcChannels.profilesInspect, { name }) as Promise<ProfileLoad>
   },
   org: {
     chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,

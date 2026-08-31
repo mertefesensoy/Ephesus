@@ -6,6 +6,7 @@ import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
 import type { GymDecided, GymRowView } from './gym-view'
 import type { BriefView, SourceView, StoaCurated } from './stoa-view'
+import type { ProfileLoad, ProfileSummary } from './profile-view'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
@@ -95,6 +96,13 @@ export const IpcChannels = {
   stoaRetire: 'stoa:retire',
   stoaBriefs: 'stoa:briefs',
   stoaBrief: 'stoa:brief',
+  // Mission profiles (SDD §5 `profiles:`, ADR-0012). M7.1 ships the READ half —
+  // `list` and `inspect` — because loading is pure and inspecting a bundle
+  // before trusting it is the safety story ADR-0012 chose profiles for.
+  // `activate`/`deactivate` are M7.2's and are deliberately absent until the
+  // composition they depend on exists.
+  profilesList: 'profiles:list',
+  profilesInspect: 'profiles:inspect',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -334,6 +342,22 @@ export interface EphApi {
     briefs: () => Promise<readonly BriefView[]>
     /** One brief's text, as archived and immutable. */
     brief: (id: string) => Promise<string | null>
+  }
+  profiles: {
+    /**
+     * Every bundle under the harness home or the built-ins, home shadowing
+     * builtin. An INVALID bundle still gets a row (`valid: false`) — a profile
+     * that disappeared from the list when its JSON broke would look
+     * uninstalled, which is the silent degradation invariant §7 forbids.
+     */
+    list: () => Promise<readonly ProfileSummary[]>
+    /**
+     * One bundle, or every reason it was refused (ADR-0012). Reading is pure:
+     * inspecting a profile activates nothing, spawns nothing and writes
+     * nothing — it is how the Architect reads what a profile MAY do before
+     * deciding whether it may.
+     */
+    inspect: (name: string) => Promise<ProfileLoad>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */

@@ -1,6 +1,10 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
+import { ProfileStore } from '../../src/main/profiles'
 
 /**
  * The handlers `registerIpc` actually registers.
@@ -44,6 +48,12 @@ interface RigOptions {
   readonly avatars?: Map<string, unknown>
   /** What `pendingMailFor` answers — UI-DESIGN §5.4's desk tray flag. */
   readonly pendingMail?: (agentId: string) => number
+  /**
+   * A REAL `ProfileStore`, so the `profiles:` cases exercise the whole seam —
+   * channel → handler → store → disk — rather than two halves that have never
+   * met. The M6 close-out audit's finding, applied.
+   */
+  readonly profiles?: ProfileStore
 }
 
 /** Registers the real handlers over a real GateManager. */
@@ -100,6 +110,9 @@ async function rig(options: RigOptions = {}): Promise<{
     stoaRetire: () => ({ ok: false, reason: 'no stoa' }),
     stoaBriefs: () => [],
     stoaBrief: () => null,
+    profilesList: () => options.profiles?.list() ?? [],
+    profilesInspect: (name: string) =>
+      options.profiles?.load(name) ?? { ok: false as const, name, reasons: [] },
     orgChart: () => [],
     orgMetrics: () => ({ metrics: [], findings: [] }),
     retros: () => [],
@@ -318,5 +331,96 @@ describe('avatars:list carries the desk tray fact (UI-DESIGN §5.4)', () => {
     // `undefined` would raise no flag either, but it would also make
     // `deskTray(update.pendingMail)` a lie by accident rather than by fact.
     expect(updates[0]?.pendingMail).toBe(0)
+  })
+})
+
+describe('profiles: — the channel reaches the store, and the store reaches the disk', () => {
+  /**
+   * The M6 close-out audit's first standing lesson: a green suite is not a
+   * wired feature. `test/main/profiles.test.ts` proves the store reads bundles
+   * and `test/shared/profile.test.ts` proves the schema refuses bad ones —
+   * both halves, neither seam. These two cases walk the whole production path
+   * a renderer takes: `IpcChannels.profilesInspect` → the handler in
+   * `src/main/ipc.ts` → `deps.profilesInspect` → `ProfileStore.load` → disk.
+   */
+  const roots: string[] = []
+
+  afterEach(() => {
+    for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  function storeWithOneBundle(profileJson?: string): ProfileStore {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ipc-profiles-'))
+    roots.push(home)
+    const dir = path.join(home, 'skeleton-crew')
+    fs.mkdirSync(path.join(dir, 'hires'), { recursive: true })
+    fs.mkdirSync(path.join(dir, 'playbooks'), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'profile.json'),
+      profileJson ??
+        JSON.stringify({
+          schemaVersion: 1,
+          name: 'skeleton-crew',
+          version: 4,
+          target: { kind: 'repo' },
+          autonomy: { default: 'supervised', byKind: { destructive: 'manual' } }
+        })
+    )
+    fs.writeFileSync(
+      path.join(dir, 'memo-policy.json'),
+      JSON.stringify({ schemaVersion: 1, requires: ['new-dependency'] })
+    )
+    fs.writeFileSync(
+      path.join(dir, 'harbor.json'),
+      JSON.stringify({ schemaVersion: 1, repos: [], channels: [], webhooks: [] })
+    )
+    fs.writeFileSync(
+      path.join(dir, 'hires', 'oncall.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        name: 'oncall',
+        version: 1,
+        role: 'oncall',
+        engine: 'claude',
+        capabilities: ['triage'],
+        envGrants: [],
+        brief: 'Answer the page.'
+      })
+    )
+    fs.writeFileSync(path.join(dir, 'playbooks', 'incident.md'), '# Incident\n')
+    return new ProfileStore(home, path.join(home, 'no-builtins'))
+  }
+
+  it('lists and inspects a real bundle off a real disk', async () => {
+    const { call } = await rig({ profiles: storeWithOneBundle() })
+    await expect(call('profiles:list')).resolves.toEqual([
+      { name: 'skeleton-crew', source: 'home', valid: true, version: 4 }
+    ])
+    const loaded = (await call('profiles:inspect', { name: 'skeleton-crew' })) as {
+      ok: boolean
+      bundle?: { document: { version: number }; hires: { name: string }[] }
+    }
+    expect(loaded.ok).toBe(true)
+    expect(loaded.bundle?.document.version).toBe(4)
+    expect(loaded.bundle?.hires.map((hire) => hire.name)).toEqual(['oncall'])
+  })
+
+  it('carries the refusal reasons across the bridge, rather than an empty answer', async () => {
+    // A renderer that got `null` for a broken bundle would show "no profiles",
+    // which is the silent degradation invariant §7 forbids.
+    const { call } = await rig({ profiles: storeWithOneBundle('{ not json') })
+    const loaded = (await call('profiles:inspect', { name: 'skeleton-crew' })) as {
+      ok: boolean
+      name: string
+      reasons: string[]
+    }
+    expect(loaded).toMatchObject({ ok: false, name: 'skeleton-crew' })
+    expect(loaded.reasons.join(' · ')).toContain('profile.json: not JSON')
+  })
+
+  it('validates the payload before it reaches the store', async () => {
+    const { call } = await rig({ profiles: storeWithOneBundle() })
+    await expect(call('profiles:inspect', { name: '' })).rejects.toThrow()
+    await expect(call('profiles:inspect', {})).rejects.toThrow()
   })
 })

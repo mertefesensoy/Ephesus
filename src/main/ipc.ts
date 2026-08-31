@@ -27,6 +27,7 @@ import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
 import { companyModeSchema } from '../shared/mode'
 import { registerDraftSchema, sourceIdSchema, briefIdSchema } from '../shared/stoa'
+import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -84,6 +85,7 @@ const gymVerdictSchema = z
 
 const gymSetModeSchema = z.object({ mode: companyModeSchema }).strict()
 
+const profileNamePayloadSchema = z.object({ name: z.string().min(1).max(64) }).strict()
 const stoaIdSchema = z.object({ id: sourceIdSchema }).strict()
 const stoaBriefIdSchema = z.object({ id: briefIdSchema }).strict()
 /**
@@ -225,6 +227,10 @@ export interface IpcDeps {
   stoaBriefs(): readonly BriefView[]
   /** One archived brief's text. */
   stoaBrief(id: string): string | null
+  /** Every profile bundle, valid or not (ADR-0012). */
+  profilesList(): readonly ProfileSummary[]
+  /** One bundle, or every reason it was refused. Reading activates nothing. */
+  profilesInspect(name: string): ProfileLoad
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -395,6 +401,15 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.stoaBrief, (_ev, raw: unknown): string | null => {
     const { id } = stoaBriefIdSchema.parse(raw)
     return deps.stoaBrief(id)
+  })
+  // The READ half of SDD §5's `profiles:` group. There is deliberately no
+  // `activate` channel yet (M7.2): a handler that could instantiate a bundle
+  // before the stricter-wins composition exists would be a path to spawning
+  // agents at a profile's own asking-price.
+  ipcMain.handle(IpcChannels.profilesList, (): readonly ProfileSummary[] => deps.profilesList())
+  ipcMain.handle(IpcChannels.profilesInspect, (_ev, raw: unknown): ProfileLoad => {
+    const { name } = profileNamePayloadSchema.parse(raw)
+    return deps.profilesInspect(name)
   })
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())

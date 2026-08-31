@@ -3801,7 +3801,7 @@ the jsdom question for renderer interaction coverage; and BUILD-PROMPT §10's
 pre-approved dependency list, which never gained the two voice SDKs the
 Architect approved at M6.5.
 
-- [ ] **M7.1 Profile schema + loader** — ADR-0012's bundle exactly:
+- [x] **M7.1 Profile schema + loader** — ADR-0012's bundle exactly:
       `profiles/<name>/` with `profile.json` (name, version, `schemaVersion`,
       target binding, autonomy levels), `hires/*.json`, `triggers/*.json`,
       `playbooks/*.md`, `memo-policy.json`, `harbor.json`. The loader validates
@@ -3814,6 +3814,42 @@ Architect approved at M6.5.
       policy; loading is pure — no activation side effects. Risk: the schema
       is a PUBLIC CONTRACT from the day it ships — transcribe ADR-0012, do not
       extend it (the M1.1 lesson, restated).*
+      *Evidence: `typecheck && lint && check-invariants` green; 50 new cases
+      (`test/shared/profile.test.ts` 35, `test/main/profiles.test.ts` 12,
+      `test/main/ipc-handlers.test.ts` +3 seam cases); full suite **2453 passed /
+      6 skipped**. Failures are the recorded 9 Windows-local deterministic ones
+      (agent-worktree 4, s-crash 3, claude-transcripts 1, cost 1) plus
+      `s-stoploop`, which fails 1–2 cases under parallel load and passes 8/8 in
+      isolation — so consecutive runs report 10 and 11, and both numbers are
+      given here rather than the kinder one.*
+      **Production call path** (the M6 standing lesson — stated, not assumed):
+      `src/main/index.ts:580` constructs the `ProfileStore` over
+      `<home>/profiles` and the bundled `profiles/`; `src/main/index.ts:1631-1632`
+      binds it to `profilesList`/`profilesInspect`; `src/main/ipc.ts:409-413`
+      registers `profiles:list` and `profiles:inspect`;
+      `src/preload/index.ts:138-142` exposes them as `window.eph.profiles`.
+      **No renderer caller yet** — the panel is M7.2's activation UI, and that
+      gap is recorded here rather than left to be discovered.
+      *Proved by RUNNING the real app, not by reading it:* built, then booted
+      `npx electron .` against a temp `EPH_HOME` holding one valid bundle and
+      one broken one. `profiles.list()` returned both — `broken-crew` present
+      and `valid: false`, `skeleton-crew` `valid: true, version: 3`;
+      `inspect("skeleton-crew")` returned the whole bundle including the hire's
+      budget and the playbook text; `inspect("broken-crew")` refused by name
+      with *both* reasons (`memo-policy.json: missing from the bundle`,
+      `harbor.json: missing from the bundle`). After the boot the profiles tree
+      was byte-for-byte what it had been — **loading wrote nothing**, so purity
+      holds in the app and not only in the rig. The temporary `EVIDENCE` log was
+      removed before commit (BUILD-PROMPT §10.7).
+      *Mutation-checked, 21/21 killed:* the refusal table, the name/directory
+      match, `byKind`'s strictness, all four migration refusals and the ladder
+      walk, both trigger-binding checks, the playbook-is-not-policy claim (a
+      mutation that genuinely parsed a fenced JSON block out of the prose), the
+      every-reason-at-once claim, the list's invalid rows, home-shadows-builtin,
+      the no-seeding claim, and the three IPC-seam mutations. Two of the first
+      draft's mutations were duds that changed no behaviour and were rewritten
+      until they bit — recorded because a dud mutation proves nothing and
+      reports as success.
 - [ ] **M7.2 Activation, targets, and autonomy composition** — instantiate a
       profile's hires as agents bound to a TARGET (repo/app); the same profile
       activatable per-target more than once; multiple profiles coexisting on

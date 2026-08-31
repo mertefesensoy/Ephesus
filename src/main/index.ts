@@ -26,6 +26,7 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
+import { ProfileStore } from './profiles'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
 import { stoaCadenceTick } from './stoa-cadence'
@@ -572,6 +573,14 @@ async function boot(): Promise<void> {
   // Architect-editable copies (invariant §8).
   const appRoot = app.getAppPath()
   const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
+  // Mission profiles (ADR-0012, SDD §2). Two roots, home first: the Architect's
+  // own bundles shadow the built-ins that ship in `profiles/`. Constructed here
+  // and read on demand — the store holds no state and caches nothing, so a
+  // bundle edited on disk is the bundle the next `inspect` reads.
+  const profiles = new ProfileStore(
+    path.join(home.root, 'profiles'),
+    path.join(appRoot, 'profiles')
+  )
   promptStore = prompts
 
   // The broker is constructed before anything can spawn: an agent must never
@@ -1619,6 +1628,8 @@ async function boot(): Promise<void> {
       stoa?.retire(id, 'architect') ?? { ok: false, reason: 'the stoa is not available' },
     stoaBriefs: () => (stoa?.briefs() ?? []).map((row) => ({ ...row })),
     stoaBrief: (id) => stoa?.brief(id) ?? null,
+    profilesList: () => profiles.list(),
+    profilesInspect: (name) => profiles.load(name),
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {
