@@ -4011,7 +4011,7 @@ Architect approved at M6.5.
       `incident-announce-owed` and reports an unmet obligation through the
       degradation channel while the gate queue takes the escalation. Mutation M9
       proves that leg is load-bearing.*
-- [ ] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
+- [x] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
       reply drafting with CONFIGURABLE autonomy (draft-only → auto-post),
       docs/changelog sync, and release-prep checklists (UC-10). Outbound
       comments above the configured level require Architect approval, batched
@@ -4022,6 +4022,42 @@ Architect approved at M6.5.
       Risk: "auto-post" is the first outward-facing irreversible act the
       company can take on its own — that gate belongs in the harness, not in a
       playbook's prose.*
+      *Evidence: `typecheck && lint && check-invariants` green; 39 new cases
+      (`test/shared/outbound.test.ts` 16, `test/main/frontoffice.test.ts` 14,
+      `test/main/front-office-profile.test.ts` 9); full suite **2636 passed /
+      6 skipped**, 11 failed — an IDENTICAL set to before this package (the
+      recorded 9 Windows-local ones plus `s-stoploop` (2) under load). **No
+      existing gate test broke**, which is the evidence that adding a seventh
+      gate kind was additive rather than a change of meaning.
+      **ONE SCHEMA CHANGE, ASKED BEFORE IT WAS MADE:** `outbound` joins
+      `GATE_KINDS` by ARCHITECT DECISION (BUILD-PROMPT §8.3 must-ask, three
+      options). M5.3's recorded rule — borrow a kind, never invent a seventh —
+      carries the qualifier "the mapping loses nothing", and here it does lose
+      something: borrowing `prod-facing` would mean enabling auto-post on issue
+      replies also granted autonomous PRODUCTION actions, with no way to write
+      "may reply, may not touch prod". **SRS FR-11.1 was amended in the same
+      change** to name outbound public communication. Safe by construction: a
+      policy that never mentions `outbound` denies it, so the addition can only
+      tighten an existing deployment.
+      **ADR-0012's dogfood claim HELD a second time:** the Front Office needed no
+      change to M7.1's profile schema. The gate kind is the WATCH's vocabulary,
+      not the bundle's. `front-office-profile.test.ts` runs against the real
+      shipped bundle through the real loader and pins the directory listing.
+      **The risk line is answered structurally, not by a guard:**
+      `GitHubHarbor.postComment` takes a branded `PostPermit` whose only two
+      constructors refuse everything below `autonomous` or unapproved — so a
+      draft-only profile has no code path that posts, asserted on the API
+      surface (the S-SECRETS pattern) rather than by inspection.
+      **Batching IS the gate:** `supervised` opens an ordinary `outbound` gate
+      and `BriefInput.openGates` is what the standup already reads, so there is
+      one record seen from two angles rather than a digest that could drift from
+      the approval it summarizes. The WHOLE draft reaches the gate — approving a
+      comment without its text is signing a blank page.
+      **Production call path:** `src/main/index.ts:1258` constructs
+      `FrontOffice`; the Harbor endpoint dispatches on `OUTBOUND_SUBJECT`
+      (one address, two filings — the ADR-0008 Odeon pattern);
+      `GateManager.onSettled` at `:695` routes an `outbound` verdict to
+      `onVerdict`; `:1271` posts. **10 mutations applied, 10 killed.**
 - [ ] **M7.6 Shareable hires and profiles** — export/import a role template or
       a whole bundle via file/link (FR-10.4); **import only PRE-FILLS the
       spawn/activation form — a human always confirms.** Bundles are plain

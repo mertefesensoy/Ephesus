@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "front-office",
+  "version": 1,
+  "target": { "kind": "repo" },
+  "autonomy": {
+    "default": "supervised",
+    "byKind": {
+      "destructive": "manual",
+      "prod-facing": "manual",
+      "spend": "manual",
+      "scope-change": "manual",
+      "outbound": "manual"
+    }
+  }
+}

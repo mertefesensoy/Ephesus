@@ -30,6 +30,7 @@ import { Gymnasium } from './gymnasium'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint } from './incidents'
+import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
@@ -115,6 +116,7 @@ let activations: ProfileActivations | null = null
 // it was actually pointed at, not a second list that could disagree.
 let harbor: GitHubHarbor | null = null
 let incidents: IncidentEndpoint | null = null
+let frontOffice: FrontOffice | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -685,13 +687,20 @@ async function boot(): Promise<void> {
       // agent is never told about is a stall it cannot act on (invariant §7).
       if (gate.memoTrigger !== null) noticeMemoOwed(gate)
     },
-    onSettled: (gate) => {
+    onSettled: (gate, verdict) => {
       // Only when the LAST gate on that agent clears: an agent held behind two
       // gates must not walk back to its desk after the first verdict.
       if (!gates?.isBlocked(gate.agentId)) {
         avatarDirector.apply(gate.agentId, { kind: 'gate-verdict' })
       }
       if (gate.taskId) ledger?.noteGate(gate.taskId, gate.id, false)
+      // UC-10 step 3's other half: an `outbound` gate the Architect decided
+      // releases (or drops) the draft it was holding. `onVerdict` returns false
+      // for a gate that held no draft, so every other gate kind passes through
+      // here untouched.
+      if (gate.kind === 'outbound') {
+        void frontOffice?.onVerdict(gate.id, verdict === 'approved')
+      }
       mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
     },
     // Invariant §8: the words a refusal shows are a prompt surface.
@@ -1229,13 +1238,59 @@ async function boot(): Promise<void> {
     }
   })
 
+  // The Front Office's outbound desk (FR-9.3, UC-10 step 3 — M7.5). The
+  // autonomy it reads is the COMPOSED one the Watch already computed, so a
+  // profile's request has been clamped against the global ceiling before it
+  // gets here and there is no second opinion about it in this file.
+  frontOffice = new FrontOffice({
+    outboundAutonomy: (agentId) => activations?.autonomyFor(agentId, 'outbound') ?? null,
+    openGate: (request) => {
+      // UC-08's four-part packaging. The facts are the harness's; every word
+      // around them is a prompt surface (invariant §8), because this is the
+      // text the Architect reads when deciding whether the company speaks.
+      const vars = {
+        key: request.key,
+        repo: request.draft.repo,
+        target: request.draft.target,
+        ref: String(request.draft.ref),
+        body: request.draft.body
+      }
+      const outcome = gates?.submit({
+        kind: 'outbound',
+        agentId: request.agentId,
+        packaging: {
+          what: prompts.render(path.join('watch', 'outbound-what.md'), vars).trim(),
+          why: prompts.render(path.join('watch', 'outbound-why.md'), vars).trim(),
+          blastRadius: prompts.render(path.join('watch', 'outbound-blast.md'), vars).trim(),
+          rollback: prompts.render(path.join('watch', 'outbound-rollback.md'), vars).trim()
+        }
+      })
+      return outcome?.held === true ? outcome.gate.id : null
+    },
+    post: (permit) =>
+      harbor?.postComment(permit) ?? Promise.resolve({ ok: false, because: 'no harbor' }),
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
     closing: (message) => closingTime?.noteReply(message) ?? false,
-    // The endpoint answers the sender itself when it can read a report and
-    // cannot match it, so "handled" means only that an endpoint exists to try.
+    // One address, two filings — the ADR-0008 pattern the Odeon endpoint
+    // already uses. The Harbor is one subsystem (everything in and out), and
+    // giving incidents and outbound drafts separate reserved ids would put two
+    // harness identities where the design has one. Dispatch is on the subject
+    // the agent wrote, and an unrecognised one is refused rather than guessed.
     harbor: (message) => {
+      if (message.subject === OUTBOUND_SUBJECT) {
+        if (frontOffice === null) return false
+        void frontOffice.onDraft(message)
+        return true
+      }
       if (incidents === null) return false
       incidents.onTriage(message)
       return true

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import type { PostPermit } from '../../shared/outbound'
 import {
   parseIssues,
   parsePulls,
@@ -94,6 +95,21 @@ export const execGh: GhRunner = (args, timeoutMs) =>
       }
     )
   })
+
+/** `gh` prints the new comment's URL; keep the first line, or nothing. */
+function firstLine(stdout: string): string | null {
+  const first = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+  return first ?? null
+}
+
+/** What a send attempt did. `because` is null only on success. */
+export interface PostOutcome {
+  readonly ok: boolean
+  readonly because: string | null
+}
 
 export interface GitHubHarborOptions {
   /** Which repositories to ingest — the active profiles' `harbor.json` repos. */
@@ -269,5 +285,59 @@ export class GitHubHarbor {
     for (const entry of remoteLogEntries(items)) this.options.onLogEvent?.(entry)
 
     return { repo, items, dropped, reasons, failure: null, ingestedAt: at }
+  }
+
+  /**
+   * The port's OUTBOUND half: sends one comment (FR-9.3, UC-10 step 3).
+   *
+   * Contract: takes a `PostPermit` and nothing else. The parameter type is
+   * branded and its only constructors live in `src/shared/outbound.ts`, so
+   * there is no expression a draft-only flow can write that satisfies this
+   * signature — the absence of a posting path is structural, not a guard
+   * somebody could invert. That is what the M7.5 risk line asks for: the gate
+   * is in the harness, and it is in the type.
+   *
+   * Refuses rather than throws when `gh` is unavailable, so a failed post is a
+   * reported fact and never a silently swallowed one.
+   */
+  async postComment(permit: PostPermit): Promise<PostOutcome> {
+    if (this.unavailable !== null) {
+      const because = `gh unavailable — ${this.unavailable}`
+      this.options.onDegraded?.(`outbound comment not sent: ${because}`)
+      return { ok: false, because }
+    }
+    const { draft } = permit
+    const subcommand = draft.target === 'issue' ? 'issue' : 'pr'
+    const result = await this.run(
+      [subcommand, 'comment', String(draft.ref), '--repo', draft.repo, '--body', draft.body],
+      DEFAULT_TIMEOUT_MS
+    )
+    if (!result.ok) {
+      const because = result.error ?? 'gh comment failed'
+      this.options.onDegraded?.(`outbound comment not sent: ${because}`)
+      this.options.onLogEvent?.({
+        kind: 'remote',
+        event: 'outbound-failed',
+        repo: draft.repo,
+        target: draft.target,
+        ref: draft.ref,
+        because
+      })
+      return { ok: false, because }
+    }
+    // FR-10.3: the act leaves a record naming HOW it was permitted, so an
+    // auto-posted comment and an Architect-approved one are distinguishable
+    // years later without reading anybody's memory.
+    this.options.onLogEvent?.({
+      kind: 'remote',
+      event: 'outbound-posted',
+      repo: draft.repo,
+      target: draft.target,
+      ref: draft.ref,
+      granted: permit.granted,
+      gate: permit.gateId,
+      url: firstLine(result.stdout)
+    })
+    return { ok: true, because: null }
   }
 }

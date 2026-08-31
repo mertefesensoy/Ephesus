@@ -1,0 +1,7 @@
+{
+  "id": "issue-arrived",
+  "kind": "event",
+  "event": "webhook",
+  "hire": "triage-agent",
+  "playbook": "triage.md"
+}
