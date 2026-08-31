@@ -134,13 +134,17 @@ it is how the next session knows where to resume).
 > audit (spec-verifier + doc-guardian + an adversarial mutation pass) is in
 > `docs/PROGRESS.md`; read its verdict before anything else.
 >
-> **M6.10 is DONE (2026-08-30)** — all three of the audit's groups, every fix
-> mutation-checked with the audit's own mutations. So **every M6 package that is
-> going to be built has been**, and the milestone now waits on one Architect
-> decision rather than on any work: M6.9 is deferred, its three exit criteria are
-> voice-live and therefore unreachable, and how M6 closes (amend the criteria,
-> waive them on the record, or hold M6 open) is the ONLY thing standing between
-> here and M7.1. Do not start M7 until that is answered — §5 is explicit.
+> **M6 is CLOSED (2026-08-30)** against AMENDED exit criteria — the Architect's
+> decision was to close on the mechanical bar once every test and conformance
+> suite passed, which it does (19/20 scenario suites and 3/3 conformance suites
+> green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
+> the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
+> **Resume at M7.1.**
+>
+> Two things the close does NOT claim, and you must not restate otherwise: SRS
+> §6.2, SRS §6.5 and the voice-driven day were **not demonstrated** and are not
+> waived — they are unchanged v1 acceptance criteria, owed, attached to M6.9. And
+> the Herald is still **unreachable from the application**.
 >
 > **M6.9 is DEFERRED INDEFINITELY** by Architect decision
 > (2026-08-30) — the Herald is not an important function for now. Deferred, not

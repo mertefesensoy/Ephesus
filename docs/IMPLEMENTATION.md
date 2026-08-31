@@ -126,8 +126,27 @@ machine). ElevenLabs adapter (STT + streamed TTS), OpenAI Realtime adapter (dupl
 Persona/phrase-book assets. Spoken briefings + voice approvals + meeting narration.
 Optional local wake word. Text-parity degradation.
 
-**Exit:** SRS §6.2 standup test and §6.5 failover test pass live; S-FAILOVER passes
-scripted; a full day driven by voice without touching the keyboard for status.
+**Exit (AMENDED 2026-08-30 by Architect decision — see the note below):** every
+scenario and conformance suite green, S-FAILOVER among them; the floor at the
+UI-DESIGN v2 bar with its evidence committed; the close-out audit's findings
+fixed with named, mutation-checked regressions.
+
+> **What this amendment does and does not do.** The original exit read: *"SRS §6.2
+> standup test and §6.5 failover test pass **live**; S-FAILOVER passes scripted; a
+> full day driven by voice without touching the keyboard for status."* All three
+> live clauses depend on the Herald being reachable from the application, and
+> M6.9 — which wires it — was **deferred indefinitely** on 2026-08-30 because the
+> Herald is not a current priority. They were therefore unreachable by
+> construction, not merely unperformed, and BUILD-PROMPT §5 would have held M6
+> open forever against a bar nobody intended to meet.
+>
+> So M6's **milestone gate** becomes the mechanical bar above, which is met.
+> **SRS §6.2 and §6.5 are NOT satisfied and are not removed** — they are
+> system-level v1 acceptance criteria (SRS §6) and they stay exactly as written,
+> owed, now attached to M6.9 wherever it lands. The voice-driven day rides with
+> them. This is a change to when the milestone closes, not a claim that the voice
+> subsystem was demonstrated; the M6 close-out audit exists precisely because a
+> record once said the latter.
 
 ## M7 — The Harbor + the two outward missions (≈ 2 weeks) — *differentiator*
 

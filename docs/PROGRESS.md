@@ -3345,16 +3345,18 @@ order; every package tests against the fake engine per-PR.
       SCREENSHOT does not exist — the only M6 floor artifact is a procedural
       SVG, which is honest evidence of a different kind. The metric-sweep
       booking, the one clause that was genuinely done, stands.)*
-- [ ] **M6 exit review** — SRS §6.2 + §6.5 live; S-FAILOVER scripted pass; the
-      v2 floor evidence; PROGRESS + docs synced. **UNTICKED at the close-out
-      audit (2026-08-29):** two of the three exit criteria in
-      `docs/IMPLEMENTATION.md` are unmet and the third was never addressed —
-      see the close-out audit below. BUILD-PROMPT §5: never start N+1 while
-      N's exit criteria fail. ~~Closed by M6.9 + M6.10.~~ **M6.9 was deferred
-      indefinitely on 2026-08-30, so every remaining exit criterion is
-      unreachable by construction. M6.10 is the only remaining M6 work. How this
-      milestone closes — amend the criteria, waive them on the record, or hold
-      M6 open — is an OPEN ARCHITECT DECISION and blocks the M7 start under §5.**
+- [x] **M6 exit review** — ~~SRS §6.2 + §6.5 live; S-FAILOVER scripted pass~~;
+      the v2 floor evidence; PROGRESS + docs synced. **UNTICKED at the close-out
+      audit (2026-08-29)**, when two of the three criteria in
+      `docs/IMPLEMENTATION.md` proved unmet and the third had never been
+      addressed. **RE-TICKED 2026-08-30 against AMENDED criteria** (Architect
+      decision: close M6 when every test and conformance suite passes). M6.9
+      stays deferred, so the three live-voice clauses were unreachable by
+      construction; IMPLEMENTATION's M6 exit now reads as the mechanical bar,
+      and **SRS §6.2 / §6.5 / the voice-driven day are NOT satisfied — they are
+      unchanged v1 acceptance criteria, owed, and attached to M6.9.** The
+      milestone closed; the voice subsystem was not demonstrated, and this
+      record says so.
 - [ ] **M6.9 Wire the Herald into the application** — **DEFERRED INDEFINITELY by
       Architect decision (2026-08-30): the Herald is not an important function
       for now.** Deferred, not cancelled and not descoped — the finding stands
@@ -3722,6 +3724,51 @@ claiming the parity suite covers it. **M6.10 closes these.**
 - **An assertion that cannot fail is not evidence.** Parity asserted as
   `f(x) === f(x)` reads exactly like parity asserted properly. Mutation is the
   only way to tell them apart, and it belongs in every close-out from here.
+
+
+### M6 close (2026-08-30) — verdict: CLOSED against amended criteria
+
+The close-out audit reopened M6 on 2026-08-29 with 0 of 3 exit criteria met. All
+three were live-voice demonstrations, and M6.9 — the package that wires the
+Herald into the application — was **deferred indefinitely** on 2026-08-30. That
+made them unreachable by construction rather than merely unperformed, so the
+Architect amended the milestone gate to the mechanical bar and closed M6 on it.
+
+**Verified by execution on `4d831e4`, each suite run in ISOLATION** so no result
+is a load artefact:
+
+| Group | Result |
+|---|---|
+| Scenario suites (20) | **19 green**; `s-crash` 3 failed — a recorded Windows-local deterministic failure, green on Ubuntu |
+| Conformance suites (3) | **all green** — engine-adapters 72 (+2 skipped), recall-smoke 15 (+1), voice-adapters 28 |
+| M6 unit suites (14) | **all green**, 259 cases |
+| Full suite | 2402 passed / 11 failed / 6 skipped (2419) |
+| **Ubuntu CI (the gate)** | **green** — run 33340182591, Typecheck · Lint · Invariants · Test · Docs integrity · Attribution all success |
+
+The 11 local failures are the baseline recorded since M6.1: 9 deterministic
+(`agent-worktree` 4, `s-crash` 3, `claude-transcripts` 1, `cost` 1) plus 2
+`s-stoploop` load flakes that pass 8/8 alone. None touch M6, and all pass on
+Ubuntu. **Green on the gate, not green on this laptop** — stated that way
+deliberately.
+
+**What this close does NOT claim.** SRS §6.2 (the spoken standup), SRS §6.5 (the
+key pulled mid-conversation) and the voice-driven day were **not demonstrated**
+and are not waived. They are v1 acceptance criteria, unchanged in the SRS, owed,
+and now attached to M6.9. The Herald remains built, tested, conforming and
+**unreachable from the application** — exactly as the close-out audit found it.
+A milestone may close with work deferred; it may not close by quietly deleting
+the bar it failed. This paragraph is the difference.
+
+**Carried into M7** (full list at the head of the M7 plan): the Herald wiring and
+its three live proofs; the v2 floor with a real company; a committed generator
+for `docs/demo/*.svg`; the M6 floor screenshot; wake-word detection.
+
+**Also found while closing:** `main` is documented in ENGINEERING-STANDARDS §2 as
+"protected: PRs only, CI green, one review", and the GitHub API reports **no
+branch protection on `main` at all** (`404 Branch not protected`). The rule is
+real in prose and absent in the mechanism — the same shape as the invariant-§7
+gap this milestone's audit found in `validateCompositions`. Recorded for the
+Architect; enabling protection is a repository-settings decision, not a code one.
 
 ## M7 — The Harbor + the two outward missions (plan drafted 2026-08-29 at M6 close)
 
