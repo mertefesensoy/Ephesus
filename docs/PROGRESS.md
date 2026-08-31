@@ -4244,6 +4244,75 @@ post-trust; a real-engine respawn demo; E-STOA's LLM-judged half; `stoa:pin`
 from a real checkout (verified: no such channel exists). *Newly owed:* SRS §6.1
 itself, and E-PLAYBOOK's live drill.
 
+### SRS §6.1 — the live run on `mertefesensoy/MUSAHIT` (2026-09-01) — verdict: **the DETECTION half passed; the ACTION half did NOT**
+
+The Architect named a real repository, chose to add CI to it, activated the
+Skeleton Crew from the panel, and approved gates by hand. `mertefesensoy/MUSAHIT`
+had no CI at all; a pytest workflow was added on `ci/add-pytest-workflow` and
+**failed on its own first run** (`33440874791`) — so the crew had a genuine
+failure to find rather than a planted one. Real `claude` 2.1.195 throughout.
+The record is `docs/demo/m7-onehour-live-musahit.txt`.
+
+**What passed, on real rails.** The Harbor ingested the failed run and tagged it
+`remote` (FR-10.3). The incident was raised, mailed to Artemis from
+`agent.harbor`, and **`tasks.json` was left untouched** — FR-5.2's single scribe
+held under live conditions. A re-ingest ten minutes later did **not** duplicate
+it: M7.4's idempotency cursor held on a real repository, which is what stops the
+crew being woken every ten minutes forever. Every gated action was held; the
+Architect approved one spend gate and the log records who, when and through
+which channel.
+
+**What did not pass, and it is the important half.** Artemis read the incident
+and replied to `agent.harbor` with the words **"Task opened…"**. No task was
+ever created. `tasks.json` holds zero and the log contains no `task` event at
+all. **The orchestrator reported work that did not happen**, and nothing in the
+harness noticed — the refusal that caught it was incidental, rejecting her prose
+for failing to be triage-report JSON. That is the E-BRIEF-FAITH failure class
+arriving in the one place M7 had not instrumented for it, and it is exactly what
+a scripted engine can never show: the fake engine always does what its script
+says.
+
+**Three defects behind it, all in M7's own code.**
+
+1. **`agent.harbor` refuses legitimate mail.** `submitToHarbor` treats every
+   inbound message as a triage report, so an orchestrator's ordinary courtesy
+   reply — legal under ADR-0003's act table — is refused by name. The endpoint
+   needs to distinguish a triage report from an acknowledgement instead of
+   assuming.
+2. **The incident prompt is ambiguous.** `prompts/harbor/incident-body.md` asks
+   Artemis to open a task and then prints the triage-report JSON schema in the
+   same message, addressed to her, describing what the ON-CALL agent should
+   send. Two audiences in one message; she reasonably read the schema as hers.
+3. **Nothing reconciles a claim against the ledger.** An agent may say it opened
+   a task, and no mechanism compares that to `tasks.json`. The incident stays
+   open with no work attached and no alarm. This is the serious one — the other
+   two are plumbing.
+
+**Five defects the run found before it got that far**, none of which any suite
+could see, and four already fixed: `agora.log(-1, …)` was always refused, so the
+floor's mail envelopes had never flown; M7.4's incident binding filtered
+`when === 'ci'` against a plan that renders `"on ci"`, so **every** CI failure
+was dropped as `incident-unclaimed`; `cmd.exe`'s 8,191-character command line
+made the orchestrator unspawnable at 10,908 bytes of identity, with the whole
+crew inside 250 bytes of the same cliff; and the wake nudge could be lost in a
+race between consuming an inbox and observing it empty. The fifth is identified
+and **not** fixed: **an avatar phase that never returns to `idle` makes an agent
+permanently unnudgeable**, which is what stalled this run for twenty minutes; a
+restart masks it, and the cause is not yet known.
+
+**Budget.** Artemis exhausted a 2,000,000-token daily allowance on *briefing*
+work before reaching the incident, and opened three gates in twenty-five
+minutes. Whether that is a budget too small, a briefing loop too expensive, or a
+priority the ledger should express is unresolved and worth its own look.
+
+**So §6.1 is not met, and this review does not round it up.** The criterion asks
+for a crew that detects a failure, fixes it or opens a fix PR, files the memo if
+policy was crossed, and has the next briefing narrate it accurately — with zero
+un-gated destructive actions. Two of those clauses passed outright (detection;
+zero un-gated actions, deny-all having held every time). One is now known to
+fail (the crew did not open work, and said it had). Two were never reached.
+
+
 **Checks.** `typecheck`, `lint`, `check-invariants` green. Full suite **2697
 passed / 6 skipped**, 12 failed — the recorded 9 Windows-local deterministic
 failures plus `s-stoploop` (2) and `hermes` (1) under parallel load, each
