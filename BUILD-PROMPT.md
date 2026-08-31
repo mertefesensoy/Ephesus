@@ -140,15 +140,16 @@ it is how the next session knows where to resume).
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
 >
-> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.4 are done — resume at M7.5.**
+> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.5 are done — resume at M7.6.**
 > One package per branch, all pushed, **none merged** (merging is the
 > Architect's call per package, and each branch is stacked on the previous
 > because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
 > `feature/m7-2-activation-autonomy` (`26b59d5`),
 > `feature/m7-3-harbor-github` (`86f6b2a`),
-> `feature/m7-4-skeleton-crew` (`f6710ff`). Evidence, production call paths and
+> `feature/m7-4-skeleton-crew` (`94e19b4`),
+> `feature/m7-5-front-office` (`e4ceacd`). Evidence, production call paths and
 > mutation sweeps are in `docs/PROGRESS.md`; the implementation docs are
-> `docs/implementations/2026-08-31-m7-{1,2,3,4}-*.md`.
+> `docs/implementations/2026-08-31-m7-{1,2,3,4,5}-*.md`.
 >
 > **What M7.1–M7.4 give you, and what they deliberately do NOT.** A profile
 > bundle is a schema that refuses by name; activation composes stricter-wins
@@ -159,16 +160,24 @@ it is how the next session knows where to resume).
 > — the activation screen and the Harbor panel are unbuilt, and that gap is
 > recorded in each package's evidence rather than left to be discovered.
 >
-> **ADR-0012's dogfood claim HELD at M7.4:** the Skeleton Crew needed no field
-> M7.1's frozen schema lacks, and `test/main/skeleton-crew.test.ts` checks that
-> against the real shipped bundle through the real loader. M7.5 (Front Office)
-> is the second half of that test — if IT needs a schema change, say so loudly
-> rather than making one quietly, because the claim is what the format is for.
+> **ADR-0012's dogfood claim HELD TWICE (M7.4, M7.5).** Neither built-in needed
+> a field M7.1's frozen profile schema lacks, on two genuinely different shapes:
+> an incident path and a configurable outbound ladder. Both are checked against
+> the real shipped bundles through the real loader. M7.5 DID need one change —
+> `outbound` as a seventh `GATE_KINDS` member — which is the WATCH's vocabulary
+> rather than the bundle's, and which went to the Architect as a §8.3 must-ask
+> before any code was written (SRS FR-11.1 amended with it). That is the shape
+> to repeat: a schema change is not forbidden, it is *asked for*.
 >
-> **Two things M7.4 settled that M7.5 should not re-litigate.** The harness
-> never grades severity (UC-09 gives triage to the agent) and never writes
-> `tasks.json` (FR-5.2 — it mails Artemis and she proposes). Both are asserted
-> by name; if Front Office needs to create work, it takes the same route.
+> **Settled at M7.4/M7.5; do not re-litigate.** The harness never grades severity
+> (UC-09 gives triage to the agent) and never writes `tasks.json` (FR-5.2 — it
+> mails Artemis and she proposes). It decides *whether* an agent's words are
+> sent, never *what* they say. `agent.harbor` carries both filings — triage
+> reports and outbound drafts — dispatched on subject, the ADR-0008 "one address,
+> three filings" pattern. And auto-post is carried by a branded `PostPermit`,
+> not a boolean: **M7.6 must not add a third permit constructor** without asking,
+> because the two that exist are what make "a draft-only profile has no code path
+> that posts" true by construction rather than by inspection.
 > **Owed to the Architect as a DOCUMENT decision:** the severity ladder has two
 > rungs because the SRS names exactly one (`severity-1`) and describes exactly
 > two treatments — see DECISIONS-LOG 2026-08-31.
