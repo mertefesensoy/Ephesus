@@ -139,7 +139,30 @@ it is how the next session knows where to resume).
 > suite passed, which it does (19/20 scenario suites and 3/3 conformance suites
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
-> **Resume at M7.1.**
+>
+> **M7 is IN PROGRESS (2026-08-31). M7.1, M7.2 and M7.3 are done — resume at
+> M7.4.** One package per branch, all pushed, **none merged** (merging is the
+> Architect's call per package, and each branch is stacked on the previous
+> because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
+> `feature/m7-2-activation-autonomy` (`26b59d5`),
+> `feature/m7-3-harbor-github` (`86f6b2a`). Evidence, production call paths and
+> mutation sweeps are in `docs/PROGRESS.md`; the three implementation docs are
+> `docs/implementations/2026-08-31-m7-{1,2,3}-*.md`.
+>
+> **What M7.1–M7.3 give you, and what they deliberately do NOT.** A profile
+> bundle is a schema that refuses by name; activation composes stricter-wins
+> autonomy into every gate submission; the Harbor ingests issues, PRs and CI
+> runs through `gh` and tags them `remote`. **There is no renderer caller for
+> any of it yet** — the activation screen and the Harbor panel are unbuilt, and
+> that gap is recorded in each package's evidence rather than left to be
+> discovered. M7.4 and M7.5 are the two built-in profiles, which are also the
+> dogfood test of whether ADR-0012's format is actually sufficient.
+>
+> **Two dead-code findings this run, both the M6 Herald shape**, both now wired:
+> `hireTemplateSchema` (M5.6) had only test callers; `effectivePolicy` and
+> `GateRequest.profileAutonomy` (M3) had **no caller at all**, so stricter-wins
+> was correct arithmetic nothing could invoke. Assume nothing is wired until you
+> have found the caller.
 >
 > Two things the close does NOT claim, and you must not restate otherwise: SRS
 > §6.2, SRS §6.5 and the voice-driven day were **not demonstrated** and are not
