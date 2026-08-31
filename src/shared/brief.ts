@@ -79,6 +79,13 @@ export interface BriefInput {
      * constant zero as ledger data (invariant §7 — degradation visible).
      */
     readonly spentTokens: number | null
+    /**
+     * Where the figure came from, in words (M6.7). The M5 close-out asked for
+     * the number back "with its source named": a bare total invites the reader
+     * to trust a scope they cannot see, and the brief is read aloud, where
+     * there is no card to hover.
+     */
+    readonly spendSource?: string | null
     readonly tokensPerWeek: number
     readonly open: number
     /**
@@ -196,7 +203,8 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
               `${String(input.gymSlice.open)} proposal(s) open`
           : `the gymnasium has spent ${String(input.gymSlice.spentTokens)} of ` +
               `${String(input.gymSlice.tokensPerWeek)} tokens this week, with ` +
-              `${String(input.gymSlice.open)} proposal(s) open`,
+              `${String(input.gymSlice.open)} proposal(s) open` +
+              (input.gymSlice.spendSource ? ` (${input.gymSlice.spendSource})` : ''),
         ['gym:slice']
       )
     )

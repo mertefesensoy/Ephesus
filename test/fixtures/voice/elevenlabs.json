@@ -1,0 +1,21 @@
+{
+  "note": "Recorded shapes for the ElevenLabs adapter's conformance run (TEST-STRATEGY §5). Timings are measured values from a recorded session; the error payloads are the provider's own shapes, trimmed to the fields an adapter classifies on. No key, no network, no audio.",
+  "provider": "elevenlabs",
+  "streamStartMs": 340,
+  "cancelMs": 40,
+  "transcript": [
+    { "text": "show me", "final": false, "confidence": 0.61 },
+    { "text": "show me the ledger", "final": true, "confidence": 0.94 }
+  ],
+  "errors": {
+    "auth": {
+      "status": 401,
+      "detail": { "status": "invalid_api_key", "message": "Invalid API key" }
+    },
+    "transient": {
+      "status": 503,
+      "detail": { "status": "service_unavailable", "message": "upstream busy" }
+    },
+    "latency-breach": { "status": 200, "elapsedMs": 4200, "detail": { "status": "ok" } }
+  }
+}

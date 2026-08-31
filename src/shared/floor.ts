@@ -32,9 +32,63 @@ export const STATION_TILES: Readonly<Record<Station, TilePoint>> = {
   portal: { col: 10, row: 2 },
   'harbor-kiosk': { col: 14, row: 2 },
   'agora-board': { col: 17, row: 5 },
-  odeon: { col: 17, row: 9 },
+  odeon: { col: 16, row: 9 },
   'watch-post': { col: 2, row: 9 },
   'temple-seat': { col: 10, row: 10 }
+}
+
+/**
+ * UI-DESIGN §5.4's size column, in pixels on the 32 px grid. A station taller
+ * than one tile rises ABOVE its anchor tile, exactly as the 32x48 citizen does,
+ * so the floor it stands on is still the tile a walk targets.
+ *
+ * Geometry lives here rather than beside the state model in `stations.ts`
+ * because the plan needs it and the state model does not: one direction of
+ * dependency, no cycle.
+ */
+export interface StationSize {
+  readonly w: number
+  readonly h: number
+}
+
+export const STATION_SIZES: Readonly<Record<Station, StationSize>> = {
+  desk: { w: 64, h: 32 },
+  shelf: { w: 64, h: 48 },
+  'terminal-bench': { w: 32, h: 48 },
+  portal: { w: 48, h: 48 },
+  'harbor-kiosk': { w: 48, h: 48 },
+  'agora-board': { w: 32, h: 48 },
+  odeon: { w: 96, h: 64 },
+  'watch-post': { w: 32, h: 48 },
+  'temple-seat': { w: 64, h: 64 }
+}
+
+/** Contract: a station's footprint in whole tiles — what the plan claims. */
+export function stationTiles(station: Station): { readonly cols: number; readonly rows: number } {
+  const size = STATION_SIZES[station]
+  return { cols: Math.ceil(size.w / TILE_PX), rows: Math.ceil(size.h / TILE_PX) }
+}
+
+/**
+ * Contract: every tile a station covers, anchored at its `STATION_TILES` tile
+ * and extending RIGHT and UP — up, because a station taller than a tile rises
+ * above the ground it stands on. Tiles outside the room are dropped, so a
+ * footprint can never claim a wall out from under the room.
+ */
+export function stationFootprint(station: Station): readonly TilePoint[] {
+  const anchor = STATION_TILES[station]
+  const { cols, rows } = stationTiles(station)
+  const tiles: TilePoint[] = []
+  for (let dRow = 0; dRow < rows; dRow += 1) {
+    for (let dCol = 0; dCol < cols; dCol += 1) {
+      const col = anchor.col + dCol
+      const row = anchor.row - dRow
+      if (col > 0 && col < ROOM_COLS - 1 && row > 0 && row < ROOM_ROWS - 1) {
+        tiles.push({ col, row })
+      }
+    }
+  }
+  return tiles
 }
 
 /** Chebyshev tile distance — avatars walk the 8 directions of UI-DESIGN §5. */
@@ -139,12 +193,31 @@ export const PLAN_KINDS = [
 
 export type PlanKind = (typeof PLAN_KINDS)[number]
 
+/**
+ * Where a cell sits inside the multi-tile structure it belongs to (§5.4 sizes).
+ *
+ * Without it a painter has no way to tell "the left half of a 64px desk" from
+ * "a whole 32px desk", so a two-tile desk paints as two desks and a row of
+ * them reads as one long slab. Observed live at M6.2, which is the second time
+ * this milestone that the running floor said something the suite could not.
+ */
+export interface PlanPart {
+  /** Offset within the structure, 0-based from its top-left. */
+  readonly col: number
+  readonly row: number
+  /** The structure's full footprint, so an edge is recognisable as an edge. */
+  readonly cols: number
+  readonly rows: number
+}
+
 export interface PlanCell {
   readonly col: number
   readonly row: number
   readonly kind: PlanKind
   /** The station or seat this cell belongs to; null for plain ground. */
   readonly of: string | null
+  /** Which tile of that structure this is; null for plain ground. */
+  readonly part: PlanPart | null
 }
 
 /** The two stone paths of §2.5, by row. */
@@ -160,17 +233,43 @@ export const PATH_ROWS: readonly number[] = [2, 7]
  * reads the same as every other station on the floor).
  */
 export function floorPlan(): readonly PlanCell[] {
-  const stationAt = new Map<string, Station>()
-  for (const [station, tile] of Object.entries(STATION_TILES) as [Station, TilePoint][]) {
+  const stationAt = new Map<string, { station: Station; part: PlanPart }>()
+  for (const station of STATIONS) {
     // `desk` is the nominal anchor for walk timing, not a drawn station: the
     // drawn desks are the seats.
     if (station === 'desk') continue
-    stationAt.set(`${tile.col},${tile.row}`, station)
+    // §5.4 gives every station a SIZE, not a tile — the Odeon is 96x64, the
+    // temple seat 64x64 — so the plan claims the whole footprint. Before M6.2
+    // each station held one tile and the size column was decorative.
+    const size = stationTiles(station)
+    const anchor = STATION_TILES[station]
+    for (const tile of stationFootprint(station)) {
+      stationAt.set(`${tile.col},${tile.row}`, {
+        station,
+        part: {
+          col: tile.col - anchor.col,
+          row: tile.row - (anchor.row - size.rows + 1),
+          cols: size.cols,
+          rows: size.rows
+        }
+      })
+    }
   }
-  const seatAt = new Map<string, string>()
+  const seatAt = new Map<string, { seat: string; part: PlanPart }>()
+  // A desk is 64x32 (§5.4): two tiles wide, which is why TERRACE_COLS are
+  // spaced two apart.
+  const deskCols = stationTiles('desk').cols
   for (let index = 1; index <= TERRACE_SEATS; index += 1) {
     const tile = seatTile(terraceSeat(index))
-    seatAt.set(`${tile.col},${tile.row}`, terraceSeat(index))
+    for (let dCol = 0; dCol < deskCols; dCol += 1) {
+      const col = tile.col + dCol
+      if (col > 0 && col < ROOM_COLS - 1) {
+        seatAt.set(`${col},${tile.row}`, {
+          seat: terraceSeat(index),
+          part: { col: dCol, row: 0, cols: deskCols, rows: 1 }
+        })
+      }
+    }
   }
 
   const cells: PlanCell[] = []
@@ -180,12 +279,14 @@ export function floorPlan(): readonly PlanCell[] {
       const edge = col === 0 || row === 0 || col === ROOM_COLS - 1 || row === ROOM_ROWS - 1
       const station = stationAt.get(key)
       const seat = seatAt.get(key)
-      if (edge) cells.push({ col, row, kind: 'wall', of: null })
-      else if (station) cells.push({ col, row, kind: 'station', of: station })
-      else if (seat) cells.push({ col, row, kind: 'seat', of: seat })
-      else if (inTempleRoom({ col, row })) cells.push({ col, row, kind: 'temple', of: null })
-      else if (PATH_ROWS.includes(row)) cells.push({ col, row, kind: 'path', of: null })
-      else cells.push({ col, row, kind: (col + row) % 2 === 0 ? 'floor-a' : 'floor-b', of: null })
+      const ground = { col, row, of: null, part: null } as const
+      if (edge) cells.push({ ...ground, kind: 'wall' })
+      else if (station) {
+        cells.push({ col, row, kind: 'station', of: station.station, part: station.part })
+      } else if (seat) cells.push({ col, row, kind: 'seat', of: seat.seat, part: seat.part })
+      else if (inTempleRoom({ col, row })) cells.push({ ...ground, kind: 'temple' })
+      else if (PATH_ROWS.includes(row)) cells.push({ ...ground, kind: 'path' })
+      else cells.push({ ...ground, kind: (col + row) % 2 === 0 ? 'floor-a' : 'floor-b' })
     }
   }
   return cells

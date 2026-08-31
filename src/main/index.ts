@@ -29,6 +29,9 @@ import { Gymnasium } from './gymnasium'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
 import { stoaCadenceTick } from './stoa-cadence'
+import { GYM_CHECK_EVERY_MS, gymCadenceTick } from './gym-cadence'
+import { attributeSpend, type AttributableAgent } from '../shared/attribution'
+import { tokensOf, ZERO_TOTALS } from '../shared/cost'
 import { checkIntake, checkStudiable } from '../shared/stoa'
 import { isImprovementRole } from '../shared/mode'
 import type { SourceView } from '../shared/stoa-view'
@@ -178,12 +181,28 @@ const steerNotes = new SteerNotes({
   }
 })
 
+/**
+ * The one place the mail count is read. The autonomy loop (ADR-0013), the push
+ * below and the `avatars:list` handler all go through it, so the floor's desk
+ * tray, the wake watchdog and a freshly-opened window can never disagree about
+ * how much mail is waiting.
+ *
+ * That it is ONE source is the point: the M5b close-out's standing lesson is
+ * that a fact supplied on the listing path and not on the others (or the
+ * reverse) is a seam no unit test sees.
+ */
+const pendingMailFor = (agentId: string): number => hermes?.pendingMailCount(agentId) ?? 0
+
 const avatarDirector = new AvatarDirector({
   // The floor and the autonomy loop read the SAME fact about pending work, so
   // they can never disagree about whether an agent is done (ADR-0013).
-  hasPendingWork: (agentId: string) => (hermes?.pendingMailCount(agentId) ? true : false),
+  hasPendingWork: (agentId: string) => pendingMailFor(agentId) > 0,
   onChange: (agentId: string, snapshot: AvatarSnapshot) => {
-    mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, { agentId, snapshot })
+    mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, {
+      agentId,
+      snapshot,
+      pendingMail: pendingMailFor(agentId)
+    })
     // The queue flushes off the same snapshots the floor draws, so held text
     // goes out exactly when the avatar says the agent is free (FR-1.3).
     commandQueue.observe(agentId, snapshot)
@@ -958,8 +977,39 @@ async function boot(): Promise<void> {
   // The Gymnasium (ADR-0015, FR-12). Its ledger seeds from the repository’s
   // own build-phase archive, so the improvement record is continuous from the
   // first commit rather than starting empty on the day the product ships.
+  /**
+   * Gym spend from the durable ledger, attributed by exact role (M6.7).
+   *
+   * `spendFor(...).cumulativeTotals` is the ledger's own durable read, so this
+   * is a fold over the record rather than a counter a restart would zero.
+   */
+  const gymnasiumSpend = (): { readonly tokens: number; readonly source: string } => {
+    const registry = agora?.registry().agents ?? {}
+    const roster: AttributableAgent[] = Object.entries(registry).map(([agentId, entry]) => ({
+      agentId,
+      role: (entry as { role?: string }).role ?? ''
+    }))
+    const attributed = attributeSpend(roster, 'gymnasium', (agentId) =>
+      // The ledger's own durable read — cumulative, so a restart cannot zero it
+      // (invariant §11).
+      tokensOf(costLedger?.spendFor(agentId, null).cumulativeTotals ?? ZERO_TOTALS)
+    )
+    return { tokens: attributed.tokens, source: attributed.source }
+  }
+
   gymnasium = new Gymnasium({
     agoraRoot: agora.root,
+    /**
+     * The carried item from the M5 close-out, closed (FR-12.5, R3).
+     *
+     * The figure comes from the DURABLE ledger (invariant §11, ADR-0011), not
+     * an in-memory counter, so a restart cannot reset it; and it is attributed
+     * by exact ROLE, so a hire whose name merely contains "improver" is not
+     * counted (the M5b audit's substring finding, one domain over). `source`
+     * rides with it because the brief is read ALOUD, where there is no card to
+     * hover: a bare total invites trust in a scope the listener cannot see.
+     */
+    gymSpend: () => gymnasiumSpend(),
     seedFrom: path.join(appRoot, 'docs', 'gymnasium'),
     // FR-13.4: a proposal citing a brief must cite one that exists.
     briefExists: (briefId) => stoa?.brief(briefId) !== null,
@@ -1056,6 +1106,32 @@ async function boot(): Promise<void> {
         plan: (sourceId) => stoa?.plan(sourceId) ?? { ok: false },
         mode: () => modes?.mode() ?? 'directed',
         appendLog: (draft) => agora?.appendLog(draft)
+      })
+    }
+  })
+
+  // SDD §7.6's missing arrow: "row `landed` ─► scheduler books metric check".
+  // Until M6.7 nothing booked one, so a landed change whose check nobody
+  // remembered to run quietly counted as a success — the gamed-metric failure
+  // ADR-0015 opens by warning about. The tick RAISES due checks on the record;
+  // the measured value is still supplied through `measure()`, because booking a
+  // check and deciding what the number was are different jobs.
+  scheduler.add({
+    id: 'gym-metric-check',
+    everyMs: GYM_CHECK_EVERY_MS,
+    // The SHIPPED tick (gym-cadence.ts), for the M5b reason: the suites
+    // exercise the same body this wiring runs.
+    run: () => {
+      gymCadenceTick({
+        rows: () => gymnasium?.rows() ?? [],
+        today: () => new Date().toISOString().slice(0, 10),
+        appendLog: (draft) => agora?.appendLog(draft),
+        onDue: (check) => {
+          reportDegradation(
+            'odeon',
+            `gymnasium: ${check.id}'s metric check was due ${check.due} — ${check.metric}`
+          )
+        }
       })
     }
   })
@@ -1422,6 +1498,7 @@ async function boot(): Promise<void> {
           )
         )
         .filter((spend): spend is NonNullable<typeof spend> => spend !== undefined),
+    pendingMailFor,
     hooksState: (): HooksState => ({
       endpoint: hookServer.endpoint(),
       driftWarnings: hookServer.driftWarnings(),

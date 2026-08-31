@@ -62,7 +62,13 @@ barge-in to the provider's interrupt primitive.
   - State-changing directives ("reassign the task"): Herald restates in one line,
     proceeds unless corrected within the utterance ("Reassigning to Iris.").
   - Gated/destructive/spend: **explicit repeat-back** — the Architect must speak the
-    named confirmation ("say *confirm delete*") — a bare "yes" is rejected (FR-8.4).
+    named confirmation ("say *confirm delete branch release 9*") — a bare "yes" is
+    rejected (FR-8.4). The token names the whole subject, so no two gates share one,
+    and a spend gate's amount is in the words that approve it. The match is **exact**:
+    an utterance that merely contains the token does not confirm, because a refusal
+    contains the token too. Each asking is single-use and lapses after two minutes.
+    A trailing "please" therefore costs a retry — the right side to err on for the
+    only spoken act that cannot be undone.
 - **Ambiguity:** one clarifying question maximum, then default to showing options on
   screen. The Herald never guesses on gated matters.
 - **Latency etiquette:** if data compile will exceed ~2 s, an immediate "One moment."

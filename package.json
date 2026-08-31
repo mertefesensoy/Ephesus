@@ -8,13 +8,14 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.web-test.json",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
     "postinstall": "node scripts/arm-hooks.cjs && node scripts/patch-node-pty.cjs && node scripts/sync-fonts.cjs && electron-rebuild -f"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.65.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/pixelify-sans": "^5.3.0",
     "@fontsource/press-start-2p": "^5.3.0",
@@ -22,6 +23,7 @@
     "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^13.0.3",
     "node-pty": "^1.1.0",
+    "openai": "^7.8.0",
     "pixi.js": "^8.20.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -39,6 +41,7 @@
     "electron-vite": "^5.0.0",
     "eslint": "^10.9.1",
     "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^26.1.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.68.0",

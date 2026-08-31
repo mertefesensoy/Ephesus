@@ -184,6 +184,8 @@ export interface IpcDeps {
   dismissFromHumanQueue(messageId: string): boolean
   /** Per-agent breaker state (ADR-0011). */
   breakerState(): readonly BreakerState[]
+  /** Mail waiting for one agent — UI-DESIGN §5.4's desk tray flag (ADR-0013). */
+  pendingMailFor(agentId: string): number
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
   hooksState(): HooksState
   /** Data-plane health — corrupt files, commit give-ups, runtime degradations (§7). */
@@ -313,7 +315,14 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle(IpcChannels.avatarsList, (): readonly AvatarUpdate[] =>
-    [...avatars.list()].map(([agentId, snapshot]) => ({ agentId, snapshot }))
+    // The mail count comes from the same source the push does (§5.4's desk
+    // tray IS `pendingMailCount`) — a listing path that omitted it would give
+    // a freshly-opened window flags-down desks until the next state change.
+    [...avatars.list()].map(([agentId, snapshot]) => ({
+      agentId,
+      snapshot,
+      pendingMail: deps.pendingMailFor(agentId)
+    }))
   )
 
   ipcMain.handle(IpcChannels.hooksState, (): HooksState => deps.hooksState())

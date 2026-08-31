@@ -6,15 +6,21 @@ import tseslint from 'typescript-eslint'
 //   1. renderer may not import from main/ (or electron directly — preload is the door)
 //   2. voice SDKs only under src/main/herald/
 //   3. engine SDKs only under src/main/engines/
+// The `group` patterns use gitignore semantics, so a bare `elevenlabs` also
+// matches `../../src/main/herald/elevenlabs` — our OWN adapter, which SDD §8
+// names `elevenlabs.ts`. The negations keep the rule about PACKAGES: a relative
+// import can never be an SDK import, and a test that imports the shipped
+// adapter is not what NFR-12 is guarding against.
+const notRelative = ['!./**', '!../**']
 const voiceSdkPatterns = [
   {
-    group: ['elevenlabs', 'elevenlabs/*', '@elevenlabs/*', 'openai', 'openai/*'],
+    group: ['elevenlabs', 'elevenlabs/*', '@elevenlabs/*', 'openai', 'openai/*', ...notRelative],
     message: 'Voice SDK imports are allowed only under src/main/herald/ (ENGINEERING-STANDARDS §1).'
   }
 ]
 const engineSdkPatterns = [
   {
-    group: ['@anthropic-ai/*', '@openai/codex*', '@google/gemini*'],
+    group: ['@anthropic-ai/*', '@openai/codex*', '@google/gemini*', ...notRelative],
     message:
       'Engine SDK imports are allowed only under src/main/engines/ (ENGINEERING-STANDARDS §1).'
   }

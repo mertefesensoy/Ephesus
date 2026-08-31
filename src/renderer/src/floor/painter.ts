@@ -1,7 +1,7 @@
 import { TILE_PX, type PlanCell, type PlanKind } from '../../../shared/floor'
-import type { TilesetMap } from '../../../shared/tileset'
+import { furnishingsOf, type TilesetMap } from '../../../shared/tileset'
 import { tokens } from '../tokens'
-import { atlasScale, frameFor, type AtlasFrame } from './atlas'
+import { atlasScale, frameFor, furnishingFrame, type AtlasFrame } from './atlas'
 
 /**
  * How a plan cell is painted — the *presentation* half of the seam
@@ -65,6 +65,33 @@ export function paintCell(cell: PlanCell, map: TilesetMap | null): readonly Pain
   return proceduralCell(cell, x, y)
 }
 
+/**
+ * Which sides of a cell are the outer edge of the structure it belongs to.
+ * A single-tile structure (or plain ground) is an edge on all four sides, so
+ * the one-tile case is unchanged from M1.
+ */
+function edges(cell: PlanCell): {
+  left: number
+  right: number
+  top: number
+  bottom: number
+} {
+  const part = cell.part
+  if (!part) return { left: 1, right: 1, top: 1, bottom: 1 }
+  return {
+    left: part.col === 0 ? 1 : 0,
+    right: part.col === part.cols - 1 ? 1 : 0,
+    top: part.row === 0 ? 1 : 0,
+    bottom: part.row === part.rows - 1 ? 1 : 0
+  }
+}
+
+/** The structure's anchor tile — bottom-left, the tile a walk targets. */
+function isAnchor(cell: PlanCell): boolean {
+  const part = cell.part
+  return !part || (part.col === 0 && part.row === part.rows - 1)
+}
+
 /** The 8-colour tiles the floor draws for itself (UI-DESIGN §7 fallback). */
 function proceduralCell(cell: PlanCell, x: number, y: number): readonly PaintOp[] {
   const ground: FillOp = {
@@ -83,19 +110,61 @@ function proceduralCell(cell: PlanCell, x: number, y: number): readonly PaintOp[
     ]
   }
   if (cell.kind === 'station') {
+    // A station is one STRUCTURE, not a grid of identical tiles (§5.4 sizes).
+    // The inset is applied only on the structure's outer edges, so a 96×64
+    // Odeon reads as one building rather than as six little ones.
+    const e = edges(cell)
     return [
       ground,
-      { op: 'fill', x: x + 2, y: y + 2, w: TILE_PX - 4, h: TILE_PX - 4, color: tokens.worldWall },
-      { op: 'fill', x: x + 6, y: y + 6, w: TILE_PX - 12, h: TILE_PX - 12, color: tokens.gold }
+      {
+        op: 'fill',
+        x: x + e.left * 2,
+        y: y + e.top * 2,
+        w: TILE_PX - (e.left + e.right) * 2,
+        h: TILE_PX - (e.top + e.bottom) * 2,
+        color: tokens.worldWall
+      },
+      // The marker sits once per structure, on its anchor tile, rather than
+      // once per tile — nine gold squares are not a station, they are wallpaper.
+      ...(isAnchor(cell)
+        ? [
+            {
+              op: 'fill' as const,
+              x: x + 6,
+              y: y + 6,
+              w: TILE_PX - 12,
+              h: TILE_PX - 12,
+              color: tokens.gold
+            }
+          ]
+        : [])
     ]
   }
   if (cell.kind === 'seat') {
     // A desk: a surface with a shadowed front edge, inset so the citizen
-    // sprite standing on the tile still reads as being *at* it.
+    // sprite standing on the tile still reads as being *at* it. A desk is
+    // 64×32 (§5.4), so the inset skips the seam between its two tiles —
+    // otherwise a row of desks paints as one long slab, which is exactly what
+    // the live floor showed when the footprints landed.
+    const e = edges(cell)
     return [
       { op: 'fill', x, y, w: TILE_PX, h: TILE_PX, color: tokens.worldTerraceB },
-      { op: 'fill', x: x + 3, y: y + 10, w: TILE_PX - 6, h: TILE_PX - 16, color: tokens.sand },
-      { op: 'fill', x: x + 3, y: y + TILE_PX - 8, w: TILE_PX - 6, h: 2, color: tokens.worldWall }
+      {
+        op: 'fill',
+        x: x + e.left * 3,
+        y: y + 10,
+        w: TILE_PX - (e.left + e.right) * 3,
+        h: TILE_PX - 16,
+        color: tokens.sand
+      },
+      {
+        op: 'fill',
+        x: x + e.left * 3,
+        y: y + TILE_PX - 8,
+        w: TILE_PX - (e.left + e.right) * 3,
+        h: 2,
+        color: tokens.worldWall
+      }
     ]
   }
   if (cell.kind === 'temple') {
@@ -112,4 +181,28 @@ function proceduralCell(cell: PlanCell, x: number, y: number): readonly PaintOp[
 /** Contract: the whole room's ops, in plan order. */
 export function paintPlan(plan: readonly PlanCell[], map: TilesetMap | null): readonly PaintOp[] {
   return plan.flatMap((cell) => paintCell(cell, map))
+}
+
+/**
+ * Contract: the §5.7 furnishings, painted over the floor.
+ *
+ * Furnishings are **place identity, not ambience**: furniture says what happens
+ * in a room. They are STATIC by construction — this returns blits, never an
+ * animation — because §1.2 bans decorative motion and the review rule cuts
+ * anything that moves without meaning.
+ *
+ * They come only from the pack's map, so a pack swap re-furnishes the floor
+ * without touching code; with no pack installed there are none, and the room
+ * still reads because the plan (not the furniture) is what says a station is
+ * there.
+ */
+export function paintFurnishings(map: TilesetMap | null): readonly PaintOp[] {
+  if (!map) return []
+  return furnishingsOf(map).map((item) => ({
+    op: 'blit' as const,
+    x: item.col * TILE_PX,
+    y: item.row * TILE_PX,
+    scale: atlasScale(map),
+    frame: furnishingFrame(map, item)
+  }))
 }

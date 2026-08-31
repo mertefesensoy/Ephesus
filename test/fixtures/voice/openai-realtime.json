@@ -1,0 +1,18 @@
+{
+  "note": "Recorded shapes for the OpenAI Realtime adapter's conformance run (TEST-STRATEGY §5). Duplex provider: one session carries speech both ways, so the cancel path is the provider's interrupt primitive rather than a stream abort.",
+  "provider": "openai-realtime",
+  "streamStartMs": 520,
+  "cancelMs": 90,
+  "transcript": [
+    { "text": "approve", "final": false, "confidence": null },
+    { "text": "approve the gate", "final": true, "confidence": null }
+  ],
+  "errors": {
+    "auth": {
+      "type": "error",
+      "error": { "type": "invalid_request_error", "code": "invalid_api_key" }
+    },
+    "transient": { "type": "error", "error": { "type": "server_error", "code": "internal_error" } },
+    "latency-breach": { "type": "response.done", "elapsedMs": 5100 }
+  }
+}

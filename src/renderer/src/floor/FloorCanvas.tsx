@@ -15,10 +15,37 @@ import {
   walkDurationMs
 } from '../../../shared/floor'
 import { badgeFor, floorCensus, glyphPixels, GLYPH_H, GLYPH_W } from '../../../shared/badges'
+import {
+  deskTray,
+  NO_FACTS,
+  stationCensus,
+  stationView,
+  type FloorFacts
+} from '../../../shared/stations'
+import { paintFurnishings } from './painter'
+import { stationMarks, stationOrigin, trayMarks } from './station-art'
 import { TEMPLE_SEAT, terraceSeat } from '../../../shared/seats'
 import type { AvatarUpdate } from '../../../shared/ipc'
+import { STATIONS, toolClassForStation } from '../../../shared/avatar'
+import {
+  ENVELOPE_MS,
+  budgetParticles,
+  envelopeFor,
+  envelopePose,
+  fanOffsets,
+  particlesUnderReducedMotion,
+  reduceEnvelope,
+  reduceWalk,
+  tokenFade,
+  tokenFor,
+  PARTICLES,
+  type EnvelopeFlight,
+  type ParticleSystem
+} from '../../../shared/vfx'
+import { colorOf, envelopeSprite, particleSprite, tokenSprite } from './vfx-art'
 import { tokens } from '../tokens'
 import {
+  CITIZEN_W,
   citizenSprite,
   directionFor,
   silhouetteFor,
@@ -26,9 +53,12 @@ import {
   type CitizenPalette,
   type Silhouette
 } from './citizen'
+import { overlayFor, overlayFrame, overlayPixels, OVERLAY_PX, OVERLAY_TOKEN_COLOR } from './overlay'
 import { paintPlan, type PaintOp } from './painter'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
+import { noteParity, parityLine, type ParityNotice } from './parity'
+import { EMPTY_FLOOR, factsOf, noteAvatar, noteGates, noteMeeting, type FloorState } from './facts'
 
 /**
  * The Terraces floor (UI-DESIGN §5). It is a **projection**: every avatar's
@@ -37,6 +67,17 @@ import { steppedProgress, STEPS_PER_TILE } from './walk'
  * the snapshots stop arriving, the floor stops — it has nothing of its own to
  * animate from, which is what "never invents motion" (SDD §10) means in code.
  */
+
+/**
+ * How often the floor re-reads the live meeting. The Odeon fill is a projection
+ * of `odeon.meeting()`, which has no push channel in SDD §5's event list, so it
+ * is polled at the same cadence the panels use. M6.7's scheduler work closes
+ * this (the `odeon:queue` badge carried item).
+ */
+const MEETING_POLL_MS = 5_000
+
+/** §8: how long a tray flash stands in for a flight. One §6 state-flip tick. */
+const FLASH_MS = 120
 
 /** Status colors from UI-DESIGN §2.4, one per avatar phase. */
 const PHASE_COLOR: Readonly<Record<string, number>> = {
@@ -98,6 +139,8 @@ function drawCitizen(
     silhouette: Silhouette
     palette: CitizenPalette
     phase: string
+    /** Milliseconds the avatar has been in this phase — the overlay's only clock. */
+    phaseElapsedMs: number
   }
 ): void {
   g.clear()
@@ -121,6 +164,181 @@ function drawCitizen(
   g.rect(10, -badgeH - 2, badgeW, 1).fill(tokens.ink900)
   for (const pixel of glyphPixels(badgeFor(opts.phase).glyph)) {
     g.rect(13 + pixel.x * 2, -badgeH + pixel.y * 2, 2, 2).fill(tokens.ink900)
+  }
+  drawOverlay(g, opts.phase, opts.phaseElapsedMs)
+}
+
+/**
+ * The §5.2 status overlay, in the head-room rows §5.1 keeps clear (0-7). It is
+ * a projection and nothing else: which mark comes from the phase, which frame
+ * comes from how long main says the phase has been current. This function owns
+ * no timer, so when the snapshots stop the overlay stops with them.
+ */
+function drawOverlay(g: Graphics, phase: string, phaseElapsedMs: number): void {
+  const spec = overlayFor(phase)
+  const frame = overlayFrame(spec, phaseElapsedMs)
+  if (frame === null) return
+  const swatch = OVERLAY_TOKEN_COLOR[spec.kind]
+  const color =
+    swatch === 'gold'
+      ? tokens.gold
+      : swatch === 'status'
+        ? (PHASE_COLOR[phase] ?? tokens.statusIdle)
+        : tokens.ink900
+  // Centred over the sprite, inside the eight reserved rows.
+  const originX = (CITIZEN_W - OVERLAY_PX) / 2
+  for (const pixel of overlayPixels(spec.kind, frame)) {
+    g.rect(originX + pixel.x, pixel.y, 1, 1).fill(color)
+  }
+}
+
+/**
+ * The §5.4 station states, drawn. This function decides nothing: it asks
+ * `stationView` what each station is doing — which cannot answer anything but
+ * `idle` without naming the event-plane fact behind it — and then asks
+ * `stationMarks` what that looks like.
+ */
+function drawStations(g: Graphics, facts: FloorFacts, nowMs: number): void {
+  g.clear()
+  for (const station of STATIONS) {
+    // `desk` is the walk-timing anchor, not a drawn station; the drawn desks
+    // are the seats, and their trays are drawn separately.
+    if (station === 'desk') continue
+    const view = stationView(station, facts, nowMs)
+    if (view.activity === 'idle') continue
+    const origin = stationOrigin(station, STATION_TILES[station])
+    for (const mark of stationMarks(view, facts.meetingAttendees)) {
+      g.rect(origin.x + mark.x, origin.y + mark.y, mark.w, mark.h).fill(mark.color)
+    }
+  }
+}
+
+/**
+ * The desk inbox trays — §5.4's "flag UP while unread mail waits". One per
+ * citizen on the floor, at that citizen's own seat, because the flag is a fact
+ * about that agent's inbox and not about the room.
+ */
+function drawTrays(
+  g: Graphics,
+  live: ReadonlyMap<string, AvatarSnapshot>,
+  mail: ReadonlyMap<string, number>,
+  seats: ReadonlyMap<string, { role: string; seat: string }>
+): void {
+  for (const agentId of live.keys()) {
+    const seat = seats.get(agentId)?.seat
+    if (!seat) continue
+    const tile = seatTile(seat)
+    const origin = stationOrigin('desk', tile)
+    for (const mark of trayMarks(deskTray(mail.get(agentId) ?? 0))) {
+      g.rect(origin.x + mark.x, origin.y + mark.y, mark.w, mark.h).fill(mark.color)
+    }
+  }
+}
+
+/** Where an agent's desk sits, in pixels — an envelope's endpoint. */
+function deskPoint(seat: string): { x: number; y: number } {
+  const tile = seatTile(seat)
+  return { x: tile.col * TILE_PX + TILE_PX / 2, y: tile.row * TILE_PX }
+}
+
+interface VfxFrame {
+  readonly now: number
+  readonly avatars: ReadonlyMap<string, AvatarSnapshot>
+  readonly mail: ReadonlyMap<string, number>
+  readonly seats: ReadonlyMap<string, { role: string; seat: string }>
+  readonly flights: Map<string, EnvelopeFlight>
+  readonly flashes: Map<string, number>
+  readonly reducedMotion: boolean
+}
+
+/**
+ * §5.3 carrying tokens, §5.5 envelopes and §5.6 particles.
+ *
+ * Every branch here is downstream of a fact: a token exists because a citizen
+ * is walking desk-ward from a station whose tool class has one; an envelope
+ * exists because the log recorded a delivery; a particle exists because a
+ * phase or a mail count says so. There is nothing this function can draw on its
+ * own initiative — which is the vfx-layer reading of NFR-13.
+ */
+function drawVfx(g: Graphics, frame: VfxFrame): void {
+  g.clear()
+  const templeTile = STATION_TILES['temple-seat']
+  const temple = { x: templeTile.col * TILE_PX, y: templeTile.row * TILE_PX }
+
+  // ── §5.5 envelopes.
+  for (const [id, flight] of frame.flights) {
+    const elapsed = frame.now - flight.startedMs
+    if (elapsed > ENVELOPE_MS) {
+      frame.flights.delete(id)
+      continue
+    }
+    const from = deskPoint(frame.seats.get(flight.from)?.seat ?? '')
+    const to = deskPoint(frame.seats.get(flight.to)?.seat ?? '')
+    const pose = envelopePose(flight, from, to, temple, elapsed)
+    for (const offset of fanOffsets(flight)) {
+      for (const rect of envelopeSprite(colorOf(flight.color), flight.wobble, pose.step)) {
+        g.rect(pose.x + offset + rect.x, pose.y + rect.y, rect.w, rect.h).fill(rect.color)
+      }
+    }
+  }
+
+  // ── §8: under reduced motion the flight is replaced by one flash on both
+  // trays. Same information, different presentation — never a faster flight.
+  for (const [who, at] of frame.flashes) {
+    if (frame.now - at > FLASH_MS) {
+      frame.flashes.delete(who)
+      continue
+    }
+    const seat = frame.seats.get(who)?.seat
+    if (!seat) continue
+    const point = deskPoint(seat)
+    g.rect(point.x - 4, point.y - 6, 8, 4).fill(tokens.gold)
+  }
+
+  for (const [agentId, snapshot] of frame.avatars) {
+    const seat = frame.seats.get(agentId)?.seat
+    if (!seat) continue
+    const desk = deskPoint(seat)
+
+    // ── §5.3: walking desk-ward after a tool completes, the citizen carries
+    // the token for the CLASS of tool it used — recovered from the station it
+    // is leaving, never from a tool name.
+    if (snapshot.walking && snapshot.station === 'desk' && !frame.reducedMotion) {
+      const carried = tokenFor(toolClassForStation(snapshot.origin))
+      if (carried) {
+        for (const rect of tokenSprite(carried.kind)) {
+          g.rect(desk.x + rect.x, desk.y - 20 + rect.y, rect.w, rect.h).fill(rect.color)
+        }
+      }
+    }
+    // The 3-frame fade after it lands on the desk.
+    if (!snapshot.walking && snapshot.station === 'desk' && !frame.reducedMotion) {
+      const carried = tokenFor(toolClassForStation(snapshot.origin))
+      const alpha = tokenFade(frame.now - snapshot.sinceMs)
+      if (carried && alpha !== null) {
+        for (const rect of tokenSprite(carried.kind)) {
+          g.rect(desk.x + rect.x, desk.y + rect.y, rect.w, rect.h).fill(rect.color, alpha)
+        }
+      }
+    }
+
+    // ── §5.6: at most two systems per citizen, each tied to a logged fact.
+    const wanted: ParticleSystem[] = []
+    if (snapshot.phase === 'success') wanted.push('sparkle')
+    if (snapshot.phase === 'working' && !snapshot.walking) wanted.push('dust')
+    if ((frame.mail.get(agentId) ?? 0) > 0) wanted.push('tray-pulse')
+    const systems = frame.reducedMotion ? particlesUnderReducedMotion() : budgetParticles(wanted)
+    for (const system of systems) {
+      const spec = PARTICLES[system]
+      const elapsed = frame.now - snapshot.sinceMs
+      const step = spec.repeats
+        ? Math.floor((frame.now % spec.durationMs) / (spec.durationMs / 2))
+        : Math.floor((elapsed / spec.durationMs) * spec.count)
+      if (!spec.repeats && (elapsed < 0 || elapsed > spec.durationMs)) continue
+      for (const rect of particleSprite(system, step)) {
+        g.rect(desk.x + rect.x, desk.y + rect.y, rect.w, rect.h).fill(rect.color)
+      }
+    }
   }
 }
 
@@ -147,10 +365,12 @@ interface DrawState {
  * nothing the renderer decides on its own about phase or destination.
  */
 function positionFor(
+  agentId: string,
   snapshot: AvatarSnapshot,
   seat: string,
   nowMs: number,
-  drawn: DrawState | undefined
+  drawn: DrawState | undefined,
+  reducedMotion: boolean
 ): DrawState & { frame: 0 | 1 | 2 | 3 } {
   // `desk` is the agent's OWN desk — its seat (SDD §4.1). Until M3.6 it was the
   // avatar's index in a Map, so a citizen changed desks whenever another agent
@@ -175,7 +395,15 @@ function positionFor(
 
   const duration = Math.max(walkDurationMs(snapshot.origin, snapshot.station), MS_PER_TILE)
   const steps = Math.max(1, Math.round((duration / MS_PER_TILE) * STEPS_PER_TILE))
-  const progress = steppedProgress(nowMs - snapshot.sinceMs, duration, steps)
+  // §8: "walks become teleports + labels". `reduceWalk` is the model's word for
+  // it — progress is 1 from the first frame, so the citizen is simply AT the
+  // destination and the interpolation never runs. The label half is the census
+  // (see `parity.ts`); this is the teleport half. Before M6.10 the renderer had
+  // no reduced-motion branch here at all, so §8's walk clause lived in the model
+  // and not on the floor.
+  const progress = reducedMotion
+    ? reduceWalk(agentId, snapshot.station).progress
+    : steppedProgress(nowMs - snapshot.sinceMs, duration, steps)
   const stepIndex = Math.round(progress * steps)
   return {
     x: fromX + (toX - fromX) * progress,
@@ -203,9 +431,40 @@ export function FloorCanvas(): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
   const [initError, setInitError] = useState<string | null>(null)
   const [population, setPopulation] = useState(0)
-  const avatarsRef = useRef<Map<string, AvatarSnapshot>>(new Map())
   const seatsRef = useRef<Map<string, { role: string; seat: string }>>(new Map())
-  const [census, setCensus] = useState(() => floorCensus([]))
+  /**
+   * §8's reduced-motion setting. Read from the OS preference rather than a new
+   * app setting: it is the signal the platform already gives, and honouring it
+   * needs no IPC. Live, because a reader may change it while the app is open.
+   */
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  )
+  // The log drain reads the setting without re-subscribing when it changes.
+  const reducedMotionRef = useRef(reducedMotion)
+  reducedMotionRef.current = reducedMotion
+  /**
+   * Envelopes in flight (§5.5). Keyed by message id, which is the LOG's id —
+   * nothing here is minted by the renderer, so replaying `log.jsonl` flies the
+   * same envelopes (NFR-13's spirit).
+   */
+  const flightsRef = useRef<Map<string, EnvelopeFlight>>(new Map())
+  // §8 parity lines awaiting the next census (see `parity.ts`).
+  const noticesRef = useRef<readonly ParityNotice[]>([])
+  /** Tray flashes standing in for flights under reduced motion (§8). */
+  const flashesRef = useRef<Map<string, number>>(new Map())
+  /**
+   * The floor's facts, folded by the pure reducers in `facts.ts`.
+   *
+   * They were assembled inline here until M6.10, which meant the renderer half
+   * of §5.4's named facts had no test: the close-out audit broke the tray flag
+   * and the brazier in this file and every suite stayed green.
+   */
+  const factsRef = useRef<FloorState>(EMPTY_FLOOR)
+  // Seeded with the same two halves `refresh()` writes, so the label reads the
+  // same way before the first snapshot arrives as it does after — a window with
+  // no bridge yet must not silently drop the station half of §8's parity.
+  const [census, setCensus] = useState(() => `${floorCensus([])} · ${stationCensus(NO_FACTS, 0)}`)
   const [overflow, setOverflow] = useState(0)
   const [tileset] = useState(tilesetState)
   const [sheetError, setSheetError] = useState<string | null>(null)
@@ -218,10 +477,131 @@ export function FloorCanvas(): ReactElement {
    * actually on the floor, not over every card ever seen.
    */
   const refresh = useCallback((): void => {
-    const live = avatarsRef.current
+    const live = factsRef.current.avatars
     setPopulation(live.size)
-    setCensus(floorCensus([...live.values()].map((snapshot) => snapshot.phase)))
+    // §8 information parity: what a station's animation says must also be
+    // reachable in words, or the floor's newest information is available only
+    // to people who can watch pixels move (NFR-15).
+    // §8's third segment: what the suppressed animations would have said. It is
+    // empty whenever motion is on, or when nothing recent is pending, so the
+    // label never carries a standing "nothing happened".
+    const parity = parityLine(noticesRef.current, Date.now())
+    setCensus(
+      `${floorCensus([...live.values()].map((snapshot) => snapshot.phase))} · ${stationCensus(
+        floorFacts(),
+        Date.now()
+      )}${parity === '' ? '' : ` · ${parity}`}`
+    )
     setOverflow(sharingDesks([...live.keys()].map((id) => seatsRef.current.get(id)?.seat ?? '')))
+  }, [])
+
+  /**
+   * The facts the §5.4 station model is allowed to see, assembled from what
+   * main has told this window. Nothing here is renderer opinion: every field
+   * traces to a snapshot, an approvals queue or a live meeting.
+   */
+  const floorFacts = useCallback((): FloorFacts => factsOf(factsRef.current), [])
+
+  /**
+   * The Watch brazier IS an open gate and the Odeon fills when a meeting
+   * gathers (§5.4), so the floor reads both facts from the same channels the
+   * panels do — never a second copy of either queue.
+   *
+   * `gate:open` pushes a nudge and the queue is re-read, which is the pattern
+   * the approvals panel already uses. The meeting has no push channel of its
+   * own (SDD §5's event list), so it is polled at the same cadence the panels
+   * poll — the `odeon:queue` badge carried item covers that gap and lands in
+   * M6.7.
+   */
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    let live = true
+    const reread = (): void => {
+      void eph.watch.approvals().then((gates) => {
+        if (!live) return
+        factsRef.current = noteGates(factsRef.current, gates)
+        refresh()
+      })
+      void eph.odeon.meeting().then((meeting) => {
+        if (!live) return
+        factsRef.current = noteMeeting(factsRef.current, meeting)
+        refresh()
+      })
+    }
+    reread()
+    const off = eph.watch.onGateChange(reread)
+    const timer = setInterval(reread, MEETING_POLL_MS)
+    return () => {
+      live = false
+      off()
+      clearInterval(timer)
+    }
+  }, [refresh])
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!query) return
+    const onChange = (): void => setReducedMotion(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  /**
+   * §5.5 envelopes, read off the event log.
+   *
+   * An envelope exists because `log.jsonl` records a delivery, a bounce or a
+   * hop-cap divert — there is no other way to make one fly, which is what keeps
+   * the vfx layer reconstructible from the record. `log:append` nudges and the
+   * tail is re-read, the same pattern the Activity panel uses; the cursor means
+   * an entry is turned into a flight exactly once.
+   */
+  useEffect(() => {
+    const eph = window.eph
+    if (!eph) return
+    let live = true
+    let cursor = -1
+    const drain = (): void => {
+      void eph.agora.log(cursor, 64).then((entries) => {
+        if (!live) return
+        for (const entry of entries) {
+          cursor = Math.max(cursor, entry.seq)
+          const flight = envelopeFor(entry)
+          if (!flight) continue
+          if (reducedMotionRef.current) {
+            // §8: the flight does not happen; both trays flash once, carrying
+            // the same information the moving form would have.
+            const flash = reduceEnvelope(flight)
+            for (const who of flash.at) flashesRef.current.set(who, Date.now())
+            // The flash is a colour on two trays and says nothing on its own.
+            // `flash.info` is the sentence the FLIGHT would have carried, and
+            // before M6.10 it was computed here and dropped, so the reduced
+            // form rendered with no label at all — §8 parity asserted in the
+            // model and absent on the floor.
+            noticesRef.current = noteParity(noticesRef.current, flash.info, Date.now())
+          } else {
+            // The flight is anchored where it was OBSERVED, not at the entry's
+            // own timestamp: a delivery seen more than one flight-length after
+            // it was logged would otherwise arrive already finished and never
+            // be seen at all. Every FACT still comes from the record — id,
+            // parties, act, colour, kind — so ADR-0014's "projection, never a
+            // second source of truth" holds; only the presentation clock is
+            // local, and `vfx.ts`'s contract says so since M6.10.
+            flightsRef.current.set(flight.id, { ...flight, startedMs: Date.now() })
+          }
+        }
+      })
+    }
+    // Seed from the tail, then follow — a window opened mid-run must not
+    // replay the whole day's mail as a storm of envelopes.
+    void eph.agora.log(-1, 1).then((entries) => {
+      cursor = entries[0]?.seq ?? -1
+    })
+    const off = eph.agora.onAppend(drain)
+    return () => {
+      live = false
+      off()
+    }
   }, [])
 
   // Roles decide silhouettes (§7) and seats decide desks (§5); the cards are
@@ -243,12 +623,29 @@ export function FloorCanvas(): ReactElement {
   useEffect(() => {
     const eph = window.eph
     if (!eph) return
+    const note = (update: AvatarUpdate): void => {
+      factsRef.current = noteAvatar(factsRef.current, update)
+      // §8's label half. Under reduced motion the walk does not play, so the
+      // only place "Iris is at the shelf" exists is the census — the moving
+      // form carried it in pixels, and suppressing motion must not cost the
+      // reader the fact (UI-DESIGN §8, NFR-15).
+      if (reducedMotionRef.current && update.snapshot.walking) {
+        noticesRef.current = noteParity(
+          noticesRef.current,
+          reduceWalk(update.agentId, update.snapshot.station).info,
+          Date.now()
+        )
+      }
+    }
+    // Both read paths set the mail count, not just this one: the M5b close-out's
+    // standing lesson is that a fact supplied on the listing path and not on the
+    // push (or the reverse) is a seam no unit test sees.
     void eph.avatars.list().then((updates: readonly AvatarUpdate[]) => {
-      for (const update of updates) avatarsRef.current.set(update.agentId, update.snapshot)
+      for (const update of updates) note(update)
       refresh()
     })
     return eph.avatars.onChange((update) => {
-      avatarsRef.current.set(update.agentId, update.snapshot)
+      note(update)
       refresh()
     })
   }, [refresh])
@@ -312,14 +709,40 @@ export function FloorCanvas(): ReactElement {
         app.stage.addChild(sheetTiles)
         drawRoom(ops, room, sheet, sheetTiles)
 
+        // §5.7 furnishings sit over the floor and under everything that moves:
+        // place identity, static, and only ever from the pack's own map.
+        drawRoom(paintFurnishings(map), room, sheet, sheetTiles)
+
+        // The §5.4 station layer, redrawn each tick because its states are
+        // projections of facts that change. It sits under the citizens so a
+        // brazier never paints over the guard standing at it.
+        const stationLayer = new Graphics()
+        app.stage.addChild(stationLayer)
+
         const citizens = new Container()
         app.stage.addChild(citizens)
+
+        // §5.5/§5.6 ride above the citizens: an envelope passes over the floor,
+        // and a sparkle is meant to be seen.
+        const vfxLayer = new Graphics()
+        app.stage.addChild(vfxLayer)
         const sprites = new Map<string, Graphics>()
         const drawStates = new Map<string, DrawState>()
 
         app.ticker.add(() => {
           const now = Date.now()
-          const live = avatarsRef.current
+          const live = factsRef.current.avatars
+          drawStations(stationLayer, floorFacts(), now)
+          drawTrays(stationLayer, live, factsRef.current.mail, seatsRef.current)
+          drawVfx(vfxLayer, {
+            now,
+            avatars: live,
+            mail: factsRef.current.mail,
+            seats: seatsRef.current,
+            flights: flightsRef.current,
+            flashes: flashesRef.current,
+            reducedMotion: reducedMotionRef.current
+          })
           let index = 0
           for (const [agentId, snapshot] of live) {
             let sprite = sprites.get(agentId)
@@ -337,7 +760,14 @@ export function FloorCanvas(): ReactElement {
               seat === TEMPLE_SEAT
                 ? tokens.terracotta
                 : (ACCENTS[index % ACCENTS.length] ?? tokens.aegean)
-            const pose = positionFor(snapshot, seat, now, previous)
+            const pose = positionFor(
+              agentId,
+              snapshot,
+              seat,
+              now,
+              previous,
+              reducedMotionRef.current
+            )
             drawStates.set(agentId, pose)
             drawCitizen(sprite, {
               dx: pose.x - (previous?.x ?? pose.x),
@@ -345,18 +775,27 @@ export function FloorCanvas(): ReactElement {
               frame: pose.frame,
               walking: snapshot.walking,
               silhouette: silhouetteFor(card?.role ?? ''),
+              // §5.1's five slots. The outline is always ink-900; `primary` is
+              // the agent's §2.3 accent (terracotta only in the temple seat);
+              // `secondary` is the trim every silhouette prop is cut from.
               palette: {
                 outline: tokens.ink900,
                 hair: tokens.ink700,
                 skin: tokens.sand,
-                accent,
-                detail: tokens.marble50
+                primary: accent,
+                secondary: tokens.marble50
               },
-              phase: snapshot.phase
+              phase: snapshot.phase,
+              // The overlay's whole clock: main stamped `sinceMs` when the
+              // phase began, so the frame on screen is a fact about the event
+              // plane, not about when this ticker happened to run.
+              phaseElapsedMs: now - snapshot.sinceMs
             })
             sprite.x = Math.round(pose.x)
             sprite.y = Math.round(pose.y) - 16
-            sprite.alpha = snapshot.phase === 'ghost' ? 0.45 : 1
+            // §5.2 gives the fade to the overlay table, so `ghost` at 50 % and
+            // `archived` at 0 are read from there rather than from a literal.
+            sprite.alpha = overlayFor(snapshot.phase).opacity
             sprite.visible = snapshot.phase !== 'archived'
             index += 1
           }

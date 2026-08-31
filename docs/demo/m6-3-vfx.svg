@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="850" shape-rendering="crispEdges">
+<rect width="100%" height="100%" fill="#f4ede0"/>
+<text x="8" y="24" font-family="monospace" font-size="14" fill="#221a14">Ephesus M6.3 — carrying tokens, envelopes, particles and reduced-motion parity</text>
+<text x="8" y="42" font-family="monospace" font-size="11" fill="#4a3b2c">every shape below comes from the shipped modules; every envelope is built from a log entry, not from the renderer</text>
+<text x="8" y="62" font-family="monospace" font-size="13" fill="#4a3b2c">§5.3 carrying tokens — keyed by tool CLASS, never a tool name</text>
+<text x="12" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">file</text>
+<rect x="12" y="90" width="36" height="36" fill="#e7dcc6"/>
+<rect x="14" y="92" width="24" height="32" fill="#fbf7ef"/>
+<rect x="14" y="92" width="24" height="8" fill="#4a3b2c"/>
+<rect x="14" y="116" width="24" height="8" fill="#4a3b2c"/>
+<text x="12" y="142" font-family="monospace" font-size="11" fill="#4a3b2c">a scroll</text>
+<text x="130" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">shell</text>
+<rect x="130" y="90" width="36" height="36" fill="#e7dcc6"/>
+<rect x="132" y="92" width="32" height="24" fill="#221a14"/>
+<rect x="136" y="100" width="8" height="4" fill="#fbf7ef"/>
+<rect x="148" y="108" width="12" height="4" fill="#fbf7ef"/>
+<text x="130" y="142" font-family="monospace" font-size="11" fill="#4a3b2c">a wax tablet</text>
+<text x="248" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">web</text>
+<rect x="248" y="90" width="36" height="36" fill="#e7dcc6"/>
+<rect x="258" y="92" width="8" height="8" fill="#9cc4d4"/>
+<rect x="254" y="100" width="16" height="16" fill="#2e6f8e"/>
+<rect x="258" y="116" width="8" height="8" fill="#9cc4d4"/>
+<text x="248" y="142" font-family="monospace" font-size="11" fill="#4a3b2c">an amphora</text>
+<text x="366" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">mcp</text>
+<rect x="366" y="90" width="36" height="36" fill="#e7dcc6"/>
+<rect x="376" y="92" width="8" height="8" fill="#7b6bc4"/>
+<rect x="368" y="100" width="24" height="8" fill="#7b6bc4"/>
+<rect x="376" y="108" width="8" height="8" fill="#7b6bc4"/>
+<text x="366" y="142" font-family="monospace" font-size="11" fill="#4a3b2c">an integration token</text>
+<text x="484" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">ledger</text>
+<rect x="484" y="90" width="36" height="36" fill="#e7dcc6"/>
+<rect x="486" y="92" width="32" height="24" fill="#7a8b3d"/>
+<rect x="494" y="96" width="4" height="16" fill="#221a14"/>
+<rect x="502" y="96" width="4" height="16" fill="#221a14"/>
+<rect x="510" y="96" width="4" height="16" fill="#221a14"/>
+<text x="484" y="142" font-family="monospace" font-size="11" fill="#4a3b2c">a tally tablet</text>
+<text x="602" y="82" font-family="monospace" font-size="11" fill="#4a3b2c">meeting</text>
+<text x="602" y="112" font-family="monospace" font-size="11" fill="#4a3b2c">(no token — §5.3</text>
+<text x="602" y="126" font-family="monospace" font-size="11" fill="#4a3b2c">gives none)</text>
+<text x="8" y="176" font-family="monospace" font-size="13" fill="#4a3b2c">§5.3 drop: a stepped 3-frame fade, then gone</text>
+<rect x="12" y="184" width="36" height="36" fill="#e7dcc6"/>
+<g opacity="1">
+<rect x="14" y="186" width="24" height="32" fill="#fbf7ef"/>
+<rect x="14" y="186" width="24" height="8" fill="#4a3b2c"/>
+<rect x="14" y="210" width="24" height="8" fill="#4a3b2c"/>
+</g>
+<text x="12" y="236" font-family="monospace" font-size="11" fill="#4a3b2c">frame 0</text>
+<rect x="102" y="184" width="36" height="36" fill="#e7dcc6"/>
+<g opacity="0.6666666666666666">
+<rect x="104" y="186" width="24" height="32" fill="#fbf7ef"/>
+<rect x="104" y="186" width="24" height="8" fill="#4a3b2c"/>
+<rect x="104" y="210" width="24" height="8" fill="#4a3b2c"/>
+</g>
+<text x="102" y="236" font-family="monospace" font-size="11" fill="#4a3b2c">frame 1</text>
+<rect x="192" y="184" width="36" height="36" fill="#e7dcc6"/>
+<g opacity="0.3333333333333333">
+<rect x="194" y="186" width="24" height="32" fill="#fbf7ef"/>
+<rect x="194" y="186" width="24" height="8" fill="#4a3b2c"/>
+<rect x="194" y="210" width="24" height="8" fill="#4a3b2c"/>
+</g>
+<text x="192" y="236" font-family="monospace" font-size="11" fill="#4a3b2c">frame 2</text>
+<rect x="282" y="184" width="36" height="36" fill="#e7dcc6"/>
+<text x="286" y="212" font-family="monospace" font-size="11" fill="#4a3b2c">gone</text>
+<text x="282" y="236" font-family="monospace" font-size="11" fill="#4a3b2c">frame 3</text>
+<text x="8" y="274" font-family="monospace" font-size="13" fill="#4a3b2c">§5.5 envelopes — colour is the speech act, read off the log</text>
+<text x="12" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">request</text>
+<rect x="12" y="298" width="32" height="24" fill="#2e6f8e"/>
+<rect x="12" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="24" y="302" width="8" height="8" fill="#221a14"/>
+<text x="12" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">aegean</text>
+<text x="116" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">inform</text>
+<rect x="116" y="298" width="32" height="24" fill="#7a8b3d"/>
+<rect x="116" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="128" y="302" width="8" height="8" fill="#221a14"/>
+<text x="116" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">olive</text>
+<text x="220" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">propose</text>
+<rect x="220" y="298" width="32" height="24" fill="#d9a441"/>
+<rect x="220" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="232" y="302" width="8" height="8" fill="#221a14"/>
+<text x="220" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">gold</text>
+<text x="324" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">query</text>
+<rect x="324" y="298" width="32" height="24" fill="#2e6f8e"/>
+<rect x="324" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="336" y="302" width="8" height="8" fill="#221a14"/>
+<text x="324" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">aegean</text>
+<text x="428" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">agree</text>
+<rect x="428" y="298" width="32" height="24" fill="#4e9b6f"/>
+<rect x="428" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="440" y="302" width="8" height="8" fill="#221a14"/>
+<text x="428" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">laurel</text>
+<text x="532" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">refuse</text>
+<rect x="532" y="298" width="32" height="24" fill="#8e3b4a"/>
+<rect x="532" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="544" y="302" width="8" height="8" fill="#221a14"/>
+<text x="532" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">wine</text>
+<text x="636" y="292" font-family="monospace" font-size="11" fill="#4a3b2c">done</text>
+<rect x="636" y="298" width="32" height="24" fill="#7a8b3d"/>
+<rect x="636" y="298" width="32" height="4" fill="#221a14"/>
+<rect x="648" y="302" width="8" height="8" fill="#221a14"/>
+<text x="636" y="336" font-family="monospace" font-size="11" fill="#4a3b2c">olive</text>
+<text x="12" y="372" font-family="monospace" font-size="11" fill="#4a3b2c">bounce</text>
+<rect x="36" y="382" width="32" height="24" fill="#8e3b4a"/>
+<rect x="36" y="382" width="32" height="4" fill="#221a14"/>
+<rect x="48" y="386" width="8" height="8" fill="#221a14"/>
+<text x="12" y="418" font-family="monospace" font-size="11" fill="#4a3b2c">mason could not reach artemis: inform</text>
+<text x="212" y="372" font-family="monospace" font-size="11" fill="#4a3b2c">divert</text>
+<rect x="236" y="378" width="32" height="24" fill="#7a8b3d"/>
+<rect x="236" y="378" width="32" height="4" fill="#221a14"/>
+<rect x="248" y="382" width="8" height="8" fill="#221a14"/>
+<text x="212" y="418" font-family="monospace" font-size="11" fill="#4a3b2c">mason was diverted from artemis: inform</text>
+<text x="412" y="372" font-family="monospace" font-size="11" fill="#4a3b2c">broadcast</text>
+<rect x="404" y="378" width="32" height="24" fill="#7a8b3d"/>
+<rect x="404" y="378" width="32" height="4" fill="#221a14"/>
+<rect x="416" y="382" width="8" height="8" fill="#221a14"/>
+<rect x="436" y="378" width="32" height="24" fill="#7a8b3d"/>
+<rect x="436" y="378" width="32" height="4" fill="#221a14"/>
+<rect x="448" y="382" width="8" height="8" fill="#221a14"/>
+<rect x="468" y="378" width="32" height="24" fill="#7a8b3d"/>
+<rect x="468" y="378" width="32" height="4" fill="#221a14"/>
+<rect x="480" y="382" width="8" height="8" fill="#221a14"/>
+<text x="412" y="418" font-family="monospace" font-size="11" fill="#4a3b2c">mason sent broadcast: inform</text>
+<text x="8" y="452" font-family="monospace" font-size="13" fill="#4a3b2c">§5.5 flight — 400 ms, stepped arc; the divert turns to the temple</text>
+<rect x="12" y="500" width="8" height="6" fill="#7a8b3d"/>
+<rect x="84" y="496" width="8" height="6" fill="#7a8b3d"/>
+<rect x="156" y="494" width="8" height="6" fill="#7a8b3d"/>
+<rect x="228" y="494" width="8" height="6" fill="#7a8b3d"/>
+<rect x="300" y="496" width="8" height="6" fill="#7a8b3d"/>
+<rect x="372" y="500" width="8" height="6" fill="#7a8b3d"/>
+<text x="400" y="480" font-family="monospace" font-size="11" fill="#4a3b2c">deliver</text>
+<rect x="12" y="560" width="8" height="6" fill="#8e3b4a"/>
+<rect x="84" y="556" width="8" height="6" fill="#8e3b4a"/>
+<rect x="156" y="554" width="8" height="6" fill="#8e3b4a"/>
+<rect x="192" y="566" width="8" height="6" fill="#8e3b4a"/>
+<rect x="192" y="584" width="8" height="6" fill="#8e3b4a"/>
+<rect x="192" y="610" width="8" height="6" fill="#8e3b4a"/>
+<text x="400" y="540" font-family="monospace" font-size="11" fill="#4a3b2c">divert → temple</text>
+<text x="8" y="606" font-family="monospace" font-size="13" fill="#4a3b2c">§5.6 — three systems, and no fourth</text>
+<text x="12" y="624" font-family="monospace" font-size="11" fill="#4a3b2c">sparkle — a tool or task finishing</text>
+<rect x="16" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="48" y="664" width="4" height="4" fill="#d9a441"/>
+<rect x="60" y="660" width="4" height="4" fill="#d9a441"/>
+<rect x="72" y="656" width="4" height="4" fill="#d9a441"/>
+<rect x="84" y="652" width="4" height="4" fill="#d9a441"/>
+<rect x="72" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="104" y="660" width="4" height="4" fill="#d9a441"/>
+<rect x="116" y="656" width="4" height="4" fill="#d9a441"/>
+<rect x="128" y="652" width="4" height="4" fill="#d9a441"/>
+<rect x="140" y="648" width="4" height="4" fill="#d9a441"/>
+<rect x="128" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="160" y="656" width="4" height="4" fill="#d9a441"/>
+<rect x="172" y="652" width="4" height="4" fill="#d9a441"/>
+<rect x="184" y="648" width="4" height="4" fill="#d9a441"/>
+<rect x="196" y="644" width="4" height="4" fill="#d9a441"/>
+<text x="232" y="624" font-family="monospace" font-size="11" fill="#4a3b2c">dust — arriving at a station</text>
+<rect x="236" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="268" y="664" width="4" height="4" fill="#d3c4a5"/>
+<rect x="284" y="668" width="4" height="4" fill="#d3c4a5"/>
+<rect x="300" y="664" width="4" height="4" fill="#d3c4a5"/>
+<rect x="292" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="324" y="660" width="4" height="4" fill="#d3c4a5"/>
+<rect x="340" y="664" width="4" height="4" fill="#d3c4a5"/>
+<rect x="356" y="660" width="4" height="4" fill="#d3c4a5"/>
+<rect x="348" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="380" y="656" width="4" height="4" fill="#d3c4a5"/>
+<rect x="396" y="660" width="4" height="4" fill="#d3c4a5"/>
+<rect x="412" y="656" width="4" height="4" fill="#d3c4a5"/>
+<text x="452" y="624" font-family="monospace" font-size="11" fill="#4a3b2c">tray-pulse — mail waiting in the inbox tray</text>
+<rect x="456" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="504" y="660" width="4" height="4" fill="#d9a441"/>
+<rect x="512" y="632" width="48" height="32" fill="#e7dcc6"/>
+<rect x="568" y="632" width="48" height="32" fill="#e7dcc6"/>
+<text x="8" y="726" font-family="monospace" font-size="13" fill="#4a3b2c">§8 reduced motion — the flight is dropped, the information is not</text>
+<text x="12" y="748" font-family="monospace" font-size="11" fill="#4a3b2c">bounce: tray flash at mason + artemis — "mason could not reach artemis: inform"</text>
+<text x="660" y="748" font-family="monospace" font-size="11" fill="#4a3b2c">parity: identical</text>
+<text x="12" y="770" font-family="monospace" font-size="11" fill="#4a3b2c">divert: tray flash at mason + artemis — "mason was diverted from artemis: inform"</text>
+<text x="660" y="770" font-family="monospace" font-size="11" fill="#4a3b2c">parity: identical</text>
+<text x="12" y="792" font-family="monospace" font-size="11" fill="#4a3b2c">broadcast: tray flash at mason + broadcast — "mason sent broadcast: inform"</text>
+<text x="660" y="792" font-family="monospace" font-size="11" fill="#4a3b2c">parity: identical</text>
+<text x="12" y="814" font-family="monospace" font-size="11" fill="#4a3b2c">deliver: tray flash at mason + artemis — "mason sent artemis: inform"</text>
+<text x="660" y="814" font-family="monospace" font-size="11" fill="#4a3b2c">parity: identical</text>
+</svg>

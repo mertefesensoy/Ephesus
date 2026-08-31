@@ -12,6 +12,7 @@ import {
   seatTile,
   sharingDesks,
   STATION_TILES,
+  stationTiles,
   TEMPLE_ROOM,
   TERRACE_COLS,
   TERRACE_ROWS,
@@ -185,10 +186,18 @@ describe('the terrace block', () => {
     }
   })
 
-  it('draws a desk for every seat it can hold', () => {
+  it('draws a desk for every seat it can hold, at the §5.4 size', () => {
     const seats = floorPlan().filter((cell) => cell.kind === 'seat')
-    expect(seats).toHaveLength(TERRACE_SEATS)
     expect(new Set(seats.map((cell) => cell.of)).size).toBe(TERRACE_SEATS)
+    // A desk is 64×32 (UI-DESIGN §5.4), i.e. two tiles wide — which is why
+    // TERRACE_COLS are spaced two apart. Before M6.2 each seat held one tile
+    // and the size column was decorative.
+    const perDesk = stationTiles('desk').cols
+    expect(perDesk).toBe(2)
+    expect(seats).toHaveLength(TERRACE_SEATS * perDesk)
+    const byDesk = new Map<string, number>()
+    for (const cell of seats) byDesk.set(cell.of ?? '', (byDesk.get(cell.of ?? '') ?? 0) + 1)
+    for (const [seat, count] of byDesk) expect(count, seat).toBe(perDesk)
   })
 })
 

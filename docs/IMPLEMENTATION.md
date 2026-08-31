@@ -126,31 +126,67 @@ machine). ElevenLabs adapter (STT + streamed TTS), OpenAI Realtime adapter (dupl
 Persona/phrase-book assets. Spoken briefings + voice approvals + meeting narration.
 Optional local wake word. Text-parity degradation.
 
-**Exit:** SRS §6.2 standup test and §6.5 failover test pass live; S-FAILOVER passes
-scripted; a full day driven by voice without touching the keyboard for status.
+**Exit (AMENDED 2026-08-30 by Architect decision — see the note below):** every
+scenario and conformance suite green, S-FAILOVER among them; the floor at the
+UI-DESIGN v2 bar with its evidence committed; the close-out audit's findings
+fixed with named, mutation-checked regressions.
 
-## M7 — The Harbor + missions: the working company (≈ 3–4 weeks) — *differentiator*
+> **What this amendment does and does not do.** The original exit read: *"SRS §6.2
+> standup test and §6.5 failover test pass **live**; S-FAILOVER passes scripted; a
+> full day driven by voice without touching the keyboard for status."* All three
+> live clauses depend on the Herald being reachable from the application, and
+> M6.9 — which wires it — was **deferred indefinitely** on 2026-08-30 because the
+> Herald is not a current priority. They were therefore unreachable by
+> construction, not merely unperformed, and BUILD-PROMPT §5 would have held M6
+> open forever against a bar nobody intended to meet.
+>
+> So M6's **milestone gate** becomes the mechanical bar above, which is met.
+> **SRS §6.2 and §6.5 are NOT satisfied and are not removed** — they are
+> system-level v1 acceptance criteria (SRS §6) and they stay exactly as written,
+> owed, now attached to M6.9 wherever it lands. The voice-driven day rides with
+> them. This is a change to when the milestone closes, not a claim that the voice
+> subsystem was demonstrated; the M6 close-out audit exists precisely because a
+> record once said the latter.
 
-Profile schema + loader + activation UI. **Skeleton Crew** built-in profile (health
+## M7 — The Harbor + the two outward missions (≈ 2 weeks) — *differentiator*
+
+> **Split from a single M7 on 2026-08-29** (Architect decision at the M6
+> close-out), at the seam between the missions that face the Architect's *other*
+> repositories and the one that faces this one. The original M7 put the one-hour
+> company test, the recursive test, a chat bridge and three-OS packaging behind a
+> single exit gate; neither half could be verified without the other being
+> finished. The M5/M5b precedent applies.
+
+Profile schema + loader + activation UI, per-target instantiation and
+stricter-wins autonomy composition. **Skeleton Crew** built-in profile (health
 watcher, CI babysitter, dependency updates, incident playbooks + severity
-escalation). **Front Office** built-in profile (issue/PR triage, reply drafting with
-autonomy levels, docs/changelog sync, release-prep checklist). **Recursive
-Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa and modes):
-researcher + improver roles, mode-gated activation, delivery as PRs under the
-company identity (FR-10.5, ADR-0020 — machine account, broker-held token, the
-attribution carve-out in `check-attribution.cjs` lands here). GitHub ingestion via
-`gh`. Chat bridge (remote conversation, briefs, approvals; `remote` tagging).
-Shareable hires/profiles (export/import, human-confirmed). Packaging: signed builds
-for macOS/Windows/Linux, one-click update check.
+escalation). **Front Office** built-in profile (issue/PR triage, reply drafting
+with autonomy levels, docs/changelog sync, release-prep checklist). GitHub
+ingestion via `gh`. Shareable hires/profiles (export/import, human-confirmed).
 
-**Exit:** **The one-hour company test (SRS §6.1) passes on a real repo.** S-PROFILE
-and S-RECURSE pass; the recursive test (SRS §6.10) lands one real chain — URL on
-the Stoa panel → brief → approved proposal → company-identity PR → Architect
-merge; a real overnight run produces a truthful morning brief on the phone. The
-Gymnasium and Stoa cadence triggers are live under company-mode governance
-(ADR-0018 — they fire autonomously only in `improving`, which the proof gate
-§6.9 must first unlock), and the two-week gymnasium acceptance test
-(SRS §6.7) is booked as the final v1 acceptance gate.
+**Exit:** **The one-hour company test (SRS §6.1) passes on a real repo** — the
+crew detects a broken test, fixes it or opens a fix PR, files the memo if policy
+was crossed, and the next briefing narrates the incident accurately from the log,
+with zero un-gated destructive actions. S-PROFILE passes; E-PLAYBOOK's drill is
+recorded.
+
+## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
+
+**Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa
+and modes): researcher + improver roles, mode-gated activation, delivery as PRs
+under the company identity (FR-10.5, ADR-0020 — machine account, broker-held
+token, the attribution carve-out in `check-attribution.cjs` lands here). Chat
+bridge (remote conversation, briefs, approvals; `remote` tagging). Packaging:
+signed builds for macOS/Windows/Linux, one-click update check.
+
+**Exit:** S-RECURSE passes; the recursive test (SRS §6.10) lands one real chain —
+URL on the Stoa panel → brief → approved proposal → company-identity PR →
+Architect merge; a real overnight run produces a truthful morning brief on the
+phone. The Gymnasium and Stoa cadence triggers are live under company-mode
+governance (ADR-0018 — they fire autonomously only in `improving`, which the
+proof gate §6.9 must first unlock), and the two-week gymnasium acceptance test
+(SRS §6.7) is booked as the final v1 acceptance gate. **This is the v1
+acceptance boundary.**
 
 ## Post-v1 horizon (recorded, not planned)
 
@@ -184,10 +220,12 @@ bridges · multi-machine crews.
 ## Dependency order (what blocks what)
 
 ```
-M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7
-            │          │      ▲ └► M5b ──┘   (Stoa + modes need only Gymnasium v1;
-            │          └──────┘              M7's cadences run under M5b's modes)
-            └── fake-engine rig ─────────┘   (everything tests against it)
+M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M7b
+            │          │      ▲ └► M5b ──┘         (Stoa + modes need only Gymnasium
+            │          └──────┘     └──────────────► v1; M7b's cadences and its
+            │                                        Recursive Improvement profile
+            │                                        run under M5b's modes)
+            └── fake-engine rig ─────────┘          (everything tests against it)
 ```
 
 The only cross-cutting asset built early and maintained forever is the fake-engine

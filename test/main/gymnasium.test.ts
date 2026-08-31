@@ -1,3 +1,5 @@
+import { compileFacts } from '../../src/shared/brief'
+import { TASKS_SCHEMA_VERSION } from '../../src/shared/tasks'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -82,7 +84,11 @@ function rig(over: { seed?: string | null; spend?: number } = {}): Rig {
     seedFrom,
     // Omitted when a case sets no spend, so slice() honestly reports the
     // missing attribution as null (finding 2) rather than a constant zero.
-    ...(over.spend === undefined ? {} : { gymSpend: () => over.spend as number }),
+    ...(over.spend === undefined
+      ? {}
+      : {
+          gymSpend: () => ({ tokens: over.spend as number, source: 'cost ledger — 1 agent (a-1)' })
+        }),
     onLogEvent: (draft) => logs.push(draft),
     onDegraded: (detail) => degradations.push(detail),
     now: () => new Date('2026-08-28T12:00:00.000Z')
@@ -219,8 +225,34 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     if (!outcome.ok) expect(outcome.reasons.join(' ')).toContain('R3')
   })
 
-  it('reports the slice for the standup brief (FR-12.5)', () => {
-    expect(rig({ spend: 25 }).gym.slice()).toMatchObject({ spentTokens: 25 })
+  it('reports the slice for the standup brief (FR-12.5), with its source', () => {
+    // M6.7 closed the carried item: the number is back AND says where it came
+    // from, because the brief is read aloud and there is no card to hover.
+    expect(rig({ spend: 25 }).gym.slice()).toMatchObject({
+      spentTokens: 25,
+      spendSource: 'cost ledger — 1 agent (a-1)'
+    })
+  })
+
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // The producer emitted `source`; `BriefInput.gymSlice` reads `spendSource`.
+  // Both sides had passing tests and the feature was dead, because object
+  // spread bypasses excess-property checking and nothing ran the two together.
+  // This drives the REAL slice into the REAL compiler, which is the only shape
+  // of test that could have caught it.
+  it('names its source in the compiled brief, through the real seam', () => {
+    const slice = rig({ spend: 25 }).gym.slice()
+    const facts = compileFacts({
+      events: [],
+      ledger: { tasks: [], schemaVersion: TASKS_SCHEMA_VERSION },
+      openGates: [],
+      openMemos: [],
+      spend: [],
+      // Spread exactly as `src/main/index.ts` composes it.
+      gymSlice: { ...slice, open: 0 }
+    })
+    const fact = facts.find((f) => f.refs.includes('gym:slice'))
+    expect(fact?.what).toContain('cost ledger')
   })
 
   it('reports NULL, not zero, when nothing attributes gym spend yet', () => {
@@ -228,6 +260,7 @@ describe('a proposal is refused before a human ever sees it (FR-12.2)', () => {
     // source, and the brief was narrating the resulting constant 0 as if it
     // were a ledger figure. A missing measurement must read as missing.
     expect(rig().gym.slice().spentTokens).toBeNull()
+    expect(rig().gym.slice().spendSource).toBeNull()
   })
 })
 

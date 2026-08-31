@@ -38,7 +38,7 @@ function map() {
 }
 
 function cell(over: Partial<PlanCell> = {}): PlanCell {
-  return { col: 0, row: 0, kind: 'wall', of: null, ...over }
+  return { col: 0, row: 0, kind: 'wall', of: null, part: null, ...over }
 }
 
 describe('the tile map is validated like any other file the harness reads', () => {
@@ -108,11 +108,11 @@ describe('atlas arithmetic', () => {
   })
 
   it('prefers a pack’s specific station tile over its generic one', () => {
-    expect(frameKeysFor(cell({ kind: 'station', of: 'odeon' }))).toEqual([
+    expect(frameKeysFor(cell({ kind: 'station', of: 'odeon', part: null }))).toEqual([
       'station:odeon',
       'station'
     ])
-    expect(frameIndexFor(map(), cell({ kind: 'station', of: 'odeon' }))).toBe(21)
+    expect(frameIndexFor(map(), cell({ kind: 'station', of: 'odeon', part: null }))).toBe(21)
     expect(frameIndexFor(map(), cell({ kind: 'station', of: 'shelf' }))).toBe(20)
   })
 
@@ -203,6 +203,43 @@ describe('the floor says which art it is drawing (invariant §7)', () => {
     expect(state.installed).toBe(true)
     expect(state.sheetUrl).toBe('/pack.png')
     expect(state.map?.name).toBe('Test Pack')
+    expect(state.note).toBe('tileset: Test Pack')
+  })
+
+  // ── The M6 close-out audit's finding, as a regression ─────────────────────
+  // `validateCompositions` had only TEST callers: a pack shipping a wrong-sized
+  // composition really did fall back to the procedural painter, and really did
+  // not say so. Invariant §7 requires the saying-so half too.
+  it('SAYS SO when a composition is the wrong size, rather than degrading in silence', () => {
+    const state = resolveTileset(
+      { '../assets/tileset/pack.png': '/pack.png' },
+      {
+        '../assets/tileset/pack.tiles.json': {
+          ...MAP,
+          compositions: { 'station:odeon': { cols: 2, rows: 2, frames: [1, 2, 3, 4] } }
+        }
+      }
+    )
+    // The pack still installs — one wrong entry must not cost the whole pack.
+    expect(state.installed).toBe(true)
+    // But the note carries the degradation, because the status strip shows it.
+    expect(state.note).toContain('procedural')
+    expect(state.note).toContain('station:odeon')
+    expect(state.note).toContain('does not match')
+  })
+
+  it('says nothing extra when every composition is sound', () => {
+    const state = resolveTileset(
+      { '../assets/tileset/pack.png': '/pack.png' },
+      {
+        '../assets/tileset/pack.tiles.json': {
+          ...MAP,
+          compositions: {
+            'station:odeon': { cols: 3, rows: 2, frames: [1, 2, 3, 4, 5, 6] }
+          }
+        }
+      }
+    )
     expect(state.note).toBe('tileset: Test Pack')
   })
 

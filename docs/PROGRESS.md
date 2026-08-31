@@ -3097,7 +3097,7 @@ TEST-STRATEGY §3/§4/§5. **Art first** (Architect decision 2026-08-29): the
 company's face reaches the licensed-art bar before the voice lands. Execute in
 order; every package tests against the fake engine per-PR.
 
-- [ ] **M6.1 Citizens v2 — the MD-grade procedural sprite** — implement
+- [x] **M6.1 Citizens v2 — the MD-grade procedural sprite** — implement
       UI-DESIGN §5.1 (anatomy, 8 drawn directions, 4-frame cycles, stepped
       ±1 px bob phased to the 250 ms tile walk) and §5.2 (status overlays as
       pure projections of the SDD §6 avatar states). Role silhouettes per the
@@ -3110,7 +3110,31 @@ order; every package tests against the fake engine per-PR.
       over every avatar state; ≤5 colors per direction/frame/role; silhouette
       distinctness; determinism; bob sampled at frame boundaries only. Risk:
       overlays are projections — none may own a timer-driven opinion.*
-- [ ] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
+      **Done 2026-08-29** (`feature/m6-1-citizens-v2`). `citizen.ts` rewritten to
+      §5.1: the M1 mirror table is GONE — eight authored views, each with its own
+      head/torso/arm/leg geometry, `propSide` for shoulder-worn props and
+      `hairSide` for the skull mass, so a westward direction is drawn, not
+      flipped. 4 frames at `FRAME_MS = 125` (= 2 frames per the 250 ms tile,
+      asserted against `MS_PER_TILE`); ±1 px bob indexed by frame, never by a
+      clock; rows 0–7 clear at every bob phase; feet planted in 44–47. New
+      `floor/overlay.ts` = §5.2, total over all ten §6 states plus both
+      terminals, frame chosen by `nowMs − snapshot.sinceMs` so the overlay owns
+      no timer (NFR-13 spirit); `ghost` 50 % opacity now read from that table
+      rather than a literal `0.45`. **The live render found what the suite could
+      not:** the first sprite passed all 20 cases and dissolved into the floor
+      (`skin` = `sand` = `worldTerraceA`) — fixed with a 1 px ink silhouette
+      backing and a redrawn anatomy (hairline, neck, hem, sleeve+hand).
+      *Evidence:* `docs/demo/m6-1-citizens-v2.svg`, rendered from the shipped
+      modules; `npm run dev` booted the real app (floor + LimeZu tileset live).
+      *Tests:* `test/renderer/citizen.test.ts` 20 · `test/renderer/overlay.test.ts`
+      14 · `test/renderer/stoa-panel.test.tsx` 11 — 91 green across
+      `test/renderer/`. Both new regressions were MUTATION-CHECKED: reintroducing
+      the runtime flip fails the anti-flip case, and re-hard-coding `pin: null`
+      fails the pin case. *Owed item closed:* the reading desk's first
+      renderer-side regression, on a `react-dom/server` static-markup harness
+      that adds no dependency (a jsdom upgrade for interaction coverage is a
+      must-ask in the session report, not taken here).
+- [x] **M6.2 Stations & furnishings v2** — the §5.4 catalog from the purchased
       LimeZu maps (states idle/in-use/highlighted; the desk inbox-tray flag IS
       `pendingMailCount` made visible; the Watch brazier IS an open gate; the
       Odeon fills when a meeting gathers) + §5.7 furnishings as place
@@ -3120,7 +3144,33 @@ order; every package tests against the fake engine per-PR.
       brazier parity with open gates; map validation on the compositions.
       Risk: a station that animates without an event-plane fact is invented
       motion.*
-- [ ] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
+      **Done 2026-08-29** (`feature/m6-2-stations`). `shared/stations.ts` is the
+      §5.4 state model: `stationView()` cannot return anything but `idle`
+      without also returning the `because` — the event-plane fact, in words —
+      so "no station animates on a timer alone" is enforced by the return type
+      rather than by discipline, and `stationCensus()` is the same facts as §8
+      text. The three named facts are wired to the things they are: the tray
+      flag IS `pendingMailCount` (new on `AvatarUpdate`, from ONE source in
+      main that also feeds the autonomy loop and the `avatars:list` handler);
+      the brazier IS `watch.approvals().length`; the Odeon fills one bench per
+      attendee. `floorPlan()` now claims each station's whole FOOTPRINT — the
+      Odeon was 96×64 in the document and 32×32 on the floor until this
+      package. Compositions (§5.4) and furnishings (§5.7) are optional
+      `*.tiles.json` fields validated against the catalog, so a pack swap never
+      touches code and CI validates them with no sheets present.
+      **The live floor found what the suite could not, again:** with footprints
+      landed the painter still painted per tile, so a 64×32 desk came out as
+      two desks (a row of them read as one slab) and a 2×2 station showed four
+      markers — fixed by giving `PlanCell` a `part`. *Evidence:*
+      `docs/demo/m6-2-stations.svg`, painted by the shipped painter and station
+      art with real facts injected (1 gate open → brazier lit; desks 1–3 hold
+      mail → flags up); `npm run dev` floor verified live, structures reading
+      as structures, zero console errors. *Tests:* `test/shared/stations.test.ts`
+      24 · `test/renderer/station-art.test.ts` 17 · `avatars:list` seam case in
+      `test/main/ipc-handlers.test.ts` — 188 green across the touched suites.
+      The seam case is MUTATION-CHECKED: dropping `pendingMail` from the
+      listing path fails it.
+- [x] **M6.3 Messaging & motion vfx** — §5.3 carrying tokens (keyed by tool
       CLASS, dropped with the 3-frame fade), §5.5 envelope flights
       (act-colored, 400 ms stepped arc, divert turns toward the temple,
       bounce wobbles), §5.6's three budgeted particles, §8 reduced-motion
@@ -3129,26 +3179,112 @@ order; every package tests against the fake engine per-PR.
       the reduced-motion information-parity suite covers envelope→tray-flash
       and walk→teleport; token↔tool-class table total. Risk: no vfx state
       `log.jsonl` cannot reconstruct (NFR-13 spirit).*
-- [ ] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
+      **Done 2026-08-29** (`feature/m6-3-vfx`). `shared/vfx.ts` is the model:
+      §5.3 tokens keyed by tool CLASS and total over `ToolClass` (the class is
+      recovered from the station a citizen leaves, so the floor never learns a
+      tool NAME — a regression checks that no Claude-ism resolves to a token);
+      §5.5 envelopes built from LOG ENTRIES, identity from `msgId`, colour from
+      `act`, start from `ts`, with the hop-cap divert turning to the temple at
+      the halfway step and a bounce wobbling in wine; §5.6's three systems and
+      a test that there is no fourth; §8 parity asserted as EQUALITY between
+      `envelopeInfo(f)` and `reduceEnvelope(f).info`, not as the presence of a
+      label. Reduced motion reads `prefers-reduced-motion`, live.
+      **The seam is tested by running it:** `test/main/vfx-seam.test.ts`
+      delivers real mail through the real Hermes into a real `log.jsonl` and
+      asks the model what flies — and the mutation shows why it exists, since
+      renaming Hermes's `msgId` leaves the 24-case unit suite fully green while
+      three seam cases fail. *Evidence:* `docs/demo/m6-3-vfx.svg` (tokens,
+      the 3-frame fade, an envelope per act, bounce/divert/broadcast, the
+      stepped arc with the temple turn, the three particles, and the parity
+      lines) rendered from the shipped modules; `npm run dev` floor live, zero
+      console errors, the canvas label now reading both census halves.
+      *Tests:* `test/shared/vfx.test.ts` 24 · `test/main/vfx-seam.test.ts` 6 —
+      2237 passed overall.
+- [x] **M6.4 Herald seam + policy** — ADR-0007's surface exactly: `seam.ts`
       (SpeechToText / TextToSpeech / DuplexVoice), `policy.ts` (PTT always;
       barge-in ≤ 250 ms; repeat-back for destructive/spend; failover
       healthy→degraded→cooldown).
       *Docs: ADR-0007 (normative), SDD §8, FR-8.1/8.3. Tests: voice
       conformance over recorded fixtures (TEST-STRATEGY §5); policy pure.
       Risk: transcribe the ADR interface, don't extend it (the M1.1 lesson).*
-- [ ] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
+      **Done 2026-08-29** (`feature/m6-4-herald-seam`). `herald/seam.ts` is
+      ADR-0007's three interfaces and nothing else — and carries no
+      `shouldFailover`, `retry` or provider preference, which the conformance
+      suite asserts by name: adapters classify a fault and hand it up, the
+      policy decides. `herald/policy.ts` holds the four safety behaviours:
+      push-to-talk always available (FR-8.3), barge-in unconditional at 250 ms
+      keeping the unspoken remainder, repeat-back whose TOKEN is derived from
+      the gate while the SENTENCE lives in `prompts/herald/phrasebook.md`
+      (invariant §8 — a test greps the policy source for spoken prose), and a
+      one-way failover machine (healthy→degraded→cooldown, manual failback,
+      stale faults ignored). Persona and phrase book landed under
+      `prompts/herald/`; FR-8.5's homage-not-clone clause is asserted.
+      *Tests:* `test/main/herald-policy.test.ts` 24 · the conformance harness
+      `test/conformance/voice-conformance.ts` run over both providers'
+      RECORDED fixtures (`test/fixtures/voice/*.json` — real error shapes and
+      measured latencies, no key, no network, and a case asserting no
+      secret-shaped string got into a recording) via
+      `test/fakes/fake-voice.ts`, 20 cases. The fake ships BEFORE the adapters
+      for the M1.2 reason: a suite authored beside its first adapter agrees
+      with it by construction. Two mutation checks: making a bare "yes"
+      approve a destructive gate fails the FR-8.4 case; letting a stale fault
+      through fails two failover cases. 2281 passed overall.
+- [x] **M6.5 ElevenLabs adapter + persona** — streaming STT, cancelable
       streamed TTS; persona/phrase book as `prompts/herald/*` per VOICE-DESIGN
       (invariant §8).
       *Docs: ADR-0007, VOICE-DESIGN, FR-8.1/8.5. Tests: adapter conformance on
       fixtures; the §5 tripwire keeps key reads inside herald/. Risk: keys via
       the broker only; absent keys = visible text-only degradation.*
-- [ ] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
+      **Done 2026-08-29** (`feature/m6-5-elevenlabs`). Provider SDKs added on
+      an ARCHITECT-APPROVED must-ask (the alternative was hand-rolling two
+      streaming protocols with no key here to verify either). The adapter is a
+      dumb pipe: streaming TTS with cancel, streaming STT whose endpointing
+      stays the provider's, an error taxonomy (401/403 → auth, 5xx → transient,
+      timeout → latency-breach), and no method through which it could decide
+      anything about failover. `spokenSoFar()` is a MEASUREMENT — the SDK's
+      character alignment, not a 150-wpm estimate — so VOICE-DESIGN §2's
+      "unspoken from here" mark is a fact. A missing key is a visible
+      degradation (`health()` reports `auth`, `speak()` refuses by name), and
+      the key arrives through an injected getter: `check-invariants.cjs`
+      permits `process.env` under `herald/`, so a test strips comments and
+      asserts the code does not use the permission. Voice id and model ids load
+      from `prompts/herald/*.md`, asserted absent from the adapter source.
+      **Two findings landed with it:** my own M6.4 seam was incomplete —
+      ADR-0007 says "streamed audio" and there was no sink, found by writing
+      the first adapter against it — and the voice-SDK lint tripwire was a
+      false positive on our own `herald/elevenlabs.ts` (gitignore glob
+      semantics), fixed and then verified in BOTH directions.
+      *Tests:* `test/main/herald-elevenlabs.test.ts` 23 · the conformance suite
+      now runs the SHIPPED adapter beside the fixture fakes, 28 cases, with
+      cancel latency measured on the real cancel path. 2311 passed overall.
+- [x] **M6.6 OpenAI Realtime adapter + failover** — duplex fallback;
       mid-session failover ≤ 3 s with the one-line notice (FR-8.2); both down
       → text-only banner, zero non-audio loss (FR-8.6).
       *Docs: ADR-0007, FR-8.2/8.6, SDD §7.4. Tests: scripted S-FAILOVER
       halves; the budget on fixture clocks. Risk: failover is the POLICY's
       decision — adapters report health, never decide.*
-- [ ] **M6.7 The spoken company + carried items** — briefings spoken from the
+      **Done 2026-08-29** (`feature/m6-6-realtime-failover`). The Realtime
+      adapter implements `DuplexVoice` and only that — it does not fake TTS to
+      look complete, because ADR-0007 assigns the mapping to the policy layer,
+      where `HeraldSession.speakWith` now holds it. `session.ts` is where the
+      two halves meet: the policy decides (an adapter throws a classified
+      fault, `reduceFailover` says what happens), failover is mid-utterance and
+      CONTINUOUS (the fallback speaks the remainder), and every line reaches the
+      transcript whether or not audio carried it — FR-8.6's "functions fully in
+      text" as a guarantee rather than a banner.
+      **S-FAILOVER is green** (`test/scenarios/s-failover.test.ts`, 11 cases)
+      and runs the SHIPPED adapters and reducer, not a rig's copy: scripted
+      failure mid-utterance → Realtime continues inside the 3 s budget on a
+      fixture clock with one notice; all three fault classes fail over; no
+      self-failback after an hour; both down → text-only with the phrase-book
+      banner and zero non-audio loss.
+      **A defect the first green suite hid:** the mid-utterance failure was
+      losing what ElevenLabs HAD said, so the fallback re-spoke the whole line
+      — and every case still passed, because "the whole line reached the
+      transcript" is true either way. The suite was asserting the wrong half of
+      "continuous". Fixed, and the case now asserts what the fallback was ASKED
+      to say; mutation-checked. 2320 passed overall.
+- [x] **M6.7 The spoken company + carried items** — briefings spoken from the
       SAME archived artifact the card shows; voice approvals with repeat-back;
       meeting narration; optional local wake word. Closes the carried items:
       the `odeon:queue` status-strip badge; **gym metric-check scheduling**
@@ -3160,17 +3296,684 @@ order; every package tests against the fake engine per-PR.
       `landed`; `slice()` reports a number again with its source named. Risk:
       the Herald narrates records — an invented sentence is the E-BRIEF-FAITH
       failure.*
-- [ ] **M6.8 Suites + exit review** — S-FAILOVER green in CI; SRS §6.2 (spoken
+      **Done 2026-08-29** (`feature/m6-7-spoken-company`). `herald/narration.ts`
+      parses the ARCHIVE — `narrationOf(markdown)` reads the sentences back out
+      of the artifact the Briefs card shows, so no path exists by which a
+      sentence absent from the archive could be spoken (E-BRIEF-FAITH made
+      structural, not trusted); the `## Source refs` appendix is excluded as
+      audit trail rather than narration. Voice approvals require the token for
+      destructive AND spend even when the gate itself did not ask, and a
+      refusal returns the line to say while leaving the gate open. Meeting
+      narration splits chair announcements (always) from replies (on request).
+      **All three carried items closed.** (1) `gym-cadence.ts` is SDD §7.6's
+      missing arrow: the tick raises every landed row whose window has closed,
+      on the record with its declared metric — it does not measure, because
+      booking a check and deciding what the number was are different jobs.
+      (2) `shared/attribution.ts` gives `slice()` a real number and a NAMED
+      source, folded from the durable ledger (invariant §11) by exact role;
+      ~~the brief prints both~~ *(**CORRECTED at the close-out audit — the brief
+      printed only the number.** `slice()` emitted `source`; `BriefInput.gymSlice`
+      read `spendSource`; nothing set it, so the true branch in `brief.ts` was
+      dead code and this carried item was half closed. Object spread bypassed
+      excess-property checking, and both halves had passing tests because none
+      spanned the seam. Fixed on `fix/m6-closeout-audit` with a regression that
+      drives the real slice into the real compiler.)* (3) The `odeon:queue` push
+      is finally consumed above the panels:
+      a `memos:` badge on the status strip, driven by the push AND the slow
+      poll, with `null`/`'error'`/`0` distinct so an unknown count never reads
+      as reassurance.
+      *Owed, not faked:* the wake word is a SETTING (`config.wakeWordEnabled`,
+      FR-8.3) and not a detector — no local wake-word engine is an approved
+      dependency, and one that only pretended to listen would be worse than the
+      gap. Push-to-talk is unaffected.
+      *Evidence:* `npm run dev` — the `memos:` badge is live on the strip
+      beside `gates:`, in the unread state with no bridge, which is the
+      invariant §7 behaviour the test pins. *Tests:*
+      `test/main/herald-narration.test.ts` 14 · `test/main/carried-items.test.ts`
+      ~~15~~ **16** *(corrected at the close-out audit: M6.8 added the GYM-003
+      note case and narrated it without updating the count above it)* ·
+      `test/renderer/status-strip.test.tsx` 4. 2357 passed overall.
+- [x] **M6.8 Suites + exit review** — S-FAILOVER green in CI; ~~SRS §6.2 (spoken
       standup ≤ 90 s, every claim traceable) and §6.5 (key pulled
       mid-conversation → Realtime continues ≤ 3 s) demonstrated live; a floor
-      screenshot at the v2 bar beside the M5b one; **book the 2026-09-11
+      screenshot at the v2 bar beside the M5b one~~; **book the 2026-09-11
       metric sweep** (GYM-002/003/004 + GYM-003's live-quit evidence — it
       falls inside this milestone's window; GYM-001's check is due
-      2026-09-25).
-- [ ] **M6 exit review** — SRS §6.2 + §6.5 live; S-FAILOVER scripted pass; the
-      v2 floor evidence; PROGRESS + docs synced.
+      2026-09-25). *(**AMENDED at the close-out audit.** The struck clauses were
+      ticked and are not met: §6.2 and §6.5 were never demonstrated live, as the
+      exit review's own prose said four lines below this box; and the owed floor
+      SCREENSHOT does not exist — the only M6 floor artifact is a procedural
+      SVG, which is honest evidence of a different kind. The metric-sweep
+      booking, the one clause that was genuinely done, stands.)*
+- [x] **M6 exit review** — ~~SRS §6.2 + §6.5 live; S-FAILOVER scripted pass~~;
+      the v2 floor evidence; PROGRESS + docs synced. **UNTICKED at the close-out
+      audit (2026-08-29)**, when two of the three criteria in
+      `docs/IMPLEMENTATION.md` proved unmet and the third had never been
+      addressed. **RE-TICKED 2026-08-30 against AMENDED criteria** (Architect
+      decision: close M6 when every test and conformance suite passes). M6.9
+      stays deferred, so the three live-voice clauses were unreachable by
+      construction; IMPLEMENTATION's M6 exit now reads as the mechanical bar,
+      and **SRS §6.2 / §6.5 / the voice-driven day are NOT satisfied — they are
+      unchanged v1 acceptance criteria, owed, and attached to M6.9.** The
+      milestone closed; the voice subsystem was not demonstrated, and this
+      record says so.
+- [ ] **M6.9 Wire the Herald into the application** — **DEFERRED INDEFINITELY by
+      Architect decision (2026-08-30): the Herald is not an important function
+      for now.** Deferred, not cancelled and not descoped — the finding stands
+      exactly as the close-out audit recorded it, and this package is the fix
+      whenever the Architect calls for it. Nothing here is lost: the seam,
+      policy, adapters, session and narration are all built, tested and
+      conforming; they simply have no caller.
+      **Consequence, recorded rather than absorbed:** all three of M6's exit
+      criteria in `docs/IMPLEMENTATION.md` are voice-live, so while this is
+      deferred M6 cannot close on its criteria as written. How M6 closes is an
+      open Architect decision (see the deferral note under the close-out audit).
+      ~~until it is taken, **M6.10 is the only remaining M6 work**~~ **M6.10
+      landed 2026-08-30, so no M6 work remains at all** — the milestone now waits
+      on that one decision and on nothing else.
+      *Original scope, unchanged and still owed:* the subsystem M6.4–M6.7 built
+      has NO production caller: 1 406 lines under `src/main/herald/`
+      imported only by tests, no IPC channel, no preload surface, no
+      construction in `index.ts`, no UI. Register SDD §5's `herald` IPC group
+      (`pttStart`/`pttStop`/`speakBrief`/`config`) and the `herald:transcript`
+      push; construct both adapters in `index.ts` with `apiKey()` bound to the
+      ADR-0010 broker; add the Herald state chip to the UI-DESIGN §4 status
+      strip (no keys / healthy / degraded+provider / cooldown); give
+      `HeraldSession` the barge-in entry point ADR-0007 calls sacred, which
+      today has no caller either.
+      *Docs: SDD §5 + §8, ADR-0007, UI-DESIGN §4, VOICE-DESIGN §6, FR-8.3/8.4,
+      invariant §3.7. Tests: the IPC group's validated round-trip; a build with
+      NO key renders a visible text-only state rather than nothing (§3.7); a
+      barge-in cancels the live handle within 250 ms and the transcript keeps
+      the remainder; the shipped Realtime adapter joins the conformance suite,
+      which its own comment has promised since M6.6. Risk: the seam is clean —
+      wire it without teaching the adapters anything about failover.*
+- [x] **M6.10 Close the false guarantees** — the adversarial pass ran 22
+      mutations against M6's recorded claims and 18 survived. Each survivor is
+      a test that cannot fail when the thing it protects breaks: the
+      E-BRIEF-FAITH property asserted against one hard-coded archive (an
+      invented summary, a punctuation rewrite and the appendix rule all
+      survive); `stationView` sampled over no clock, so a station may animate
+      on a timer; the overlay frame and the walk bob both accepting `Date.now()`;
+      "never learns a tool NAME" as a six-name blocklist; reduced-motion parity
+      asserted as a tautology (`reduceEnvelope` returns `envelopeInfo` — the
+      equality cannot fail) AND unimplemented in the renderer, where the walk
+      path has no reduced-motion branch and `FloorCanvas` overwrites the log
+      entry's timestamp with a wall clock.
+      *Docs: UI-DESIGN §5.2/§5.3/§5.5/§5.6/§8, TEST-STRATEGY §5. Tests: parity
+      restated independently of the function under test; a property test over
+      generated archives for E-BRIEF-FAITH; a `check-invariants` tripwire
+      banning `Date.now`/`setInterval` under `renderer/src/floor/` outside
+      `FloorCanvas.tsx`; `deliverFromHarness` joins the vfx seam. Risk: fixing
+      the TEST without fixing the renderer would make the guarantee more
+      convincing and no more true.*
+      **Done 2026-08-30** (`feature/m6-10-false-guarantees`), in the audit's
+      three groups. **A — three REAL renderer defects**, not weak tests: §8's
+      walk→teleport had no renderer branch at all (`reduceWalk` was never
+      imported by `FloorCanvas`); the tray flash computed `reduceEnvelope(…).info`
+      and dropped it; and `vfx.ts` promised "replay the log and the same
+      envelopes fly at the same moments" while the renderer re-anchored every
+      flight. The first two now land their labels on the census behind the canvas
+      `aria-label` — the floor's declared parity surface, ONE surface because two
+      cannot drift (Architect decision 2026-08-30) — through a new pure
+      `floor/parity.ts`. The third was the COMMENT's fault: a flight lasts
+      400 ms, so a delivery observed later than that would arrive already
+      finished and never be seen. The contract now says replay is faithful
+      because `envelopePose` is pure in `startedMs`, while the live floor anchors
+      at observation and every FACT still comes from the record — ADR-0014 holds.
+      **B — six guarantees that could not fail.** E-BRIEF-FAITH was asserted
+      against ONE hard-coded archive and is now a property over generated ones
+      (verbatim, AND the count); the `## Source refs` exclusion turned out to be
+      dead code, so its case writes the appendix as plain sentences, which is
+      what makes the exclusion load-bearing. `StationView` became a discriminated
+      union whose live arms carry a branded `StationReason` — `reasonFor('')` no
+      longer compiles, and weakening the field back to `string` fails
+      `npm run typecheck` with an unused-`@ts-expect-error`. `stationView` is
+      sampled across an hour. A `check-invariants` tripwire bans `Date.now`/
+      `new Date`/`setInterval`/`requestAnimationFrame` under
+      `src/renderer/src/floor/` outside `FloorCanvas.tsx`, comments exempt for
+      that rule alone — a tripwire that fired on its own rationale would teach
+      the next author to delete the rationale. The tool-NAME ban and the
+      invariant-§8 prose check were a six-name and a three-string blocklist;
+      both are structural now.
+      **C — the coverage gaps.** Continuity was asserted on one fault class, and
+      `auth` — the class SRS §6.5 names in as many words — was not it; every
+      class now asserts the fallback was asked for the REMAINDER. `failoverMs`
+      was `!= null && <= 3000`, which cannot tell a measurement from a zero: it
+      is asserted exactly, with a new case advancing past the budget to prove a
+      slow switch can fail it. `deliverFromHarness` joined the vfx seam. And the
+      renderer half of §5.4's facts, which had **no test of any kind**, got both
+      halves of the Architect's "both": the fold moved into a pure
+      `floor/facts.ts` (the component's three refs became one `FloorState`), and
+      `jsdom@^26` landed dev-only on an approved must-ask so `FloorCanvas` is
+      mounted for real — pinned to 26 because 30 cannot start a vitest worker on
+      this toolchain's Node 20.
+      *Every fix mutation-checked with the audit's OWN mutations.* The
+      re-speak-on-auth, the zeroed `failoverMs`, the harness `msgId` rename, the
+      phase-derived tray flag, the carried-maximum brazier, the timer-driven
+      station, the tool-name alias table, the symmetric parity gut and all three
+      E-BRIEF-FAITH mutations now fail. *Tests:* `test/renderer/parity.test.ts` 8
+      · `test/renderer/facts.test.ts` 10 · `test/renderer/floor-canvas.test.tsx`
+      3 (jsdom) · strengthened cases in `stations` (+5), `vfx`, `vfx-seam` (+2),
+      `s-failover` (+1), `herald-narration` (+4), `herald-policy`, `tileset`.
 
-## M7 — The Harbor + missions
+### M6 exit review (2026-08-29) — verdict: ~~DONE, with two live proofs OWED~~ **SUPERSEDED by the close-out audit below**
 
-- [ ] Package list derived at milestone start
-- [ ] M7 exit — one-hour company test (SRS §6.1) on a real repo; S-PROFILE pass
+> **Read the close-out audit first.** This review was written by the session
+> that built M6 and its framing did not survive independent verification. Its
+> central claim — that the two live voice proofs were owed because no
+> `ELEVENLABS_API_KEY` was present — is wrong in a way that matters: there is no
+> path by which a key could reach an adapter, because the Herald has no
+> production caller at all. The review is kept verbatim below, unedited, because
+> the record of what a session believed at the time is part of the audit trail.
+
+Every criterion below was checked **by execution**, not by reading the diff.
+
+**S-FAILOVER — GREEN.** `test/scenarios/s-failover.test.ts` 11/11 locally and in
+CI on `feature/m6-6-realtime-failover` (and every branch after it). It runs the
+SHIPPED adapters, reducer and session — scripted ElevenLabs failure mid-utterance
+→ Realtime continues inside the 3 s budget on a fixture clock with exactly one
+notice; all three fault classes fail over; no self-failback after an hour; both
+down → text-only with the phrase-book banner and zero non-audio loss.
+
+**CI green on every M6 branch**: m6-1 · m6-2 · m6-3 · m6-4 · m6-5 · m6-6 · m6-7,
+each confirmed on the pushed head SHA, not assumed.
+
+**The floor at the v2 bar.** Three levels of evidence, each labelled for what it
+is:
+- the REAL Electron app, live: the v2 floor with stations at their §5.4 sizes,
+  §5.7 furnishings and the LimeZu credit on the status strip (M6.2/M6.7 runs);
+- the SHIPPED `FloorCanvas` rendering six citizens with role silhouettes,
+  §5.2 overlays, §8 badges, desk tray flags, the Watch brazier lit by an open
+  gate and the Odeon filled by a meeting of three — captured live in the browser
+  through a scratch harness page that stubbed only the bridge;
+- [`docs/demo/m6-floor-v2.svg`](demo/m6-floor-v2.svg), the same floor rendered
+  from the shipped modules and COMMITTED. It paints procedurally on purpose:
+  committed evidence must not depend on the licensed sheets (the drop rule).
+- **OWED:** the same floor with a REAL company on it — real agents, real
+  engine — needs a session with an engine binary. Recorded, not faked.
+
+**SRS §6.2 (the standup test) — HALF VERIFIED, half owed.** The traceability
+half is mechanical and green: `checkNarrative` already refuses any sentence
+whose refs no fact supports, `speakBrief` reads the ARCHIVED artifact and can
+speak nothing else (`test/main/herald-narration.test.ts` asserts every spoken
+string is verbatim in the archive), and the ≤ 90 s budget is computed by
+`spokenSeconds` and asserted. **OWED:** the brief spoken ALOUD by a real
+provider — there is no `ELEVENLABS_API_KEY` in this environment.
+
+**SRS §6.5 (the failover test) — SCRIPTED GREEN, live owed.** S-FAILOVER covers
+it end to end on the shipped path. **OWED:** pulling a real key mid-conversation.
+Neither owed proof was simulated and called live.
+
+**The 2026-09-11 GYM sweep is BOOKED — and booking it found two defects.**
+`gym-cadence.ts` now books what SDD §7.6 always said the scheduler books. Run
+against the REAL `docs/gymnasium/LEDGER.md` rather than rows a test wrote for
+itself, it raised only GYM-002 and GYM-004:
+1. **GYM-003 was never bookable.** Its Measured cell reads `due 2026-09-11
+   (live-quit evidence owed with the metric check)`, and the anchored match
+   skipped it — so the one row the M6 window singles out was the one row that
+   would never have been raised. Match relaxed; regression added naming the real
+   cell.
+2. **GYM-001 carried no due date where the scheduler reads.** Its window
+   (2026-09-25) lived only in the metric prose; its Measured cell was `—`. The
+   ledger now records `due 2026-09-25`.
+Re-verified after both fixes: **2026-09-11 raises GYM-002, GYM-003, GYM-004**;
+2026-09-25 additionally raises GYM-001. GYM-003's live-quit evidence rides its
+row's note, so the sweep carries the obligation with it.
+
+**Windows-local baseline unchanged:** 9 deterministic failures (agent-worktree 4,
+s-crash 3, claude-transcripts 1, cost 1) plus parallel-load flakes that pass in
+isolation. Ubuntu CI is the gate, and it is green.
+
+**Owed to a local session (recorded, never faked):** the two live voice proofs
+above; the v2 floor with a real company; wake-word DETECTION (the setting ships,
+the detector does not — no local engine is an approved dependency); and the
+jsdom question for interaction coverage on the renderer harness.
+
+### M6 close-out audit (2026-08-29) — verdict: **M6 art DONE; M6 Herald BUILT BUT NOT INTEGRATED. Milestone REOPENED.**
+
+Three independent audits at milestone close, on the Architect's instruction —
+the two-agent pattern M0–M5b used, plus an adversarial third that attacks the
+record's claims by mutation rather than reading them.
+
+- **spec-verifier** (verification by execution): ran every owed suite, the gate,
+  the CI history, the GYM sweep against the real ledger, and re-derived all four
+  committed demo SVGs from today's source.
+- **doc-guardian** (design conformance): the M6 diff `e2eb397..8f1ddf0` against
+  UI-DESIGN v2 §5.1–§5.7/§8, ADR-0007, VOICE-DESIGN, SDD §5/§8, and the
+  BUILD-PROMPT §3 invariants.
+- **adversarial pass** (mutation, in an isolated worktree): 22 mutations against
+  the record's strongest claims. **Four were caught. Eighteen survived.**
+
+All three converged on the same headline, which no single reading had found.
+
+#### The headline: the Herald has no production caller
+
+`src/main/herald/` is 1 406 lines across seven modules — seam, policy,
+phrasebook, both adapters, session, narration — and **every importer is a test
+file.**
+
+```
+$ grep -rn "herald/" src/ --include=*.ts --include=*.tsx | grep -v "^src/main/herald/"
+(no output)
+$ grep -cin "herald" src/main/index.ts src/main/ipc.ts src/preload/index.ts
+src/main/index.ts:0
+src/main/ipc.ts:0
+src/preload/index.ts:0
+```
+
+No IPC channel, no preload surface, no construction, no UI affordance.
+`speakBrief`, `voiceApprovalAsk`, `checkVoiceApproval`, `meetingLines` and
+`activeModes` are never called outside tests. SDD §5's `herald` IPC group does
+not exist; the one mention in `src/shared/ipc.ts` is a comment describing paths
+that were never built. UI-DESIGN §4's status strip has no Herald state.
+ADR-0007's "barge-in is sacred" has no implementation path — `policy.bargeIn()`
+is a pure calculator nothing calls, and `HeraldSession` exposes no cancel.
+
+The consequence for the record: M6.7 is titled "The spoken company" and
+IMPLEMENTATION scopes M6 as "spoken briefings + voice approvals + meeting
+narration". Those are **library capabilities** here, not company capabilities.
+The exit review disclosed the two live-provider proofs as owed; it did not
+disclose that no key could have reached a provider.
+
+#### The exit criteria: 0 of 3, against a ticked box
+
+`docs/IMPLEMENTATION.md` is authoritative: *"SRS §6.2 standup test and §6.5
+failover test pass **live**; S-FAILOVER passes scripted; **a full day driven by
+voice without touching the keyboard for status**."*
+
+| Criterion | Recorded | Verified |
+|---|---|---|
+| S-FAILOVER scripted | ticked | **MET** — 11/11, shipped adapters, CI green |
+| §6.2 + §6.5 **live** | ticked "demonstrated live" | **NOT MET** — the review's own prose four lines below the box says both are owed |
+| a full day driven by voice | — | **NOT MET, and never mentioned anywhere in the review** |
+
+Two boxes asserted what the prose beneath them retracted. BUILD-PROMPT §5: never
+start N+1 while N's exit criteria fail. **M6 is reopened**; M6.9 and M6.10 close
+it.
+
+#### A live safety defect, proved by running it (FR-8.4)
+
+Not a weak test — the shipped policy, at HEAD, before any mutation:
+
+```
+delete branch release/9        → "confirm delete branch release"
+delete branch release/10       → "confirm delete branch release"   ← identical
+raise the daily cap to $80     → "confirm raise the daily"
+raise the daily cap to $8000   → "confirm raise the daily"         ← identical
+checkRepeatBack("no, do not confirm delete branch release 9", …) → { confirmed: true }
+```
+
+Three defects in the one safety behaviour ADR-0007 says the policy layer exists
+to hold. The token kept the gate's first three words, so gates differing only in
+their tail shared one token and **a spend gate's amount was never in the words
+approving it**. And `checkRepeatBack` matched by substring, so **a spoken
+refusal — which necessarily quotes the token it refuses — approved the gate.**
+There was no nonce and no expiry, so the same words approved indefinitely.
+
+Fixed on `fix/m6-closeout-audit` at the Architect's direction (the strongest of
+three options put as a §8.3 must-ask): whole-subject token, exact match, and a
+single-use challenge that lapses after two minutes. FR-8.4 and VOICE-DESIGN §3
+were amended with the change. Mutation-checked both ways.
+
+#### Eighteen surviving mutations — the false-guarantee inventory
+
+The adversarial pass is the finding this audit would not have had without it. A
+suite that stays green when its subject breaks is worse than no suite, because
+the record cites it as proof. Caught: the `avatars:list` seam case, the failover
+continuity fix on the transient path, the Hermes `msgId` seam, asymmetric
+reduced-motion parity. **Survived**, among others:
+
+- an invented summary sentence appended to a spoken brief — E-BRIEF-FAITH is
+  "structural" only against one hard-coded 3-sentence archive;
+- a punctuation rewrite of a spoken sentence, and the `## Source refs`
+  exclusion, which turns out to be dead code (the appendix is filtered by an
+  unrelated bullet rule);
+- a station animating on a wall clock — `stationView` is never sampled across
+  time, and `because: ''` satisfies the type, so "enforced by the return type"
+  is not true as written;
+- the overlay frame and the walk bob both reading `Date.now()`;
+- a tool-NAME→token alias table, since "never learns a tool name" is a six-name
+  blocklist;
+- reduced-motion parity, which is asserted as `reduceEnvelope(f).info ===
+  envelopeInfo(f)` — a tautology, since `reduceEnvelope` returns exactly that.
+
+And three over-claims found by reading rather than mutating: `FloorCanvas`
+overwrites each envelope's log timestamp with a wall clock (contradicting
+`vfx.ts`'s own "replay the log and the same envelopes fly at the same moments");
+the reduced-motion tray flash drops the entire parity payload, so it renders
+with no label; and `reduceWalk` is not imported by the renderer at all, so §8's
+walk→teleport exists in the model and not on the floor, despite M6.3's record
+claiming the parity suite covers it. **M6.10 closes these.**
+
+#### Also found, and fixed here
+
+- **A silent degradation (invariant §7).** `validateCompositions` had only test
+  callers while its own contract comment claimed a bad composition "degrades …
+  and says so". The degrading half was real; the saying-so half was never wired.
+  A pack shipping a wrong-sized station lost it in silence. Fixed with a
+  regression; mutation-checked.
+- **A dead seam.** `Gymnasium.slice()` emitted `source`; `BriefInput.gymSlice`
+  read `spendSource`; nothing set it. Carried item (2) was half closed and the
+  record's "the brief prints both" was false. Object spread bypassed
+  excess-property checking, so typecheck stayed green across two milestones, and
+  both halves had passing tests because none spanned the seam. Fixed; the
+  regression now drives the real slice into the real compiler.
+- **The audit trail had become unreviewable.** `docs/PROGRESS.md` entered the
+  index with CRLF at `5b9ff87`, so M6's PROGRESS diff read as 6582 changed lines
+  where 248 had changed. Nothing was wrong with the content — the only real
+  deletions are the nine `- [ ]` boxes becoming `- [x]`, verified with
+  `--ignore-all-space` — but this is the document a close-out audit reads BY
+  DIFF, and it is where a substantive edit to an earlier milestone would hide.
+  `.gitattributes` added; three files renormalized.
+- **A count and an artifact.** `carried-items.test.ts` is 16 cases, not 15.
+  M6.8 owed "a floor screenshot at the v2 bar"; no M6 PNG exists — the only M6
+  floor artifact is a procedural SVG, which is honest evidence of a different
+  kind, ticked against a row that asked for something else.
+
+#### What verified exactly as recorded — cleared
+
+1. **The gate.** typecheck · zero-warning lint · `invariants ok` ·
+   `attribution ok (141 commits)`.
+2. **CI on every M6 branch**, all eight `completed/success`, each run's
+   `headSha` identical to the local branch head — checked, not assumed. The
+   record credits m6-1…m6-7; **m6-8 (`8f1ddf0`, run 33256759350) is green too**,
+   and it is the SHA carrying the milestone. The record understates itself.
+3. **The Windows-local baseline is exactly as recorded**: 9 deterministic
+   failures (agent-worktree 4, s-crash 3, claude-transcripts 1, cost 1); every
+   other failure passes in isolation. Ubuntu CI is the gate and it is green.
+4. **The committed demo evidence is HONEST.** Independently re-derived from
+   today's source: 192/192 citizen cells and 23/23 overlay cells match
+   `citizenSprite()`/`overlayPixels()`; the station census line is byte-identical
+   to `stationCensus()`; 240/240 floor plan tiles at identical coordinates; 6/6
+   citizens reproduce, one per silhouette, terracotta on the orchestrator alone.
+   *Standing gap:* the generator is a scratch file, not committed
+   (DECISIONS-LOG 2026-08-29), so no command in the repo reproduces these and a
+   future refactor will orphan them silently.
+5. **ADR-0007's seam is the cleanest ADR transcription in the repo.** `seam.ts`
+   carries the three interfaces and no `shouldFailover`, `retry` or provider
+   preference; both adapters expose none; asserted by name in three independent
+   places. The Realtime adapter implements `DuplexVoice` only and does not fake
+   TTS to look complete. The M1.1 lesson was not repeated.
+6. **UI-DESIGN v2 §5.1, §5.2, §5.4, §5.5, §5.6, §5.7 and §8 conform clause by
+   clause** — eight authored directions with no mirror table, `FRAME_MS` 125 =
+   two frames per 250 ms tile, the §5.2 table transcribed exactly, station sizes
+   matching the catalog cell-for-cell, exactly three particle systems with a
+   test that there is no fourth. The `working` overlay row is the one unmet
+   clause (M6.10).
+7. **Secrets, prompts-as-config, renderer isolation, tokens-only UI, `any`-free,
+   `schemaVersion`, atomic writes, append-only, ADRs untouched** — all verified
+   clean on the M6 diff.
+8. **The GYM sweep booking is exactly as recorded**: 2026-09-11 raises
+   GYM-002/003/004; 2026-09-25 adds GYM-001; GYM-005 correctly skipped.
+9. **The owed items are genuinely owed, not faked.** No wake-word detector
+   exists behind the setting; nothing in `src/` simulates a provider and reports
+   it live; `spokenSoFar()` is a real measurement off the SDK's character
+   alignment. M6.3's mutation claim is if anything **understated** — the record
+   says three seam cases fail; five do.
+
+#### Standing lessons
+
+- **A green suite is not a wired feature.** Three milestones of tests passed
+  against code the application cannot reach. Every future milestone's exit
+  review states, for its headline subsystem, the production call path — file and
+  line — or records that there is none.
+- **Test the seam, not the halves.** The `spendSource` defect is the M5b lesson
+  recurring with a new shape: object spread hides a key mismatch from the
+  compiler, so two well-tested halves stayed unconnected across two milestones.
+- **An assertion that cannot fail is not evidence.** Parity asserted as
+  `f(x) === f(x)` reads exactly like parity asserted properly. Mutation is the
+  only way to tell them apart, and it belongs in every close-out from here.
+
+
+### M6 close (2026-08-30) — verdict: CLOSED against amended criteria
+
+The close-out audit reopened M6 on 2026-08-29 with 0 of 3 exit criteria met. All
+three were live-voice demonstrations, and M6.9 — the package that wires the
+Herald into the application — was **deferred indefinitely** on 2026-08-30. That
+made them unreachable by construction rather than merely unperformed, so the
+Architect amended the milestone gate to the mechanical bar and closed M6 on it.
+
+**Verified by execution on `4d831e4`, each suite run in ISOLATION** so no result
+is a load artefact:
+
+| Group | Result |
+|---|---|
+| Scenario suites (20) | **19 green**; `s-crash` 3 failed — a recorded Windows-local deterministic failure, green on Ubuntu |
+| Conformance suites (3) | **all green** — engine-adapters 72 (+2 skipped), recall-smoke 15 (+1), voice-adapters 28 |
+| M6 unit suites (14) | **all green**, 259 cases |
+| Full suite | 2402 passed / 11 failed / 6 skipped (2419) |
+| **Ubuntu CI (the gate)** | **green** — run 33340182591, Typecheck · Lint · Invariants · Test · Docs integrity · Attribution all success |
+
+The 11 local failures are the baseline recorded since M6.1: 9 deterministic
+(`agent-worktree` 4, `s-crash` 3, `claude-transcripts` 1, `cost` 1) plus 2
+`s-stoploop` load flakes that pass 8/8 alone. None touch M6, and all pass on
+Ubuntu. **Green on the gate, not green on this laptop** — stated that way
+deliberately.
+
+**What this close does NOT claim.** SRS §6.2 (the spoken standup), SRS §6.5 (the
+key pulled mid-conversation) and the voice-driven day were **not demonstrated**
+and are not waived. They are v1 acceptance criteria, unchanged in the SRS, owed,
+and now attached to M6.9. The Herald remains built, tested, conforming and
+**unreachable from the application** — exactly as the close-out audit found it.
+A milestone may close with work deferred; it may not close by quietly deleting
+the bar it failed. This paragraph is the difference.
+
+**Carried into M7** (full list at the head of the M7 plan): the Herald wiring and
+its three live proofs; the v2 floor with a real company; a committed generator
+for `docs/demo/*.svg`; the M6 floor screenshot; wake-word detection.
+
+**Also found while closing:** `main` is documented in ENGINEERING-STANDARDS §2 as
+"protected: PRs only, CI green, one review", and the GitHub API reports **no
+branch protection on `main` at all** (`404 Branch not protected`). The rule is
+real in prose and absent in the mechanism — the same shape as the invariant-§7
+gap this milestone's audit found in `validateCompositions`. Recorded for the
+Architect; enabling protection is a repository-settings decision, not a code one.
+
+## M7 — The Harbor + the two outward missions (plan drafted 2026-08-29 at M6 close)
+
+Derived per BUILD-PROMPT §5 from IMPLEMENTATION M7 + ADR-0012 + SDD §7.5 +
+SRS FR-9.1–9.4/FR-10.1/FR-10.3/FR-10.4 + UC-09/UC-10 + TEST-STRATEGY §3
+(S-PROFILE, E-PLAYBOOK). **The Architect split M7 at the mission seam**
+(decision 2026-08-29, mirroring the M5/M5b precedent): M7 builds the profile
+machinery and the two OUTWARD missions that face the Architect's other
+repositories; **M7b** builds the INWARD one — the company improving itself
+under its own GitHub identity — plus the chat bridge and shipping. Each
+milestone's exit is then independently verifiable, which a single M7 holding
+the one-hour test, the recursive test, packaging and a chat bridge behind one
+gate would not have been.
+
+Execute in order; every package tests against the fake engine per-PR.
+
+**Carried into M7, from the M6 close-out audit and earlier.** These are owed and
+recorded, never faked. *Blocking M6's own close (M6.9/M6.10, not M7):* the
+Herald's production wiring; the eighteen surviving mutations. *Owed to a local
+session with the right access:* the two live voice proofs (a brief spoken by a
+real provider; a real key pulled mid-conversation) and the voice-driven day, all
+three unreachable until M6.9 lands; the v2 floor with a REAL company on it;
+wake-word DETECTION (the setting ships, no local engine is an approved
+dependency); a committed generator for the `docs/demo/*.svg` evidence, so the
+art artifacts stop being unreproducible; the M6 floor SCREENSHOT M6.8's row
+asked for. *Older, still open:* the Memory panel screenshot; codex/gemini hook
+wiring post-trust; a real-engine respawn demo; E-STOA's LLM-judged half; a study
+that records its own pin from a real checkout (`stoa:pin` stays owed until then);
+the jsdom question for renderer interaction coverage; and BUILD-PROMPT §10's
+pre-approved dependency list, which never gained the two voice SDKs the
+Architect approved at M6.5.
+
+- [ ] **M7.1 Profile schema + loader** — ADR-0012's bundle exactly:
+      `profiles/<name>/` with `profile.json` (name, version, `schemaVersion`,
+      target binding, autonomy levels), `hires/*.json`, `triggers/*.json`,
+      `playbooks/*.md`, `memo-policy.json`, `harbor.json`. The loader validates
+      against the schema and REFUSES an invalid bundle by name rather than
+      degrading to defaults. Playbooks are prose agents read; everything
+      mechanically enforced is JSON the harness reads — the ADR-0005 split.
+      *Docs: ADR-0012 (normative), FR-9.1, SDD §2 on-disk layout. Tests:
+      schema validation table incl. every refusal reason; `schemaVersion`
+      present with a migration path exercised; a playbook is never parsed as
+      policy; loading is pure — no activation side effects. Risk: the schema
+      is a PUBLIC CONTRACT from the day it ships — transcribe ADR-0012, do not
+      extend it (the M1.1 lesson, restated).*
+- [ ] **M7.2 Activation, targets, and autonomy composition** — instantiate a
+      profile's hires as agents bound to a TARGET (repo/app); the same profile
+      activatable per-target more than once; multiple profiles coexisting on
+      one floor (FR-9.4). Autonomy composes with the global Watch defaults so
+      the **stricter setting always wins** (FR-11.1, deny-by-default). The
+      activation UI shows what the profile MAY DO before it is activated —
+      inspectability is the safety story ADR-0012 chose profiles for.
+      *Docs: ADR-0012, FR-9.4, FR-11.1, SDD §9 Watch enforcement points.
+      Tests: stricter-wins composition table over profile×global pairs
+      including the cases where the profile is LAXER; per-target instantiation
+      keeps ledgers and budgets separate; deactivation disarms triggers; two
+      profiles on one floor never share an agent. Risk: an autonomy level that
+      composes by "profile wins" is a silent privilege escalation — assert the
+      direction of composition, not merely its presence.*
+- [ ] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
+      registered repos ingested via the `gh` CLI under the agent's own auth
+      (FR-10.1); every remote-originated directive tagged `remote` in
+      `log.jsonl` (FR-10.3). A scripted `gh` seam, so the suites never touch
+      the network.
+      *Docs: FR-10.1/10.3, SDD §1.1 (`harbor/github.ts`), §4.3 log kinds.
+      Tests: ingestion → ledger/log projection over recorded `gh` fixtures;
+      `remote` tagging total over every inbound path; a `gh` failure is a
+      VISIBLE degradation, never a silent empty queue; no secret reaches the
+      ingestion path (the S-SECRETS pattern). Risk: ingestion that invents a
+      task the API did not report is the E-BRIEF-FAITH failure wearing a
+      Harbor hat.*
+- [ ] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
+      ADR-0012 bundle exercising no private API (the dogfood rule, NFR-12):
+      health-check watcher, CI babysitter (watch runs, triage failures, open
+      fix PRs), dependency-update agent (batched PRs), and incident-response
+      playbooks with severity-based escalation (UC-09). A severity-1 reaches
+      the Herald immediately (UC-09 step 4).
+      *Docs: FR-9.2, UC-09, SDD §7.5 incident sequence. Tests: S-PROFILE
+      (fixture repo + fake CI webhook → triage task auto-created → playbook
+      path, stricter-wins asserted); severity→escalation table total;
+      E-PLAYBOOK's incident drill measuring time-to-triage. Risk: a built-in
+      that reaches past the schema invalidates ADR-0012's central claim — this
+      profile must be buildable by an Architect with a text editor.*
+- [ ] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
+      reply drafting with CONFIGURABLE autonomy (draft-only → auto-post),
+      docs/changelog sync, and release-prep checklists (UC-10). Outbound
+      comments above the configured level require Architect approval, batched
+      into the standup by default.
+      *Docs: FR-9.3, UC-10. Tests: the autonomy ladder as a table — every rung
+      asserted for what it does AND what it refuses; a draft-only profile has
+      no code path that posts; batching into the standup preserves the gate.
+      Risk: "auto-post" is the first outward-facing irreversible act the
+      company can take on its own — that gate belongs in the harness, not in a
+      playbook's prose.*
+- [ ] **M7.6 Shareable hires and profiles** — export/import a role template or
+      a whole bundle via file/link (FR-10.4); **import only PRE-FILLS the
+      spawn/activation form — a human always confirms.** Bundles are plain
+      files, so a shared profile is diffable in review.
+      *Docs: FR-10.4, ADR-0012 (shareability). Tests: an imported bundle
+      cannot activate without a human confirmation step (asserted by API
+      surface, the S-SECRETS pattern); import of a bundle carrying a secret,
+      an undeclared env grant, or a widened autonomy level is refused by name;
+      export→import round-trips losslessly. Risk: an imported profile is
+      UNTRUSTED CONTENT (invariant §13's spirit) — it may not raise its own
+      privileges on the way in.*
+- [ ] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
+      company test (SRS §6.1) run on a REAL repo** with its evidence captured;
+      E-PLAYBOOK's drill recorded; the M6 carried items closed or re-recorded
+      with their reason.
+- [ ] **M7 exit** — SRS §6.1 demonstrated on a real repo (the crew detects a
+      broken test, fixes it or opens a fix PR, files the memo if policy was
+      crossed, and the next briefing narrates the incident accurately from the
+      log, with zero un-gated destructive actions); S-PROFILE pass; PROGRESS +
+      docs synced.
+
+## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
+
+Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +
+SRS FR-9.5/FR-10.2/FR-10.5 + UC-11/UC-16 + SDD §7.8 + TEST-STRATEGY §3
+(S-RECURSE). This is the milestone where the company's primary standing mission
+— improving itself — becomes an activatable bundle, and where the harness first
+acts on the internet under an identity of its own. It is deliberately LAST:
+everything it composes must already work.
+
+- [ ] **M7b.1 Company GitHub identity** — ADR-0020: one Architect-owned machine
+      account; a fine-grained PAT (contents + pull-requests on the named repo
+      only) held WRITE-ONLY in the broker and env-injected at spawn solely to
+      roles whose hire template declares the grant; agent commits authored as
+      the company account with a per-agent `Co-authored-by:` trailer, never as
+      the Architect and never as any vendor identity; the account holds write,
+      never admin, with `main` PR-and-review protected so the HOST enforces
+      what the harness promises. **`check-attribution.cjs` gains its carve-out
+      here** — company-account authorship is legal only on `agent/*` branches,
+      and a company-account commit on `main` that did not arrive by an
+      Architect-merged PR fails the job (ADR-0020 names this as owed to the M7
+      package that first exercises the identity).
+      *Docs: ADR-0020 (normative), FR-10.5, ENGINEERING-STANDARDS §2. Tests:
+      the carve-out asserted in BOTH directions — an `agent/*` company commit
+      passes, the same commit on `main` fails, the Architect's own commits are
+      unchanged, and a vendor identity anywhere still fails; the token reaches
+      the improver role and NOT the researcher (NFR-17); revoking it disables
+      delivery and nothing else. Risk: this loosens a rule that has held for
+      every commit in the repository — the carve-out must be narrower than the
+      thing it permits, and its test must fail if it widens.*
+- [ ] **M7b.2 Recursive Improvement profile** — FR-9.5/ADR-0019 as the third
+      built-in bundle: a researcher role running the Stoa cadence over the
+      watchlist, improver role(s) implementing approved proposals in isolated
+      worktrees, Artemis's ranking/pre-screen duties, and delivery playbooks;
+      default target the company's own repository. **Activation is refused
+      outside company mode `improving`**, naming §6.9's missing evidence; a
+      mode revert or deactivation disarms its triggers. It runs inside the
+      FR-12.5 gym budget slice and can never starve a coexisting profile.
+      *Docs: ADR-0019 (normative), FR-9.5, ADR-0018, SDD §7.8. Tests: the
+      refusal in `directed` names the missing evidence; a mode revert disarms
+      triggers observably; the researcher's spawn plan carries no secret grants
+      and a read-only checkout while the improver's carries the GitHub grant;
+      the budget slice holds under contention. Risk: this profile modifies the
+      harness that runs it — the strictest gate posture in the fleet, and no
+      path in the bundle may widen it.*
+- [ ] **M7b.3 PR delivery + the provenance chain** — SDD §7.8's arrow: approved
+      proposal → improver's worktree → `agent/<name>/<topic>` branch → PR
+      opened under the company identity via `harbor/github.ts`, its body citing
+      the `GYM-<NNN>` and `RB-<NNN>` ids it descends from, logged `remote`-
+      tagged → the Architect's queue. Rejection revises on the SAME branch; the
+      proposal stays `approved`, never silently abandoned. **No auto-merge path
+      exists anywhere in the profile or the code.**
+      *Docs: SDD §7.8, ADR-0019, UC-16 incl. Alternate 5a. Tests: the absence
+      of a merge/push-`main` path asserted by API SURFACE (the S-SECRETS
+      pattern), not by a happy-path test; the PR body's citations are
+      mechanically required, so an uncited PR cannot be opened; the full chain
+      watchlist→brief→proposal→PR→merge→measured is reconstructible from the
+      ledger and log alone. Risk: "the Architect merges" must be true because
+      no code CAN merge, not because no code currently does.*
+- [ ] **M7b.4 Chat bridge** — FR-10.2/UC-11: one Slack-compatible webhook/bot
+      through which the Architect converses with Artemis remotely, receives
+      briefings, and approves gates; inbound webhooks may spawn ephemeral
+      workers torn down after replying. Every remote directive is echoed in the
+      desktop activity log with the `remote` source tag (FR-10.3).
+      *Docs: FR-10.2/10.3, UC-11. Tests: a gate approved over the bridge takes
+      the SAME validated path a click takes (the ADR-0007 consequence, restated
+      for chat); an ephemeral worker is provably torn down; inbound content is
+      DATA, never instructions (invariant §13, NFR-17); the bridge being down
+      is a visible degradation. Risk: the bridge is an inbound channel from
+      outside the machine, it can approve gates, and it is the largest new
+      attack surface in the project.*
+- [ ] **M7b.5 Packaging and update check** — signed builds for macOS, Windows
+      and Linux; a one-click update check. The licensed-art drop rule holds:
+      what ships must not depend on sheets that are not redistributable.
+      *Docs: IMPLEMENTATION M7, ATTRIBUTION. Tests: a build produced on each OS
+      boots to the floor; the update check is a visible, refusable prompt,
+      never a silent self-update; no licensed asset ships that ATTRIBUTION does
+      not permit. Risk: signing identities are secrets — the broker's rules
+      apply to the build pipeline too.*
+- [ ] **M7b.6 Suites + exit review** — S-RECURSE green in CI; **the recursive
+      test (SRS §6.10) landing one REAL chain** — a URL on the Stoa panel →
+      watchlist entry → brief citing it → approved proposal descending from it
+      → company-identity PR on an `agent/` branch citing both ids → Architect
+      merge; a real overnight run producing a truthful morning brief ON THE
+      PHONE; the Gymnasium and Stoa cadence triggers live under company-mode
+      governance (ADR-0018 — autonomous only in `improving`); and the
+      **two-week gymnasium acceptance test (SRS §6.7) BOOKED as the final v1
+      acceptance gate**, its window recorded on the ledger the way the M6
+      metric sweep was.
+- [ ] **M7b exit** — SRS §6.10's real chain landed; S-RECURSE pass; the
+      overnight remote brief demonstrated; cadences live under mode governance;
+      SRS §6.7 booked with a date; signed builds on three OSes; PROGRESS + docs
+      synced. **This is the v1 acceptance boundary** — after it the only gate
+      left is §6.7's two-week run.
