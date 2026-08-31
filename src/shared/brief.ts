@@ -191,6 +191,53 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
     )
   }
 
+  // 4a. Incidents (VOICE-DESIGN §4: health covers "breaker trips, INCIDENTS,
+  //     Harbor queue depth"), and SRS §6.1's last clause: "the next briefing
+  //     narrates the incident accurately from the log".
+  //
+  //     Until M7.7 this section had no incident branch at all, so an incident
+  //     reached the standup only sideways — as an open gate, or as whatever
+  //     task Artemis happened to create. The Architect was never told that
+  //     something broke, in which repository, or what the on-call agent
+  //     concluded. Two halves that had never met: the incident endpoint wrote
+  //     these entries from the day it shipped and the compiler had never heard
+  //     of them.
+  for (const raised of incidents(input.events, 'incident-raised')) {
+    facts.push(
+      fact(
+        'health',
+        `incident ${String(raised['incident'] ?? '?')}: ${String(raised['conclusion'] ?? 'failed')} on ${String(raised['repo'] ?? '?')}, ${String(raised['oncall'] ?? 'nobody')} on call`,
+        [`log#${String(raised.seq)}`]
+      )
+    )
+  }
+  for (const triaged of incidents(input.events, 'incident-triaged')) {
+    // The agent's own sentence, carried VERBATIM. The brief is read aloud and
+    // is the E-BRIEF-FAITH surface: a summary the harness rewrote would be a
+    // claim nobody made, attributed to the company.
+    facts.push(
+      fact(
+        'health',
+        `incident ${String(triaged['incident'] ?? '?')} triaged severity-${String(triaged['severity'] ?? '?')}` +
+          `${triaged['resolved'] === true ? ' and resolved' : ', unresolved'}: ${String(triaged['summary'] ?? 'no summary given')}`,
+        [`log#${String(triaged.seq)}`]
+      )
+    )
+  }
+  // An obligation the company owes and cannot meet is a health fact, not a
+  // silence. Today this is only the severity-1 announcement the deferred
+  // Herald cannot make (M6.9) — the standup is where the Architect finds out
+  // that the spoken alarm they were promised did not happen.
+  for (const owed of incidents(input.events, 'incident-announce-owed')) {
+    facts.push(
+      fact(
+        'health',
+        `incident ${String(owed['incident'] ?? '?')} owed an immediate spoken announcement that could not be made`,
+        [`log#${String(owed.seq)}`]
+      )
+    )
+  }
+
   // 4b. The Gymnasium slice (FR-12.5): improvement is budgeted, not ambient,
   //     and the standup is where the budget is seen.
   if (input.gymSlice !== undefined) {
@@ -245,6 +292,20 @@ function fact(section: BriefSection, what: string, refs: readonly string[]): Bri
 
 function refsOfTasks(tasks: readonly Task[]): readonly string[] {
   return tasks.map((task) => `task:${task.id}`)
+}
+
+/**
+ * Incident entries of one event kind, oldest first (SDD §4.3's `profile` kind).
+ *
+ * Matched on the recorded `event` tag rather than on the message text, so a
+ * reworded log line cannot silently drop the standup's only account of an
+ * incident.
+ */
+function incidents(
+  events: readonly LogEntry[],
+  event: 'incident-raised' | 'incident-triaged' | 'incident-announce-owed'
+): readonly LogEntry[] {
+  return events.filter((entry) => entry.kind === 'profile' && entry['event'] === event)
 }
 
 /** One narrated sentence and the facts it rests on. */

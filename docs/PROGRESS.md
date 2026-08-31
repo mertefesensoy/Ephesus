@@ -4112,15 +4112,143 @@ Architect approved at M6.5.
       could not distinguish the key-scan from the strict schema's own refusal;
       and an install-side guard that was unreachable dead code, now an exported
       function with its own test — the M6 lesson restated).*
-- [ ] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
+- [x] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
       company test (SRS §6.1) run on a REAL repo** with its evidence captured;
       E-PLAYBOOK's drill recorded; the M6 carried items closed or re-recorded
       with their reason.
+      *Evidence: CI **green on the whole M7 stack** —
+      `feature/m7-6-shareable`, run `33438533520`, success, 1m57s — which is
+      S-PROFILE's "green in CI". `typecheck && lint && check-invariants` green;
+      full suite **2697 passed / 6 skipped**, 12 failed (the recorded 9
+      Windows-local ones plus `s-stoploop` (2) and `hermes` (1) under parallel
+      load, each verified green in isolation — `hermes` 40/40).
+      **A DEFECT THE EXIT REVIEW EXISTS TO CATCH, FOUND AND FIXED:**
+      `compileFacts` had NO INCIDENT BRANCH, so the incident entries the endpoint
+      has written since M7.4 reached the standup only sideways — as an open gate,
+      or as whatever task Artemis happened to create. **SRS §6.1's "the next
+      briefing narrates the incident accurately from the log" was unreachable BY
+      CONSTRUCTION while every suite was green.** VOICE-DESIGN §4 had specified
+      it all along ("Health — … breaker trips, **incidents**, Harbor queue
+      depth"), so this was an unimplemented requirement, not a new feature. The
+      agent's summary is carried VERBATIM, every fact carries a `log#<seq>` ref,
+      and the OWED announcement is narrated too — an obligation recorded only in
+      `log.jsonl` is one the Architect must go looking for. **5 mutations, 5
+      killed**; the owed-announcement branch survived the first pass and the
+      assertion was added rather than the branch accepted.
+      **Evidence, with a COMMITTED generator** (M6's standing complaint):
+      `test/scenarios/m7-evidence.test.ts` writes
+      `docs/demo/m7-onehour-chain.txt` and `docs/demo/m7-eplaybook-scorecard.md`,
+      reproducible with `npm test`. Both artifacts state in their own text what
+      they are NOT — the transcript that it is not the acceptance criterion, the
+      scorecard that its drill record is a fixture rather than a live agent run.
+      **`test/scenarios/s-onehour.test.ts`** walks §6.1's chain end to end over
+      the SHIPPED components (real git, real incident endpoint, real Hermes
+      router, real ledger endpoint, real gates, real briefing compiler) with only
+      the `gh` process and the ENGINE replaced at their seams.*
 - [ ] **M7 exit** — SRS §6.1 demonstrated on a real repo (the crew detects a
       broken test, fixes it or opens a fix PR, files the memo if policy was
       crossed, and the next briefing narrates the incident accurately from the
       log, with zero un-gated destructive actions); S-PROFILE pass; PROGRESS +
       docs synced.
+
+### M7 exit review (2026-09-01) — verdict: **M7.1–M7.7 DONE; the milestone's exit criterion is NOT met, and how it closes is an OPEN ARCHITECT DECISION**
+
+Every package is built, tested, mutation-checked and documented. The milestone's
+exit criterion is not met, and this review does not pretend otherwise: **SRS §6.1
+has not been demonstrated on a real repo.** What follows is what was verified by
+execution, what was not, and the decision that is the Architect's.
+
+**What M7.7 owed, and what it delivered.**
+
+1. **S-PROFILE green in CI — MET.** The whole M7 stack is on
+   `feature/m7-6-shareable` (each branch cut from the previous, since M7.1 never
+   reached `main`), pushed and green: run `33438533520`, `success`, 1m57s. That
+   run carries S-PROFILE, S-ONEHOUR and every other suite.
+2. **The one-hour company test on a REAL repo — NOT MET.** The CHAIN is
+   demonstrated end to end over shipped components (below); the real-repo,
+   real-engine half is owed. See the decision at the end.
+3. **E-PLAYBOOK's drill recorded — MET**, with the qualifier stated in the
+   artifact itself: `docs/demo/m7-eplaybook-scorecard.md` scores a well-run
+   drill through the shipped scorer, from a FIXTURE record. E-PLAYBOOK is a
+   weekly/pre-release eval against real engines (TEST-STRATEGY §6); the live run
+   is owed with §6.1.
+4. **Carried items closed or re-recorded — MET.** Re-recorded accurately below;
+   two of them had already been closed at M6.10 and the M7 paragraph still
+   listed them, which is the kind of staleness this row exists to catch.
+
+**A defect found by the exit review, and fixed.** `compileFacts` had **no
+incident branch at all**. The incident endpoint has written `incident-raised`,
+`incident-triaged` and `incident-announce-owed` to `log.jsonl` since M7.4, and
+the briefing compiler had never heard of any of them — so an incident reached
+the standup only sideways, as an open gate or as whatever task Artemis happened
+to create. The Architect was never told that something broke, in which
+repository, or what the on-call agent concluded. **SRS §6.1's last clause — "the
+next briefing narrates the incident accurately from the log" — was unreachable
+by construction**, and every suite was green. VOICE-DESIGN §4 had specified it
+all along ("Health — budgets vs burn, breaker trips, **incidents**, Harbor queue
+depth"); it was simply never implemented. Fixed, with the agent's summary
+carried verbatim and every fact carrying a `log#<seq>` ref, and mutation-checked
+five ways. This is the M6 shape a third time: two halves that had never met.
+
+**What was demonstrated, by execution.** `test/scenarios/s-onehour.test.ts`
+walks SRS §6.1's chain over the SHIPPED components — real git in a temp home,
+the real `IncidentEndpoint`, Hermes router, `LedgerEndpoint`, `GateManager` and
+briefing compiler. Two things are replaced at their seams (TEST-STRATEGY §1's
+"determinize the boundary, not the world"): the `gh` process, and the ENGINE.
+The transcript is committed at `docs/demo/m7-onehour-chain.txt`, and its
+generator is committed too — `test/scenarios/m7-evidence.test.ts`, re-runnable
+with `npm test`, which is the answer to M6's standing complaint that the demo
+generator was a scratch file.
+
+The chain, as it actually ran: CI reports run #4021 failed → the incident is
+raised and mailed to Artemis while **`tasks.json` is unchanged** (FR-5.2's single
+scribe) → Artemis proposes → the task lands assigned → the on-call agent files a
+triage report from its own outbox through the real router → a severity-1
+escalates now and opens a gate → the announcement the Herald cannot make is
+recorded as owed → **and the standup narrates all three, from the log, with
+refs**.
+
+**What was NOT demonstrated, and why the milestone does not close on it.**
+SRS §6.1 asks whether a REAL agent, given a REAL broken test in a REAL
+repository, actually detects it, triages it correctly, and fixes it or opens a
+sound fix PR — within an hour, unattended. That is *judgment*, and no fake
+engine stands in for it. What M7 has proved is that every arrow between "CI went
+red" and "the standup says so" exists, is wired, and carries the truth. What
+remains unproved is the half the harness cannot supply.
+
+The gap is not for want of tooling: `gh` is authenticated on this machine and
+`claude` is on PATH. It is that running §6.1 means **deliberately breaking a
+test in one of the Architect's repositories and leaving autonomous agents with
+`GH_TOKEN` grants running unattended against it for an hour**. Choosing that
+repository, and consenting to that, is the Architect's call and nobody else's.
+
+**Therefore M7 does not close on its criterion as written**, and — exactly as at
+M6 — the options are the Architect's: run §6.1 and close on it; amend the
+criterion on the record; or hold M7 open. What this review will not do is tick
+the row and call the chain the criterion. That substitution is the failure the
+M6 close-out audit was convened to catch, and committing it here would make this
+review worthless.
+
+**Carried items, re-recorded accurately (2026-09-01).**
+*Already closed at M6.10, and the M7 paragraph was stale in still listing them:*
+the jsdom question (answered — dev-only, pinned `^26`), and BUILD-PROMPT §10's
+dependency list (it does now carry both voice SDKs and jsdom — verified).
+*Closed here:* a committed generator for demo evidence — for M7's artifacts
+(`test/scenarios/m7-evidence.test.ts`); the M6 SVGs still have none, so the
+pattern is established and that specific debt stands.
+*Still owed, unchanged, and blocked on a session with the right access:* the two
+live voice proofs and the voice-driven day (all three unreachable while M6.9 is
+deferred); the v2 floor with a real company on it; wake-word detection; the M6
+floor screenshot; the Memory panel screenshot; codex/gemini hook wiring
+post-trust; a real-engine respawn demo; E-STOA's LLM-judged half; `stoa:pin`
+from a real checkout (verified: no such channel exists). *Newly owed:* SRS §6.1
+itself, and E-PLAYBOOK's live drill.
+
+**Checks.** `typecheck`, `lint`, `check-invariants` green. Full suite **2697
+passed / 6 skipped**, 12 failed — the recorded 9 Windows-local deterministic
+failures plus `s-stoploop` (2) and `hermes` (1) under parallel load, each
+verified green in isolation (`hermes` 40/40) and none related to M7. Ubuntu CI
+green on the stack.
 
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
