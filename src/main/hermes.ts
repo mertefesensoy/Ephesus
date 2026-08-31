@@ -198,8 +198,29 @@ export class Hermes {
   private sweeping: Promise<SweepReport> = Promise.resolve({ delivered: [], rejected: [] })
   /** Stop-hook continuations per session, for guard 2 (ADR-0013). */
   private readonly blocks = new Map<string, number>()
-  /** Agents already nudged for their current pending mail — "exactly once". */
-  private readonly nudged = new Set<string>()
+  /**
+   * Which message files each agent has already been nudged FOR.
+   *
+   * A set of agent IDS is what this used to be, and it left a race that can
+   * silence an agent for good. The old rule was "nudged once, no more until the
+   * inbox is empty": the nudge consumes the inbox, so the next tick normally
+   * sees zero pending and clears the flag. But mail landing in the window
+   * between the consume and that observation leaves `pending > 0` with the flag
+   * still set — and from then on `pending` never returns to zero, so the flag
+   * never clears and the agent is never nudged again.
+   *
+   * Found while investigating a live stall at M7.7. It was NOT the cause of
+   * that stall (the agent there was correctly skipped as busy), and it is
+   * recorded that way rather than dressed up as the fix — but it is a real way
+   * for an agent to go deaf, and it costs one map to close.
+   *
+   * Keyed on the message files instead, so "exactly once" means once per
+   * MESSAGE rather than once per agent. The same unread mail still nudges only
+   * once (S-WAKE's "no stale nudges"); genuinely new mail earns its own nudge,
+   * which is what FR-3.5 asks for — "mail that lands while an agent is idle
+   * must wake it".
+   */
+  private readonly nudged = new Map<string, ReadonlySet<string>>()
   /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
   private readonly heldLogged = new Set<string>()
   /** Diverted msgIds already logged and signalled — one divert, one record. */
@@ -789,15 +810,20 @@ export class Hermes {
     if (!this.options.nudge) return []
     const woken: string[] = []
     for (const agentId of this.knownAgents()) {
-      const pending = this.pendingMailCount(agentId)
+      const pendingFiles = this.pendingMailFiles(agentId)
+      const pending = pendingFiles.length
       if (pending === 0) {
         this.nudged.delete(agentId)
         continue
       }
-      if (this.nudged.has(agentId)) continue
+      // New mail is mail this agent has not been nudged for. Everything it was
+      // already told about stays silent, however long it sits unread.
+      const told = this.nudged.get(agentId) ?? new Set<string>()
+      const unannounced = pendingFiles.filter((name) => !told.has(name))
+      if (unannounced.length === 0) continue
       if (this.options.isIdle && !this.options.isIdle(agentId)) continue
 
-      this.nudged.add(agentId)
+      this.nudged.set(agentId, new Set(pendingFiles))
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
       const handed = await this.consumeInbox(agentId)
@@ -885,9 +911,23 @@ export class Hermes {
 
   /** Unread messages waiting for an agent. */
   pendingMailCount(agentId: string): number {
+    return this.pendingMailFiles(agentId).length
+  }
+
+  /**
+   * The message files waiting in an agent's inbox, sorted.
+   *
+   * Names rather than a count, because the wake watchdog has to tell new mail
+   * from old: a count alone cannot, since consuming one message and receiving
+   * another leaves it unchanged.
+   */
+  pendingMailFiles(agentId: string): readonly string[] {
     const inbox = path.join(this.mailboxDir(agentId), 'inbox')
-    if (!fs.existsSync(inbox)) return 0
-    return fs.readdirSync(inbox).filter((name) => name.endsWith('.json')).length
+    if (!fs.existsSync(inbox)) return []
+    return fs
+      .readdirSync(inbox)
+      .filter((name) => name.endsWith('.json'))
+      .sort()
   }
 
   /**

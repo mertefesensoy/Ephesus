@@ -750,3 +750,45 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     expect(r.agora.readLog().some((e) => e['kind'] === 'hook' && e['event'] === 'wake')).toBe(true)
   })
 })
+
+describe('Hermes — mail arriving just after a nudge still gets one (M7.7)', () => {
+  /**
+   * The old watchdog keyed "already nudged" on the AGENT. The nudge consumes
+   * the inbox, so the next tick normally sees zero pending and clears the flag
+   * — but mail landing in the window between the consume and that observation
+   * leaves `pending > 0` with the flag still set, and `pending` never returns
+   * to zero again. The agent goes permanently deaf.
+   *
+   * Keying on the message FILES makes "exactly once" mean once per message,
+   * which is what FR-3.5 asks for and what S-WAKE's "no stale nudges" allows.
+   */
+  it('nudges again for mail that landed after the previous nudge', async () => {
+    const nudges: string[] = []
+    const r = await rig({ isIdle: () => true, nudge: (agentId) => nudges.push(agentId) })
+
+    r.send('agent.a', message())
+    await r.hermes.sweep()
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
+
+    // New mail, and NO intervening tick observed the empty inbox — which is
+    // precisely the window the old flag could not survive.
+    r.send('agent.a', message({ subject: 'the second one' }))
+    await r.hermes.sweep()
+
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
+    expect(nudges).toEqual(['agent.b', 'agent.b'])
+  })
+
+  it('still refuses to nudge twice for the SAME unread mail', async () => {
+    // S-WAKE's "no stale nudges" — unchanged. An agent that is told about a
+    // message and leaves it unread is not told again.
+    const nudges: string[] = []
+    const r = await rig({ isIdle: () => false, nudge: (agentId) => nudges.push(agentId) })
+    r.send('agent.a', message())
+    await r.hermes.sweep()
+    // Not idle: skipped, and NOT recorded as told.
+    expect(await r.hermes.wakeCheck()).toEqual([])
+    expect(nudges).toEqual([])
+  })
+})
