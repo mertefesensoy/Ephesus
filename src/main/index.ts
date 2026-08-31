@@ -1214,7 +1214,11 @@ async function boot(): Promise<void> {
     bindings: () =>
       (activations?.instances() ?? []).flatMap((instance) =>
         instance.plan.triggers
-          .filter((trigger) => trigger.when === 'ci')
+          // On the machine-readable binding, never on `when` — `when` renders
+          // "on ci" for display, and filtering it as 'ci' is what silently
+          // dropped every CI failure as `incident-unclaimed` on the first real
+          // repository this was pointed at.
+          .filter((trigger) => trigger.event === 'ci')
           .map((trigger) => ({
             instanceId: instance.instanceId,
             agentId: trigger.agentId,

@@ -15,10 +15,10 @@ correctly and opens a sound fix PR. That is judgment, and no fake engine
 stands in for it. The judgment half is OWED and recorded in docs/PROGRESS.md.
 
 [1] CI reports run #4021 on owner/app: failure
-[2] incident raised: owner/app#ci-run:4021 → mail 2026-08-31T21-17-19-140Z-inc33p
+[2] incident raised: owner/app#ci-run:4021 → mail 2026-08-31T21-42-08-481Z-inc33p
 [2a] tasks.json is UNCHANGED (0 tasks) — FR-5.2
 [3] Artemis received a "request" from agent.harbor
-[4] Artemis proposed; task t-2026-08-31-985ead0 assigned to agent.mason
+[4] Artemis proposed; task t-2026-08-31-2e12270 assigned to agent.mason
 [5] on-call agent filed a triage report from its own outbox (severity 1, unresolved)
 [6] escalated now: owner/app#ci-run:4021
 [6a] gates open: 1

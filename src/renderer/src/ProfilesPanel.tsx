@@ -154,8 +154,10 @@ export function AutonomyRow({ row }: { readonly row: ComposedAutonomy }): ReactE
  * clamped rows rather than asserting that a function returned them.
  */
 export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElement {
-  const armed = plan.triggers.filter((trigger) => trigger.when.startsWith('every '))
-  const unarmed = plan.triggers.filter((trigger) => !trigger.when.startsWith('every '))
+  // On the structured binding, not on the label the same object renders for
+  // humans — the incident path already paid for keying on `when`.
+  const armed = plan.triggers.filter((trigger) => trigger.everyMs !== null)
+  const unarmed = plan.triggers.filter((trigger) => trigger.everyMs === null)
   return (
     <div style={card}>
       <p style={{ margin: '0 0 6px' }}>

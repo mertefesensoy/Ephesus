@@ -14,7 +14,8 @@ import {
   targetKindSchema,
   type ProfileAutonomy,
   type ProfileBundle,
-  type TargetKind
+  type TargetKind,
+  type TriggerEvent
 } from './profile'
 import type { SpawnRequest } from './agents'
 
@@ -200,10 +201,26 @@ export interface ActivationPlan {
   readonly envGrants: readonly string[]
   /** Per-class autonomy, after composition against the global ceiling. */
   readonly autonomy: readonly ComposedAutonomy[]
-  /** Triggers that would be armed, by id and what wakes them. */
+  /**
+   * Triggers that would be armed, by id and what wakes them.
+   *
+   * `when` is a HUMAN-READABLE label for the activation screen. `everyMs` and
+   * `event` are the machine-readable binding, and consumers must key on those.
+   *
+   * They exist because keying on `when` cost the incident path its whole
+   * production life: `index.ts` filtered `when === 'ci'` while this renders
+   * `"on ci"`, so every CI failure was dropped as `incident-unclaimed` and no
+   * incident was ever raised on a real repository. The unit tests passed
+   * bindings in directly and never derived one from a plan, so both halves were
+   * green. A display string is not a contract; these two fields are.
+   */
   readonly triggers: readonly {
     readonly id: string
     readonly when: string
+    /** Set for a schedule trigger; null for an event binding. */
+    readonly everyMs: number | null
+    /** Set for an event binding (`webhook`/`ci`/`health`); null otherwise. */
+    readonly event: TriggerEvent | null
     readonly agentId: string
     readonly playbook: string
   }[]
@@ -286,6 +303,8 @@ export function activationPlan(
           trigger.kind === 'schedule'
             ? `every ${String(Math.round(trigger.everyMs / 60_000))} min`
             : `on ${trigger.event}`,
+        everyMs: trigger.kind === 'schedule' ? trigger.everyMs : null,
+        event: trigger.kind === 'event' ? trigger.event : null,
         agentId,
         playbook: trigger.playbook
       }

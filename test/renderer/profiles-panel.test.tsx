@@ -70,12 +70,19 @@ function plan(over: Partial<ActivationPlan> = {}): ActivationPlan {
       {
         id: 'health-sweep',
         when: 'every 15 min',
+        everyMs: 900_000,
+        event: null,
         agentId: 'agent.skeleton-crew-myapp-health-watcher',
         playbook: 'health-check.md'
       },
       {
+        // `when` says "on ci" for humans; `event` is what code keys on. The
+        // two are deliberately different strings here so a consumer that went
+        // back to matching the label fails this suite.
         id: 'ci-failure',
-        when: 'ci',
+        when: 'on ci',
+        everyMs: null,
+        event: 'ci',
         agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
         playbook: 'incident.md'
       }

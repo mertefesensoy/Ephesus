@@ -361,7 +361,8 @@ export class ProfileActivations {
 
     const armed: string[] = []
     for (const trigger of plan.triggers) {
-      const everyMs = scheduleIntervalOf(trigger.when)
+      // The plan's own field, not a number parsed back out of its label.
+      const everyMs = trigger.everyMs
       if (everyMs === null) continue
       this.options.addTrigger({
         id: trigger.id,
@@ -379,8 +380,8 @@ export class ProfileActivations {
       agentIds: spawned,
       armed,
       pendingEvents: plan.triggers
-        .filter((trigger) => scheduleIntervalOf(trigger.when) === null)
-        .map((trigger) => ({ id: trigger.id, event: trigger.when })),
+        .filter((trigger) => trigger.everyMs === null)
+        .map((trigger) => ({ id: trigger.id, event: trigger.event ?? trigger.when })),
       activatedAt: (this.options.now?.() ?? new Date()).toISOString()
     }
     this.live.set(instanceId, instance)
@@ -443,18 +444,6 @@ export class ProfileActivations {
     }
     return null
   }
-}
-
-/**
- * Reads a schedule interval back out of a plan's `when` line, or null when the
- * trigger is event-bound. The plan renders `when` for humans; this is the one
- * place that turns it back into a number, so the two cannot disagree about
- * which triggers are armable.
- */
-function scheduleIntervalOf(when: string): number | null {
-  const minutes = /^every (\d+) min$/.exec(when)?.[1]
-  if (minutes === undefined) return null
-  return Number(minutes) * 60_000
 }
 
 /** What a fired schedule trigger needs to say, and to whom. */

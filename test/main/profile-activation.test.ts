@@ -313,7 +313,9 @@ describe('triggers', () => {
     expect(result.instance.armed).toEqual(['skeleton-crew@repo:myapp/sweep'])
     expect(result.instance.armed).toEqual([...r.triggers.keys()])
     expect(result.instance.pendingEvents).toEqual([
-      { id: 'skeleton-crew@repo:myapp/ci', event: 'on ci' }
+      // The EVENT name, not the display label. A pending row keyed on 'on ci'
+      // is how the incident path came to drop every CI failure in production.
+      { id: 'skeleton-crew@repo:myapp/ci', event: 'ci' }
     ])
   })
 

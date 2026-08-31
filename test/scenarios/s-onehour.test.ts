@@ -278,3 +278,45 @@ describe('SRS §6.1 — the chain, end to end over shipped components', () => {
     expect(allowed).toEqual([])
   })
 })
+
+/**
+ * The seam that cost the incident path its whole production life.
+ *
+ * `index.ts` derives its `IncidentBinding`s from `ActivationPlan.triggers`, and
+ * filtered on `trigger.when === 'ci'` — while the plan renders `when` as
+ * `"on ci"` for the activation screen. So `bindings()` always returned empty,
+ * every CI failure was dropped as `incident-unclaimed`, and no incident was
+ * ever raised. Both halves were green: `incidents.test.ts` passed
+ * `IncidentBinding` objects in directly and never derived one from a plan.
+ *
+ * Found on the first real repository this was pointed at. This case derives the
+ * binding the way production does, so the two halves finally meet.
+ */
+describe('the incident binding is derived from a real plan', () => {
+  it('finds the ci trigger by its EVENT, not by its display label', async () => {
+    const { ProfileStore } = await import('../../src/main/profiles')
+    const { activationPlan } = await import('../../src/shared/profile-activation')
+    const store = new ProfileStore(
+      path.join(__dirname, '..', '.no-such-home'),
+      path.join(__dirname, '..', '..', 'profiles')
+    )
+    const loaded = store.load('skeleton-crew')
+    if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
+    const planned = activationPlan(
+      loaded.bundle,
+      { kind: 'repo', id: 'musahit', path: path.join(__dirname, '..', '..') },
+      'manual'
+    )
+    if (!planned.ok) throw new Error(planned.reasons.join('; '))
+
+    // Exactly the expression `src/main/index.ts` uses to build its bindings.
+    const bindings = planned.plan.triggers.filter((trigger) => trigger.event === 'ci')
+    expect(bindings).toHaveLength(1)
+    expect(bindings[0]?.playbook).toBe('incident.md')
+
+    // And the label it must NOT be keyed on, pinned so the two cannot be
+    // confused again.
+    expect(bindings[0]?.when).toBe('on ci')
+    expect(planned.plan.triggers.filter((trigger) => trigger.when === 'ci')).toEqual([])
+  })
+})
