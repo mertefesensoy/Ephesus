@@ -116,6 +116,12 @@ async function rig(options: RigOptions = {}): Promise<{
     profilesPreview: () => ({ ok: false as const, reasons: [] }),
     profilesActivate: () => Promise.resolve({ ok: false as const, reasons: [] }),
     profilesDeactivate: () => ({ ok: false, reason: 'no activations in this rig' }),
+    harborRepos: () => ({
+      schemaVersion: 1,
+      ghVersion: null,
+      unavailable: 'no Harbor in this rig',
+      repos: []
+    }),
     profilesInstances: () => [],
     orgChart: () => [],
     orgMetrics: () => ({ metrics: [], findings: [] }),

@@ -3906,7 +3906,7 @@ Architect approved at M6.5.
       assertion compared `instance.armed` against what the scheduler was
       actually given — the UI would have shown a watcher on duty that no clock
       would ever fire.
-- [ ] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
+- [x] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
       registered repos ingested via the `gh` CLI under the agent's own auth
       (FR-10.1); every remote-originated directive tagged `remote` in
       `log.jsonl` (FR-10.3). A scripted `gh` seam, so the suites never touch
@@ -3918,6 +3918,46 @@ Architect approved at M6.5.
       ingestion path (the S-SECRETS pattern). Risk: ingestion that invents a
       task the API did not report is the E-BRIEF-FAITH failure wearing a
       Harbor hat.*
+      *Evidence: `typecheck && lint && check-invariants` green; 41 new cases
+      (`test/shared/harbor.test.ts` 22, `test/main/harbor-github.test.ts` 19);
+      full suite **2530 passed / 6 skipped**, failures unchanged — the recorded
+      9 Windows-local deterministic ones plus `s-stoploop` (2) and `hermes` (1)
+      under parallel load, both green in isolation and neither related.*
+      **Production call path:** `src/main/index.ts:1465` constructs
+      `GitHubHarbor` whose registered repos are the ACTIVE profiles'
+      `harbor.json` entries (M7.1's schema, M7.2's instances — one list, not a
+      second that could disagree); `src/main/index.ts:1478` probes and ingests
+      at boot; `:1480-1490` adds the `harbor-github` scheduler cadence
+      (10 min, `enabled` only while some profile actually watches a repo);
+      `src/main/ipc.ts:410` registers `harbor:repos`; `src/preload/index.ts:138`
+      exposes it. **No renderer caller yet** — no Harbor panel is built.
+      Recorded, not hidden.
+      *Proved against the REAL `gh` CLI and the REAL GitHub API,* because the
+      parsers were written against an assumption of `gh --json`'s shapes and an
+      assumption is what a fixture would have re-tested: booted the built app
+      with the driver pointed at `mertefesensoy/Ephesus`. `gh 2.92.0`,
+      `unavailable: null`, **50 items, 0 dropped, failure null**, and **50
+      `remote` log entries — one per item, tagging total (FR-10.3)**. Zero rows
+      needed repairing, so the schemas match what GitHub actually returns. The
+      repo has no open issues or PRs, and that read as `items: 50, failure:
+      null` rather than as a fault — which is the distinction `RepoQueue.failure`
+      exists to make. (Incidentally: the two newest runs are this session's own
+      `feature/m7-1-profile-schema` and `feature/m7-2-activation-autonomy` CI
+      runs, both `success` — Ubuntu CI is green on both pushed branches.) The
+      temporary `EVIDENCE` block was removed before commit.
+      *Mutation-checked, 16/16 killed*, headed by the invention the risk line
+      names: a malformed row REPAIRED into the queue as `#0 ""`. Also killed —
+      dropped rows uncounted; a running CI job given a `failure` conclusion; a
+      non-array response read as "no rows"; the `remote` projection skipping a
+      kind or losing its tag; a cancelled run counted as a failure; a draft PR
+      reported ready; a `gh` failure yielding an empty queue with no failure
+      recorded; a failed repo forgetting what it last knew; ingestion without a
+      probe; an unrecognised `--version` accepted; one failing repo aborting the
+      others; calls unscoped from `--repo`; dropped rows raising no degradation.
+      One survivor found and closed: failing only the FIRST `gh` call left
+      nothing in flight to leak, so nothing tested whether a LATER failure would
+      still log the items collected before it — half a repo tagged `remote` in
+      the book of record that the queue never showed.
 - [ ] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
       ADR-0012 bundle exercising no private API (the dogfood rule, NFR-12):
       health-check watcher, CI babysitter (watch runs, triage failures, open

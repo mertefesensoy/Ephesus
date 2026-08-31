@@ -13,6 +13,7 @@ import type {
   ProfileSummary
 } from './profile-view'
 import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
+import type { HarborView } from './harbor'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
@@ -119,6 +120,11 @@ export const IpcChannels = {
   profilesActivate: 'profiles:activate',
   profilesDeactivate: 'profiles:deactivate',
   profilesInstances: 'profiles:instances',
+  // The Harbor's inbound half (SDD §5 `harbor: repos()`, FR-10.1). Reading is
+  // free: `repos` answers from what the last ingestion held and touches no
+  // network — the scheduler drives ingestion, so a panel opening cannot make
+  // the company shell out to `gh`.
+  harborRepos: 'harbor:repos',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -386,6 +392,15 @@ export interface EphApi {
     deactivate: (instanceId: string) => Promise<{ ok: boolean; reason: string | null }>
     /** Every live instance (FR-9.4: many profiles, many targets, one floor). */
     instances: () => Promise<readonly ProfileInstanceView[]>
+  }
+  harbor: {
+    /**
+     * What the port holds: the registered repositories, their queues, the rows
+     * that were dropped, and any failure — per repo, and for `gh` overall.
+     * A failure is a FIELD, never an empty list: a repo whose call errored and
+     * one with nothing open must not look alike (invariant §7).
+     */
+    repos: () => Promise<HarborView>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */

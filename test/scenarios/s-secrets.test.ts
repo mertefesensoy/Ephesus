@@ -126,6 +126,12 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       profilesPreview: () => ({ ok: false as const, reasons: [] }),
       profilesActivate: () => Promise.resolve({ ok: false as const, reasons: [] }),
       profilesDeactivate: () => ({ ok: false, reason: 'no activations in this rig' }),
+      harborRepos: () => ({
+        schemaVersion: 1,
+        ghVersion: null,
+        unavailable: 'no Harbor in this rig',
+        repos: []
+      }),
       profilesInstances: () => [],
       orgChart: () => [],
       orgMetrics: () => ({ metrics: [], findings: [] }),

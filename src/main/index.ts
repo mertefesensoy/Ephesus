@@ -28,6 +28,8 @@ import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
 import { ProfileActivations, ProfileStore } from './profiles'
+import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
+import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
 import { stoaCadenceTick } from './stoa-cadence'
@@ -107,6 +109,10 @@ let stoa: Stoa | null = null
 // built before the AgentManager this needs, and the gate seam below reads
 // through the handle rather than capturing a value that does not exist yet.
 let activations: ProfileActivations | null = null
+// The Harbor's inbound half (FR-10.1, M7.3). Its registered repositories are the
+// ones the ACTIVE profiles declare in `harbor.json` — the company watches what
+// it was actually pointed at, not a second list that could disagree.
+let harbor: GitHubHarbor | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -1458,6 +1464,33 @@ async function boot(): Promise<void> {
     }
   })
 
+  harbor = new GitHubHarbor({
+    repos: () => [
+      ...new Set((activations?.instances() ?? []).flatMap((instance) => instance.plan.repos))
+    ],
+    onLogEvent: (draft) => {
+      // FR-10.3: every inbound item lands in `log.jsonl` tagged `remote`.
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onDegraded: (what) => reportDegradation('harbor', what)
+  })
+  // The probe first (ADR-0009's subprocess discipline): until `gh` answers,
+  // the Harbor reports itself unavailable rather than returning empty queues
+  // that would read as "nothing to do".
+  void harbor.probe().then(() => harbor?.ingest())
+  scheduler.add({
+    id: 'harbor-github',
+    everyMs: HARBOR_INGEST_EVERY_MS,
+    // Only when something is actually watching a repository. An ingestion
+    // cadence that ran against an empty list would still shell out to `gh`
+    // every ten minutes for nothing.
+    enabled: () => (activations?.instances() ?? []).some((i) => i.plan.repos.length > 0),
+    run: async () => {
+      await harbor?.ingest()
+    }
+  })
+
   // minute for a figure nobody reads that often (SDD §11).
   budgetWatcher = new BudgetWatcher({
     ledger: costLedger,
@@ -1692,6 +1725,13 @@ async function boot(): Promise<void> {
     profilesDeactivate: (instanceId) =>
       activations?.deactivate(instanceId) ?? { ok: false, reason: 'profiles: not started' },
     profilesInstances: () => activations?.instances() ?? [],
+    harborRepos: () =>
+      harbor?.view() ?? {
+        schemaVersion: HARBOR_SCHEMA_VERSION,
+        ghVersion: null,
+        unavailable: 'the Harbor has not started',
+        repos: []
+      },
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {

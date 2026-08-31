@@ -22,6 +22,7 @@ import {
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { HarborView } from '../shared/harbor'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
@@ -247,6 +248,8 @@ export interface IpcDeps {
   profilesActivate(request: ActivationRequest): Promise<ActivationResult>
   profilesDeactivate(instanceId: string): { ok: boolean; reason: string | null }
   profilesInstances(): readonly ProfileInstanceView[]
+  /** What the Harbor holds; reading touches no network (FR-10.1). */
+  harborRepos(): HarborView
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -446,6 +449,7 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.profilesInstances, (): readonly ProfileInstanceView[] =>
     deps.profilesInstances()
   )
+  ipcMain.handle(IpcChannels.harborRepos, (): HarborView => deps.harborRepos())
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())
   ipcMain.handle(IpcChannels.orgRetros, (): readonly RetroRow[] => deps.retros())
