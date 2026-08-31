@@ -140,29 +140,48 @@ it is how the next session knows where to resume).
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
 >
-> **M7 is IN PROGRESS (2026-08-31). M7.1, M7.2 and M7.3 are done — resume at
-> M7.4.** One package per branch, all pushed, **none merged** (merging is the
+> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.4 are done — resume at M7.5.**
+> One package per branch, all pushed, **none merged** (merging is the
 > Architect's call per package, and each branch is stacked on the previous
 > because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
 > `feature/m7-2-activation-autonomy` (`26b59d5`),
-> `feature/m7-3-harbor-github` (`86f6b2a`). Evidence, production call paths and
-> mutation sweeps are in `docs/PROGRESS.md`; the three implementation docs are
-> `docs/implementations/2026-08-31-m7-{1,2,3}-*.md`.
+> `feature/m7-3-harbor-github` (`86f6b2a`),
+> `feature/m7-4-skeleton-crew` (`f6710ff`). Evidence, production call paths and
+> mutation sweeps are in `docs/PROGRESS.md`; the implementation docs are
+> `docs/implementations/2026-08-31-m7-{1,2,3,4}-*.md`.
 >
-> **What M7.1–M7.3 give you, and what they deliberately do NOT.** A profile
+> **What M7.1–M7.4 give you, and what they deliberately do NOT.** A profile
 > bundle is a schema that refuses by name; activation composes stricter-wins
 > autonomy into every gate submission; the Harbor ingests issues, PRs and CI
-> runs through `gh` and tags them `remote`. **There is no renderer caller for
-> any of it yet** — the activation screen and the Harbor panel are unbuilt, and
-> that gap is recorded in each package's evidence rather than left to be
-> discovered. M7.4 and M7.5 are the two built-in profiles, which are also the
-> dogfood test of whether ADR-0012's format is actually sufficient.
+> runs through `gh` and tags them `remote`; and the Skeleton Crew ships as an
+> ordinary bundle whose CI failures become incidents, are mailed to Artemis, and
+> come back as triage reports. **There is no renderer caller for any of it yet**
+> — the activation screen and the Harbor panel are unbuilt, and that gap is
+> recorded in each package's evidence rather than left to be discovered.
 >
-> **Two dead-code findings this run, both the M6 Herald shape**, both now wired:
-> `hireTemplateSchema` (M5.6) had only test callers; `effectivePolicy` and
-> `GateRequest.profileAutonomy` (M3) had **no caller at all**, so stricter-wins
-> was correct arithmetic nothing could invoke. Assume nothing is wired until you
-> have found the caller.
+> **ADR-0012's dogfood claim HELD at M7.4:** the Skeleton Crew needed no field
+> M7.1's frozen schema lacks, and `test/main/skeleton-crew.test.ts` checks that
+> against the real shipped bundle through the real loader. M7.5 (Front Office)
+> is the second half of that test — if IT needs a schema change, say so loudly
+> rather than making one quietly, because the claim is what the format is for.
+>
+> **Two things M7.4 settled that M7.5 should not re-litigate.** The harness
+> never grades severity (UC-09 gives triage to the agent) and never writes
+> `tasks.json` (FR-5.2 — it mails Artemis and she proposes). Both are asserted
+> by name; if Front Office needs to create work, it takes the same route.
+> **Owed to the Architect as a DOCUMENT decision:** the severity ladder has two
+> rungs because the SRS names exactly one (`severity-1`) and describes exactly
+> two treatments — see DECISIONS-LOG 2026-08-31.
+>
+> **Three dead-code findings across this run, all the M6 Herald shape**, all now
+> wired: `hireTemplateSchema` (M5.6) had only test callers; `effectivePolicy`
+> and `GateRequest.profileAutonomy` (M3) had **no caller at all**, so
+> stricter-wins was correct arithmetic nothing could invoke; and M7.2's
+> `onTriggerFired` appended a log line and stopped, so a fired profile schedule
+> trigger never reached the agent it named — two of FR-9.2's four components
+> were spawned and inert behind an entirely green suite. Assume nothing is wired
+> until you have found the caller, and prefer extracting logic out of
+> `index.ts` to trusting it there: boot wiring is where a test cannot go.
 >
 > Two things the close does NOT claim, and you must not restate otherwise: SRS
 > §6.2, SRS §6.5 and the voice-driven day were **not demonstrated** and are not
