@@ -346,7 +346,16 @@ odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(mem
           // never writes the ledger, which is hers (FR-5.2, UC-05 step 4)
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
-harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
+harbor:   repos() bridgeStatus()
+          hireExport(profile, hire) profileExport(name)
+          importInspect(blob) importInstall(blob)
+          // FR-10.4's export/import, split because the requirement is: "import
+          // only pre-fills the spawn form — a human always confirms". INSPECT
+          // reads a blob and returns a RECOMPUTED disclosure, writing nothing;
+          // INSTALL is what a confirmed form reaches, and it writes files
+          // without activating. There is deliberately no channel that does both
+          // and none that activates — an imported profile is inert until
+          // `profiles:activate`, which is its own Architect action (M7.6)
 profiles: list() inspect(name) activate(request) deactivate(instanceId)
           preview(request) instances()
           // list() rows an INVALID bundle too (`valid: false`) — a profile that

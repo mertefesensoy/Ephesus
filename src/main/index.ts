@@ -30,6 +30,7 @@ import { Gymnasium } from './gymnasium'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint } from './incidents'
+import { HireExchange } from './harbor/hires'
 import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
 import { STOA_EVERY_MS, Stoa } from './stoa'
@@ -117,6 +118,7 @@ let activations: ProfileActivations | null = null
 let harbor: GitHubHarbor | null = null
 let incidents: IncidentEndpoint | null = null
 let frontOffice: FrontOffice | null = null
+let exchange: HireExchange | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -596,6 +598,13 @@ async function boot(): Promise<void> {
     path.join(home.root, 'profiles'),
     path.join(appRoot, 'profiles')
   )
+  // Export/import (FR-10.4 — M7.6). Accepted imports land in the HOME profiles
+  // directory, never beside the built-ins: a shared bundle must not be able to
+  // shadow or overwrite one that ships with the app.
+  exchange = new HireExchange({
+    homeProfilesDir: path.join(home.root, 'profiles'),
+    store: profiles
+  })
   promptStore = prompts
 
   // The broker is constructed before anything can spawn: an agent must never
@@ -1868,6 +1877,40 @@ async function boot(): Promise<void> {
         unavailable: 'the Harbor has not started',
         repos: []
       },
+    // Sharing (FR-10.4 — M7.6). `inspect` writes nothing; `install` writes
+    // files and does NOT activate — an imported profile is inert until the
+    // Architect activates it through `profiles:activate`.
+    harborHireExport: (profile, hire) =>
+      exchange?.exportHire(profile, hire) ?? { ok: false, reason: 'no profile store' },
+    harborProfileExport: (name) =>
+      exchange?.exportProfile(name) ?? { ok: false, reason: 'no profile store' },
+    harborImportInspect: (blob) => {
+      const inspected = exchange?.inspect(blob)
+      if (inspected === undefined) return { ok: false, reasons: ['no profile store'] }
+      if (!inspected.ok) return { ok: false, reasons: inspected.reasons }
+      return {
+        ok: true,
+        kind: inspected.manifest.kind,
+        // The RECOMPUTED manifest, never the one the envelope carried: what
+        // the Architect confirms against has to be derived from the payload.
+        manifest: inspected.manifest,
+        replaces: inspected.replaces
+      }
+    },
+    harborImportInstall: (blob) => {
+      const result = exchange?.install(blob)
+      if (result === undefined) return { ok: false, reasons: ['no profile store'] }
+      if (result.ok) {
+        agora?.appendLog({
+          kind: 'profile',
+          event: 'imported',
+          profile: result.name,
+          replaced: result.replaced
+        })
+        mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      }
+      return result
+    },
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {

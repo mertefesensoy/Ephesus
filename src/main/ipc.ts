@@ -23,6 +23,7 @@ import {
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { HarborView } from '../shared/harbor'
+import type { ShareExport, ShareInspection, ShareInstall } from '../shared/share-view'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
@@ -99,6 +100,15 @@ const gymSetModeSchema = z.object({ mode: companyModeSchema }).strict()
 
 const profileNamePayloadSchema = z.object({ name: z.string().min(1).max(64) }).strict()
 const stoaIdSchema = z.object({ id: sourceIdSchema }).strict()
+// Sharing payloads (FR-10.4 — M7.6). Validated in main like every other
+// renderer-supplied value (invariant §2). The blob cap is generous but finite:
+// an import is a file somebody else wrote, and an unbounded string from an
+// untrusted source is a denial of service wearing a profile's clothes.
+const hireExportSchema = z
+  .object({ profile: z.string().min(1).max(64), hire: z.string().min(1).max(64) })
+  .strict()
+const profileNameArgSchema = z.object({ name: z.string().min(1).max(64) }).strict()
+const importBlobSchema = z.object({ blob: z.string().min(1).max(2_000_000) }).strict()
 const stoaBriefIdSchema = z.object({ id: briefIdSchema }).strict()
 /**
  * The register payload is the DRAFT and nothing else — no id, no registrar, no
@@ -250,6 +260,10 @@ export interface IpcDeps {
   profilesInstances(): readonly ProfileInstanceView[]
   /** What the Harbor holds; reading touches no network (FR-10.1). */
   harborRepos(): HarborView
+  harborHireExport(profile: string, hire: string): ShareExport
+  harborProfileExport(name: string): ShareExport
+  harborImportInspect(blob: string): ShareInspection
+  harborImportInstall(blob: string): ShareInstall
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -450,6 +464,25 @@ export function registerIpc(deps: IpcDeps): void {
     deps.profilesInstances()
   )
   ipcMain.handle(IpcChannels.harborRepos, (): HarborView => deps.harborRepos())
+  ipcMain.handle(IpcChannels.harborHireExport, (_ev, raw: unknown): ShareExport => {
+    const { profile, hire } = hireExportSchema.parse(raw)
+    return deps.harborHireExport(profile, hire)
+  })
+  ipcMain.handle(IpcChannels.harborProfileExport, (_ev, raw: unknown): ShareExport => {
+    const { name } = profileNameArgSchema.parse(raw)
+    return deps.harborProfileExport(name)
+  })
+  // Reads a blob and returns what importing it WOULD do. Writes nothing and
+  // starts nothing — FR-10.4's "import only pre-fills the spawn form".
+  ipcMain.handle(IpcChannels.harborImportInspect, (_ev, raw: unknown): ShareInspection => {
+    const { blob } = importBlobSchema.parse(raw)
+    return deps.harborImportInspect(blob)
+  })
+  // What a CONFIRMED form reaches. Writes the bundle; does not activate it.
+  ipcMain.handle(IpcChannels.harborImportInstall, (_ev, raw: unknown): ShareInstall => {
+    const { blob } = importBlobSchema.parse(raw)
+    return deps.harborImportInstall(blob)
+  })
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())
   ipcMain.handle(IpcChannels.orgRetros, (): readonly RetroRow[] => deps.retros())

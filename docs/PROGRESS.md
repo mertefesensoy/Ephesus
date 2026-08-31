@@ -4058,7 +4058,7 @@ Architect approved at M6.5.
       (one address, two filings — the ADR-0008 Odeon pattern);
       `GateManager.onSettled` at `:695` routes an `outbound` verdict to
       `onVerdict`; `:1271` posts. **10 mutations applied, 10 killed.**
-- [ ] **M7.6 Shareable hires and profiles** — export/import a role template or
+- [x] **M7.6 Shareable hires and profiles** — export/import a role template or
       a whole bundle via file/link (FR-10.4); **import only PRE-FILLS the
       spawn/activation form — a human always confirms.** Bundles are plain
       files, so a shared profile is diffable in review.
@@ -4069,6 +4069,49 @@ Architect approved at M6.5.
       export→import round-trips losslessly. Risk: an imported profile is
       UNTRUSTED CONTENT (invariant §13's spirit) — it may not raise its own
       privileges on the way in.*
+      *Evidence: `typecheck && lint && check-invariants` green; 56 new cases
+      (`test/shared/share.test.ts` 25, `test/main/hires-exchange.test.ts` 19,
+      `test/shared/secret-shapes.test.ts` 12); full suite **2692 passed /
+      6 skipped**, failures an identical set to before the package.
+      **FIVE REAL PRIVILEGE ESCALATIONS FOUND BY AN ADVERSARIAL PASS AGAINST MY
+      OWN CODE, ALL FIXED, EACH WITH A NAMED REGRESSION.** (1) **Path traversal**
+      — payload record KEYS were bare `z.string()` and `install` writes through
+      `path.join`, so a playbook named `../../../gate-policy.json` overwrote the
+      WATCH'S OWN POLICY, which SDD §2 says "can only ever loosen, never
+      tighten" — a complete bypass of the approval system, found by a probe that
+      asserted the import SUCCEEDED while the happy-path suite stayed green.
+      (2) **A JSON backslash-uXXXX escape walked past the secret scan**, which read the
+      raw blob text — the raw text matches nothing while `JSON.parse` yields a
+      real token; the scan now walks decoded values AND keys. (3) **`install`
+      merged instead of replacing**, so a v2 that dropped a hire left the old one
+      on disk and the loader read back the UNION — the Architect confirms two
+      hires and gets three, with the third still armed. (4) **The widening check
+      was skipped when the installed copy did not parse**, so a bundle arriving
+      while the installed profile happened to be broken got MORE latitude than
+      one arriving while it was healthy. (5) **The manifest disclosed NAMES but
+      not PROSE** — every name identical, every runbook rewritten, and a playbook
+      is the agent's task list on a timer with the profile's autonomy.
+      **The design:** the envelope carries FILES (ADR-0012's "diffable in
+      review" — round trip asserted byte-for-byte), and the manifest is
+      RECOMPUTED from the payload on import by the same function that produced
+      it, so a human confirms a derived fact rather than an author's claim. That
+      is what gives "an undeclared env grant" a mechanical meaning. Every gate
+      class is declared, including ones the bundle never mentions, so a
+      permissive DEFAULT cannot arrive undisclosed.
+      **Production call path:** `src/main/index.ts` constructs `HireExchange`
+      beside the `ProfileStore`; `harbor:import-inspect` -> `inspect` ->
+      `inspectImport` -> `secretShapeIn`; `harbor:import-install` -> `install`
+      -> `writeFileAtomic`. **Nothing here activates** — asserted on the API
+      surface (S-SECRETS pattern): the four sharing channels are pinned, and
+      `HireExchange` has no spawn, scheduler or activation seam to call.
+      `inspect`'s purity is asserted by a CENSUS of the file tree, not a claim.
+      **The runtime secret list cannot drift from the M0 build gate:**
+      `secret-shapes.test.ts` reads `check-invariants.cjs` as text and compares
+      element by element. **14 mutations applied, 14 killed** — two survived a
+      first pass and both were fixed rather than accepted (an assertion that
+      could not distinguish the key-scan from the strict schema's own refusal;
+      and an install-side guard that was unreachable dead code, now an exported
+      function with its own test — the M6 lesson restated).*
 - [ ] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
       company test (SRS §6.1) run on a REAL repo** with its evidence captured;
       E-PLAYBOOK's drill recorded; the M6 carried items closed or re-recorded

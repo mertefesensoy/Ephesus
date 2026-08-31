@@ -109,6 +109,24 @@ export class ProfileStore {
     }
   }
 
+  /**
+   * Contract: the raw FILES of one bundle, home shadowing builtin, or null.
+   *
+   * Export needs the text, not the parsed object (FR-10.4, M7.6): ADR-0012's
+   * argument for declarative bundles is that they are plain files, diffable in
+   * review, and a re-serialized object would hand a reviewer a diff of this
+   * build's formatting instead of what the author wrote.
+   */
+  filesOf(name: string): ProfileFiles | null {
+    if (!profileNameSchema.safeParse(name).success) return null
+    for (const dir of [this.homeProfilesDir, this.builtinProfilesDir]) {
+      if (!isDirectory(path.join(dir, name))) continue
+      const read = readBundleFiles(path.join(dir, name), name)
+      return read.ok ? read.files : null
+    }
+    return null
+  }
+
   private loadFrom(root: string, name: string, source: 'home' | 'builtin'): ProfileLoad {
     const dir = path.join(root, name)
     const read = readBundleFiles(dir, name)

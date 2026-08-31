@@ -14,6 +14,7 @@ import type {
 } from './profile-view'
 import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
 import type { HarborView } from './harbor'
+import type { ShareExport, ShareInspection, ShareInstall } from './share-view'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
@@ -125,6 +126,20 @@ export const IpcChannels = {
   // network — the scheduler drives ingestion, so a panel opening cannot make
   // the company shell out to `gh`.
   harborRepos: 'harbor:repos',
+  // Sharing (SDD §5 `harbor: hireExport(role) hireImport(blob)`, FR-10.4 — M7.6).
+  // FOUR channels where the SDD's abridged list names two, recorded in
+  // DECISIONS-LOG with SDD §5 updated to name them (the M3.1 rule).
+  //
+  // The split is the requirement, not a convenience. FR-10.4 says "import only
+  // pre-fills the spawn form — a human always confirms", so INSPECT reads a
+  // blob and returns a disclosure while writing nothing, and INSTALL is what a
+  // confirmed form reaches. There is deliberately no channel that does both,
+  // and none that activates: an imported profile is inert until the Architect
+  // activates it through `profiles:activate`, which is its own action.
+  harborHireExport: 'harbor:hire-export',
+  harborProfileExport: 'harbor:profile-export',
+  harborImportInspect: 'harbor:import-inspect',
+  harborImportInstall: 'harbor:import-install',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -401,6 +416,22 @@ export interface EphApi {
      * one with nothing open must not look alike (invariant §7).
      */
     repos: () => Promise<HarborView>
+    /** One role template as a shareable blob (FR-10.4). */
+    hireExport: (profile: string, hire: string) => Promise<ShareExport>
+    /** A whole ADR-0012 bundle, as the FILES it is made of. */
+    profileExport: (name: string) => Promise<ShareExport>
+    /**
+     * What importing this blob WOULD do. Writes nothing, starts nothing —
+     * this is the pre-fill FR-10.4 requires, and the manifest it returns is
+     * recomputed from the payload rather than taken from the envelope.
+     */
+    importInspect: (blob: string) => Promise<ShareInspection>
+    /**
+     * Writes an accepted import into the harness home. The human confirming
+     * is what reaches this. It does NOT activate: the imported profile is
+     * inert until `profiles:activate`, which is a separate Architect action.
+     */
+    importInstall: (blob: string) => Promise<ShareInstall>
   }
   org: {
     /** The org chart, read off the roster (FR-11.5). */
