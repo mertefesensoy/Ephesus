@@ -10,6 +10,7 @@ import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
 import { GymPanel } from './GymPanel'
 import { StoaPanel } from './StoaPanel'
+import { ProfilesPanel } from './ProfilesPanel'
 import { OrgPanel } from './OrgPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
@@ -62,6 +63,7 @@ export function App(): ReactElement {
     | 'org'
     | 'gym'
     | 'stoa'
+    | 'profiles'
     | 'memory'
     | 'watch'
   >('floor')
@@ -340,6 +342,7 @@ export function App(): ReactElement {
             'org',
             'gym',
             'stoa',
+            'profiles',
             'memory',
             'watch'
           ] as const
@@ -376,6 +379,7 @@ export function App(): ReactElement {
         {tab === 'org' && <OrgPanel />}
         {tab === 'gym' && <GymPanel />}
         {tab === 'stoa' && <StoaPanel />}
+        {tab === 'profiles' && <ProfilesPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
