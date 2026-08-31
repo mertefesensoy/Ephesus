@@ -560,7 +560,10 @@ export function FloorCanvas(): ReactElement {
     const eph = window.eph
     if (!eph) return
     let live = true
-    let cursor = -1
+    // 0, not -1: `agora:log` validates `afterSeq >= 0`, so a -1 here made the
+    // FIRST drain rejected as well as the seed. 0 means "from the beginning",
+    // which the seed below immediately advances to the tail.
+    let cursor = 0
     const drain = (): void => {
       void eph.agora.log(cursor, 64).then((entries) => {
         if (!live) return
@@ -594,8 +597,22 @@ export function FloorCanvas(): ReactElement {
     }
     // Seed from the tail, then follow — a window opened mid-run must not
     // replay the whole day's mail as a storm of envelopes.
-    void eph.agora.log(-1, 1).then((entries) => {
-      cursor = entries[0]?.seq ?? -1
+    //
+    // This used to ask for `log(-1, 1)`, and `agora:log` validates
+    // `afterSeq >= 0`, so the call was REJECTED every time: `cursor` stayed at
+    // -1, every subsequent poll was rejected too, and the mail flights never
+    // ran at all. Found by booting the app at M7.7 — the rejections go to the
+    // MAIN process console, so nothing in the UI ever said the floor's
+    // envelopes were dead, and no renderer test could see it either.
+    //
+    // `readLog` only reads FORWARD, so a true tail read would need a new IPC
+    // channel (and the M3.1 rule that comes with one). This asks for a window
+    // larger than any plausible session's log and takes its last entry, which
+    // is the true tail whenever the log fits. Past that the seed starts mid-log
+    // and the first drain replays the remainder once — noisier than ideal, and
+    // still bounded, which the previous behaviour was not.
+    void eph.agora.log(0, 2_000).then((entries) => {
+      cursor = entries.at(-1)?.seq ?? 0
     })
     const off = eph.agora.onAppend(drain)
     return () => {
