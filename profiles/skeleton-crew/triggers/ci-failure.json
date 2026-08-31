@@ -1,0 +1,7 @@
+{
+  "id": "ci-failure",
+  "kind": "event",
+  "event": "ci",
+  "hire": "ci-babysitter",
+  "playbook": "incident.md"
+}

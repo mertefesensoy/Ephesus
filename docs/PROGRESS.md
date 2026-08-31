@@ -3958,7 +3958,7 @@ Architect approved at M6.5.
       nothing in flight to leak, so nothing tested whether a LATER failure would
       still log the items collected before it — half a repo tagged `remote` in
       the book of record that the queue never showed.
-- [ ] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
+- [x] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
       ADR-0012 bundle exercising no private API (the dogfood rule, NFR-12):
       health-check watcher, CI babysitter (watch runs, triage failures, open
       fix PRs), dependency-update agent (batched PRs), and incident-response
@@ -3970,6 +3970,47 @@ Architect approved at M6.5.
       E-PLAYBOOK's incident drill measuring time-to-triage. Risk: a built-in
       that reaches past the schema invalidates ADR-0012's central claim — this
       profile must be buildable by an Architect with a text editor.*
+      *Evidence: `typecheck && lint && check-invariants` green; 61 new cases
+      (`test/main/skeleton-crew.test.ts` 9, `test/shared/incident.test.ts` 16,
+      `test/main/incidents.test.ts` 19, `test/scenarios/s-profile.test.ts` 10,
+      `test/evals/e-playbook.test.ts` 7) plus 3 on the extracted trigger wake;
+      full suite **2593 passed / 6 skipped**, failures unchanged — the recorded
+      9 Windows-local deterministic ones plus `s-stoploop` (2) under parallel
+      load, green in isolation (8/8) and unrelated.
+      **ADR-0012's dogfood claim HOLDS, and is now checked rather than stated:**
+      the bundle needed no field M7.1's frozen schema lacks, and
+      `skeleton-crew.test.ts` runs against the REAL shipped bundle through the
+      REAL loader — a private sidecar or a schema reach turns it red. One case
+      pins the directory listing itself.
+      **Production call path:** `src/main/index.ts:1195` constructs
+      `IncidentEndpoint`; the `harbor-github` cadence's `run` feeds it the
+      ingest result (repositories that ANSWERED only — a failed repo keeps its
+      stale queue, and re-raising from it would be news that is not new);
+      `src/shared/routing.ts:172` → `src/main/hermes.ts:587` carries the triage
+      report back; `onTriggerFired` now WAKES its agent through
+      `triggerWakeMessage` (through M7.2 it appended a log line and stopped, so
+      the health watcher and dependency updater were spawned and never asked for
+      anything — two of FR-9.2's four components inert behind a green suite).
+      **The harness never writes `tasks.json`:** a CI failure is mailed to
+      Artemis from `agent.harbor` and she proposes the task (FR-5.2's single
+      scribe); S-PROFILE asserts the ledger is UNCHANGED after `raise`.
+      **The harness never grades severity** — the escalation table is driven by
+      the severity the AGENT reported, and an unreadable report is refused, not
+      defaulted to the mild rung.
+      **9 mutations applied, 9 killed** (M1 drop the routing branch · M2 flatten
+      the ladder · M3 drop the dedupe · M4 misroute by repo · M5 default an
+      unreadable report · M6 invent a conclusion · M7 widen env grants · M8 ask
+      for `autonomous` on `destructive` · M9 announce silently). Two defects
+      found by writing them: `'reproduce'` CONTAINS `'prod'`, so the eval's
+      substring match scored playbook compliance as an un-gated production
+      action (the M6 repeat-back shape — now a closed vocabulary compared by
+      equality); and `agent.sk-<target>-<hire>` matches check-invariants'
+      OpenAI-key pattern, so the tests now use the id production actually mints.
+      **UC-09 step 4's spoken announcement is OWED, not faked:** M6.9 is deferred
+      and the Herald gains no caller here, so a severity-1 logs
+      `incident-announce-owed` and reports an unmet obligation through the
+      degradation channel while the gate queue takes the escalation. Mutation M9
+      proves that leg is load-bearing.*
 - [ ] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
       reply drafting with CONFIGURABLE autonomy (draft-only → auto-post),
       docs/changelog sync, and release-prep checklists (UC-10). Outbound

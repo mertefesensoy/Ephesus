@@ -1,0 +1,4 @@
+{
+  "schemaVersion": 1,
+  "requires": ["new-dependency", "api-or-schema-change", "security-posture", "spend"]
+}

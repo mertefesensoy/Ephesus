@@ -131,6 +131,20 @@ async function restartOver(home: string): Promise<Company> {
       render: () => '',
       onLogEvent: () => {}
     }),
+    // The incident plane is deliberately not exercised by a blackout: what a
+    // restart owes an in-flight incident is its own question (the endpoint
+    // re-raises a still-failing run by design), and S-PROFILE owns it. An
+    // honest stand-in over the same restored Agora belongs here.
+    incidents: new (await import('../../src/main/incidents')).IncidentEndpoint({
+      bindings: () => [],
+      orchestratorId: () => agora.registry().orchestratorId ?? 'agent.artemis',
+      deliver: (message) => hermes.deliverFromHarness(message),
+      render: () => '',
+      onLogEvent: () => {}
+    }),
+    incidentBindings: [],
+    unmetObligations: [],
+    escalatedNow: [],
     // A blackout scenario asserts what survived on disk in the *data plane*;
     // the cost plane's own restart property is S-LEDGER's. Honest stand-ins.
     ledgerStore: new MemoryLedgerStore(),

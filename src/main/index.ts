@@ -18,7 +18,7 @@ import {
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
-import { Artemis } from './artemis'
+import { Artemis, ARTEMIS_AGENT_ID } from './artemis'
 import { ExecGitRunner, Worktrees } from './git'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
@@ -27,8 +27,9 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
-import { ProfileActivations, ProfileStore } from './profiles'
+import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
+import { IncidentEndpoint } from './incidents'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
@@ -113,6 +114,7 @@ let activations: ProfileActivations | null = null
 // ones the ACTIVE profiles declare in `harbor.json` — the company watches what
 // it was actually pointed at, not a second list that could disagree.
 let harbor: GitHubHarbor | null = null
+let incidents: IncidentEndpoint | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -1186,10 +1188,58 @@ async function boot(): Promise<void> {
     }
   })
 
+  // The Harbor's incident endpoint (FR-9.2, UC-09, SDD §7.5 — M7.4).
+  // Constructed here, before Hermes, for the same reason closing time is: the
+  // router hands triage reports to it. It never writes `tasks.json` — it mails
+  // Artemis, and the task is hers to propose (FR-5.2).
+  incidents = new IncidentEndpoint({
+    bindings: () =>
+      (activations?.instances() ?? []).flatMap((instance) =>
+        instance.plan.triggers
+          .filter((trigger) => trigger.when === 'ci')
+          .map((trigger) => ({
+            instanceId: instance.instanceId,
+            agentId: trigger.agentId,
+            playbook: trigger.playbook,
+            repos: instance.plan.repos
+          }))
+      ),
+    orchestratorId: () => agora?.registry().orchestratorId ?? ARTEMIS_AGENT_ID,
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`incident ${String(draft['event'] ?? 'event')}`)
+    },
+    // UC-09 step 4's announcement has no delivery leg: M6.9 is deferred and the
+    // Herald has no production caller. The obligation surfaces as a visible
+    // degradation (invariant §7) instead of being quietly dropped.
+    onUnmetObligation: (what) => reportDegradation('incident', what),
+    onEscalateNow: (incident, report) => {
+      // UC-09 step 4's "UC-08 escalation with an incident summary", through
+      // SDD §9's `needs_human` choke point — the surface that already exists
+      // and is already wired to the approvals queue. The summary is the
+      // AGENT'S sentence, not one composed here.
+      chokePoints?.submitNeedsHuman({
+        from: incident.agentId,
+        subject: `severity-1 incident ${incident.key}: ${report.summary}`,
+        conversation: incident.key
+      })
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
     closing: (message) => closingTime?.noteReply(message) ?? false,
+    // The endpoint answers the sender itself when it can read a report and
+    // cannot match it, so "handled" means only that an endpoint exists to try.
+    harbor: (message) => {
+      if (incidents === null) return false
+      incidents.onTriage(message)
+      return true
+    },
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
     // ADR-0008 filing endpoint. One address, three filings: the archive is one
     // subsystem, and giving each artifact its own reserved id would put three
@@ -1461,6 +1511,29 @@ async function boot(): Promise<void> {
         playbook
       })
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+
+      // …and the agent is actually told. Logging the fire and stopping there
+      // would leave the health watcher and the dependency updater spawned and
+      // never asked for anything — two of FR-9.2's four components inert
+      // behind a green suite, which is the one failure mode this build has
+      // already paid for once.
+      const instance = activations
+        ?.instances()
+        .find((candidate) => candidate.instanceId === instanceId)
+      hermes?.deliverFromHarness(
+        triggerWakeMessage(
+          {
+            instanceId,
+            triggerId,
+            agentId,
+            playbook,
+            profile: instance?.plan.profile ?? instanceId,
+            targetPath: instance?.plan.targetPath ?? ''
+          },
+          (kind, vars) => prompts.render(path.join('profiles', `trigger-${kind}.md`), vars),
+          new Date()
+        )
+      )
     }
   })
 
@@ -1487,7 +1560,15 @@ async function boot(): Promise<void> {
     // every ten minutes for nothing.
     enabled: () => (activations?.instances() ?? []).some((i) => i.plan.repos.length > 0),
     run: async () => {
-      await harbor?.ingest()
+      const view = await harbor?.ingest()
+      if (view === undefined) return
+      // UC-09 step 1, wired: what came in through the port becomes an incident
+      // for whoever is on call for that repository. Only repositories that
+      // actually ANSWERED — `ingest` deliberately keeps a failed repo's stale
+      // queue rather than blanking it (so a blind repo and an idle one do not
+      // look alike), and re-raising yesterday's items because `gh` is down
+      // would wake the crew for news that is not new.
+      incidents?.raise(view.repos.filter((row) => row.failure === null).flatMap((row) => row.items))
     }
   })
 

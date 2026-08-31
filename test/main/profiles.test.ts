@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ProfileStore } from '../../src/main/profiles'
+import { ProfileStore, triggerWakeMessage } from '../../src/main/profiles'
+import { PROFILE_ENDPOINT } from '../../src/shared/reserved'
 import { PROFILE_SCHEMA_VERSION } from '../../src/shared/profile'
 import { ORG_SCHEMA_VERSION } from '../../src/shared/org'
 
@@ -278,5 +279,46 @@ describe('listing', () => {
 
   it('is empty, not an error, when neither root exists', () => {
     expect(new ProfileStore('/no/such/home/profiles', '/no/such/app/profiles').list()).toEqual([])
+  })
+})
+
+describe('a fired schedule trigger actually wakes its agent', () => {
+  const WAKE = {
+    instanceId: 'skeleton-crew:repo:myapp',
+    triggerId: 'health-sweep',
+    agentId: 'agent.skeleton-crew-myapp-health-watcher',
+    playbook: 'health-check.md',
+    profile: 'skeleton-crew',
+    targetPath: '/repos/myapp'
+  }
+  const render = (kind: 'subject' | 'body', vars: Record<string, string>): string =>
+    kind === 'subject' ? `duty: ${vars.playbook}` : `follow ${vars.playbook} in ${vars.target}`
+  const at = new Date('2026-08-31T09:00:00.000Z')
+
+  it('addresses the agent the binding names, from the profile endpoint', () => {
+    const message = triggerWakeMessage(WAKE, render, at)
+    expect(message.to).toBe('agent.skeleton-crew-myapp-health-watcher')
+    expect(message.from).toBe(PROFILE_ENDPOINT)
+    // `request` obligates a reply — a duty nobody must answer for is a duty
+    // that quietly stops being done (ADR-0003's obligation table).
+    expect(message.act).toBe('request')
+  })
+
+  it('names the runbook and does not summarize it', () => {
+    const message = triggerWakeMessage(WAKE, render, at)
+    expect(message.body).toContain('health-check.md')
+    // The harness has never read a playbook. If this message ever carried the
+    // runbook's CONTENT, the bundle would have two places that say what to do.
+    expect(message.body).not.toContain('Do these now')
+    expect(message.body.length).toBeLessThan(500)
+  })
+
+  it('threads every wake of one binding onto one conversation', () => {
+    const first = triggerWakeMessage(WAKE, render, at)
+    const second = triggerWakeMessage(WAKE, render, new Date('2026-08-31T09:15:00.000Z'))
+    expect(first.conversation).toBe(second.conversation)
+    // Distinct ids, so two wakes are two messages and neither overwrites the
+    // other in an inbox.
+    expect(first.id).not.toBe(second.id)
   })
 })

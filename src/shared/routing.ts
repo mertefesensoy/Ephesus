@@ -1,4 +1,10 @@
-import { CLOSING_ENDPOINT, LEDGER_ENDPOINT, LIBRARY_ENDPOINT, ODEON_ENDPOINT } from './reserved'
+import {
+  CLOSING_ENDPOINT,
+  HARBOR_ENDPOINT,
+  LEDGER_ENDPOINT,
+  LIBRARY_ENDPOINT,
+  ODEON_ENDPOINT
+} from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -161,6 +167,22 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
       }
     }
     return { kind: 'endpoint', endpoint: ODEON_ENDPOINT }
+  }
+
+  if (message.to === HARBOR_ENDPOINT) {
+    // FR-9.2, UC-09 step 3/4. The on-call agent's triage report comes back
+    // here. Like the closing endpoint, only a reply-shaped act: a triage
+    // report tells the harness what the agent found, it never asks the harness
+    // for anything. WHICH incident the sender may report on is state, not
+    // transport — the endpoint refuses a report for an incident nobody raised,
+    // and the router does not track incidents.
+    if (message.act !== 'inform' && message.act !== 'done') {
+      return {
+        kind: 'bounce',
+        reason: `the harbor endpoint takes "inform" or "done" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: HARBOR_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

@@ -4,6 +4,7 @@ import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
 import {
   CLOSING_ENDPOINT,
+  HARBOR_ENDPOINT,
   HERMES_SENDER,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
@@ -131,6 +132,16 @@ export interface HermesOptions {
    * bounces it back to the sender ("no closing time is in progress", FR-3.4).
    */
   closing?(message: Message): boolean
+
+  /**
+   * The Harbor's incident endpoint (FR-9.2, UC-09) — carries an on-call
+   * agent's triage report to `IncidentEndpoint.onTriage`. Returns true when the
+   * report was consumed; false bounces it back with the reason, exactly as an
+   * out-of-season closing ack bounces. The endpoint writes its own refusal for
+   * a report it could read but could not match, so a `false` here means only
+   * "no incident subsystem is listening".
+   */
+  harbor?(message: Message): boolean
   /** Renders the block reason and the wake nudge — both are prompt surfaces. */
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
@@ -334,6 +345,19 @@ export class Hermes {
   private submitToClosing(message: Message): void {
     const handled = this.options.closing?.(message) ?? false
     if (!handled) this.bounce(message, 'no closing time is in progress')
+  }
+
+  /**
+   * Hands a triage report to the incident endpoint (FR-9.2, UC-09 step 3/4).
+   *
+   * The endpoint answers the sender itself when it can read the report and
+   * cannot match it, because that refusal carries reasons only it knows. A
+   * `false` here is the coarser case — nothing is listening at all — and
+   * bounces with that reason rather than dropping the agent's work.
+   */
+  private submitToHarbor(message: Message): void {
+    const handled = this.options.harbor?.(message) ?? false
+    if (!handled) this.bounce(message, 'no incident endpoint is listening')
   }
 
   /**
@@ -560,6 +584,7 @@ export class Hermes {
       if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
       else if (route.endpoint === CLOSING_ENDPOINT) this.submitToClosing(parsed.message)
       else if (route.endpoint === ODEON_ENDPOINT) this.submitToOdeon(parsed.message)
+      else if (route.endpoint === HARBOR_ENDPOINT) this.submitToHarbor(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }

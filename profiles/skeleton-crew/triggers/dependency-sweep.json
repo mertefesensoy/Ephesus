@@ -1,0 +1,7 @@
+{
+  "id": "dependency-sweep",
+  "kind": "schedule",
+  "everyMs": 86400000,
+  "hire": "dependency-updater",
+  "playbook": "dependency-update.md"
+}

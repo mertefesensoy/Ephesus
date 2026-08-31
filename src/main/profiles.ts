@@ -12,6 +12,8 @@ import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { AutonomyLevel, GateKind } from '../shared/gates'
 import type { SpawnRequest } from '../shared/agents'
 import type { Trigger } from './scheduler'
+import { composeMessage, makeMessageId, type Message } from '../shared/message'
+import { PROFILE_ENDPOINT } from '../shared/reserved'
 
 /**
  * The profile store (SDD §1.1 `profiles.ts`, SDD §2 `~/.ephesus/profiles/<name>/`,
@@ -435,4 +437,55 @@ function scheduleIntervalOf(when: string): number | null {
   const minutes = /^every (\d+) min$/.exec(when)?.[1]
   if (minutes === undefined) return null
   return Number(minutes) * 60_000
+}
+
+/** What a fired schedule trigger needs to say, and to whom. */
+export interface TriggerWake {
+  readonly instanceId: string
+  readonly triggerId: string
+  readonly agentId: string
+  readonly playbook: string
+  /** The profile's name, for the wake's own words. */
+  readonly profile: string
+  /** Where the agent works — the activation target's path. */
+  readonly targetPath: string
+}
+
+/**
+ * Contract: the message a fired schedule trigger sends its agent. Pure.
+ *
+ * SDD §7.5's first arrow, and the reason this is a function rather than a
+ * closure inside `index.ts`: through M7.2 a fired trigger appended a log line
+ * and stopped, so the health watcher and the dependency updater were spawned
+ * and then never asked for anything — two of FR-9.2's four components inert
+ * behind a suite that was entirely green. Logic that lives only in the boot
+ * wiring is logic no test can reach, so it lives here instead.
+ *
+ * The body is rendered from `prompts/profiles/trigger-body.md` (invariant §8);
+ * this supplies facts and never prose. It names the runbook and does NOT
+ * summarize it — the harness has never read a playbook and must not start.
+ */
+export function triggerWakeMessage(
+  wake: TriggerWake,
+  render: (kind: 'subject' | 'body', vars: Record<string, string>) => string,
+  at: Date
+): Message {
+  const vars = { profile: wake.profile, playbook: wake.playbook, target: wake.targetPath }
+  return composeMessage({
+    // The suffix is derived from the trigger, so a wake is traceable to the
+    // binding that sent it (NFR-13) without a random component nothing can
+    // reproduce.
+    id: makeMessageId(at, `trg${wake.triggerId.replace(/[^a-z0-9]/g, '').slice(0, 10) || 'x'}`),
+    conversation: `${wake.instanceId}:${wake.triggerId}`,
+    in_reply_to: null,
+    from: PROFILE_ENDPOINT,
+    to: wake.agentId,
+    // `request` obligates a reply (ADR-0003's table): a scheduled duty that
+    // nobody had to answer for is a duty that quietly stops being done.
+    act: 'request',
+    subject: render('subject', vars).trim().slice(0, 200),
+    body: render('body', vars).trim(),
+    hops: 0,
+    created_at: at.toISOString()
+  })
 }

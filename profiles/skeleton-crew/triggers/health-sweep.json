@@ -1,0 +1,7 @@
+{
+  "id": "health-sweep",
+  "kind": "schedule",
+  "everyMs": 900000,
+  "hire": "health-watcher",
+  "playbook": "health-check.md"
+}
