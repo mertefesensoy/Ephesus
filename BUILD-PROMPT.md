@@ -140,16 +140,18 @@ it is how the next session knows where to resume).
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
 >
-> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.5 are done — resume at M7.6.**
+> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.6 are done — resume at M7.7,
+> the suites-and-exit package.**
 > One package per branch, all pushed, **none merged** (merging is the
 > Architect's call per package, and each branch is stacked on the previous
 > because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
 > `feature/m7-2-activation-autonomy` (`26b59d5`),
 > `feature/m7-3-harbor-github` (`86f6b2a`),
 > `feature/m7-4-skeleton-crew` (`94e19b4`),
-> `feature/m7-5-front-office` (`e4ceacd`). Evidence, production call paths and
+> `feature/m7-5-front-office` (`5af30a8`),
+> `feature/m7-6-shareable` (`e7a431d`). Evidence, production call paths and
 > mutation sweeps are in `docs/PROGRESS.md`; the implementation docs are
-> `docs/implementations/2026-08-31-m7-{1,2,3,4,5}-*.md`.
+> `docs/implementations/2026-08-31-m7-{1,2,3,4,5,6}-*.md`.
 >
 > **What M7.1–M7.4 give you, and what they deliberately do NOT.** A profile
 > bundle is a schema that refuses by name; activation composes stricter-wins
@@ -168,6 +170,16 @@ it is how the next session knows where to resume).
 > rather than the bundle's, and which went to the Architect as a §8.3 must-ask
 > before any code was written (SRS FR-11.1 amended with it). That is the shape
 > to repeat: a schema change is not forbidden, it is *asked for*.
+>
+> **M7.6 found FIVE privilege escalations in its own new code by running an
+> adversarial pass against it while it was being written** — a path traversal
+> that overwrote the Watch's gate policy, a JSON-escape bypass of the secret
+> scan, an install that merged instead of replacing, a widening check that was
+> skipped exactly when the installed profile was broken, and a manifest that
+> disclosed names but never prose. **The happy-path suite was green through all
+> five.** M7.7 and M7b should assume the same is true of their own code: a green
+> suite proves the paths you thought of, and the first move against you is the
+> one you did not.
 >
 > **Settled at M7.4/M7.5; do not re-litigate.** The harness never grades severity
 > (UC-09 gives triage to the agent) and never writes `tasks.json` (FR-5.2 — it
