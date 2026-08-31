@@ -140,8 +140,18 @@ it is how the next session knows where to resume).
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
 >
-> **M7 is IN PROGRESS (2026-08-31). M7.1–M7.6 are done — resume at M7.7,
-> the suites-and-exit package.**
+> **M7's SEVEN PACKAGES ARE ALL DONE (2026-09-01) — and M7 has NOT CLOSED.**
+> Its exit criterion is SRS §6.1 on a REAL repo, and §6.1 has not been run. The
+> M7.7 exit review demonstrated the whole CHAIN over shipped components (only
+> `gh` and the ENGINE replaced at their seams) and left the exit row UNCHECKED,
+> because §6.1 asks whether a real agent given a real broken test triages it
+> correctly within the hour — judgment, which no fake engine supplies. Running
+> it means breaking a test in one of the Architect's repositories and leaving
+> agents holding `GH_TOKEN` against it unattended, which is theirs to consent
+> to. **How M7 closes is an OPEN ARCHITECT DECISION** (run it / amend the
+> criterion on the record / hold M7 open), exactly as at M6. Do not tick that
+> row on your own initiative, and do not start M7b before it is settled —
+> BUILD-PROMPT §5 sequences them.
 > One package per branch, all pushed, **none merged** (merging is the
 > Architect's call per package, and each branch is stacked on the previous
 > because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
@@ -149,9 +159,12 @@ it is how the next session knows where to resume).
 > `feature/m7-3-harbor-github` (`86f6b2a`),
 > `feature/m7-4-skeleton-crew` (`94e19b4`),
 > `feature/m7-5-front-office` (`5af30a8`),
-> `feature/m7-6-shareable` (`e7a431d`). Evidence, production call paths and
-> mutation sweeps are in `docs/PROGRESS.md`; the implementation docs are
-> `docs/implementations/2026-08-31-m7-{1,2,3,4,5,6}-*.md`.
+> `feature/m7-6-shareable` (`31eafd7`),
+> `feature/m7-7-suites-exit` (`76ccf00`). All pushed; CI green on the stack
+> (run `33438533520`). Evidence, production call paths and mutation sweeps are
+> in `docs/PROGRESS.md`; the implementation docs are
+> `docs/implementations/2026-08-3{1}-m7-{1,2,3,4,5,6}-*.md` and
+> `2026-09-01-m7-7-suites-and-exit.md`.
 >
 > **What M7.1–M7.4 give you, and what they deliberately do NOT.** A profile
 > bundle is a schema that refuses by name; activation composes stricter-wins
@@ -170,6 +183,13 @@ it is how the next session knows where to resume).
 > rather than the bundle's, and which went to the Architect as a §8.3 must-ask
 > before any code was written (SRS FR-11.1 amended with it). That is the shape
 > to repeat: a schema change is not forbidden, it is *asked for*.
+>
+> **M7.7's exit review found a THIRD instance of the two-halves defect:** the
+> briefing compiler had no incident branch, so SRS §6.1's "the next briefing
+> narrates the incident accurately from the log" was unreachable by
+> construction while every suite was green — VOICE-DESIGN §4 had specified it
+> since before M6. Fixed. Count the pattern: M6's Herald, M7.2's inert trigger,
+> M7.7's silent standup. **Before claiming a subsystem works, find the caller.**
 >
 > **M7.6 found FIVE privilege escalations in its own new code by running an
 > adversarial pass against it while it was being written** — a path traversal
