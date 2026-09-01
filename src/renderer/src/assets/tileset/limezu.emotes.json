@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "name": "LimeZu Modern Interiors — UI thinking emotes",
+  "credit": "LimeZu — limezu.itch.io",
+  "sheet": "limezu-emotes.png",
+  "tilePx": 16,
+  "columns": 10,
+  "phases": {
+    "idle": 56,
+    "alert": 40,
+    "thinking": 52,
+    "working": 44,
+    "waiting": 52,
+    "blocked": 50,
+    "success": 64,
+    "ghost": 84,
+    "compacting": 66,
+    "looping": 90,
+    "stopped": 90,
+    "archived": 84
+  }
+}
