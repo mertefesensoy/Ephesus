@@ -209,7 +209,14 @@ describe('Hermes — a message the router will not carry', () => {
     expect(r.inbox('agent.a')).toEqual([])
   })
 
-  it('rejects a message that lies about owing a reply (ADR-0003 obligation table)', async () => {
+  /**
+   * Replaces a case that asserted the message was REJECTED. On the 2026-09-01
+   * live run that rule destroyed a finished standup brief, and the author was
+   * never told — a rejection is parked and logged, never returned. The
+   * obligation is now derived, which the sender cannot dodge, and the mail is
+   * carried.
+   */
+  it('carries a message whose obligation flag was wrong, having fixed it', async () => {
     const r = await rig()
     const forged = { ...message({ act: 'request' }), requires_reply: false }
     fs.writeFileSync(
@@ -220,8 +227,16 @@ describe('Hermes — a message the router will not carry', () => {
 
     const report = await r.hermes.sweep()
 
-    expect(report.rejected[0]?.reason).toContain('requires_reply must be true')
-    expect(r.inbox('agent.b')).toEqual([])
+    expect(report.rejected).toEqual([])
+    const delivered = r.inbox('agent.b')
+    expect(delivered).toHaveLength(1)
+    const carried = JSON.parse(
+      fs.readFileSync(
+        path.join(r.agora.agentDir('agent.b'), 'inbox', delivered[0] as string),
+        'utf8'
+      )
+    ) as { requires_reply: boolean }
+    expect(carried.requires_reply).toBe(true)
   })
 
   it('records every rejection in the log — never a silent drop', async () => {

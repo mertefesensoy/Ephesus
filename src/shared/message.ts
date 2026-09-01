@@ -76,15 +76,33 @@ export const messageSchema = z
 export type Message = z.infer<typeof messageSchema>
 
 export type MessageParse =
-  { readonly ok: true; readonly message: Message } | { readonly ok: false; readonly reason: string }
+  | {
+      readonly ok: true
+      readonly message: Message
+      /**
+       * Fields the harness derived rather than accepted, if any. Empty for a
+       * message that arrived correct. Reported so drift stays visible: a
+       * correction nobody can see is how a buggy sender goes unnoticed.
+       */
+      readonly corrected: readonly string[]
+    }
+  | { readonly ok: false; readonly reason: string }
 
 /**
  * Contract: validates a message an *agent* wrote, so it never throws and never
  * trusts. Two checks beyond the schema:
  *
- *  - `requires_reply` must match what the act implies. A sender that disagrees
- *    is either buggy or trying to dodge the obligation table; either way the
- *    router will not carry it.
+ *  - `requires_reply` is DERIVED from the act, never accepted. The obligation
+ *    table is the harness's rule and `PROTOCOL.md` tells agents in as many
+ *    words that they "do not get to choose it", so a sender that disagrees is
+ *    corrected rather than refused.
+ *
+ *    It used to be a refusal, and on the 2026-09-01 live run that destroyed a
+ *    complete, fully-cited standup brief: Artemis wrote it, set
+ *    `requires_reply: false` on a `propose`, and the whole message went to
+ *    `.rejected/` — where nothing tells the author, so she could not learn or
+ *    retry. Deriving is also STRONGER against the threat the refusal was
+ *    written for: a sender cannot dodge an obligation that is computed.
  *  - a message cannot be `in_reply_to` itself.
  */
 export function parseMessage(raw: unknown): MessageParse {
@@ -95,18 +113,20 @@ export function parseMessage(raw: unknown): MessageParse {
     return { ok: false, reason: `${where}: ${issue?.message ?? 'invalid message'}` }
   }
 
-  const message = parsed.data
-  if (message.requires_reply !== requiresReply(message.act)) {
-    return {
-      ok: false,
-      reason: `requires_reply must be ${requiresReply(message.act)} for act "${message.act}" (ADR-0003 obligation table)`
-    }
-  }
-  if (message.in_reply_to === message.id) {
+  const parsedMessage = parsed.data
+  if (parsedMessage.in_reply_to === parsedMessage.id) {
     return { ok: false, reason: 'in_reply_to: a message cannot reply to itself' }
   }
 
-  return { ok: true, message }
+  const obliged = requiresReply(parsedMessage.act)
+  if (parsedMessage.requires_reply === obliged) {
+    return { ok: true, message: parsedMessage, corrected: [] }
+  }
+  return {
+    ok: true,
+    message: { ...parsedMessage, requires_reply: obliged },
+    corrected: [`requires_reply -> ${String(obliged)} for act "${parsedMessage.act}"`]
+  }
 }
 
 /** Contract: a time-sortable id for `at`, with a random suffix for uniqueness. */
