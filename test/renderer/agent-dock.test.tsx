@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AgentDock, dockRows, toneFor } from '../../src/renderer/src/AgentDock'
+import { strictestLevel } from '../../src/renderer/src/AutonomyBadge'
 import type { AgentCard } from '../../src/shared/agents'
 
 function card(over: Partial<AgentCard> = {}): AgentCard {
@@ -66,5 +67,123 @@ describe('the company, at a glance', () => {
   it('renders an empty company honestly', () => {
     const html = renderToStaticMarkup(<AgentDock selected={null} onSelect={() => {}} />)
     expect(html).toContain('nobody hired yet')
+  })
+})
+
+function spendRow(over: Record<string, unknown> = {}) {
+  return {
+    agent: 'agent.mason',
+    reporting: 'engine',
+    session: 's-1',
+    sessionTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
+    todayTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
+    cumulativeTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
+    dailyTokens: 20_000_000,
+    budget: { state: 'ok', spent: 5_000_000, remaining: 15_000_000, projected: null, because: '' },
+    ...over
+  } as never
+}
+
+/**
+ * A meter that reads empty when nothing is measuring is the silent fallback
+ * invariant §7 forbids — `reporting: 'none'` is a product tier (ADR-0009 makes
+ * transcripts optional), not a spend of zero. These pin the three states apart.
+ */
+describe('how much of today an agent has spent', () => {
+  const live = new Map([['agent.mason', { phase: 'working', pendingMail: 0 }]])
+
+  it('shows a fraction when there is a budget and something measuring it', () => {
+    const rows = dockRows([card()], live, new Map([['agent.mason', spendRow()]]))
+    expect(rows[0]?.spent).toBeCloseTo(0.25)
+    expect(rows[0]?.spendNote).toContain('25%')
+  })
+
+  it('never renders an empty bar for an engine that reports nothing', () => {
+    const rows = dockRows(
+      [card()],
+      live,
+      new Map([['agent.mason', spendRow({ reporting: 'none' })]])
+    )
+    expect(rows[0]?.spent).toBeNull()
+    expect(rows[0]?.spendNote).toContain('reports no usage')
+  })
+
+  it('says so when a role is unbudgeted, rather than showing nothing spent', () => {
+    const rows = dockRows(
+      [card()],
+      live,
+      new Map([['agent.mason', spendRow({ dailyTokens: null })]])
+    )
+    expect(rows[0]?.spent).toBeNull()
+    expect(rows[0]?.spendNote).toBe('unbudgeted')
+  })
+
+  it('clamps a breach to full rather than overflowing the bar', () => {
+    const rows = dockRows(
+      [card()],
+      live,
+      new Map([
+        [
+          'agent.mason',
+          spendRow({
+            budget: {
+              state: 'breached',
+              spent: 40_000_000,
+              remaining: -20_000_000,
+              projected: null,
+              because: 'over'
+            }
+          })
+        ]
+      ])
+    )
+    expect(rows[0]?.spent).toBe(1)
+  })
+})
+
+/**
+ * The Architect asked, repeatedly across one evening, whether the crew were
+ * really running autonomously. Answering it meant reading a bundle, composing
+ * it against the gate policy by hand, and checking a log. It is a fact about
+ * the running system, so it belongs on the screen.
+ */
+describe('what the company may do without asking', () => {
+  const row = (kind: string, effective: string, clamped = false) => ({
+    kind,
+    global: 'autonomous',
+    requested: effective,
+    effective,
+    clamped
+  })
+  const instance = (autonomy: readonly unknown[]) =>
+    ({
+      instanceId: 'i',
+      plan: { autonomy },
+      agentIds: [],
+      armed: [],
+      pendingEvents: [],
+      activatedAt: ''
+    }) as never
+
+  it('reports the STRICTEST level, because that is the one that bites', () => {
+    // A profile that is autonomous for four kinds and manual for one is not an
+    // autonomous profile; the badge must not read as though it were.
+    const said = strictestLevel([
+      instance([row('tool-permission', 'autonomous'), row('spend', 'manual', true)])
+    ])
+    expect(said.level).toBe('manual')
+    expect(said.detail).toContain('spend')
+  })
+
+  it('names how many kinds the profile clamped', () => {
+    const said = strictestLevel([
+      instance([row('spend', 'manual', true), row('destructive', 'manual', true)])
+    ])
+    expect(said.detail).toContain('2 clamped')
+  })
+
+  it('says nothing is active rather than implying manual', () => {
+    expect(strictestLevel([]).level).toBeNull()
+    expect(strictestLevel([]).detail).toBe('no profile is active')
   })
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { badgeFor } from '../../shared/badges'
 import type { AgentCard } from '../../shared/agents'
 import type { AvatarUpdate } from '../../shared/ipc'
+import type { AgentSpend } from '../../shared/cost'
 
 /**
  * The company at a glance (UI-DESIGN §5).
@@ -30,6 +31,18 @@ export interface DockRow {
   /** What the phase MEANS, in words — `badgeFor`'s own label. */
   readonly status: string
   readonly pendingMail: number
+  /**
+   * How much of today's allowance is gone, 0..1 — or null when the role is
+   * unbudgeted, or when the engine reports no usage at all.
+   *
+   * `reporting: 'none'` is a product tier, not a zero (ADR-0009 makes
+   * transcripts optional), so it must not render as an empty bar. An agent
+   * that looks like it has spent nothing when nothing is measuring it is the
+   * silent fallback invariant §7 forbids.
+   */
+  readonly spent: number | null
+  /** The reason there is no bar, when there is none. */
+  readonly spendNote: string
 }
 
 /**
@@ -42,10 +55,14 @@ export interface DockRow {
  */
 export function dockRows(
   cards: readonly AgentCard[],
-  phases: ReadonlyMap<string, { phase: string; pendingMail: number }>
+  phases: ReadonlyMap<string, { phase: string; pendingMail: number }>,
+  spend: ReadonlyMap<string, AgentSpend> = new Map()
 ): readonly DockRow[] {
   return cards.map((card) => {
     const live = phases.get(card.agentId) ?? null
+    const money = spend.get(card.agentId) ?? null
+    const budgeted = money !== null && money.dailyTokens !== null && money.dailyTokens > 0
+    const measured = money !== null && money.reporting === 'engine'
     return {
       agentId: card.agentId,
       name: card.name,
@@ -53,7 +70,19 @@ export function dockRows(
       lifecycle: card.lifecycle,
       phase: live?.phase ?? null,
       status: live === null ? 'no signal yet' : badgeFor(live.phase).label,
-      pendingMail: live?.pendingMail ?? 0
+      pendingMail: live?.pendingMail ?? 0,
+      spent:
+        budgeted && measured
+          ? Math.min(1, money.budget.spent / (money.dailyTokens as number))
+          : null,
+      spendNote:
+        money === null
+          ? 'no spend recorded'
+          : !measured
+            ? 'this engine reports no usage'
+            : !budgeted
+              ? 'unbudgeted'
+              : `${Math.round((money.budget.spent / (money.dailyTokens as number)) * 100).toString()}% of today`
     }
   })
 }
@@ -103,6 +132,7 @@ export function AgentDock({
   const [phases, setPhases] = useState<ReadonlyMap<string, { phase: string; pendingMail: number }>>(
     new Map()
   )
+  const [spend, setSpend] = useState<ReadonlyMap<string, AgentSpend>>(new Map())
 
   const applyAvatar = useCallback((update: AvatarUpdate) => {
     setPhases((prev) => {
@@ -126,13 +156,24 @@ export function AgentDock({
       void eph.agents.list().then(setCards)
     })
     const offAvatars = eph.avatars.onChange(applyAvatar)
+    // Spend is a slow poll rather than a subscription: it is folded post-hoc
+    // from transcripts, so there is no event to ride, and a stale bar is a far
+    // smaller lie than no bar at all.
+    const readSpend = (): void => {
+      void eph.watch.budgets().then((rows) => {
+        setSpend(new Map(rows.map((row) => [row.agent, row])))
+      })
+    }
+    readSpend()
+    const timer = setInterval(readSpend, 5000)
     return () => {
       offAgents()
       offAvatars()
+      clearInterval(timer)
     }
   }, [applyAvatar])
 
-  const rows = dockRows(cards, phases)
+  const rows = dockRows(cards, phases, spend)
 
   return (
     <div style={dock} aria-label="The company">
@@ -160,6 +201,31 @@ export function AgentDock({
               {String(row.pendingMail)} waiting
             </div>
           )}
+          <div style={{ marginTop: '4px', color: 'var(--eph-ink-500)' }} title={row.spendNote}>
+            {row.spent === null ? (
+              row.spendNote
+            ) : (
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '100%',
+                  height: '4px',
+                  background: 'var(--eph-marble-200)',
+                  border: '1px solid var(--eph-ink-500)'
+                }}
+              >
+                <span
+                  style={{
+                    display: 'block',
+                    height: '100%',
+                    width: `${String(Math.round(row.spent * 100))}%`,
+                    background:
+                      row.spent >= 1 ? 'var(--eph-status-looping)' : 'var(--eph-status-working)'
+                  }}
+                />
+              </span>
+            )}
+          </div>
         </button>
       ))}
     </div>

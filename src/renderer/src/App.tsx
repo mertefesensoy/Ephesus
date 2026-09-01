@@ -5,6 +5,7 @@ import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { CountBadge } from './StatusBadge'
 import { ActivityPanel } from './ActivityPanel'
 import { AgentDock } from './AgentDock'
+import { AutonomyBadge } from './AutonomyBadge'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
@@ -328,6 +329,10 @@ export function App(): ReactElement {
               {' · '}mode: {mode.mode}
             </span>
           )}
+          {/* What the company may do without asking. Composed, not global:
+              stricter-wins means a profile can clamp the policy, and showing
+              the policy would state the opposite of what actually happens. */}
+          <AutonomyBadge />
         </span>
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
