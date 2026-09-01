@@ -4444,6 +4444,37 @@ Being listed on one line made four suites look like one bug for four days. The
 error is the one this milestone keeps finding: a grouping accepted as a property
 of the things grouped.
 
+**Load verification of `4143464`, and two qualifications (2026-09-02).** The fix
+was green on a drained machine — the condition that never reproduced the bug —
+so it was re-run under three concurrent `test/scenarios/` suites with identical
+load on both arms: **control (`3d5fbfa`) failed 3 of 3** with the exact
+assertion, **fixed (`4143464`) failed 0 of 3**. The control arm is what makes
+that evidence rather than another silent no-op.
+
+1. **`s-stoploop`'s margin is ~6×, not ~2.2×.** The thin figure compared the
+   whole FILE duration against a PER-TEST timeout. `vitest.config.mts` sets
+   `testTimeout: 30_000` and `hookTimeout: 30_000`, both per unit; the file's
+   16.55 s is five tests plus transform and import. Measured per test, the
+   slowest is **4.77 s** (`signals the breaker at rung 1`), then 4.76 s, 2.19 s,
+   1.92 s, 1.67 s — so roughly sixfold headroom on the metric that actually
+   governs. `s-livelock`'s slowest test is 1.98 s. The underlying concern still
+   stands and is not dismissed: under 3× concurrent load `s-stoploop` did time
+   out 3/3, which means real saturation can inflate a 4.8 s test past 30 s. But
+   nothing here needs a bigger number today, and if one is ever chosen it should
+   be chosen against the per-test measurement rather than the file's.
+2. **The `writeFileAtomic` retry has a reachable ceiling.** `s-deckgate` failed
+   in the control arm with `EPERM … .tasks.json.tmp -> tasks.json` — the exact
+   error the retry exists to absorb — with the retry live. Independently
+   confirmed by instrumenting a full suite here: 2 renames recovered (284 ms and
+   311 ms, six attempts each) and **1 gave up at 508 ms** against the 500 ms
+   budget. So "the retry absorbs transients" is true only up to a ceiling a
+   saturated machine can reach. Widening it is NOT proposed off these events: it
+   blocks the main process and NFR-2's 500 ms delivery p95 is why the ceiling is
+   where it is. The real fix is upstream — `Agora.commitSoon`'s fire-and-forget
+   `git add -A` holds the very files the Hermes sweep renames over (reproduced
+   at 1.9% and 0.55%), so the harness is contending with itself and no budget
+   wins that race.
+
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
 Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +
