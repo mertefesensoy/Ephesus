@@ -142,10 +142,14 @@ loaded Windows machine.
 
 ## Design decisions
 
-**Why not stop pinning the directory at the source.** The structural fix is to
-stop giving git the repository as its `cwd` — `--git-dir`/`--work-tree` from a
-neutral directory — which would make the pin impossible in production too.
-Deliberately not done: it changes the semantics of every git invocation in the
+**Why not stop pinning the directory at the source.** *(Superseded: it was done
+straight after this landed — see
+`docs/implementations/2026-09-01-git-runs-from-a-neutral-cwd.md`. The reasoning
+below is kept because it is why this layer exists at all, and the waiting is
+still what makes the teardown safe against anything else that holds a
+directory.)* The structural fix is to stop giving git the repository as its
+`cwd` — `--git-dir`/`--work-tree` from a neutral directory — which would make
+the pin impossible in production too. Not done here: it changes the semantics of every git invocation in the
 app (pathspec resolution for `add -A`, `init`, `worktree add`) to fix a symptom
 that only appears in test teardown. Production degrades gracefully today —
 `GitWorktrees.remove()` lets *git* do the removal and surfaces git's own error —
@@ -178,12 +182,39 @@ Full suite, same machine, back to back:
 
 `EBUSY` occurrences went to **0** in every run after the fix.
 
-Every one of the 11 stable failures was confirmed pre-existing by checking the
-same files out at `cef76e0` and re-running: `agent-worktree` ×4, `s-crash` ×3 and
-`hires-exchange` ×1 reproduce **test for test** on the base tree (agent-spawn
-tests that need a real PTY on this machine), as do `s-profile` ×1,
-`renderer/emotes` ×1 (a gitignored paid asset absent here) and `shared/cost` ×1
-(already known-failing on this branch). None is a timeout or a teardown error.
+Every one of the 11 stable failures was shown to be **independent of this
+change** by checking the same files out at `cef76e0` and re-running: they
+reproduce test for test on the base tree. None is a timeout or a teardown error,
+which is what this change is accountable for.
+
+### A correction: these failures were real bugs, not this machine
+
+This section originally called the failures below "known-unrelated" and
+"pre-existing", and told the reader not to chase a red suite here. **That was
+wrong, and the reasoning error is worth naming.**
+
+The evidence was that each failure reproduced test-for-test with the same files
+checked out at the base commit. That is sound evidence for exactly one claim —
+*this change did not cause them* — and it is the claim the gate needed. It is
+not evidence that the cause is environmental, and reading it that way turned
+"independent of my change" into "nobody's bug", which is a much stronger and
+much less supportable statement.
+
+Every one was a real defect, found afterwards by other sessions:
+
+| Failure | Actual cause |
+|---|---|
+| `agent-worktree` ×4, `s-crash` ×3 | `probeVersion` ran with `shell: true` and never quoted the command, so `C:\Program Files\nodejs\node.exe` executed as `C:\Program`. The probe returned null, spawn took the FR-1.6 install branch and parked at `installing`. Fixed in `fb48887`. |
+| `hires-exchange`, `s-profile` | Stale assertions against the loosened skeleton-crew profile. |
+| `renderer/emotes` | `.gitignore` excludes the LimeZu art wholesale and allowlists our own manifests back in — but the exception list had `*.tiles.json` and `*.chars.json` and never gained `*.emotes.json`. Our own emote table was ignored along with the art it indexes and never committed. Fixed in `a151ae6`; it was never a missing generator step, and `npm run typecheck` is runnable again. |
+| `shared/cost` | Timezone, not an unknown. `dayKey` reads LOCAL calendar fields by design, and the test straddled UTC midnight, so at UTC+3 both instants fall on the same local day. |
+
+Verified from this worktree: `limezu.emotes.json` is tracked on the integration
+branch, and `fb48887` is an ancestor of it. The `shared/cost` fix was reported
+as verified but not yet committed, so it should not be counted as landed.
+
+The guidance this section used to give — that a red suite here is not worth
+chasing — is now the opposite of correct.
 
 ### MUTATION-CHECK
 

@@ -17,6 +17,23 @@ It is not only a test concern. The harness removes and moves checkouts —
 and none of that can succeed while a git command it started is still running
 there. The old design made a visible refusal out of a race that need not exist.
 
+## The finding worth carrying out of this
+
+One rule in `repoLocation` looks like defensive noise and is not: when no
+repository is found, a `--git-dir` that **does not exist** is still passed.
+
+Removing it as a mutation check did not merely fail tests. `git init` with no
+`--git-dir` and a neutral cwd **created a repository in the system temp
+directory** — and every later run then discovered that repo by walking up, so
+directories that were not repositories started reporting that they were. Three
+tests failed for that reason, on a tree whose code was correct, until the stray
+repo was found and deleted.
+
+A mutation that corrupts the environment the tests run in is worth more than a
+mutation that reddens a line: it shows the rule is not guarding a case, it is
+guarding a *search*. Always naming a git dir is what stops git's discovery from
+ever starting from wherever the harness happens to be standing.
+
 ## What changed
 
 | File | Change |
@@ -133,9 +150,10 @@ npx vitest run test/main/git-neutral-cwd.test.ts test/main/worktrees.test.ts tes
 
 `EBUSY` was already at zero after the teardown fix; this removes the condition
 that produced it rather than waiting it out. The suite's failure set is
-unchanged and remains the pre-existing set confirmed against `cef76e0`
-(`agent-worktree` ×4, `s-crash` ×3, `hires-exchange`, `s-profile`,
-`renderer/emotes`, `shared/cost`).
+unchanged by this branch — the same set reproduces with these files checked out
+at `cef76e0`, which is the claim the gate needs. Those failures were later
+traced to real defects rather than to this machine; see the correction in
+`docs/implementations/2026-09-01-flaky-temp-dir-teardown.md`.
 
 `test/main/git-neutral-cwd.test.ts` asserts the property directly: twelve git
 processes running against a repository, and a directory inside it still
