@@ -2,6 +2,7 @@ import { composeMessage, makeMessageId, type Message } from '../shared/message'
 import { replyHops } from '../shared/routing'
 import { HARBOR_ENDPOINT } from '../shared/reserved'
 import {
+  checkTriage,
   escalationFor,
   incidentFrom,
   parseTriageReport,
@@ -94,6 +95,13 @@ export interface IncidentEndpointOptions {
    * (invariant §8) — this class supplies only the facts in `vars`.
    */
   render(kind: 'subject' | 'body', vars: Record<string, string>): string
+  /**
+   * Task ids the ledger actually holds, for reconciling what a triage report
+   * CLAIMS against what the company can see. Absent means no ledger is wired,
+   * and an unverifiable claim is then let through rather than refused on the
+   * strength of a check that could not run.
+   */
+  taskIds?(): readonly string[]
   /** `log.jsonl` kind `profile` (SDD §4.3): raised, triaged, owed. */
   onLogEvent(draft: { kind: 'profile' } & Record<string, unknown>): void
   /**
@@ -247,6 +255,28 @@ export class IncidentEndpoint {
     }
 
     const report = parsed.report
+
+    // Reconciliation (2026-09-01): a report may not claim a ledger action it
+    // cannot point at. The brief has refused unsupported sentences since M4;
+    // this is the same rule on the other thing an agent asserts about its own
+    // work. Skipped entirely when no ledger is wired — refusing on a check that
+    // could not run would be worse than not checking.
+    const observed = this.options.taskIds?.() ?? null
+    if (observed !== null) {
+      const faith = checkTriage(report, { taskIds: observed })
+      if (!faith.ok) {
+        this.options.onLogEvent({
+          kind: 'profile',
+          event: 'incident-triage-refused',
+          from: message.from,
+          msgId: message.id,
+          reasons: faith.reasons
+        })
+        this.refuse(message, faith.reasons)
+        return null
+      }
+    }
+
     const incident =
       (message.in_reply_to === null ? undefined : this.awaiting.get(message.in_reply_to)) ??
       [...this.awaiting.values()].find((candidate) => candidate.key === report.incident)

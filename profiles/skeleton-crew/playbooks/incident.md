@@ -84,13 +84,26 @@ the gate is the Architect's decision point, not an obstacle in front of one.
 
 ## 6. Report
 
-Reply to `agent.harbor` with the subject `INCIDENT-TRIAGE` and the JSON body the
-request showed you:
+Reply to `agent.harbor` with the subject `INCIDENT-TRIAGE` and this JSON body:
+
+    {
+      "schemaVersion": 1,
+      "kind": "triage",
+      "incident": "<owner/repo>#ci-run:<run id>",
+      "severity": 1,
+      "resolved": false,
+      "summary": "one line: what broke, and what you did",
+      "refs": ["<task id, if you are claiming one>"]
+    }
 
 - `severity` — what you assigned in step 2
 - `resolved` — `true` only if the fix in step 4 actually worked, and you
   verified it. Not "should work". Not "the re-run is queued".
 - `summary` — one line, your own words: what broke, and what you did.
+- `refs` — what in the company's records supports the summary. If your summary
+  says a task was opened or assigned, you MUST name that task's id here. The
+  harness checks it against the ledger and refuses a report that claims a task
+  nobody can find, with the reason, so you can correct it and send again.
 
 Then, if it is resolved, `inform` Artemis so it lands in the next standup. If it
 is not, escalate with everything you learned in steps 1 and 3 — an escalation
@@ -99,3 +112,9 @@ carrying a real diagnosis is worth ten that say "CI is red".
 Report what happened, not what you hoped would happen. Everything downstream of
 this message — the standup, the ledger, the Architect's sense of whether the
 company is trustworthy — is built on your summary being true.
+
+On 2026-09-01 a triage report on this very repository said "Task was opened and
+assigned" while the ledger held no tasks at all. The diagnosis in it was
+detailed, well-argued, and its central claim about the source was also wrong.
+Nothing caught either. That is the failure this step exists to prevent: not
+laziness, but a confident account of work that did not happen.

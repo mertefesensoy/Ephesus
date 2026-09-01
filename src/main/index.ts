@@ -1355,6 +1355,10 @@ async function boot(): Promise<void> {
           }))
       ),
     orchestratorId: () => agora?.registry().orchestratorId ?? ARTEMIS_AGENT_ID,
+    // What the ledger actually holds, so a triage report cannot claim a task
+    // that does not exist. Undefined when no ledger is up: an unverifiable
+    // claim is let through rather than refused by a check that could not run.
+    taskIds: () => (ledger?.tasks().tasks ?? []).map((row) => row.id),
     deliver: (message) => hermes?.deliverFromHarness(message),
     render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {

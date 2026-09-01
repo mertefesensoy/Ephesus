@@ -200,7 +200,22 @@ export const triageReportSchema = z
     /** True when the playbook fix worked (UC-09 step 3's `inform` branch). */
     resolved: z.boolean(),
     /** One line, the agent's words, carried verbatim into the log and brief. */
-    summary: z.string().min(1).max(2_000)
+    summary: z.string().min(1).max(2_000),
+    /**
+     * What in the company's own records supports this report — task ids and
+     * `log#<seq>` entries, exactly as a brief sentence carries them.
+     *
+     * Optional only so a pack of older agents keeps working; `checkTriage`
+     * refuses a report whose SUMMARY claims an action it cannot point at.
+     *
+     * This exists because of the 2026-09-01 run. A triage report stated "Task
+     * was opened and assigned to agent.skeleton-crew-musahit-ci-babysitter"
+     * while `tasks.json` held zero tasks, and nothing anywhere checked. The
+     * brief had carried this rule since M4 — `checkNarrative` refuses a
+     * sentence citing a ref no fact supports — and the triage report, which is
+     * the other thing an agent asserts about work it did, had no equivalent.
+     */
+    refs: z.array(z.string().min(1).max(128)).max(32).optional()
   })
   .strict()
 
@@ -241,4 +256,55 @@ export function parseTriageReport(body: string): TriageParse {
       return `${where}: ${issue.message}`
     })
   }
+}
+
+/**
+ * Words a triage summary uses to claim it changed the company's records.
+ *
+ * Deliberately narrow. This is not prose comprehension and must not pretend to
+ * be: it catches the specific, repeated claim — that a task was opened or
+ * assigned — and says nothing about any other sentence. A checker that tried to
+ * judge every claim would be wrong often enough that nobody would trust it.
+ */
+const LEDGER_CLAIM =
+  /(task (?:was )?(?:opened|created|filed|assigned)|opened a task|created a task|assigned (?:the|a) task)/i
+
+export interface TriageCheck {
+  readonly ok: boolean
+  readonly reasons: readonly string[]
+}
+
+/**
+ * Contract: pure. Whether a triage report's claims are supported by what the
+ * company can actually see.
+ *
+ * The rule is the brief's rule (`checkNarrative`), applied to the other thing
+ * an agent asserts: if the summary says a task was opened, the report must cite
+ * a ref, and that ref must name a task the ledger really holds. A report that
+ * claims a ledger action it cannot point at is refused and told why — which is
+ * what the 2026-09-01 run had no way to do.
+ *
+ * It checks claims, never judgement. Whether the diagnosis is CORRECT is not
+ * knowable from here, and a checker that pretended otherwise would be the same
+ * confident wrongness one level up.
+ */
+export function checkTriage(
+  report: TriageReport,
+  observed: { readonly taskIds: readonly string[] }
+): TriageCheck {
+  const reasons: string[] = []
+  const claimsLedger = LEDGER_CLAIM.test(report.summary)
+  const refs = report.refs ?? []
+  if (claimsLedger) {
+    const known = new Set(observed.taskIds)
+    const cited = refs.filter((ref) => known.has(ref) || known.has(ref.replace(/^task:/, '')))
+    if (cited.length === 0) {
+      reasons.push(
+        refs.length === 0
+          ? 'the summary says a task was opened but cites nothing; name the task id in `refs`'
+          : `the summary says a task was opened but none of ${refs.join(', ')} names a task the ledger holds`
+      )
+    }
+  }
+  return { ok: reasons.length === 0, reasons }
 }

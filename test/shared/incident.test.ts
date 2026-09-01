@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   INCIDENT_SEVERITIES,
   SEVERITY_1,
+  checkTriage,
   escalationFor,
   incidentFrom,
   incidentKey,
@@ -177,5 +178,88 @@ describe('a triage report is the agent’s judgment, and is refused when unreada
       expect(parsed.ok).toBe(true)
       if (parsed.ok) expect(parsed.report.severity).toBe(severity as IncidentSeverity)
     }
+  })
+})
+
+/**
+ * Reconciliation (2026-09-01 live run).
+ *
+ * A triage report on `mertefesensoy/MUSAHIT` stated "Task was opened and
+ * assigned to agent.skeleton-crew-musahit-ci-babysitter" while `tasks.json`
+ * held zero tasks. Nothing checked. The brief had carried exactly this rule
+ * since M4 — `checkNarrative` refuses a sentence citing a ref no fact supports
+ * — and the triage report, which is the other thing an agent asserts about its
+ * own work, had no equivalent.
+ *
+ * It checks CLAIMS, never judgement. Whether a diagnosis is correct is not
+ * knowable from here, and a checker that pretended otherwise would be the same
+ * confident wrongness one level up.
+ */
+describe('a triage report cannot claim a task the ledger does not hold', () => {
+  const report = (over: Partial<Record<string, unknown>> = {}) =>
+    ({
+      schemaVersion: 1,
+      kind: 'triage',
+      incident: 'owner/app#ci-run:1',
+      severity: 2,
+      resolved: false,
+      summary: 'CI went red on a flaky test',
+      ...over
+    }) as never
+
+  it('refuses the exact sentence the live run produced', () => {
+    const check = checkTriage(
+      report({ summary: 'Task was opened and assigned to agent.mason, who triaged it.' }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(false)
+    expect(check.reasons.join(' ')).toContain('cites nothing')
+  })
+
+  it('refuses a claim whose ref names no task the ledger holds', () => {
+    const check = checkTriage(
+      report({ summary: 'A task was opened for this.', refs: ['t-nope'] }),
+      { taskIds: ['t-real'] }
+    )
+    expect(check.ok).toBe(false)
+    expect(check.reasons.join(' ')).toContain('t-nope')
+  })
+
+  it('accepts a claim that names a task the ledger really holds', () => {
+    const check = checkTriage(
+      report({ summary: 'Task was opened and assigned.', refs: ['t-real'] }),
+      { taskIds: ['t-real'] }
+    )
+    expect(check.ok).toBe(true)
+  })
+
+  it('accepts the same claim written as a task: ref', () => {
+    const check = checkTriage(
+      report({ summary: 'Opened a task for the on-call agent.', refs: ['task:t-real'] }),
+      { taskIds: ['t-real'] }
+    )
+    expect(check.ok).toBe(true)
+  })
+
+  /**
+   * The check must not become prose comprehension. A report that claims nothing
+   * about the ledger is not required to cite anything — most triage is exactly
+   * that, and demanding refs for ordinary findings would train agents to attach
+   * meaningless ones.
+   */
+  it('asks nothing of a report that claims no ledger action', () => {
+    const check = checkTriage(
+      report({ summary: 'Reproduced locally; the runner ran out of disk. Re-ran, green.' }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(true)
+  })
+
+  it('does not mistake a mention of tasks in general for a claim', () => {
+    const check = checkTriage(
+      report({ summary: 'No tasks are affected; the failure is confined to a branch.' }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(true)
   })
 })
