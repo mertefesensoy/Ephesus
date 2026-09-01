@@ -31,6 +31,25 @@ const DEMO = path.join(__dirname, '..', '..', 'docs', 'demo')
 const ONCALL = 'agent.mason'
 const companies: Company[] = []
 
+/**
+ * The two ids in the transcript a re-run cannot reproduce, and their shapes.
+ *
+ * A mail id is stamped from the wall clock (`IncidentEndpoint.send`), and a task
+ * id carries three random bytes ON PURPOSE — `LedgerEndpoint.mintId` explains
+ * why a counter would be wrong, since two proposals in flight would mint the
+ * same id. Neither is a defect to fix upstream.
+ *
+ * Printing them raw is what made this COMMITTED artifact rewrite itself on every
+ * `npm test`, so the file looked freshly changed on every branch and a real
+ * regeneration was indistinguishable from clock noise. The generator now checks
+ * each id against the shape below and prints a stable rendering — which is
+ * strictly more than printing the digits did, because nothing verified them.
+ * Neither id is referenced anywhere else in the transcript, so the digits were
+ * load-bearing for no reader of it.
+ */
+const MAIL_ID = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-inc33p$/
+const TASK_ID = /^t-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}[0-9a-z]$/
+
 afterEach(async () => {
   for (const company of companies.splice(0)) await company.close()
 })
@@ -76,10 +95,8 @@ describe('M7 evidence (committed generator)', () => {
 
     step('1', `CI reports run #4021 on owner/app: failure`)
     const raised = eph.incidents.raise([failedRun()])
-    step(
-      '2',
-      `incident raised: ${raised[0]?.incident.key ?? '?'} → mail ${raised[0]?.msgId ?? '?'}`
-    )
+    expect(raised[0]?.msgId ?? '').toMatch(MAIL_ID)
+    step('2', `incident raised: ${raised[0]?.incident.key ?? '?'} → mail <stamped>-inc33p`)
     step('2a', `tasks.json is UNCHANGED (${String(eph.tasks.tasks().tasks.length)} tasks) — FR-5.2`)
 
     const request = eph.readInbox('agent.artemis', eph.inbox('agent.artemis')[0] as string)
@@ -112,7 +129,8 @@ describe('M7 evidence (committed generator)', () => {
       })
     )
     const task = eph.tasks.tasks().tasks[0]
-    step('4', `Artemis proposed; task ${task?.id ?? '?'} assigned to ${task?.assignee ?? '?'}`)
+    expect(task?.id ?? '').toMatch(TASK_ID)
+    step('4', `Artemis proposed; task t-<day>-<minted> assigned to ${task?.assignee ?? '?'}`)
 
     await eph.runTurn(ONCALL, [
       sendStep(
@@ -170,17 +188,31 @@ describe('M7 evidence (committed generator)', () => {
       'correctly and opens a sound fix PR. That is judgment, and no fake engine',
       'stands in for it. The judgment half is OWED and recorded in docs/PROGRESS.md.',
       '',
+      'TWO IDS BELOW ARE NORMALISED. A mail id is wall-clock stamped and a task id',
+      'carries three random bytes by design, so printing them raw rewrote this',
+      'committed file on every run. Each is checked against its documented shape',
+      'and then printed <in angle brackets>; neither is referenced anywhere else.',
+      '',
       ...lines,
       ''
     ].join('\n')
-
-    fs.mkdirSync(DEMO, { recursive: true })
-    fs.writeFileSync(path.join(DEMO, 'm7-onehour-chain.txt'), body)
 
     // The artifact is evidence only if it says what actually happened.
     expect(body).toContain('tasks.json is UNCHANGED')
     expect(body).toContain('triaged severity-1')
     expect(body).toContain('WHAT THIS IS NOT')
+
+    // And it is COMMITTED, so a run that changed nothing must produce the same
+    // bytes. A future step that prints a fresh id fails HERE, where the reason
+    // is written down, instead of surfacing as a phantom diff in someone's
+    // `git status` on an unrelated branch — which is how this was found.
+    expect(body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/)
+    expect(body).not.toMatch(/t-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}/)
+
+    // Written last: a run that fails its own checks above leaves the previous
+    // artifact standing rather than replacing it with something unverified.
+    fs.mkdirSync(DEMO, { recursive: true })
+    fs.writeFileSync(path.join(DEMO, 'm7-onehour-chain.txt'), body)
   })
 
   it('writes the E-PLAYBOOK drill scorecard', () => {
