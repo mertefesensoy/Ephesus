@@ -209,7 +209,7 @@ describe('an import cannot widen a profile already installed here', () => {
     if (!loaded.ok) throw new Error('installed profile must load')
     const facts = factsOf(loaded.bundle)
     expect(facts.envGrants).toContain('GH_TOKEN')
-    expect(facts.autonomy.find((row) => row.kind === 'destructive')?.level).toBe('manual')
+    expect(facts.autonomy.find((row) => row.kind === 'destructive')?.level).toBe('supervised')
   })
 })
 

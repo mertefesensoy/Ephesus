@@ -110,8 +110,12 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     const byKind = Object.fromEntries(planned.plan.autonomy.map((row) => [row.kind, row.effective]))
-    expect(byKind.destructive).toBe('manual')
-    expect(byKind['prod-facing']).toBe('manual')
+    // The value moved on 2026-09-01 (skeleton-crew's irreversible classes went
+    // manual -> supervised); what this case proves did not. A laxer global does
+    // not widen the profile: `autonomous` above `supervised` still yields
+    // `supervised`, which is the direction stricter-wins exists to hold.
+    expect(byKind.destructive).toBe('supervised')
+    expect(byKind['prod-facing']).toBe('supervised')
 
     // And the other direction, which is the one a bug would take: a STRICTER
     // global clamps the profile's own `supervised` default down to `manual`.
