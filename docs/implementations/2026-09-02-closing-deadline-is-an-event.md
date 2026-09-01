@@ -119,12 +119,45 @@ Those three carry no deadline, no `setTimeout` and no timing constant — they a
 loop-shaped tests that pay a real round-trip per iteration (S-LIVELOCK's ping-pong
 to the hop cap, S-STOPLOOP's continuations to the block cap). They exceeded
 vitest's old 5 s default because they are *slow*, not because they race, and
-`39aad30` raised `testTimeout` to 30 s. Measured now, in isolation: 4.65 s, 10.89 s
-and 3.84 s of test time against that 30 s ceiling.
+`39aad30` raised `testTimeout` to 30 s.
 
 Being listed together made them look like one family. They are two: a timeout
-that a bigger budget fixes, and a race that no budget can. Nothing was changed for
-the three, because nothing is broken in them.
+that a bigger budget fixes, and a race that no budget can. That distinction holds,
+and it is the useful half of this section.
+
+### Correction: "nothing there" was too strong, and the numbers behind it were wrong
+
+This section first justified leaving the three alone with "4.65 s, 10.89 s and
+3.84 s against that 30 s ceiling". **Both the figures and the comparison were
+wrong**, and it took four people five passes to land the right one — each error
+caught by someone other than whoever made it.
+
+- Those were **file totals**. `testTimeout` applies **per test**. A run of
+  `closing.test.ts` with its scheduler disarmed produced three separate 30 s
+  timeouts inside one file, with no file-level timeout — the ceiling never sees a
+  file total at all.
+- The per-test figures were then measured **isolated**, which flatters the margin
+  badly, because CI runs the whole suite in parallel.
+
+Slowest single test, `--reporter=verbose`, same machine:
+
+```text
+isolated, warm repeat            ~3.1 s
+isolated, cold shell             ~11 s
+FULL SUITE, default parallelism  12.3 s, 13.4 s   <- the condition that matters
+```
+
+The real headroom is about **2.2×**. S-LIVELOCK's worst is 9.0–11.0 s — the same
+band, so the earlier claim that it was "in much better shape" was also an artifact
+of isolated measurement and is withdrawn.
+
+The conclusion survives, on better grounds: the suite is green under real
+parallelism across repeated full runs, so nothing is changed for the three. But
+the ceiling is **reachable** — three concurrent scenario suites hit it 3/3 — so
+this is a live margin rather than an unreachable one. `vitest.config.mts` now
+records the distribution and the condition instead of a single figure, because a
+figure invites the next person to compare it against whatever they happen to
+measure. That is exactly how five wrong answers happened.
 
 ## Related docs
 
