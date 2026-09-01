@@ -106,17 +106,39 @@ export interface AgentWorktrees {
 export type VersionProber = (spec: BinarySpec) => Promise<string | null>
 
 /**
+ * Quotes a command for the Windows shell. `execFile` with `shell` set hands the
+ * command to `cmd.exe` as a *string*, which re-splits it on whitespace — so an
+ * absolute path like `C:\Program Files\nodejs\node.exe` runs as `C:\Program`
+ * and fails. Node does not quote for you when `shell` is set; that is the
+ * caller's job, and this is the caller.
+ *
+ * Only whitespace matters here. A command already carrying its own quotes is
+ * left exactly as the adapter wrote it — re-quoting would break it in the same
+ * way not quoting breaks a bare path.
+ */
+function quoteForShell(command: string): string {
+  if (!/\s/.test(command) || command.startsWith('"')) return command
+  return `"${command}"`
+}
+
+/**
  * Runs the engine's version probe. Contract: never throws — a missing binary and
  * a probe that errors are the same answer (null), because both mean "we cannot
  * confirm the engine is here", and FR-1.6 responds to that with a visible
  * install offer, not a crash.
+ *
+ * Windows needs the shell because an engine CLI is usually a `.cmd` shim, which
+ * `execFile` cannot start directly. That shell is why the command needs
+ * quoting: without it a perfectly present engine probes as absent, and FR-1.6
+ * answers by offering to install a binary that is already on disk.
  */
 export const probeVersion: VersionProber = (spec) =>
   new Promise((resolve) => {
+    const shell = process.platform === 'win32'
     execFile(
-      spec.versionProbe.command,
+      shell ? quoteForShell(spec.versionProbe.command) : spec.versionProbe.command,
       [...spec.versionProbe.args],
-      { timeout: 10_000, windowsHide: true, shell: process.platform === 'win32' },
+      { timeout: 10_000, windowsHide: true, shell },
       (err, stdout) => {
         if (err) {
           resolve(null)
