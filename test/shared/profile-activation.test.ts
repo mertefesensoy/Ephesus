@@ -269,3 +269,35 @@ describe('the plan is the disclosure', () => {
     expect(first).toBe(second)
   })
 })
+
+/**
+ * The id a machine needs and the name a person reads are different things.
+ *
+ * `spawn.name` was the ROLE, so every panel said `ci-babysitter` twice while
+ * the floor and the terminal dropdown showed
+ * `agent.skeleton-crew-musahit-ci-babysitter`. SDD §4.1's own examples have
+ * always called that hire `agent.mason`, so the design assumed a name existed;
+ * only the template had nowhere to put one.
+ *
+ * The id is deliberately untouched: it names a mailbox directory, a registry
+ * row and every ledger reference, so a rename must not be able to orphan an
+ * inbox.
+ */
+describe('a hire can be called something a person would say', () => {
+  it('uses the display name for the spawn, and leaves the id alone', () => {
+    const built = bundle({ hires: [hire({ displayName: 'Mason' })] })
+    const plan = activationPlan(built, TARGET, 'supervised')
+    if (!plan.ok) throw new Error(plan.reasons.join('; '))
+    const row = plan.plan.hires[0]
+    expect(row?.spawn.name).toBe('Mason')
+    expect(row?.spawn.role).toBe('oncall')
+    expect(row?.agentId).toContain('oncall')
+    expect(row?.agentId).not.toContain('Mason')
+  })
+
+  it('falls back to the role, so an unnamed hire behaves exactly as before', () => {
+    const plan = activationPlan(bundle({ hires: [hire()] }), TARGET, 'supervised')
+    if (!plan.ok) throw new Error(plan.reasons.join('; '))
+    expect(plan.plan.hires[0]?.spawn.name).toBe(plan.plan.hires[0]?.spawn.role)
+  })
+})

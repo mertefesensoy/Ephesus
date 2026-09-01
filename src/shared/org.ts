@@ -164,6 +164,25 @@ export const hireTemplateSchema = z
     /** Bumped whenever the template changes; a hire records which one it used. */
     version: z.number().int().min(1).max(10_000),
     role: z.string().min(1).max(64),
+    /**
+     * What to call this hire on screen — "Mason", not "ci-babysitter".
+     *
+     * Optional, and it changes NO identifier: the agent id stays the slug that
+     * names a mailbox directory, a registry row and every ledger reference, so
+     * adding a name cannot orphan an inbox. It exists because the id a machine
+     * needs and the name a person reads are different things, and using the
+     * role for both left every panel saying `ci-babysitter` twice while the
+     * floor showed `agent.skeleton-crew-musahit-ci-babysitter`.
+     *
+     * SDD §4.1's own examples have always called this hire `agent.mason`, so
+     * the design assumed names; only the template had nowhere to put one.
+     */
+    displayName: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^\S[^\r\n]*$/, 'a display name is one line')
+      .optional(),
     engine: z.string().min(1).max(32),
     capabilities: z.array(z.string().min(1).max(32)).max(32),
     /** Names only — a template that carried a secret VALUE would be a leak. */

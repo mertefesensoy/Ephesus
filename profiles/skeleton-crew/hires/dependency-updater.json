@@ -3,6 +3,7 @@
   "name": "dependency-updater",
   "version": 1,
   "role": "dependency-updater",
+  "displayName": "Silas",
   "engine": "claude",
   "capabilities": ["dependencies", "git", "test-triage"],
   "envGrants": ["GH_TOKEN"],

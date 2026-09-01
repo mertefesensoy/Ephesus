@@ -274,7 +274,9 @@ export function activationPlan(
       hireRef: `${hire.name}@${String(hire.version)}`,
       spawn: {
         agentId,
-        name: hire.role,
+        // The name a person reads; the role stays the role. A hire that
+        // declares no name keeps the old behaviour exactly.
+        name: hire.displayName ?? hire.role,
         role: hire.role,
         // The registry types `engine` as an `EngineId`; the hire template types
         // it as a string, because a template may name an engine this build does

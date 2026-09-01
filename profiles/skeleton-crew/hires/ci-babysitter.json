@@ -3,6 +3,7 @@
   "name": "ci-babysitter",
   "version": 1,
   "role": "ci-babysitter",
+  "displayName": "Mason",
   "engine": "claude",
   "capabilities": ["ci", "test-triage", "git"],
   "envGrants": ["GH_TOKEN"],

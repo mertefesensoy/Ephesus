@@ -3,6 +3,7 @@
   "name": "triage-agent",
   "version": 1,
   "role": "triage-agent",
+  "displayName": "Nikias",
   "engine": "claude",
   "capabilities": ["triage", "labelling", "dedup", "drafting"],
   "envGrants": ["GH_TOKEN"],

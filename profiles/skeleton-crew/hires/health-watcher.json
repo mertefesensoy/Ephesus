@@ -3,6 +3,7 @@
   "name": "health-watcher",
   "version": 1,
   "role": "health-watcher",
+  "displayName": "Thalia",
   "engine": "claude",
   "capabilities": ["monitoring", "diagnostics"],
   "envGrants": [],

@@ -3,6 +3,7 @@
   "name": "docs-agent",
   "version": 1,
   "role": "docs-agent",
+  "displayName": "Kallias",
   "engine": "claude",
   "capabilities": ["docs", "changelog", "git"],
   "envGrants": ["GH_TOKEN"],

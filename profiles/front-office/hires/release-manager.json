@@ -3,6 +3,7 @@
   "name": "release-manager",
   "version": 1,
   "role": "release-manager",
+  "displayName": "Damon",
   "engine": "claude",
   "capabilities": ["release", "checklist", "changelog"],
   "envGrants": ["GH_TOKEN"],
