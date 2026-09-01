@@ -81,6 +81,13 @@ const chip = {
   color: 'var(--eph-ink-900)'
 } as const
 
+/**
+ * Masking for the value field. `-webkit-text-security` is what makes a
+ * *textarea* behave like a password box, and a textarea is required because a
+ * PEM key spans lines. Chromium honours it, and the app is Chromium.
+ */
+const masked = { WebkitTextSecurity: 'disc' } as const
+
 const note = { color: 'var(--eph-ink-500)', margin: '4px 0' } as const
 const warn = { color: 'var(--eph-wine)', margin: '4px 0' } as const
 
@@ -157,13 +164,19 @@ export function SecretsPanel(): ReactElement {
       </p>
 
       <p style={{ margin: '0 0 6px' }}>
-        <input
-          style={{ ...field, width: '260px' }}
-          type="password"
+        {/* A textarea, not an input, and the reason is a real failure: an
+            `input` holds one line, so pasting a PEM private key into it
+            silently dropped every newline and the broker stored something
+            OpenSSL could not read ("NO_START_LINE"). Masking is kept with
+            `-webkit-text-security`, which Chromium honours on a textarea —
+            write-only must not cost the ability to store a key at all. */}
+        <textarea
+          style={{ ...field, width: '260px', height: '48px', verticalAlign: 'top', ...masked }}
           value={value}
-          placeholder="value (write-only)"
+          placeholder="value (write-only; a PEM key may span lines)"
           aria-label="secret value"
           autoComplete="off"
+          spellCheck={false}
           onChange={(event) => {
             setValue(event.target.value)
           }}

@@ -20,11 +20,28 @@ describe('the credentials desk', () => {
     expect(html).toContain('GH_TOKEN')
   })
 
-  it('never renders an input that would show a value back', () => {
+  /**
+   * This case replaces one that asserted `type="password"`, and that assertion
+   * is what caused the bug it now guards.
+   *
+   * An `input` holds a single line. A GitHub App's private key is a PEM that
+   * spans many, so pasting one into the password field dropped every newline
+   * and the broker stored a string OpenSSL refused with `NO_START_LINE` — a
+   * credential that looked stored, tested as retrievable, and could never work.
+   * The requirement was never "be a password input"; it is "never show the
+   * value back" AND "be able to hold the values we actually store".
+   */
+  it('can hold a value that spans lines, because private keys do', () => {
     const html = renderToStaticMarkup(<SecretsPanel />)
-    // Write-only is not a convention here, it is the type of the field: a
-    // masked echo is still an echo, and the reason people think it is safe.
-    expect(html).toContain('type="password"')
+    expect(html).toContain('<textarea')
+    expect(html).not.toContain('type="password"')
+  })
+
+  it('still never shows a value back', () => {
+    const html = renderToStaticMarkup(<SecretsPanel />)
+    // A masked echo is still an echo; the field is masked and the value only
+    // ever travels renderer→main.
+    expect(html).toMatch(/text-security/i)
     expect(html).not.toContain('type="text"')
   })
 

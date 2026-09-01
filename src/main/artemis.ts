@@ -40,7 +40,22 @@ export const ARTEMIS_CAPABILITIES: readonly string[] = [
   'briefing',
   'chair'
 ]
-export const ARTEMIS_DAILY_TOKENS = 2_000_000
+/**
+ * The orchestrator's daily allowance.
+ *
+ * Raised from 2,000,000 after the 2026-09-01 live run, where she reached
+ * `breached` on briefing work before the first incident arrived and stayed
+ * breached across every restart that night. Two million was not a limit that
+ * shaped behaviour; it was a limit that fired immediately and permanently,
+ * which is the same as having no signal at all.
+ *
+ * It stays a number rather than becoming unlimited on purpose: ADR-0011's
+ * ladder (steer → constrain → stop) needs a ceiling to be a ladder, and an
+ * orchestrator that cannot exhaust anything is one that can spend the
+ * Architect's quota in a loop nobody is watching. The figure is a day's real
+ * work with room over it, not an estimate of what she needs.
+ */
+export const ARTEMIS_DAILY_TOKENS = 40_000_000
 
 /** The delegated-authority table, beside `gate-policy.json` at the home root (SDD §2). */
 export const AUTHORITY_REL = 'authority.json'
