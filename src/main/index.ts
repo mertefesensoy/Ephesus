@@ -31,10 +31,10 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { targetRef } from '../shared/profile-activation'
+import { targetRef, verifierAgentFor } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
-import { IncidentEndpoint } from './incidents'
+import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
 import { HireExchange } from './harbor/hires'
 import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
@@ -1359,6 +1359,15 @@ async function boot(): Promise<void> {
     // that does not exist. Undefined when no ledger is up: an unverifiable
     // claim is let through rather than refused by a check that could not run.
     taskIds: () => (ledger?.tasks().tasks ?? []).map((row) => row.id),
+    // Who reads a root cause back against the repository it describes.
+    //
+    // The rule itself is `verifierAgentFor` — a pure function over the same
+    // activation plan the Architect approved, so it is reachable by a test
+    // rather than copied into one. Picking "some other live agent" here was the
+    // alternative and would have made the second opinion arrive from whoever
+    // happened to be idle, which is availability, not independence.
+    verifierFor: ({ incident, reportedBy }) =>
+      verifierAgentFor(activations?.instances() ?? [], incident.instanceId, reportedBy),
     deliver: (message) => hermes?.deliverFromHarness(message),
     render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
@@ -1457,6 +1466,13 @@ async function boot(): Promise<void> {
         return true
       }
       if (incidents === null) return false
+      // A verdict on a root cause is not a triage report and must not be
+      // parsed as one. The endpoint answers the sender either way; what this
+      // branch decides is WHICH conversation the message belongs to.
+      if (message.subject === VERDICT_SUBJECT) {
+        incidents.onVerdict(message)
+        return true
+      }
       incidents.onTriage(message)
       return true
     },

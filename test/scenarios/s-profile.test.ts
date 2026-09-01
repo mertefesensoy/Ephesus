@@ -91,7 +91,12 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     expect(planned.plan.hires.map((hire) => hire.hire).sort()).toEqual([
       'ci-babysitter',
       'dependency-updater',
-      'health-watcher'
+      'health-watcher',
+      // Not a component FR-9.2 names. The fourth hire is the profile format
+      // being exercised rather than extended: a hire file with its own budget,
+      // no schema field, no private API — which is ADR-0012's dogfood claim
+      // being true rather than asserted.
+      'verifier'
     ])
     // The disclosure the Architect reads before activating: what it may hold.
     expect(planned.plan.envGrants).toEqual(['GH_TOKEN'])

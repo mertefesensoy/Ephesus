@@ -263,3 +263,107 @@ describe('a triage report cannot claim a task the ledger does not hold', () => {
     expect(check.ok).toBe(true)
   })
 })
+
+/**
+ * The other half of the same rule (2026-09-01 live run): a report may not call
+ * something a root cause without pointing at the source it read.
+ *
+ * The ledger half above catches "Task was opened and assigned" beside an empty
+ * `tasks.json`. This half catches the finding that shipped in the SAME report
+ * and cost more: a detailed diagnosis whose central claim about the source was
+ * false, argued well enough that a fix was proposed for work already done.
+ */
+describe('a summary that calls itself a root cause must cite source', () => {
+  const report = (over: Partial<Record<string, unknown>> = {}) =>
+    ({
+      schemaVersion: 1,
+      kind: 'triage',
+      incident: 'owner/app#ci-run:1',
+      severity: 2,
+      resolved: false,
+      summary: 'CI went red on a flaky test',
+      ...over
+    }) as never
+
+  const CITED = {
+    claim: 'ArcLinker.run() has no injectable clock',
+    cites: [
+      {
+        file: 'musahit/arcs/linker.py',
+        line: 122,
+        quote: 'async def run(self, run_id: str)'
+      }
+    ]
+  }
+
+  it('refuses a root-cause claim that carries no citations at all', () => {
+    const check = checkTriage(
+      report({ summary: 'Root cause: the linker has no injectable clock.' }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(false)
+    expect(check.reasons.join(' ')).toContain('rootCause')
+  })
+
+  it('accepts the same claim once it points at a file, a line and the text', () => {
+    const check = checkTriage(
+      report({
+        summary: 'Root cause: the linker has no injectable clock.',
+        rootCause: CITED
+      }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(true)
+  })
+
+  it('asks nothing of an observation that never claims to be the root cause', () => {
+    // Not prose comprehension. Most triage is an observation, and demanding a
+    // citation for every sentence would train agents to attach meaningless ones
+    // — the same reason the ledger rule matches one narrow phrase.
+    const check = checkTriage(
+      report({ summary: 'The runner ran out of disk; re-ran and it passed.' }),
+      { taskIds: [] }
+    )
+    expect(check.ok).toBe(true)
+  })
+
+  it('checks the root cause even when no ledger is wired to check refs against', () => {
+    // `taskIds: null` means the ledger check could not run. That is a reason to
+    // skip THAT check, not to stop checking — the root-cause rule needs nothing
+    // looked up.
+    const check = checkTriage(report({ summary: 'Root cause: a stale cache key.' }), {
+      taskIds: null
+    })
+    expect(check.ok).toBe(false)
+    expect(check.reasons.join(' ')).toContain('rootCause')
+  })
+
+  it('still lets an unverifiable ledger claim through when no ledger is wired', () => {
+    const check = checkTriage(report({ summary: 'A task was opened for this.' }), {
+      taskIds: null
+    })
+    expect(check.ok).toBe(true)
+  })
+
+  it('carries a well-formed root cause through the parser', () => {
+    const parsed = parseTriageReport(JSON.stringify(report({ rootCause: CITED })))
+    expect(parsed.ok).toBe(true)
+    expect(parsed.ok && parsed.report.rootCause?.cites[0]?.line).toBe(122)
+  })
+
+  it('refuses a report whose citation names a file but quotes no text', () => {
+    const parsed = parseTriageReport(
+      JSON.stringify(
+        report({
+          rootCause: {
+            claim: 'no injectable clock',
+            cites: [{ file: 'linker.py', line: 122 }]
+          }
+        })
+      )
+    )
+    // The quote is what makes the claim falsifiable. Without it the report is
+    // exactly the shape that got past the company on 2026-09-01.
+    expect(parsed.ok).toBe(false)
+  })
+})

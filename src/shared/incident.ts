@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { InboundItem } from './harbor'
+import { rootCauseSchema } from './root-cause'
 
 /**
  * Incidents and severity-based escalation (FR-9.2, UC-09, SDD §7.5).
@@ -190,6 +191,13 @@ export function incidentFrom(
  * it, and one line of what happened. Anything richer would be the harness
  * asking the agent to fill in a form it then summarizes — and ADR-0005 puts
  * summarizing on the agent's side of the line, not the harness's.
+ *
+ * `refs` and `rootCause` are the two exceptions, and they are exceptions to the
+ * form-filling worry rather than to the rule. Neither is summarized by anybody:
+ * they are the CITATIONS the other fields rest on, and every one of them exists
+ * so a claim can be held against something — the ledger for a ref, the
+ * repository for a root cause. The distinction that keeps this honest is that
+ * the harness never reads them for meaning, only for support.
  */
 export const triageReportSchema = z
   .object({
@@ -215,7 +223,27 @@ export const triageReportSchema = z
      * sentence citing a ref no fact supports — and the triage report, which is
      * the other thing an agent asserts about work it did, had no equivalent.
      */
-    refs: z.array(z.string().min(1).max(128)).max(32).optional()
+    refs: z.array(z.string().min(1).max(128)).max(32).optional(),
+    /**
+     * The diagnosis, in the one shape a second party can check — a claim, and
+     * the file/line/quote it rests on (`src/shared/root-cause.ts`).
+     *
+     * Separate from `refs` deliberately, and not merely because a source path
+     * is not a task id. The two namespaces answer different questions and are
+     * checked by different means: `refs` is reconciled against the company's
+     * OWN records, which the harness holds and can read; `rootCause` is
+     * reconciled against a repository, which it cannot — so that check is an
+     * agent's, and the block exists to give that agent something falsifiable to
+     * open.
+     *
+     * Optional, because most triage has no root cause to offer: "could not
+     * retrieve the run log" is a real and useful result, and demanding a
+     * diagnosis would produce invented ones. What is NOT optional is the
+     * citation once a diagnosis is offered — the schema below cannot represent
+     * a claim with no source, and `checkTriage` refuses a summary that says
+     * "root cause" while carrying no block at all.
+     */
+    rootCause: rootCauseSchema.optional()
   })
   .strict()
 
@@ -269,6 +297,21 @@ export function parseTriageReport(body: string): TriageParse {
 const LEDGER_CLAIM =
   /(task (?:was )?(?:opened|created|filed|assigned)|opened a task|created a task|assigned (?:the|a) task)/i
 
+/**
+ * The one phrase that turns a summary into a diagnosis the company will act on.
+ *
+ * As narrow as `LEDGER_CLAIM` and for the same reason: this is not prose
+ * comprehension. It matches the literal words "root cause" and nothing else — a
+ * summary saying "the migration dropped a column" is an observation and is asked
+ * for no citation, while one saying "root cause: the migration dropped a column"
+ * has named itself a diagnosis and must point at the source it read.
+ *
+ * A broader detector ("because", "caused by", "due to") was considered and
+ * rejected: it fires on almost every honest sentence, and a checker that refuses
+ * honest reports is one agents learn to write around rather than satisfy.
+ */
+const ROOT_CAUSE_CLAIM = /\broot[- ]cause/i
+
 export interface TriageCheck {
   readonly ok: boolean
   readonly reasons: readonly string[]
@@ -278,24 +321,35 @@ export interface TriageCheck {
  * Contract: pure. Whether a triage report's claims are supported by what the
  * company can actually see.
  *
- * The rule is the brief's rule (`checkNarrative`), applied to the other thing
- * an agent asserts: if the summary says a task was opened, the report must cite
- * a ref, and that ref must name a task the ledger really holds. A report that
- * claims a ledger action it cannot point at is refused and told why — which is
- * what the 2026-09-01 run had no way to do.
+ * The rule is the brief's rule (`checkNarrative`), applied to the two things an
+ * agent asserts about work it did:
  *
- * It checks claims, never judgement. Whether the diagnosis is CORRECT is not
- * knowable from here, and a checker that pretended otherwise would be the same
- * confident wrongness one level up.
+ *  - **A ledger claim must point at the ledger.** If the summary says a task was
+ *    opened, the report must cite a ref naming a task the ledger really holds.
+ *    That is what the 2026-09-01 run had no way to do.
+ *  - **A root cause must point at source.** If the summary calls itself a root
+ *    cause, the report must carry a `rootCause` block — and that block cannot
+ *    exist without a file, a line and a quote. This is the second half of the
+ *    same run's finding: the diagnosis was as false as the ledger claim and far
+ *    better argued, and nothing anywhere could open the file it was about.
+ *
+ * Both are CLAIM checks, never judgement. Whether a diagnosis is CORRECT is not
+ * knowable from here — that question goes to an independent agent, whose verdict
+ * is recorded beside the claim rather than replacing it. A checker that graded
+ * correctness itself would be the same confident wrongness one level up.
+ *
+ * `taskIds` is nullable: null means no ledger is wired, which skips the ledger
+ * rule alone. The root-cause rule needs nothing the harness has to look up, so
+ * it runs either way — a check that could not run is a reason to skip THAT
+ * check, not to stop checking.
  */
 export function checkTriage(
   report: TriageReport,
-  observed: { readonly taskIds: readonly string[] }
+  observed: { readonly taskIds: readonly string[] | null }
 ): TriageCheck {
   const reasons: string[] = []
-  const claimsLedger = LEDGER_CLAIM.test(report.summary)
   const refs = report.refs ?? []
-  if (claimsLedger) {
+  if (observed.taskIds !== null && LEDGER_CLAIM.test(report.summary)) {
     const known = new Set(observed.taskIds)
     const cited = refs.filter((ref) => known.has(ref) || known.has(ref.replace(/^task:/, '')))
     if (cited.length === 0) {
@@ -305,6 +359,11 @@ export function checkTriage(
           : `the summary says a task was opened but none of ${refs.join(', ')} names a task the ledger holds`
       )
     }
+  }
+  if (ROOT_CAUSE_CLAIM.test(report.summary) && report.rootCause === undefined) {
+    reasons.push(
+      'the summary claims a root cause but cites no source; put the claim in `rootCause` with the file, line and quoted text it rests on'
+    )
   }
   return { ok: reasons.length === 0, reasons }
 }
