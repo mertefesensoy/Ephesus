@@ -11,6 +11,15 @@ import {
   frameKeysFor
 } from '../../src/renderer/src/floor/atlas'
 import { paintCell, paintPlan, PROCEDURAL_FILL } from '../../src/renderer/src/floor/painter'
+import type { TilesetLayer, TilesetMap } from '../../src/shared/tileset'
+
+/**
+ * One pack, as a layer. The painter takes layers now (a frame index only means
+ * something against its own sheet), so a single-pack test says so explicitly.
+ */
+function asLayer(map: TilesetMap): readonly TilesetLayer[] {
+  return [{ map, sheet: map.sheet, sheetUrl: `mem://${map.sheet}` }]
+}
 
 /**
  * Sheet rendering (UI-DESIGN §7) and the procedural fallback it degrades to.
@@ -125,24 +134,28 @@ describe('atlas arithmetic', () => {
 describe('art paints the plan and cannot change it (ADR-0014)', () => {
   it('paints every cell either way', () => {
     const plan = floorPlan()
-    expect(paintPlan(plan, null).length).toBeGreaterThanOrEqual(plan.length)
-    expect(paintPlan(plan, map()).length).toBeGreaterThanOrEqual(plan.length)
+    expect(paintPlan(plan, []).length).toBeGreaterThanOrEqual(plan.length)
+    expect(paintPlan(plan, asLayer(map())).length).toBeGreaterThanOrEqual(plan.length)
   })
 
   it('blits a mapped cell from the sheet', () => {
-    const ops = paintCell(cell({ kind: 'wall' }), map())
-    expect(ops).toEqual([{ op: 'blit', x: 0, y: 0, scale: 2, frame: { x: 0, y: 0, w: 16, h: 16 } }])
+    const ops = paintCell(cell({ kind: 'wall' }), asLayer(map()))
+    // The blit names its sheet: a frame index means nothing without the image
+    // it indexes, and a floor can now be painted from more than one pack.
+    expect(ops).toEqual([
+      { op: 'blit', x: 0, y: 0, scale: 2, sheet: 'pack.png', frame: { x: 0, y: 0, w: 16, h: 16 } }
+    ])
   })
 
   it('falls back to the procedural tile for a cell the pack misses', () => {
     // A partial pack must not punch holes in the floor.
-    const ops = paintCell(cell({ kind: 'seat', of: 'terrace-1' }), map())
+    const ops = paintCell(cell({ kind: 'seat', of: 'terrace-1' }), asLayer(map()))
     expect(ops.every((op) => op.op === 'fill')).toBe(true)
     expect(ops.length).toBeGreaterThan(0)
   })
 
   it('draws procedurally when no pack is installed', () => {
-    const ops = paintCell(cell({ kind: 'wall' }), null)
+    const ops = paintCell(cell({ kind: 'wall' }), [])
     expect(ops).toEqual([
       { op: 'fill', x: 0, y: 0, w: TILE_PX, h: TILE_PX, color: PROCEDURAL_FILL.wall }
     ])
@@ -150,14 +163,14 @@ describe('art paints the plan and cannot change it (ADR-0014)', () => {
 
   it('positions a cell at its tile, whichever painter draws it', () => {
     const target = cell({ col: 3, row: 5, kind: 'wall' })
-    for (const painted of [paintCell(target, null), paintCell(target, map())]) {
+    for (const painted of [paintCell(target, []), paintCell(target, asLayer(map()))]) {
       expect(painted[0]).toMatchObject({ x: 3 * TILE_PX, y: 5 * TILE_PX })
     }
   })
 
   it('gives a fill for every plan kind, so nothing is ever unpainted', () => {
     for (const planCell of floorPlan()) {
-      expect(paintCell(planCell, null).length).toBeGreaterThan(0)
+      expect(paintCell(planCell, []).length).toBeGreaterThan(0)
     }
   })
 })
@@ -183,7 +196,9 @@ describe('the floor says which art it is drawing (invariant §7)', () => {
       { '../assets/tileset/pack.tiles.json': { ...MAP, tilePx: 12 } }
     )
     expect(state.installed).toBe(false)
-    expect(state.note).toMatch(/tile map invalid — tilePx/)
+    // The note names WHICH map failed, not just that one did: with several
+    // packs installable, "a map is invalid" is not an actionable sentence.
+    expect(state.note).toMatch(/pack\.tiles\.json invalid — tilePx/)
   })
 
   it('is procedural when the map names a sheet that is not there', () => {
@@ -331,5 +346,82 @@ describe('the installed tileset drop (skipped when the drop is empty)', () => {
     for (const [key, index] of Object.entries(parsed.map.frames)) {
       expect(`${key}:${String(index <= last)}`).toBe(`${key}:true`)
     }
+  })
+})
+
+/**
+ * A drop is a stack, not a choice (UI-DESIGN §7).
+ *
+ * `resolveTileset` read `mapPaths[0]` and stopped, so a second installed pack
+ * sat inert — ATTRIBUTION recorded exactly that state for the office pack:
+ * "installed and mapped, inactive while the interiors map sorts first". It also
+ * meant a pack of office FURNITURE could never reach a floor whose walls came
+ * from the interiors pack, because frame indices only mean anything against the
+ * sheet that shipped them.
+ */
+describe('a floor can be painted from more than one pack', () => {
+  const packMap = (name: string, sheet: string, frames: Record<string, number>) => ({
+    schemaVersion: 1,
+    name,
+    sheet,
+    tilePx: 16,
+    columns: 4,
+    frames
+  })
+
+  it('resolves every installed pack, in map-file order', () => {
+    const state = resolveTileset(
+      { '/a/base.png': 'blob:base', '/a/extra.png': 'blob:extra' },
+      {
+        '/a/1-base.tiles.json': packMap('Base', 'base.png', { wall: 0 }),
+        '/a/2-extra.tiles.json': packMap('Extra', 'extra.png', { 'station:desk': 3 })
+      }
+    )
+    expect(state.installed).toBe(true)
+    expect(state.layers.map((layer) => layer.sheet)).toEqual(['base.png', 'extra.png'])
+    expect(state.note).toContain('Base')
+    expect(state.note).toContain('Extra')
+  })
+
+  it('keeps a pack whose sheet is missing out, and says which', () => {
+    const state = resolveTileset(
+      { '/a/base.png': 'blob:base' },
+      {
+        '/a/1-base.tiles.json': packMap('Base', 'base.png', { wall: 0 }),
+        '/a/2-extra.tiles.json': packMap('Extra', 'nowhere.png', { 'station:desk': 3 })
+      }
+    )
+    expect(state.layers).toHaveLength(1)
+    expect(state.note).toContain('nowhere.png')
+  })
+
+  it('gives a contested key to the FIRST pack, and names the contest', () => {
+    // Silently picking one of two definitions is how a floor comes to look
+    // wrong with no way to find out why.
+    const state = resolveTileset(
+      { '/a/base.png': 'blob:base', '/a/extra.png': 'blob:extra' },
+      {
+        '/a/1-base.tiles.json': packMap('Base', 'base.png', { wall: 0 }),
+        '/a/2-extra.tiles.json': packMap('Extra', 'extra.png', { wall: 3 })
+      }
+    )
+    expect(state.note).toContain('wall')
+    expect(state.note).toContain('first pack')
+  })
+
+  it('paints a cell from the first layer that covers it, naming that sheet', () => {
+    const layers = [
+      { map: packMap('Base', 'base.png', { wall: 0 }), sheet: 'base.png', sheetUrl: 'u' },
+      {
+        map: packMap('Extra', 'extra.png', { 'station:terminal-bench': 2 }),
+        sheet: 'extra.png',
+        sheetUrl: 'u'
+      }
+    ] as never
+    const wall = paintCell(cell({ kind: 'wall' }), layers)
+    expect(wall[0]).toMatchObject({ op: 'blit', sheet: 'base.png' })
+    // The second pack fills what the first left unmapped — it does not overpaint.
+    const bench = paintCell(cell({ kind: 'station', of: 'terminal-bench' }), layers)
+    expect(bench[0]).toMatchObject({ op: 'blit', sheet: 'extra.png' })
   })
 })

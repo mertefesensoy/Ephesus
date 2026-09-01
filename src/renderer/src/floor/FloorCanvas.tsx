@@ -105,7 +105,7 @@ const PHASE_COLOR: Readonly<Record<string, number>> = {
 function drawRoom(
   ops: readonly PaintOp[],
   g: Graphics,
-  sheet: Texture | null,
+  sheets: ReadonlyMap<string, Texture>,
   into: Container
 ): void {
   for (const op of ops) {
@@ -113,6 +113,10 @@ function drawRoom(
       g.rect(op.x, op.y, op.w, op.h).fill(op.color)
       continue
     }
+    // A blit names its own sheet, so a pack whose image failed to decode simply
+    // does not paint — rather than indexing its frames into another pack's
+    // image, which would look deliberate and be wrong.
+    const sheet = sheets.get(op.sheet)
     if (!sheet) continue
     const frame = new Rectangle(op.frame.x, op.frame.y, op.frame.w, op.frame.h)
     const sprite = new Sprite(new Texture({ source: sheet.source, frame }))
@@ -684,11 +688,18 @@ export function FloorCanvas(): ReactElement {
     // inlines a small sheet as a `data:` URL, which has none. Observed live —
     // an installed pack fell back to procedural with a loader error. Nothing
     // about a tileset should depend on the shape of the URL it arrived on.
-    const loadSheet = async (): Promise<Texture | null> => {
-      if (!tileset.sheetUrl) return null
+    const loadSheets = async (): Promise<ReadonlyMap<string, Texture>> => {
+      const loaded = new Map<string, Texture>()
+      for (const layer of tileset.layers) {
+        const texture = await loadOne(layer.sheetUrl)
+        if (texture) loaded.set(layer.sheet, texture)
+      }
+      return loaded
+    }
+    const loadOne = async (url: string): Promise<Texture | null> => {
       try {
         const image = new Image()
-        image.src = tileset.sheetUrl
+        image.src = url
         await image.decode()
         return new Texture({
           // `nearest` is not a preference: §1.1 is pixel-snapped everywhere, and
@@ -707,28 +718,29 @@ export function FloorCanvas(): ReactElement {
         background: tokens.marble200,
         antialias: false // pixel-snapped everything (§1.1)
       }),
-      loadSheet()
+      loadSheets()
     ])
-      .then(([, sheet]) => {
-        const map = sheet ? tileset.map : null
+      .then(([, sheets]) => {
+        // Only layers whose image actually decoded may paint.
+        const layers = tileset.layers.filter((layer) => sheets.has(layer.sheet))
         if (cancelled) {
           app.destroy(true)
           return
         }
         host.appendChild(app.canvas)
 
-        const ops = paintPlan(floorPlan(), map)
+        const ops = paintPlan(floorPlan(), layers)
         const room = new Graphics()
         const sheetTiles = new Container()
         // Fills under blits: a partially-mapped pack paints its own tiles over
         // the procedural floor rather than punching holes in it.
         app.stage.addChild(room)
         app.stage.addChild(sheetTiles)
-        drawRoom(ops, room, sheet, sheetTiles)
+        drawRoom(ops, room, sheets, sheetTiles)
 
         // §5.7 furnishings sit over the floor and under everything that moves:
         // place identity, static, and only ever from the pack's own map.
-        drawRoom(paintFurnishings(map), room, sheet, sheetTiles)
+        drawRoom(paintFurnishings(layers), room, sheets, sheetTiles)
 
         // The §5.4 station layer, redrawn each tick because its states are
         // projections of facts that change. It sits under the citizens so a

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "name": "LimeZu Modern Office Revamped (furniture)",
+  "credit": "LimeZu — limezu.itch.io",
+  "sheet": "limezu-office-furniture.png",
+  "tilePx": 16,
+  "columns": 16,
+  "frames": {
+    "station:terminal-bench": 570,
+    "station:harbor-kiosk": 683
+  }
+}
