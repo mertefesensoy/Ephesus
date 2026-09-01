@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 /**
@@ -51,6 +52,97 @@ const IDENTITY_ARGS = [
   'core.hooksPath=/dev/null'
 ]
 
+/**
+ * The working directory every git child actually gets.
+ *
+ * NOT the repository. On Windows a process's current directory is an open
+ * handle on it, so a git child running in a repository is a lock on that
+ * directory for as long as it lives — `rmdir` fails with EBUSY while every file
+ * inside deletes normally. That made the test suite flake for as long as it
+ * existed, and it is a real constraint on the app too: the harness cannot
+ * remove or move a checkout while any git command is still running in it.
+ *
+ * The system temp directory is chosen because it always exists and the harness
+ * never deletes it. Nothing is ever written here — git is told where the
+ * repository is instead (`repoLocation`).
+ */
+const NEUTRAL_CWD = os.tmpdir()
+
+/** A directory that IS a git directory (a bare repo), by git's own markers. */
+function isGitDir(dir: string): boolean {
+  return (
+    fs.existsSync(path.join(dir, 'HEAD')) &&
+    fs.existsSync(path.join(dir, 'objects')) &&
+    fs.existsSync(path.join(dir, 'refs'))
+  )
+}
+
+/**
+ * Tells git which repository to work on WITHOUT making it the process's cwd.
+ *
+ * Every case below is here because dropping it was measured to change
+ * behaviour against plain `{ cwd }`:
+ *
+ *  - **A working tree.** `<dir>/.git` is a directory: the ordinary case.
+ *  - **A linked worktree.** `<dir>/.git` is a *file* holding `gitdir: <path>`,
+ *    which `--git-dir` will not follow, so it is resolved here. This is the
+ *    case every agent's isolated checkout is in.
+ *  - **A subdirectory of a repository.** git discovers a repo by walking up,
+ *    and a `--git-dir` nailed to `<dir>/.git` does not: pointing at a repo's
+ *    subdirectory went from working to "not a git repository". So the walk is
+ *    reproduced here.
+ *  - **A bare repository.** `--work-tree` makes no sense for one, and passing
+ *    it broke a bare repo that works today; `--git-dir` alone is right.
+ *  - **`init`.** It CREATES the repository, so it must never discover an
+ *    enclosing one — a `~/.ephesus` that happened to sit inside some other
+ *    checkout would otherwise silently join it instead of getting its own
+ *    `.git`, and the Agora would be committing into the user's repository.
+ *
+ * When nothing is found, a `--git-dir` that does not exist is still passed,
+ * deliberately. Passing nothing would let git discover a repository from
+ * `NEUTRAL_CWD` instead of failing, and "not a git repository" has to keep
+ * being an error.
+ *
+ * That rule is not theoretical. Removing it as a mutation check did not merely
+ * fail tests: `git init` with no `--git-dir` and a neutral cwd CREATED a
+ * repository in the system temp directory, and every later run then discovered
+ * that repo by walking up — so a directory that was not a repository started
+ * reporting that it was. Always naming a git dir is what keeps git's search
+ * from ever starting.
+ */
+export function repoLocation(dir: string, command: string | undefined): readonly string[] {
+  const resolved = path.resolve(dir)
+  const here = [`--git-dir=${path.join(resolved, '.git')}`, `--work-tree=${resolved}`]
+  if (command === 'init') return here
+
+  let current = resolved
+  for (;;) {
+    const dotGit = path.join(current, '.git')
+    let stat: fs.Stats | null
+    try {
+      stat = fs.statSync(dotGit)
+    } catch {
+      stat = null
+    }
+    if (stat?.isDirectory()) return [`--git-dir=${dotGit}`, `--work-tree=${current}`]
+    if (stat?.isFile()) {
+      try {
+        const pointer = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'))
+        if (pointer?.[1]) {
+          return [`--git-dir=${path.resolve(current, pointer[1].trim())}`, `--work-tree=${current}`]
+        }
+      } catch {
+        // Unreadable pointer: fall through and let git report it.
+      }
+    }
+    if (isGitDir(current)) return [`--git-dir=${current}`]
+
+    const parent = path.dirname(current)
+    if (parent === current) return here
+    current = parent
+  }
+}
+
 export class ExecGitRunner implements GitRunner {
   constructor(private readonly timeoutMs = 20_000) {}
 
@@ -58,8 +150,13 @@ export class ExecGitRunner implements GitRunner {
     return new Promise((resolve) => {
       execFile(
         'git',
-        [...IDENTITY_ARGS, ...args],
-        { cwd, timeout: this.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+        [...IDENTITY_ARGS, ...repoLocation(cwd, args[0]), ...args],
+        {
+          cwd: NEUTRAL_CWD,
+          timeout: this.timeoutMs,
+          windowsHide: true,
+          maxBuffer: 8 * 1024 * 1024
+        },
         (err, stdout, stderr) => {
           const code =
             err && typeof (err as { code?: unknown }).code === 'number'
