@@ -6,6 +6,7 @@ import { HOOK_ENVELOPE_SCHEMA_VERSION } from '../../src/shared/hooks'
 import { HookServer, HOOK_SOCKET_MODE, hookEndpointFor } from '../../src/main/hooks'
 import type { HookEventRecord, HookRejection } from '../../src/main/hooks'
 import { postHookEvent, buildEnvelope } from '../../shims/hook-client.mjs'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Integration over a real socket / real named pipe in a temp harness home
@@ -26,7 +27,7 @@ const homes: string[] = []
 
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.server.stop()
-  for (const home of homes.splice(0)) fs.rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 async function startRig(): Promise<Rig> {

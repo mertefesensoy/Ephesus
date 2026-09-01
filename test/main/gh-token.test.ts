@@ -12,13 +12,14 @@ import {
 // actually takes rather than a second client that could drift from it.
 import { postGhToken } from '../../shims/eph-gh-token.mjs'
 import { postJson } from '../../shims/hook-client.mjs'
+import { removeTempDir } from '../tmpdir'
 
 const temps: string[] = []
 const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

@@ -8,6 +8,7 @@ import { GYM_SCHEMA_VERSION } from '../../src/shared/gym'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import { ODEON_ENDPOINT } from '../../src/shared/reserved'
 import { Gymnasium } from '../../src/main/gymnasium'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The Gymnasium's ledger and loop (ADR-0015, FR-12, SDD §7.6).
@@ -21,7 +22,7 @@ import { Gymnasium } from '../../src/main/gymnasium'
 const homes: string[] = []
 afterEach(() => {
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

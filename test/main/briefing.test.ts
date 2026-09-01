@@ -11,6 +11,7 @@ import { Agora } from '../../src/main/agora'
 import { BriefingJob } from '../../src/main/briefing'
 import { Odeon } from '../../src/main/odeon'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The standup job and the brief archive (FR-7.1, SDD §7.2, UC-04).
@@ -28,7 +29,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

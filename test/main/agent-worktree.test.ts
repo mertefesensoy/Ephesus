@@ -12,6 +12,7 @@ import { PromptStore } from '../../src/main/prompts'
 import type { AgentCard } from '../../src/shared/agents'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { ProcessSpawner } from '../fakes/process-spawner'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The lifecycle half of worktree isolation (SRS UC-01 alternate 2a): a spawn
@@ -29,7 +30,7 @@ const closers: (() => Promise<void>)[] = []
 
 afterEach(async () => {
   for (const close of closers.splice(0)) await close()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

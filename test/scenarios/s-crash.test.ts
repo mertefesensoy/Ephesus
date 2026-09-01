@@ -18,6 +18,7 @@ import { GHOST_ARCHIVE_MS } from '../../src/shared/avatar'
 import { composeMessage, makeMessageId } from '../../src/shared/message'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { ProcessSpawner } from '../fakes/process-spawner'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * **S-CRASH** (TEST-STRATEGY §3): "SIGKILL a fake agent mid-task; ghost →
@@ -175,7 +176,7 @@ async function startRig(options: { resumable?: boolean } = {}): Promise<Rig> {
       avatars.stop()
       await hookServer.stop()
       await agora.drained().catch(() => {})
-      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+      removeTempDir(home)
     }
   }
   rigs.push(rig)

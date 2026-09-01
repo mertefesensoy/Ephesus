@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { EventLog } from '../../src/main/eventlog'
 import { LOG_KINDS, formatLogLine, parseLogLine } from '../../src/shared/log'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The book of record (SDD §4.3, NFR-13, invariant §5). What these tests defend
@@ -15,7 +16,7 @@ import { LOG_KINDS, formatLogLine, parseLogLine } from '../../src/shared/log'
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function logFile(): string {

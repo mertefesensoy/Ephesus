@@ -24,6 +24,7 @@ import { wireOdeonEndpoint } from '../../src/main/odeon-endpoint'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 import { Breaker } from '../../src/main/watch/breaker'
 import { SteerNotes } from '../../src/main/watch/steer-notes'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
@@ -166,9 +167,7 @@ const openHomes: string[] = []
 
 /** Removes every temp home created this run. Call after closing the companies. */
 export function cleanupHomes(): void {
-  for (const home of openHomes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-  }
+  for (const home of openHomes.splice(0)) removeTempDir(home)
 }
 
 let seq = 0
@@ -683,6 +682,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       budgets.stop()
       hermes.stop()
       await hookServer.stop()
+      // Stop, SETTLE, then drain. `stop()` only clears the timers; a sweep
+      // already running keeps going and calls `agora.commitSoon()`, so draining
+      // first drains a queue that is about to be added to — and the git child
+      // that commit starts is still alive when `cleanupHomes` deletes the
+      // directory it is running in.
+      await hermes.settled()
       await agora.drained().catch(() => {})
     }
   }

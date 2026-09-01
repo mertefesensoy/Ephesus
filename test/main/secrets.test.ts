@@ -7,6 +7,7 @@ import { SECRET_MASK } from '../../src/shared/redaction'
 import { scopeGrants, secretNameSchema, secretSetSchema } from '../../src/shared/secrets'
 import { SecretBroker } from '../../src/main/watch/secrets'
 import type { SecretCipher } from '../../src/main/watch/cipher'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The broker (ADR-0010) on real fs in a temp home. The cipher is the one seam —
@@ -22,7 +23,7 @@ import type { SecretCipher } from '../../src/main/watch/cipher'
 
 const homes: string[] = []
 afterEach(() => {
-  for (const home of homes.splice(0)) fs.rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 /** A reversible stand-in for the OS keychain. Not encryption — a seam. */

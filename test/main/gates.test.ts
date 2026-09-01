@@ -13,6 +13,7 @@ import {
 } from '../../src/main/watch/gates'
 import { PromptStore } from '../../src/main/prompts'
 import { canCloseTask, type Task } from '../../src/shared/tasks'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The approval queue (SDD §9, UC-08). The policy itself is asserted in
@@ -334,7 +335,7 @@ describe('effectivePolicy', () => {
 describe('loadGatePolicy — a policy the harness cannot read never permits', () => {
   const dirs: string[] = []
   afterEach(() => {
-    for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+    for (const dir of dirs.splice(0)) removeTempDir(dir)
   })
   function tempDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-policy-'))

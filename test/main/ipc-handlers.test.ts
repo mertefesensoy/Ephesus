@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
 import { ProfileStore } from '../../src/main/profiles'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The handlers `registerIpc` actually registers.
@@ -361,7 +362,7 @@ describe('profiles: — the channel reaches the store, and the store reaches the
   const roots: string[] = []
 
   afterEach(() => {
-    for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+    for (const dir of roots.splice(0)) removeTempDir(dir)
   })
 
   function storeWithOneBundle(profileJson?: string): ProfileStore {

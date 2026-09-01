@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { GeminiAdapter } from '../../../src/main/engines/gemini'
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig, EngineAdapter } from '../../../src/main/engines'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * The gemini adapter's own behaviour, beyond the conformance table.
@@ -21,7 +22,7 @@ const ESCAPE = String.fromCharCode(0x1b)
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 /** The adapter is read through the SURFACE, the way every caller reads it. */

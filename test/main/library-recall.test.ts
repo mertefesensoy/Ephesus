@@ -12,6 +12,7 @@ import {
 import { FtsIndex, MemoryFtsStore } from '../../src/main/library-fts'
 import { PromptStore } from '../../src/main/prompts'
 import type { RecallHit, RecallRung } from '../../src/shared/recall'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The recall ladder (ADR-0006 layer 2, ADR-0016 §5) against a real corpus on a
@@ -26,7 +27,7 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function rig(options: { indexes?: readonly RecallIndex[] } = {}): {

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Stoa } from '../../src/main/stoa'
 import { parseWatchlist } from '../../src/shared/stoa'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The Stoa's driver (ADR-0017, FR-13, SDD §4.7/§7.7).
@@ -17,7 +18,7 @@ import { parseWatchlist } from '../../src/shared/stoa'
 const homes: string[] = []
 afterEach(() => {
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

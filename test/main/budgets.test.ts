@@ -6,6 +6,7 @@ import type { AgentSpend, BudgetVerdict } from '../../src/shared/cost'
 import type { AgentSpawnConfig, EngineAdapter, UsageFact } from '../../src/main/engines'
 import { BudgetWatcher, transcriptFiles, type BudgetedAgent } from '../../src/main/watch/budgets'
 import { CostLedger, MemoryLedgerStore } from '../../src/main/watch/ledger'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The budget watcher (ADR-0011, SDD §9) — the loop that turns transcripts into
@@ -17,7 +18,7 @@ import { CostLedger, MemoryLedgerStore } from '../../src/main/watch/ledger'
 
 const temps: string[] = []
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempDir(): string {

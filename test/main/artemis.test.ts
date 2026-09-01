@@ -14,6 +14,7 @@ import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { MemorySettingsRegistry } from '../../src/main/settings-registry'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Artemis's lifecycle (FR-5.1–5.5, ADR-0005), against the fake engine.
@@ -61,7 +62,7 @@ const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

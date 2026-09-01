@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ensureHarnessHome, HOME_DIRS } from '../../src/main/home'
 import { writeFileAtomic } from '../../src/main/fsx'
+import { removeTempDir } from '../tmpdir'
 
 // Integration per TEST-STRATEGY §2: real fs in temp dirs, no mocking.
 let root: string
@@ -11,7 +12,7 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-home-'))
 })
 afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true })
+  removeTempDir(root)
 })
 
 describe('ensureHarnessHome (SDD §2)', () => {
