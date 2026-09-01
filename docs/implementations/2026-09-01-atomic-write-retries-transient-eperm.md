@@ -7,9 +7,8 @@ process may read — cursors, the registry, the task ledger, settings, secrets,
 every delivered message. It writes a temp file and renames it over the target,
 and it rethrew any failure of that rename.
 
-On Windows the rename fails for a reason that has nothing to do with this
-program. Anything holding the destination open for a moment — a virus scanner,
-the search indexer, another reader — makes `renameSync` return `EPERM`. Measured:
+On Windows the rename fails when anything is holding the destination open for a
+moment, which makes `renameSync` return `EPERM`. Measured:
 
 | what is holding the destination | `renameSync(tmp, dest)` | destination afterwards |
 |---|---|---|
@@ -21,6 +20,13 @@ the search indexer, another reader — makes `renameSync` return `EPERM`. Measur
 The destination keeps its old contents, so this is not cosmetic: **the write is
 lost.** A lost cursor write, a lost registry entry, a lost message — surfaced as
 a degradation rather than as the transient it actually was.
+
+> **Correction — the cause is not what this document first said.** The original
+> version of this section blamed "a virus scanner, the search indexer, another
+> reader", i.e. something outside the program. That was a guess dressed as a
+> premise, and it is wrong about the dominant case. See
+> [the real cause](#the-cause-is-mostly-this-harness) below: the harness
+> contends with itself, and that changes what the right fix is.
 
 It was observed, not theorised. On a pristine tree, before any change in this
 session, `hermes.test.ts > reports the pathology before the cap fires` failed
@@ -35,6 +41,32 @@ EPERM: operation not permitted, rename
 ```
 
 and passed on an immediate re-run of the same file on the same tree.
+
+## The cause is mostly this harness
+
+Measured afterwards by the M7 orchestrator session, and it reframes this change:
+
+- **`Agora.commitSoon`'s fire-and-forget `git add -A` holds the very files the
+  Hermes sweep renames over.** Reproduced at 28/1500 (1.9%) and 82/15000
+  (0.55%). The single committer and the router are contending over the same
+  files, so this is self-inflicted, not weather.
+- **The failure is `ERROR_ACCESS_DENIED` (5) from `MoveFileEx` with
+  `REPLACE_EXISTING`, not a sharing violation**, and it occurs in *every* share
+  mode including `FILE_SHARE_DELETE`. So it is not something a reader can opt
+  out of by opening politely.
+- **An ordinary Node child holding `openSync(dest, 'r')` reproduces it** — which
+  this session confirmed independently, and it is the fourth row of the table
+  above. Ephesus's own readers are enough; no scanner is required.
+
+That matters because it changes which fix is the right shape. **A retry is the
+wrong answer to contention a program is creating with itself** — it waits out a
+conflict it could instead not have. The ordering question (should the committer's
+`git add -A` overlap a sweep at all?) is the real one, and it touches ADR-0004's
+single-committer design, so it is recorded here rather than answered.
+
+The retry still earns its place: it recovers writes that would otherwise be
+lost, today, without waiting for that question to be settled. It is a floor, not
+a solution.
 
 ## What changed
 
@@ -139,11 +171,28 @@ it was instrumented and a full suite run counted every retry:
 cumulative elapsed at retry: 43ms, 44ms, 58ms, 91ms, 260ms, …
 ```
 
-Two things follow. The transient is real and not rare enough to ignore — **those
-were eleven writes that the old code would have thrown away in a single run**.
-And nothing came close to the ceiling: every blocked rename succeeded, the worst
-after about 260 ms, so the 500 ms budget is bounding a case that has not yet
-been observed rather than one being hit routinely.
+The transient is real and not rare enough to ignore — **those were eleven writes
+that the old code would have thrown away in a single run**.
+
+The second conclusion drawn here originally was that "nothing came close to the
+ceiling", and **that has since been falsified twice**:
+
+- The orchestrator's instrumented run: 2 renames recovered (284 ms and 311 ms,
+  six attempts each) and **1 that gave up at 508 ms**.
+- Under three concurrent scenario suites, `s-deckgate` failed with exactly the
+  `EPERM` this retry exists to absorb — `.tasks.json.tmp -> tasks.json` — on a
+  tree where the retry was live.
+
+So the ceiling is reachable, not theoretical. It has not been reached under
+realistic load, and three concurrent suites is heavier than CI will ever be, so
+the budget is **not** being widened off it: it blocks the main process and
+NFR-2 is the reason it sits at 500 ms. Recurrence at realistic load would be new
+evidence and should be treated as such.
+
+What this does retire is the sentence "the retry absorbs transients" without
+qualification. It absorbs them up to a ceiling a saturated machine can reach,
+and — given the cause above — the eventual answer is more likely to be not
+generating the contention than to be waiting longer through it.
 
 ### MUTATION-CHECK
 
