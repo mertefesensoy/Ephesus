@@ -11,6 +11,7 @@ import {
 import { CodexAdapter } from '../../../src/main/engines/codex'
 import { GeminiAdapter } from '../../../src/main/engines/gemini'
 import { PromptStore } from '../../../src/main/prompts'
+import type { EngineAdapter } from '../../../src/main/engines/types'
 
 const BUNDLED_PROMPTS = fileURLToPath(new URL('../../../prompts/', import.meta.url))
 const temps: string[] = []
@@ -133,7 +134,12 @@ describe('recording the Architect’s approval where the engine looks for it (AD
    */
   it('is offered by no engine whose only route past its prompt is a bypass flag', () => {
     const prompts = new PromptStore(path.join(fakeHome(), 'prompts'), BUNDLED_PROMPTS)
-    expect(new CodexAdapter({ prompts }).trustWorkspace).toBeUndefined()
-    expect(new GeminiAdapter({ prompts }).trustWorkspace).toBeUndefined()
+    // Read through the interface, where the capability is optional: the
+    // concrete classes not declaring it at all is the stronger guarantee, and
+    // is what makes this assertion pass.
+    const codex: EngineAdapter = new CodexAdapter({ prompts })
+    const gemini: EngineAdapter = new GeminiAdapter({ prompts })
+    expect(codex.trustWorkspace).toBeUndefined()
+    expect(gemini.trustWorkspace).toBeUndefined()
   })
 })
