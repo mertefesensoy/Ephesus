@@ -180,6 +180,7 @@ async function startRig(options: { resumable?: boolean } = {}): Promise<Rig> {
     }
   }
   rigs.push(rig)
+  live = rig
   return rig
 }
 
@@ -223,13 +224,32 @@ function assignInFlightTask(rig: Rig, taskId: string): void {
   })
 }
 
+/**
+ * The rig whose processes a timeout should describe.
+ *
+ * Module-level rather than threaded through `until`, which is called eleven
+ * times here: passing a diagnosis to each would bury the point in mechanical
+ * edits. Safe because vitest runs the tests within one file sequentially, so
+ * exactly one rig is live, and `startRig` reassigns this on every test.
+ */
+let live: Rig | null = null
+
+/**
+ * Waits for `predicate`, and on timeout says what the processes were doing.
+ *
+ * The bare version — `timed out waiting for the agent to start` — is what all
+ * three tests here reported while a quoting bug in the version probe sent every
+ * spawn down the FR-1.6 install branch. It named nothing, and the spawner was
+ * discarding the one line that did.
+ */
 async function until(predicate: () => boolean, label: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
-  throw new Error(`s-crash: timed out waiting for ${label}`)
+  const detail = live === null ? '' : `\n${live.spawner.diagnose()}`
+  throw new Error(`s-crash: timed out waiting for ${label}${detail}`)
 }
 
 function spawnRequest(rig: Rig): Parameters<AgentManager['spawn']>[0] {
