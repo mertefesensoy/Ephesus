@@ -46,13 +46,31 @@ function shimPrinting(text: string): string {
   return file
 }
 
-function spec(command: string): BinarySpec {
+function spec(command: string, args: readonly string[] = ['--version']): BinarySpec {
   return {
     name: command,
     install: { command: 'echo', args: ['pretend-install'] },
-    versionProbe: { command, args: ['--version'] },
+    versionProbe: { command, args },
     parseVersion: (stdout) => /v?(\d+\.\d+\.\d+)/.exec(stdout)?.[1] ?? null
   }
+}
+
+/**
+ * Writes a shim that reports a version only when it receives its argument as a
+ * SINGLE word — the shape that catches an argument split by the shell.
+ */
+function shimRequiringArg(arg: string, text: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph probe-'))
+  temps.push(root)
+  const file = path.join(root, WINDOWS ? 'engine.cmd' : 'engine.sh')
+  fs.writeFileSync(
+    file,
+    WINDOWS
+      ? `@echo off\r\nif "%~1"=="${arg}" echo ${text}\r\n`
+      : `#!/bin/sh\n[ "$1" = "${arg}" ] && echo "${text}"\nexit 0\n`
+  )
+  if (!WINDOWS) fs.chmodSync(file, 0o755)
+  return file
 }
 
 describe('the engine version probe', () => {
@@ -91,6 +109,24 @@ describe('the engine version probe', () => {
    */
   it.runIf(WINDOWS)('leaves a command the adapter already quoted alone', async () => {
     expect(await probeVersion(spec(`"${shimPrinting('v4.5.6')}"`))).toBe('4.5.6')
+  })
+
+  /**
+   * Arguments go through the same splitter as the command, and this is the half
+   * that is easy to miss: quoting the command alone still delivers `hello world`
+   * to the child as `hello`. No shipped adapter passes a spaced probe argument
+   * today — they all pass `--version` — but `BinarySpec` permits one, and the
+   * failure would look like a version the engine refused to report rather than
+   * like a quoting bug.
+   */
+  it('passes an argument containing a space as ONE argument', async () => {
+    const shim = shimRequiringArg('hello world', 'v2.3.4')
+    expect(await probeVersion(spec(shim, ['hello world']))).toBe('2.3.4')
+  })
+
+  it('leaves an argument that needs no quoting untouched', async () => {
+    const shim = shimRequiringArg('--version', 'v3.4.5')
+    expect(await probeVersion(spec(shim, ['--version']))).toBe('3.4.5')
   })
 
   it('reports null when the probe runs but says nothing a version can be read from', async () => {

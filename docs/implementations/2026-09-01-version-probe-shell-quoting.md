@@ -97,26 +97,33 @@ app would offer to install an engine the Architect already has.
 
 | File | Change |
 |---|---|
-| `src/main/agents.ts` | New `quoteForShell()`; `probeVersion` quotes the command when — and only when — it is handing it to a shell. |
-| `test/main/version-probe.test.ts` | New. Five tests over `probeVersion` against real shims on disk; it had no direct coverage at all. |
+| `src/main/agents.ts` | New `quoteForShell()`; `probeVersion` quotes the command *and each argument* when — and only when — it is handing them to a shell. |
+| `test/main/version-probe.test.ts` | New. Seven tests over `probeVersion` against real shims on disk; it had no direct coverage at all. |
 
 ## Implementation approach
 
 ```ts
-function quoteForShell(command: string): string {
-  if (!/\s/.test(command) || command.startsWith('"')) return command
-  return `"${command}"`
+function quoteForShell(word: string): string {
+  if (!/\s/.test(word) || word.startsWith('"')) return word
+  return `"${word}"`
 }
 ```
 
 Two guards, each doing real work:
 
-- **`!/\s/`** — a command with no whitespace is passed through untouched. This
-  keeps the common path (`claude`, `echo`) byte-identical to what shipped
+- **`!/\s/`** — a word with no whitespace is passed through untouched. This
+  keeps the common path (`claude --version`) byte-identical to what shipped
   before, so the fix cannot regress engines that were working.
 - **`startsWith('"')`** — an adapter is allowed to quote its own command.
   Quoting it again yields `""C:\…""`, which breaks in precisely the way this
   fix exists to prevent.
+
+It is applied to **arguments as well as the command**, because `execFile` joins
+both into one string for the shell and the splitter does not care which half a
+space is in: an unquoted `hello world` reaches the child as `hello`. No shipped
+adapter passes a spaced probe argument today — every one passes `--version` —
+but `BinarySpec` permits it, and that failure would present as an engine
+refusing to report its version rather than as a quoting bug.
 
 The quoting is applied at the call, not stored on the spec, so the value an
 adapter declares is never rewritten — `spec.versionProbe.command` still reads
@@ -146,7 +153,8 @@ POSIX keeps `execFile`'s argv-array semantics with no quoting at all.
 npx vitest run --no-file-parallelism test/main/version-probe.test.ts test/main/agent-worktree.test.ts test/scenarios/s-crash.test.ts
 ```
 
-The seven routed failures pass, and the new file passes 5/5.
+The seven routed failures pass, and the new file passes 7/7 — locally and, for
+the timezone-independent half, unchanged under `TZ=UTC`.
 
 **Mutation-checked**, per the M6 close-out standing lesson — an assertion that
 cannot fail is not evidence:
@@ -155,12 +163,20 @@ cannot fail is not evidence:
 |---|---|
 | Quoting removed (`spec.versionProbe.command` passed raw) | **2 red** — the spaced-shim and absolute-interpreter tests |
 | `startsWith('"')` guard removed (double-quotes an already-quoted command) | **1 red** — the already-quoted test |
+| Argument quoting removed (command quoted, args raw) | **1 red** — the spaced-argument test |
+| `shell` forced to `false` | **5 red** — the fixtures pin the shell, not only the quoting |
 
-Both mutations were applied by asserted string replacement, so a mutation that
-silently failed to apply would have been caught rather than scored as "survived".
-Under the first mutation the two control tests — absent binary, unparseable
-output — stayed green, which is what makes them controls: they are not passing
-for the same reason the others are.
+Every mutation was applied by asserted string replacement, so one that silently
+failed to apply would have been caught rather than scored as "survived". Under
+the first mutation the two control tests — absent binary, unparseable output —
+stayed green, which is what makes them controls: they are not passing for the
+same reason the others are.
+
+The `shell: false` mutation is in the table for a specific reason. A probe test
+written against a bare `git` would NOT go red under it — `git` is a `.exe` that
+Node resolves off `PATH` with no shell at all, so such a test pins the quoting
+while silently pinning nothing about the shell. Building a real `.cmd` is what
+makes these fixtures pin both, and 5 red is the proof rather than the claim.
 
 The test builds a real `.cmd` shim inside a directory named `Program Files`
 rather than relying on where Node happens to be installed, so it reproduces the

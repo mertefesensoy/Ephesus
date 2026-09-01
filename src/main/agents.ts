@@ -106,19 +106,23 @@ export interface AgentWorktrees {
 export type VersionProber = (spec: BinarySpec) => Promise<string | null>
 
 /**
- * Quotes a command for the Windows shell. `execFile` with `shell` set hands the
- * command to `cmd.exe` as a *string*, which re-splits it on whitespace — so an
- * absolute path like `C:\Program Files\nodejs\node.exe` runs as `C:\Program`
- * and fails. Node does not quote for you when `shell` is set; that is the
- * caller's job, and this is the caller.
+ * Quotes one word for the Windows shell. `execFile` with `shell` set joins the
+ * command and its arguments into a single *string* for `cmd.exe`, which then
+ * re-splits it on whitespace — so an absolute path like
+ * `C:\Program Files\nodejs\node.exe` runs as `C:\Program` and fails, and an
+ * argument containing a space arrives as two. Node does not quote for you when
+ * `shell` is set; that is the caller's job, and this is the caller.
  *
- * Only whitespace matters here. A command already carrying its own quotes is
- * left exactly as the adapter wrote it — re-quoting would break it in the same
- * way not quoting breaks a bare path.
+ * Applies to arguments as well as the command, because they go through the same
+ * splitter: an unquoted `hello world` reaches the child as `hello`.
+ *
+ * Only whitespace matters here. A word already carrying its own quotes is left
+ * exactly as the adapter wrote it — re-quoting would break it in the same way
+ * not quoting breaks a bare path.
  */
-function quoteForShell(command: string): string {
-  if (!/\s/.test(command) || command.startsWith('"')) return command
-  return `"${command}"`
+function quoteForShell(word: string): string {
+  if (!/\s/.test(word) || word.startsWith('"')) return word
+  return `"${word}"`
 }
 
 /**
@@ -137,7 +141,7 @@ export const probeVersion: VersionProber = (spec) =>
     const shell = process.platform === 'win32'
     execFile(
       shell ? quoteForShell(spec.versionProbe.command) : spec.versionProbe.command,
-      [...spec.versionProbe.args],
+      shell ? spec.versionProbe.args.map(quoteForShell) : [...spec.versionProbe.args],
       { timeout: 10_000, windowsHide: true, shell },
       (err, stdout) => {
         if (err) {
