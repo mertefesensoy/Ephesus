@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { REJECTED_DIR } from '../../src/main/hermes'
 import { cleanupHomes, startCompany, scenarioMessage, sendStep, type Company } from './company'
 
 /**
@@ -88,6 +89,46 @@ describe('S-BOUNCE', () => {
     // …and present as a bounce in the log plus a refusal in the sender's inbox.
     expect(company.agora.readLog().filter((e) => e['kind'] === 'bounce')).toHaveLength(1)
     expect(company.inbox('agent.a')).toHaveLength(1)
+  })
+
+  /**
+   * S-BOUNCE's charter is "sender notified, nothing dropped", and until now it
+   * only held for mail that was *undeliverable*. A message the router REFUSED
+   * to carry was parked and logged and its author was never told — which is how
+   * a complete, fully-cited standup brief was destroyed on 2026-09-01 with one
+   * line in the error log as the only symptom anywhere.
+   */
+  it('returns a REJECTION to its author too, not only an undeliverable bounce', async () => {
+    company = await startCompany()
+    company.hire('agent.a')
+
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const outbox = path.join(company.agora.agentDir('agent.a'), 'outbox')
+    // Truncated JSON: refused before a single field can be read, so there is no
+    // message id and no conversation to reply into — the hardest case to answer.
+    fs.writeFileSync(path.join(outbox, 'malformed.json'), '{ "act": "propose"', 'utf8')
+
+    await company.hermes.sweep()
+
+    const inbox = company.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const refusal = company.readInbox('agent.a', inbox[0] ?? '')
+    expect(refusal.act).toBe('refuse')
+    // The author is known from the outbox it was found in, not from the bytes.
+    expect(refusal.to).toBe('agent.a')
+    // Enough to act on: which file, and where its text still is.
+    expect(refusal.body).toContain('malformed.json')
+    expect(refusal.body).toContain(`outbox/${REJECTED_DIR}/malformed.json`)
+
+    // Still parked for the Architect — the refusal points at it.
+    expect(fs.existsSync(path.join(outbox, REJECTED_DIR, 'malformed.json'))).toBe(true)
+
+    // And it does not refuse its own refusal: a second sweep finds nothing,
+    // and the notice consumes cleanly instead of looping.
+    await company.hermes.sweep()
+    expect(company.inbox('agent.a')).toHaveLength(1)
+    expect(await company.hermes.consumeInbox('agent.a')).toHaveLength(1)
   })
 
   it('does not bounce a bounce — the refusal itself is consumable', async () => {
