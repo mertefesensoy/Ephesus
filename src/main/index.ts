@@ -659,12 +659,24 @@ async function boot(): Promise<void> {
         if (minted.ok) {
           // The token is never logged. What is logged is that the company can
           // act on GitHub and until when — enough to explain a 401 later.
+          const who = companyGitHub?.gitIdentity() ?? null
           agora?.appendLog({
             kind: 'remote',
             source: 'github',
             event: 'company-token-minted',
-            expiresAt: minted.expiresAt
+            expiresAt: minted.expiresAt,
+            // Public, and the point of the exercise: if this is null the
+            // company can act on GitHub but its commits carry no author, which
+            // is a different degradation from having no token at all.
+            authorName: who?.name ?? null,
+            authorEmail: who?.email ?? null
           })
+          if (who === null) {
+            reportDegradation(
+              'secrets',
+              'company GitHub token minted, but the bot identity could not be read — commits will not be authored as the company'
+            )
+          }
           return
         }
         reportDegradation('secrets', `company GitHub identity unavailable: ${minted.because}`)
