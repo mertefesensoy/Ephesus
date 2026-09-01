@@ -95,6 +95,7 @@ export function conformanceRig(): ConformanceRig {
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
       commitIdentity: null,
+      ghTokenCommand: '',
       envGrants: {},
       identityPath: path.join(agentDir, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),

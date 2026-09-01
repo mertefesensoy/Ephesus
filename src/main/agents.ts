@@ -222,6 +222,8 @@ export interface AgentManagerOptions {
    * is composed here rather than in each adapter's deps.
    */
   readonly recallCommand?: string
+  /** `eph-gh-token`, for an agent whose spawn-time token has aged out (ADR-0022). */
+  readonly ghTokenCommand?: string
   /**
    * Git worktree isolation for a spawn that asks for it (UC-01 alternate 2a).
    * Injected rather than imported so the lifecycle never runs git itself —
@@ -514,7 +516,8 @@ export class AgentManager {
       // process actually starts, and this config is built before the version
       // probe has even run.
       memory: '',
-      recallCommand: this.options.recallCommand ?? ''
+      recallCommand: this.options.recallCommand ?? '',
+      ghTokenCommand: this.options.ghTokenCommand ?? ''
     }
   }
 

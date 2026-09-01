@@ -128,6 +128,11 @@ company knows nothing.
   do not silently substitute a better one.
 - Report what you actually did, including what failed. An honest failure is
   useful; a confident claim that turns out to be false is not.
+- `$GH_TOKEN` is a GitHub credential that expires an hour after you were
+  started. If you have been working a while and a push or an API call comes
+  back 401, run `$EPH_GH_TOKEN` for a fresh one rather than concluding you lack
+  permission. If that variable is empty, no company GitHub identity is
+  configured and there is no fresher token to get.
 - When you commit, sign the work. The company is already the git author; add
   the value of `$EPH_COAUTHOR` as the last line of your commit message so the
   record says which agent did it. If that variable is empty there is no company

@@ -68,6 +68,7 @@ function rig(): Rig {
       hookEndpoint: '/tmp/eph/events.sock',
       cwd,
       commitIdentity: null,
+      ghTokenCommand: '',
       envGrants: { GH_TOKEN: 'granted-value' },
       identityPath: path.join(agora, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),

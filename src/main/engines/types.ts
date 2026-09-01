@@ -93,6 +93,17 @@ export interface AgentSpawnConfig {
    */
   readonly recallCommand: string
   /**
+   * The command an agent runs to get a FRESH GitHub installation token
+   * (`eph-gh-token`, ADR-0022). Adapters export it as `EPH_GH_TOKEN`.
+   *
+   * Separate from the token itself, which arrives in `envGrants` and is a
+   * snapshot: a token lives an hour, an agent may not, and an agent holding a
+   * stale copy gets a 401 that reads like a permissions mistake. Empty when no
+   * company identity is configured, in which case the adapter exports nothing
+   * and `PROTOCOL.md`'s instruction to use it is the thing that must not print.
+   */
+  readonly ghTokenCommand: string
+  /**
    * The autonomy this spawn runs at — the profile's level composed against the
    * global ceiling (ADR-0012, FR-11.1), or the ceiling alone for an agent on no
    * profile.

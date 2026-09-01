@@ -62,6 +62,7 @@ function budgeted(
     hookEndpoint: company.hookServer.endpoint() ?? '',
     cwd,
     commitIdentity: null,
+    ghTokenCommand: '',
     envGrants: {},
     identityPath: path.join(company.agora.agentDir(agentId), 'identity.md'),
     protocolPath: company.agora.pathOf('PROTOCOL.md'),

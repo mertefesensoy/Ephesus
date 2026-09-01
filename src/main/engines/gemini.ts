@@ -145,7 +145,8 @@ export class GeminiAdapter implements EngineAdapter {
         EPH_AGENT_ID: cfg.agentId,
         EPH_HOOK_TOKEN: cfg.hookToken,
         EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
-        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand })
+        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
+        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand })
       },
       settings: []
     }

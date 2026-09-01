@@ -30,6 +30,7 @@ import { Gymnasium } from './gymnasium'
 import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
+import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
 import { targetRef } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
@@ -315,6 +316,37 @@ const hookServer = new HookServer({
   onRecall: (request) => {
     if (!library) throw new Error('recall: the Library is not up yet')
     return library.recall(request.query, request.scope, request.limit)
+  },
+  /**
+   * A fresh GitHub installation token for a still-running agent (ADR-0022).
+   *
+   * Least privilege survives the refresh: the endpoint's own gate is the
+   * per-spawn hook token, which proves only that a live agent is asking. What
+   * decides whether it may HAVE this is the same thing that decided at spawn —
+   * whether its hire declared the grant. Without this check the researcher,
+   * whose spawns are no-secrets by NFR-17, could ask for the company credential
+   * and get it.
+   */
+  onGhToken: (agentId) => {
+    const refuse = (because: string): GhTokenResponse => ({
+      schemaVersion: GH_TOKEN_SCHEMA_VERSION,
+      ok: false,
+      because
+    })
+    let declared: readonly string[]
+    try {
+      declared = agentManager?.card(agentId).envGrants ?? []
+    } catch {
+      return refuse(`no live spawn for "${agentId}"`)
+    }
+    if (!declared.includes(GITHUB_TOKEN_GRANT)) {
+      return refuse(`your role does not declare ${GITHUB_TOKEN_GRANT}`)
+    }
+    const token = companyGitHub?.token() ?? null
+    if (token === null) {
+      return refuse('the company has no current GitHub token — check the Watch for why')
+    }
+    return { schemaVersion: GH_TOKEN_SCHEMA_VERSION, ok: true, token, expiresAt: null }
   },
   onEventError: (err) =>
     reportDegradation(
@@ -1523,6 +1555,7 @@ async function boot(): Promise<void> {
     // ADR-0006 layer 2: how an agent asks what the company knows. Harness-owned
     // and engine-independent, so every adapter merely forwards it.
     recallCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-recall.mjs')}`,
+    ghTokenCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-gh-token.mjs')}`,
     // ADR-0006 layer 1: what an agent remembers reaches its next spawn through
     // the Library, budgeted there rather than by whichever adapter runs it.
     memory: {

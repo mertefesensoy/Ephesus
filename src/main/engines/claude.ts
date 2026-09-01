@@ -531,7 +531,8 @@ export class ClaudeAdapter implements EngineAdapter {
         EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
         // The Library's agent-facing surface (ADR-0006 layer 2). Harness-owned
         // and identical for every engine, so the adapter only forwards it.
-        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand })
+        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
+        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand })
       },
       settings: this.settingsInjections(cfg)
     }
