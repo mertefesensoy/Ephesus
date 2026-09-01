@@ -350,7 +350,8 @@ interface ClaudeAdapterDeps {
    * `unobserved`, which `paceFor` treats as `full`.
    */
   readonly usageShimPath?: string
-  readonly usageStatusPath?: string
+  /** Directory the shim writes one report per agent into. */
+  readonly usageStatusDir?: string
   /** Interpreter used to run the shim; `node`, resolved on the agent's PATH. */
   readonly nodeCommand?: string
   /** Durable record of installed settings, so a killed harness can undo them. */
@@ -465,11 +466,11 @@ function isHarnessHookEntry(entry: unknown, shimPath: string): boolean {
  * leaves whatever `statusLine` the Architect already had entirely alone.
  */
 function usageStatusLine(deps: ClaudeAdapterDeps): Record<string, unknown> | null {
-  if (!deps.usageShimPath || !deps.usageStatusPath) return null
+  if (!deps.usageShimPath || !deps.usageStatusDir) return null
   const node = deps.nodeCommand ?? 'node'
   return {
     type: 'command',
-    command: `${node} ${shellQuote(deps.usageShimPath)} --out ${shellQuote(deps.usageStatusPath)}`
+    command: `${node} ${shellQuote(deps.usageShimPath)} --dir ${shellQuote(deps.usageStatusDir)}`
   }
 }
 

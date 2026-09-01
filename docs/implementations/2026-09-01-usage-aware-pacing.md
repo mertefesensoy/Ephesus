@@ -161,11 +161,11 @@ measuring the thing the harness itself issues.
 | File | Change |
 |---|---|
 | `docs/adr/ADR-0023-usage-aware-pacing.md` | **New.** Supersedes ADR-0011's budget clause and trip signal #4. |
-| `src/shared/pacing.ts` | **New.** The `usage.json` schema and `paceFor()` — the pure decision that turns observed windows into `full` / `slow` / `hold`. |
-| `shims/eph-usage.mjs` | **New.** Statusline shim: reads the engine's status JSON on stdin, writes the observed windows to `<home>/usage.json` atomically, prints a short status back. |
-| `src/main/watch/usage-watch.ts` | **New.** Reads and validates `usage.json`, exposes the current windows and pace to main, reports staleness as a degradation. |
+| `src/shared/pacing.ts` | **New.** The usage-report schema and `paceFor()` — the pure decision that turns observed windows into `full` / `slow` / `hold`. |
+| `shims/eph-usage.mjs` | **New.** Statusline shim: reads the engine's status JSON on stdin, writes the observed windows to `<home>/usage/<agent>.json` atomically, prints a short status back. |
+| `src/main/watch/usage-watch.ts` | **New.** Reads and validates the per-agent reports, exposes the current windows and pace to main, reports staleness as a degradation. |
 | `src/main/watch/wake-clock.ts` | **New.** The wall-clock cap per wake — the second, independent limit. |
-| `src/main/engines/claude.ts` | Installs the `statusLine` block alongside the existing `hooks` block; `usageStatusPath`/`usageShimPath` deps; strip-then-merge so re-installs do not accumulate. |
+| `src/main/engines/claude.ts` | Installs the `statusLine` block alongside the existing `hooks` block; `usageStatusDir`/`usageShimPath` deps; strip-then-merge so re-installs do not accumulate. |
 | `src/main/hermes.ts` | `pace()` gate on both wake paths (`wakeCheck`, `decideOnStop`); deferral is visible and never consumes the inbox. |
 | `src/shared/breaker.ts` | Trip signal #4 fires on `breached` only; `projected-breach` no longer trips (ADR-0023). |
 | `src/main/index.ts` | Wires `UsageWatch` → `paceFor` → Hermes; wires `WakeClock` → `interrupt`; passes the shim paths to the Claude adapter. |
@@ -192,7 +192,7 @@ point inherits the existing backup and uninstall path, and nothing new has to be
 cleaned up on the way out.
 
 The shim converts `resets_at` from epoch **seconds** to epoch **milliseconds**
-once, at the boundary, and writes `<home>/usage.json` with temp+rename
+once, at the boundary, and writes `<home>/usage/<agent>.json` with temp+rename
 (invariant §4 — several agents' status lines write it while the harness reads
 it). It is **fail-open and time-bounded**: it sits on the agent's critical path,
 so every path exits 0, the stdin read gives up after 2 s, and trouble goes to
@@ -290,7 +290,7 @@ contract. The statusline is a supported extension point we already install into.
 whose event vocabulary is a shared, validated contract (`src/shared/hooks.ts`).
 Adding a "usage" event would widen that contract for telemetry. A file is the
 Ephesus idiom, survives a harness restart, and is inspectable: the Architect can
-`cat ~/.ephesus/usage.json` and see the number the company is steering on.
+`cat ~/.ephesus/usage/*.json` and see the number the company is steering on.
 
 **Why pacing is a governor, not an interlock.** No reading, a stale reading, and
 an engine that reports nothing all yield `full`. A harness that froze the company

@@ -30,6 +30,8 @@ function report(over: Partial<UsageReport> = {}): UsageReport {
     agentId: 'agent.artemis',
     fiveHour: null,
     sevenDay: null,
+    session: null,
+    sessionCostUsd: null,
     ...over
   }
 }
@@ -46,11 +48,15 @@ describe('the usage report schema', () => {
       observedAt: NOW,
       agentId: 'agent.artemis',
       fiveHour: { usedPercent: 12, resetsAt: 1788294000000 },
-      sevenDay: { usedPercent: 28.999999999999996, resetsAt: 1788753600000 }
+      sevenDay: { usedPercent: 28.999999999999996, resetsAt: 1788753600000 },
+      // Also captured live from that same render.
+      session: '6e7cc56d-1269-4284-82e4-d4975aecadff',
+      sessionCostUsd: 0.08599799999999999
     })
     expect(parsed.fiveHour?.usedPercent).toBe(12)
     // The engine reports a float; nothing rounds it on the way in.
     expect(parsed.sevenDay?.usedPercent).toBeCloseTo(29)
+    expect(parsed.sessionCostUsd).toBeCloseTo(0.085998, 9)
   })
 
   it('accepts a used-percentage above 100, because the engine documents one', () => {

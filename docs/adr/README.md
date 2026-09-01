@@ -33,6 +33,12 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):
 
+- ADR-0023 "writes each observation to `<home>/usage.json`" — as built, one
+  report per agent at `<home>/usage/<agent>.json`. The account WINDOWS are
+  account-wide and a single file served them, but the report also carries the
+  live per-session cost, and one shared file is last-writer-wins: whichever
+  agent rendered most recently would have every other agent's spend attributed
+  to it. The decision is unchanged; only the file layout is.
 - ADR-0011 "Budgets are enforced pre-flight where possible (burn-rate
   projection) … budget state feeds trip signal #4" — superseded by ADR-0023.
   The per-agent `dailyTokens` ceiling survives as a runaway backstop and

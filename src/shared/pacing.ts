@@ -52,10 +52,29 @@ export const usageReportSchema = z
     schemaVersion: z.literal(USAGE_SCHEMA_VERSION),
     /** Epoch milliseconds the shim wrote this. */
     observedAt: z.number().int().nonnegative(),
-    /** Which agent's session rendered it — for the log, not for the decision. */
+    /**
+     * Which agent rendered it. For the windows this is only provenance — they
+     * are account-wide, so any agent's reading is every agent's. For the live
+     * cost below it is the ATTRIBUTION KEY, which is why each agent now writes
+     * its own file: a single shared file would let whichever agent rendered
+     * last claim the others' spend, and mis-attribution between agents is the
+     * exact bug class ADR-0011 exists to close.
+     */
     agentId: z.string().min(1).max(128).nullable(),
     fiveHour: usageWindowSchema.nullable(),
-    sevenDay: usageWindowSchema.nullable()
+    sevenDay: usageWindowSchema.nullable(),
+    /** The engine session this reading came from, or null before it says. */
+    session: z.string().min(1).max(128).nullable(),
+    /**
+     * What the engine says THIS session has cost so far, in USD — the live
+     * counterpart of the transcript's `cost-state` total, which only lands when
+     * the session ends.
+     *
+     * Nullable and null-means-unknown: an engine that reports no cost, and a
+     * reading taken before the first API response, must not read as "$0"
+     * (ADR-0011's rule that "not reported" and "free" are different claims).
+     */
+    sessionCostUsd: z.number().nonnegative().nullable()
   })
   .strict()
 

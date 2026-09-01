@@ -88,6 +88,16 @@ export interface CostLedgerOptions {
   onCostRegressed?(source: string, session: string, model: string): void
   /** Raised when the engine said it could not price every model it used. */
   onCostIncomplete?(source: string): void
+  /**
+   * What the engine says an agent's CURRENT session has cost so far, live.
+   *
+   * Injected as a lookup rather than stored, and that is the whole point: the
+   * ledger keeps no money in memory. This is read fresh on every `spendFor`
+   * from a file the status line rewrites, exactly as the pace is — so a restart
+   * loses nothing it cannot immediately re-observe, and ADR-0011's ban on
+   * in-memory cumulative figures is untouched.
+   */
+  liveCost?(agent: string): { readonly session: string; readonly usd: number } | null
 }
 
 export class CostLedger {
@@ -205,6 +215,7 @@ export class CostLedger {
       session === null ? ZERO_TOTALS : totalOf(rows.filter((row) => row.session === session))
 
     const todayTotals = totalOf(todayRows)
+    const live = this.options.liveCost?.(agent) ?? null
     const observed = this.window.get(agent) ?? null
     const nowMs = this.now().getTime()
     const midnight = new Date(this.now())
@@ -218,6 +229,10 @@ export class CostLedger {
       todayTotals,
       cumulativeTotals: totalOf(rows),
       dailyTokens,
+      // Only when it names the SAME session the agent is running. A figure left
+      // behind by the previous session would otherwise be shown against this
+      // one, which is the same mis-attribution in miniature.
+      liveSessionCostUsd: live !== null && live.session === session ? live.usd : null,
       budget: evaluateBudget({
         spent: tokensOf(todayTotals),
         dailyTokens,
