@@ -258,7 +258,26 @@ export interface EngineAdapter {
    * caller can log it — pre-trusting must never be silent.
    */
   trustWorkspace?(cwd: string): WorkspaceTrustResult
+  /**
+   * Sorts one `notification` event into what the engine actually meant.
+   *
+   * Engines fire a single notification for at least two unrelated situations,
+   * and the words are the only thing that tells them apart — so the words live
+   * here (NFR-12) and core never learns an engine's phrasing.
+   *
+   * `null` means "cannot tell", and the caller must treat that as a permission
+   * prompt: a real prompt mistaken for idleness would leave an agent blocked
+   * with nobody told, which is the worse of the two errors.
+   */
+  notificationKind?(payload: unknown): NotificationKind | null
 }
+
+/**
+ * What an engine's notification meant. `waiting` is an agent sitting at an
+ * empty prompt with nothing to do — a fact about idleness, not a request for a
+ * decision, and gating it asks the Architect to approve an agent's silence.
+ */
+export type NotificationKind = 'permission' | 'waiting'
 
 /** What `trustWorkspace` did, for the log line that must follow it. */
 export type WorkspaceTrustResult =

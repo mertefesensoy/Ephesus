@@ -441,6 +441,21 @@ export function wireGateChokePoints(deps: {
   memoPolicy?(): MemoPolicy
   /** Raised when a choke point could not file its gate (invariant §7). */
   onError?(detail: string): void
+  /**
+   * What the engine's notification meant, from the adapter that knows its
+   * phrasing (NFR-12). Absent, or null, means "treat it as a permission
+   * prompt" — the safe direction, since a real prompt read as idleness would
+   * strand an agent with nobody told.
+   */
+  notificationKind?(agentId: string, payload: unknown): 'permission' | 'waiting' | null
+  /**
+   * The autonomy this agent runs at, already composed against the global
+   * ceiling. An engine prompt under a granted `autonomous` is not the
+   * Architect's to answer: they made that decision once, at activation.
+   */
+  autonomyFor?(agentId: string): AutonomyLevel | null
+  /** An engine prompt that was NOT gated, so the choice is still on the record. */
+  onUngated?(agentId: string, kind: 'permission' | 'waiting', message: string): void
 }): {
   submitNotification(agentId: string, payload: unknown): void
   submitMemoTrigger(agentId: string, action: MemoAction): MemoTrigger | null
@@ -469,6 +484,23 @@ export function wireGateChokePoints(deps: {
       const message =
         notificationMessage(payload) ??
         deps.prompts.render(path.join('watch', 'notification-unspecified.md'), {}).trim()
+      // An engine fires one notification for two unrelated situations. On the
+      // 2026-09-01 live run nine of ten gates the Architect was asked to answer
+      // said "Claude is waiting for your input" — an agent idle at an empty
+      // prompt, gated as though it had asked for something. Approving them did
+      // nothing back, because there was nothing to approve.
+      const kind = deps.notificationKind?.(agentId, payload) ?? null
+      if (kind === 'waiting') {
+        deps.onUngated?.(agentId, 'waiting', message)
+        return
+      }
+      // A prompt under a granted `autonomous` is not the Architect's to answer
+      // either: they made that decision once, at activation, and re-asking per
+      // tool call is the micromanagement the autonomy grant exists to end.
+      if (deps.autonomyFor?.(agentId) === 'autonomous') {
+        deps.onUngated?.(agentId, 'permission', message)
+        return
+      }
       deps.gates.submit({
         kind: 'tool-permission',
         agentId,

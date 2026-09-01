@@ -824,7 +824,36 @@ async function boot(): Promise<void> {
     // gate this app opens is now recorded against the work it blocks, so the
     // `status → done` refusal finally guards a field something fills.
     taskOf: (agentId) => ledger?.boundTaskFor(agentId) ?? null,
-    onError: (detail) => reportDegradation('gates', detail)
+    onError: (detail) => reportDegradation('gates', detail),
+    // The adapter owns the engine's phrasing (NFR-12); core only learns which
+    // of the two situations it was.
+    notificationKind: (agentId, payload) => {
+      try {
+        const card = agentManager?.card(agentId)
+        if (!card) return null
+        return engines.get(card.engine).notificationKind?.(payload) ?? null
+      } catch {
+        // Unknown reads as a permission prompt, which is the safe direction.
+        return null
+      }
+    },
+    autonomyFor: (agentId) =>
+      activations?.autonomyFor(agentId, 'tool-permission') ??
+      loadGatePolicy(gatePolicyPath).policy.autonomy,
+    // Not gated is not unrecorded: an engine prompt the harness declined to put
+    // in front of the Architect still belongs in the book of record, or
+    // "autonomy" becomes a synonym for "unobserved".
+    onUngated: (agentId, kind, message) => {
+      agora?.appendLog({
+        kind: 'gate',
+        event: 'ungated',
+        agentId,
+        gateKind: 'tool-permission',
+        because: kind,
+        what: message
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    }
   })
 
   // The circuit breaker (ADR-0011). Constructed before anything can spawn, so

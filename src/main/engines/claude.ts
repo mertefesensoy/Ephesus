@@ -16,6 +16,7 @@ import type {
   SettingsInjection,
   SpawnPlan,
   TranscriptReader,
+  NotificationKind,
   UsageFact,
   WorkspaceTrustResult
 } from './types'
@@ -475,6 +476,13 @@ export function claudePermissionMode(
   }
 }
 
+/** Contract: pure. The engine's own words on a notification payload, or null. */
+function claudeNotificationMessage(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const message = (payload as Record<string, unknown>)['message']
+  return typeof message === 'string' && message.trim().length > 0 ? message.trim() : null
+}
+
 export class ClaudeAdapter implements EngineAdapter {
   readonly id = 'claude' as const
   /**
@@ -556,6 +564,24 @@ export class ClaudeAdapter implements EngineAdapter {
    */
   injectIdentity(cfg: AgentSpawnConfig): void {
     composeIdentity(cfg, this.deps.prompts)
+  }
+
+  /**
+   * Claude Code says "Claude needs your permission to use X" when it is
+   * blocked on a decision, and "Claude is waiting for your input" when it is
+   * simply idle at an empty prompt. Both arrive as `Notification`.
+   *
+   * Measured, not assumed: on the 2026-09-01 live run, nine of the ten gates
+   * the Architect was asked to answer carried the idle message. They asked a
+   * human to approve an agent doing nothing, and approving them did nothing
+   * back.
+   */
+  notificationKind(payload: unknown): NotificationKind | null {
+    const message = claudeNotificationMessage(payload)
+    if (message === null) return null
+    if (/waiting for your input/i.test(message)) return 'waiting'
+    if (/needs your permission|permission to use/i.test(message)) return 'permission'
+    return null
   }
 
   interrupt(): KeySequence {
