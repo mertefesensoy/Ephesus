@@ -105,9 +105,10 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
 
   it('asserts stricter-wins composition against a laxer global ceiling', () => {
     const bundle = skeletonCrew()
-    // The global policy is the MOST permissive setting there is; the profile
-    // still gets `manual` on the irreversible classes, because composition
-    // takes the stricter side and the bundle asked for the stricter side.
+    // The global policy is the MOST permissive setting there is, so any row
+    // that comes back below `autonomous` came from the bundle asking for it and
+    // winning: composition takes the stricter side, and the bundle asked for
+    // the stricter side.
     const planned = activationPlan(
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
@@ -123,7 +124,9 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     expect(byKind['prod-facing']).toBe('supervised')
 
     // And the other direction, which is the one a bug would take: a STRICTER
-    // global clamps the profile's own `supervised` default down to `manual`.
+    // global clamps every kind down to `manual`, the profile's own `autonomous`
+    // default included — the widest thing the bundle now asks for, and so the
+    // row that would fail loudest if composition ever widened.
     const clamped = activationPlan(bundle, { kind: 'repo', id: 'myapp', path: REPO_ROOT }, 'manual')
     if (!clamped.ok) throw new Error(clamped.reasons.join('; '))
     for (const row of clamped.plan.autonomy) {
