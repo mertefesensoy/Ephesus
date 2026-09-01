@@ -13,6 +13,7 @@ import {
   type StopReply
 } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
+import { HERMES_SENDER } from '../../src/shared/reserved'
 import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 import { PATHOLOGY_SIGNAL_AT } from '../../src/shared/autonomy'
 
@@ -57,19 +58,28 @@ async function rig(
     onPathology?: (agentId: string, blocks: number) => void
     onSweepError?: (err: unknown) => void
     onDiverted?: (record: { from: string; conversation: string; reason: string }) => void
+    /**
+     * Opt-in, not the default: several cases below assert on the *fallback*
+     * rendering (`render()` serialises its vars when no store is wired), so
+     * handing every rig the real templates would rewrite tests that are not
+     * about prose. The cases that check what an agent is actually told wire it.
+     */
+    withPrompts?: boolean
   } = {}
 ): Promise<Rig> {
+  const { withPrompts, ...hermesOptions } = options
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-hermes-'))
   temps.push(home)
+  const prompts = new PromptStore(path.join(home, 'prompts'), BUNDLED_PROMPTS)
   const agora = new Agora({
     root: path.join(home, 'agora'),
-    prompts: new PromptStore(path.join(home, 'prompts'), BUNDLED_PROMPTS),
+    prompts,
     backoffMs: 1
   })
   await agora.ensureRepo()
   agoras.push(agora)
 
-  const hermes = new Hermes({ agora, ...options })
+  const hermes = new Hermes({ agora, ...(withPrompts ? { prompts } : {}), ...hermesOptions })
   routers.push(hermes)
   hermes.ensureMailbox('agent.a')
   hermes.ensureMailbox('agent.b')
@@ -201,12 +211,145 @@ describe('Hermes — a message the router will not carry', () => {
   it('rejects a forged sender — an outbox may only carry its owner mail', async () => {
     const r = await rig()
     // agent.a writes a message claiming to be from agent.b.
-    r.send('agent.a', message({ from: 'agent.b', to: 'agent.a' }))
+    const forged = message({ from: 'agent.b', to: 'agent.a' })
+    r.send('agent.a', forged)
 
     const report = await r.hermes.sweep()
 
     expect(report.rejected[0]?.reason).toContain('does not own this outbox')
+    // The forged message itself is not carried. agent.a's inbox is no longer
+    // asserted EMPTY, because the refusal now lands there — which is the point
+    // of the case below.
+    expect(r.inbox('agent.a')).not.toContain(`${forged.id}.json`)
+  })
+
+  /**
+   * The general form of the 2026-09-01 loss. Deriving `requires_reply` fixed
+   * the ONE reason that destroyed Artemis's standup brief; these cover the
+   * class — whatever the reason, the author is told, so it can learn, correct
+   * and retry instead of writing into a void.
+   */
+  it('returns the refusal to the author, with enough to fix the message', async () => {
+    const r = await rig({ withPrompts: true })
+    const file = path.join(r.agora.agentDir('agent.a'), 'outbox', 'broken.json')
+    fs.writeFileSync(file, '{ not json', 'utf8')
+
+    const report = await r.hermes.sweep()
+
+    const notice = report.rejected[0]?.notice
+    expect(notice).not.toBeNull()
+    // Addressed from the reserved router identity, never forged as someone else.
+    expect(notice?.from).toBe(HERMES_SENDER)
+    expect(notice?.act).toBe('refuse')
+    // The author is read from the PATH: a file whose bytes are not even JSON
+    // still has a knowable author, which is what makes the class closable.
+    expect(notice?.to).toBe('agent.a')
+    expect(r.inbox('agent.a')).toEqual([`${notice?.id}.json`])
+
+    // Enough to fix it: which message, why, and where the text still is.
+    expect(notice?.subject).toContain('broken.json')
+    expect(notice?.body).toContain('not valid JSON')
+    expect(notice?.body).toContain(`outbox/${REJECTED_DIR}/broken.json`)
+  })
+
+  it('tells the outbox owner, not the identity a forged file claimed', async () => {
+    const r = await rig({ withPrompts: true })
+    r.send('agent.a', message({ from: 'agent.b', to: 'agent.a' }))
+
+    const report = await r.hermes.sweep()
+
+    // agent.b did not write this and must never be told that it did. The
+    // author comes from the directory, not from the content — which is exactly
+    // why a forgery cannot misdirect the refusal.
+    expect(report.rejected[0]?.notice?.to).toBe('agent.a')
+    expect(r.inbox('agent.b')).toEqual([])
+  })
+
+  it('cannot ping-pong: the refusal obligates nothing and never enters an outbox', async () => {
+    const r = await rig({ withPrompts: true })
+    fs.writeFileSync(
+      path.join(r.agora.agentDir('agent.a'), 'outbox', 'broken.json'),
+      '{ not json',
+      'utf8'
+    )
+
+    const first = await r.hermes.sweep()
+    const notice = first.rejected[0]?.notice
+    expect(notice).not.toBeNull()
+
+    // `refuse` is not a reply-obliging act, so the notice asks for nothing back
+    // and starts no chain; hops 0 means it can never trip a hop cap either.
+    expect(notice?.requires_reply).toBe(false)
+    expect(notice?.hops).toBe(0)
+
+    // It is well-formed, so consuming it can never reject it in turn...
+    const consumed = await r.hermes.consumeInbox('agent.a')
+    expect(consumed.map((m) => m.id)).toEqual([notice?.id])
+
+    // ...and it went straight to the inbox, so the next sweep finds nothing to
+    // refuse. A refusal cannot be refused.
+    const second = await r.hermes.sweep()
+    expect(second.rejected).toEqual([])
+    expect(second.delivered).toEqual([])
+    expect(r.outbox('agent.a')).toEqual([])
+  })
+
+  it('parks a message whose author cannot be named, and invents no recipient', async () => {
+    const r = await rig({ withPrompts: true })
+    const inbox = path.join(r.agora.agentDir('agent.b'), 'inbox')
+    // An inbox names the RECIPIENT; `from` is the field that just failed to
+    // validate. Guessing an author here would send a refusal to someone who may
+    // never have written anything, so the log entry is all anyone can have.
+    //
+    // BOTH inbox failure branches, deliberately: unreadable bytes and readable
+    // JSON that is not a message. A first draft covered only the first, and a
+    // mutation that invented an author on the second passed it.
+    fs.writeFileSync(path.join(inbox, 'wrecked.json'), '{ "from": "', 'utf8')
+    fs.writeFileSync(path.join(inbox, 'shaped.json'), '{ "from": "agent.a" }', 'utf8')
+
+    expect(await r.hermes.consumeInbox('agent.b')).toEqual([])
+
+    expect(fs.existsSync(path.join(inbox, REJECTED_DIR, 'wrecked.json'))).toBe(true)
+    expect(fs.existsSync(path.join(inbox, REJECTED_DIR, 'shaped.json'))).toBe(true)
+    // Nobody is told — least of all `agent.a`, which the readable-but-invalid
+    // file names as its sender and which the router must not believe.
     expect(r.inbox('agent.a')).toEqual([])
+    expect(r.inbox('agent.b')).toEqual([])
+    // Matched on the two files by name rather than counted globally: the log is
+    // the whole rig's, and an exact count would couple this case to anything
+    // else that ever logs an error.
+    const errors = r.agora
+      .readLog()
+      .filter((e) => e['kind'] === 'error' && e['subsystem'] === 'hermes')
+    for (const name of ['wrecked.json', 'shaped.json']) {
+      const entry = errors.find((e) => String(e['file'] ?? '').endsWith(name))
+      expect(entry, `no rejection logged for ${name}`).toBeDefined()
+      expect(entry).toMatchObject({ author: null, noticeId: null })
+    }
+  })
+
+  it('still parks, and says it could not tell anyone, when the author is unaddressable', async () => {
+    const r = await rig({ withPrompts: true })
+    // A directory under agents/ whose name is not a valid agent id. `to` is
+    // schema-validated, so composing the notice throws — and it must be caught,
+    // not delivered half-formed and not allowed to take the sweep down.
+    const stray = path.join(r.agora.pathOf('agents'), 'NOT-an-agent-id', 'outbox')
+    fs.mkdirSync(stray, { recursive: true })
+    fs.writeFileSync(path.join(stray, 'broken.json'), '{ not json', 'utf8')
+
+    const report = await r.hermes.sweep()
+
+    const record = report.rejected.find((x) => x.file.includes('NOT-an-agent-id'))
+    expect(record).toBeDefined()
+    expect(record?.notice).toBeNull()
+    // Parked regardless: losing the notification must not also lose the file.
+    expect(fs.existsSync(path.join(stray, REJECTED_DIR, 'broken.json'))).toBe(true)
+    // And the failure to notify is itself visible — a silent failure to break
+    // the silence would be the same bug one level up.
+    const failed = r.agora
+      .readLog()
+      .find((e) => typeof e['reason'] === 'string' && e['reason'].includes('could not tell'))
+    expect(failed).toBeDefined()
   })
 
   /**

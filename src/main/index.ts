@@ -1558,7 +1558,18 @@ async function boot(): Promise<void> {
         'hermes',
         `sweep failed: ${err instanceof Error ? err.message : String(err)}`
       ),
-    onRejected: ({ file, reason }) => reportDegradation('hermes', `rejected ${file}: ${reason}`)
+    // The author is told directly (Hermes returns the refusal to whoever wrote
+    // the file), so the Architect-facing report exists to catch the case the
+    // author CANNOT be told about — the only path by which an agent's work can
+    // still end in silence, and therefore the one worth naming out loud
+    // (invariant §7).
+    onRejected: ({ file, reason, notice }) =>
+      reportDegradation(
+        'hermes',
+        notice
+          ? `rejected ${file}: ${reason}`
+          : `rejected ${file} with no author to tell: ${reason}`
+      )
   })
   hermes.start()
 
