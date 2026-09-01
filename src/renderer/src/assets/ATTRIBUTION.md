@@ -12,9 +12,29 @@ is not shipped.**
 2. Asset files that the licence forbids redistributing *in source form* are kept
    out of this repository: they go in the gitignored drop below, and the
    restore path is documented so a fresh clone can be rebuilt from a purchase.
-3. Characters are never third-party assets. Citizens are drawn procedurally
-   (`src/renderer/src/floor/citizen.ts`) precisely so no likeness of a real
-   person and no other IP's character can appear on the floor.
+3. **No likeness of a real person, and no other IP's character, ever appears on
+   the floor.** That is the rule; it has not changed.
+
+   Until 2026-09-01 it was enforced by a blanket ban — citizens were drawn
+   procedurally and characters were never third-party assets at all. The ban was
+   broader than its own reason: a licensed character pack from the same author
+   as the floor is neither a real person nor another IP's character, and refusing
+   it protected nobody while costing the floor its legibility.
+
+   So the rule is now the reason, enforced directly. A character asset is
+   acceptable only when it is (a) licensed like any other asset under rule 1 and
+   kept out of the repository under rule 2, (b) the pack author's own original
+   characters, and (c) generic — no real person, no recognisable character from
+   another work. Anything a reader could identify as somebody is refused, whether
+   it is drawn procedurally or bought.
+
+   The procedural citizens remain, and remain the default: a floor with no
+   character pack installed still paints people. That is not a fallback nobody
+   exercises — it is what an Ephesus without the paid pack looks like, and
+   invariant §7 requires the difference to be visible rather than silent.
+
+   *Architect's decision, 2026-09-01, recorded because it rewrites a rule rather
+   than applying one.*
 
 ## Installed assets
 

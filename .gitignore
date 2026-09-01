@@ -16,3 +16,10 @@ src/renderer/src/assets/tileset/*
 !src/renderer/src/assets/tileset/*.tiles.json
 src/renderer/public/fonts/*
 !src/renderer/public/fonts/README.md
+
+# Licensed character art (ATTRIBUTION rule 3, rewritten 2026-09-01). Same rule
+# as the tileset: the SHEETS are the licensed asset and never enter the
+# repository; the manifest that says how to read them is our own work and does.
+src/renderer/src/assets/characters/*
+!src/renderer/src/assets/characters/.gitkeep
+!src/renderer/src/assets/characters/*.chars.json

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "LimeZu Modern Interiors \u2014 premade characters",
+  "credit": "LimeZu \u2014 limezu.itch.io",
+  "sheets": [
+    "limezu-char-01.png",
+    "limezu-char-02.png",
+    "limezu-char-03.png",
+    "limezu-char-04.png",
+    "limezu-char-05.png",
+    "limezu-char-06.png",
+    "limezu-char-07.png",
+    "limezu-char-08.png",
+    "limezu-char-09.png",
+    "limezu-char-10.png",
+    "limezu-char-11.png",
+    "limezu-char-12.png"
+  ],
+  "frameW": 16,
+  "frameH": 32,
+  "idleRow": 0,
+  "walkRow": 1,
+  "walkFrames": 6
+}
