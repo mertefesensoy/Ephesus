@@ -139,7 +139,90 @@ it is how the next session knows where to resume).
 > suite passed, which it does (19/20 scenario suites and 3/3 conformance suites
 > green in isolation; Ubuntu CI green on `4d831e4`; the only local failures are
 > the 9 recorded Windows-local ones). M6.10 landed all three audit groups.
-> **Resume at M7.1.**
+>
+> **M7's SEVEN PACKAGES ARE ALL DONE (2026-09-01) — and M7 has NOT CLOSED.**
+> Its exit criterion is SRS §6.1 on a REAL repo, and §6.1 has not been run. The
+> M7.7 exit review demonstrated the whole CHAIN over shipped components (only
+> `gh` and the ENGINE replaced at their seams) and left the exit row UNCHECKED,
+> because §6.1 asks whether a real agent given a real broken test triages it
+> correctly within the hour — judgment, which no fake engine supplies. Running
+> it means breaking a test in one of the Architect's repositories and leaving
+> agents holding `GH_TOKEN` against it unattended, which is theirs to consent
+> to. **How M7 closes is an OPEN ARCHITECT DECISION** (run it / amend the
+> criterion on the record / hold M7 open), exactly as at M6. Do not tick that
+> row on your own initiative, and do not start M7b before it is settled —
+> BUILD-PROMPT §5 sequences them.
+> One package per branch, all pushed, **none merged** (merging is the
+> Architect's call per package, and each branch is stacked on the previous
+> because M7.1 is not on `main`): `feature/m7-1-profile-schema` (`df83ddb`),
+> `feature/m7-2-activation-autonomy` (`26b59d5`),
+> `feature/m7-3-harbor-github` (`86f6b2a`),
+> `feature/m7-4-skeleton-crew` (`94e19b4`),
+> `feature/m7-5-front-office` (`5af30a8`),
+> `feature/m7-6-shareable` (`31eafd7`),
+> `feature/m7-7-suites-exit` (`76ccf00`). All pushed; CI green on the stack
+> (run `33438533520`). Evidence, production call paths and mutation sweeps are
+> in `docs/PROGRESS.md`; the implementation docs are
+> `docs/implementations/2026-08-3{1}-m7-{1,2,3,4,5,6}-*.md` and
+> `2026-09-01-m7-7-suites-and-exit.md`.
+>
+> **What M7.1–M7.4 give you, and what they deliberately do NOT.** A profile
+> bundle is a schema that refuses by name; activation composes stricter-wins
+> autonomy into every gate submission; the Harbor ingests issues, PRs and CI
+> runs through `gh` and tags them `remote`; and the Skeleton Crew ships as an
+> ordinary bundle whose CI failures become incidents, are mailed to Artemis, and
+> come back as triage reports. **There is no renderer caller for any of it yet**
+> — the activation screen and the Harbor panel are unbuilt, and that gap is
+> recorded in each package's evidence rather than left to be discovered.
+>
+> **ADR-0012's dogfood claim HELD TWICE (M7.4, M7.5).** Neither built-in needed
+> a field M7.1's frozen profile schema lacks, on two genuinely different shapes:
+> an incident path and a configurable outbound ladder. Both are checked against
+> the real shipped bundles through the real loader. M7.5 DID need one change —
+> `outbound` as a seventh `GATE_KINDS` member — which is the WATCH's vocabulary
+> rather than the bundle's, and which went to the Architect as a §8.3 must-ask
+> before any code was written (SRS FR-11.1 amended with it). That is the shape
+> to repeat: a schema change is not forbidden, it is *asked for*.
+>
+> **M7.7's exit review found a THIRD instance of the two-halves defect:** the
+> briefing compiler had no incident branch, so SRS §6.1's "the next briefing
+> narrates the incident accurately from the log" was unreachable by
+> construction while every suite was green — VOICE-DESIGN §4 had specified it
+> since before M6. Fixed. Count the pattern: M6's Herald, M7.2's inert trigger,
+> M7.7's silent standup. **Before claiming a subsystem works, find the caller.**
+>
+> **M7.6 found FIVE privilege escalations in its own new code by running an
+> adversarial pass against it while it was being written** — a path traversal
+> that overwrote the Watch's gate policy, a JSON-escape bypass of the secret
+> scan, an install that merged instead of replacing, a widening check that was
+> skipped exactly when the installed profile was broken, and a manifest that
+> disclosed names but never prose. **The happy-path suite was green through all
+> five.** M7.7 and M7b should assume the same is true of their own code: a green
+> suite proves the paths you thought of, and the first move against you is the
+> one you did not.
+>
+> **Settled at M7.4/M7.5; do not re-litigate.** The harness never grades severity
+> (UC-09 gives triage to the agent) and never writes `tasks.json` (FR-5.2 — it
+> mails Artemis and she proposes). It decides *whether* an agent's words are
+> sent, never *what* they say. `agent.harbor` carries both filings — triage
+> reports and outbound drafts — dispatched on subject, the ADR-0008 "one address,
+> three filings" pattern. And auto-post is carried by a branded `PostPermit`,
+> not a boolean: **M7.6 must not add a third permit constructor** without asking,
+> because the two that exist are what make "a draft-only profile has no code path
+> that posts" true by construction rather than by inspection.
+> **Owed to the Architect as a DOCUMENT decision:** the severity ladder has two
+> rungs because the SRS names exactly one (`severity-1`) and describes exactly
+> two treatments — see DECISIONS-LOG 2026-08-31.
+>
+> **Three dead-code findings across this run, all the M6 Herald shape**, all now
+> wired: `hireTemplateSchema` (M5.6) had only test callers; `effectivePolicy`
+> and `GateRequest.profileAutonomy` (M3) had **no caller at all**, so
+> stricter-wins was correct arithmetic nothing could invoke; and M7.2's
+> `onTriggerFired` appended a log line and stopped, so a fired profile schedule
+> trigger never reached the agent it named — two of FR-9.2's four components
+> were spawned and inert behind an entirely green suite. Assume nothing is wired
+> until you have found the caller, and prefer extracting logic out of
+> `index.ts` to trusting it there: boot wiring is where a test cannot go.
 >
 > Two things the close does NOT claim, and you must not restate otherwise: SRS
 > §6.2, SRS §6.5 and the voice-driven day were **not demonstrated** and are not

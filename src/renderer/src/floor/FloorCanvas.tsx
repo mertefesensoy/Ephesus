@@ -46,6 +46,7 @@ import { colorOf, envelopeSprite, particleSprite, tokenSprite } from './vfx-art'
 import { tokens } from '../tokens'
 import {
   CITIZEN_W,
+  CITIZEN_H,
   citizenSprite,
   directionFor,
   silhouetteFor,
@@ -55,6 +56,8 @@ import {
 } from './citizen'
 import { overlayFor, overlayFrame, overlayPixels, OVERLAY_PX, OVERLAY_TOKEN_COLOR } from './overlay'
 import { paintPlan, type PaintOp } from './painter'
+import { charactersState } from './characters'
+import { characterFrame, sheetForAgent } from '../../../shared/characters'
 import { tilesetState } from './tileset'
 import { steppedProgress, STEPS_PER_TILE } from './walk'
 import { noteParity, parityLine, type ParityNotice } from './parity'
@@ -105,7 +108,7 @@ const PHASE_COLOR: Readonly<Record<string, number>> = {
 function drawRoom(
   ops: readonly PaintOp[],
   g: Graphics,
-  sheet: Texture | null,
+  sheets: ReadonlyMap<string, Texture>,
   into: Container
 ): void {
   for (const op of ops) {
@@ -113,6 +116,10 @@ function drawRoom(
       g.rect(op.x, op.y, op.w, op.h).fill(op.color)
       continue
     }
+    // A blit names its own sheet, so a pack whose image failed to decode simply
+    // does not paint — rather than indexing its frames into another pack's
+    // image, which would look deliberate and be wrong.
+    const sheet = sheets.get(op.sheet)
     if (!sheet) continue
     const frame = new Rectangle(op.frame.x, op.frame.y, op.frame.w, op.frame.h)
     const sprite = new Sprite(new Texture({ source: sheet.source, frame }))
@@ -141,16 +148,24 @@ function drawCitizen(
     phase: string
     /** Milliseconds the avatar has been in this phase — the overlay's only clock. */
     phaseElapsedMs: number
+    /**
+     * True when a character pack is painting the body. The badge and the
+     * overlay still come from here: they are facts about an agent, not
+     * decoration, and no pack ships them.
+     */
+    bodyFromPack: boolean
   }
 ): void {
   g.clear()
-  for (const rect of citizenSprite({
-    direction: directionFor(opts.dx, opts.dy),
-    frame: opts.frame,
-    silhouette: opts.silhouette,
-    palette: opts.palette,
-    walking: opts.walking
-  })) {
+  for (const rect of opts.bodyFromPack
+    ? []
+    : citizenSprite({
+        direction: directionFor(opts.dx, opts.dy),
+        frame: opts.frame,
+        silhouette: opts.silhouette,
+        palette: opts.palette,
+        walking: opts.walking
+      })) {
     g.rect(rect.x, rect.y, rect.w, rect.h).fill(rect.color)
   }
   // Status badge, drawn OUTSIDE the sprite's five-colour budget: it is a UI
@@ -467,6 +482,7 @@ export function FloorCanvas(): ReactElement {
   const [census, setCensus] = useState(() => `${floorCensus([])} · ${stationCensus(NO_FACTS, 0)}`)
   const [overflow, setOverflow] = useState(0)
   const [tileset] = useState(tilesetState)
+  const [characters] = useState(charactersState)
   const [sheetError, setSheetError] = useState<string | null>(null)
 
   /**
@@ -560,7 +576,10 @@ export function FloorCanvas(): ReactElement {
     const eph = window.eph
     if (!eph) return
     let live = true
-    let cursor = -1
+    // 0, not -1: `agora:log` validates `afterSeq >= 0`, so a -1 here made the
+    // FIRST drain rejected as well as the seed. 0 means "from the beginning",
+    // which the seed below immediately advances to the tail.
+    let cursor = 0
     const drain = (): void => {
       void eph.agora.log(cursor, 64).then((entries) => {
         if (!live) return
@@ -594,8 +613,22 @@ export function FloorCanvas(): ReactElement {
     }
     // Seed from the tail, then follow — a window opened mid-run must not
     // replay the whole day's mail as a storm of envelopes.
-    void eph.agora.log(-1, 1).then((entries) => {
-      cursor = entries[0]?.seq ?? -1
+    //
+    // This used to ask for `log(-1, 1)`, and `agora:log` validates
+    // `afterSeq >= 0`, so the call was REJECTED every time: `cursor` stayed at
+    // -1, every subsequent poll was rejected too, and the mail flights never
+    // ran at all. Found by booting the app at M7.7 — the rejections go to the
+    // MAIN process console, so nothing in the UI ever said the floor's
+    // envelopes were dead, and no renderer test could see it either.
+    //
+    // `readLog` only reads FORWARD, so a true tail read would need a new IPC
+    // channel (and the M3.1 rule that comes with one). This asks for a window
+    // larger than any plausible session's log and takes its last entry, which
+    // is the true tail whenever the log fits. Past that the seed starts mid-log
+    // and the first drain replays the remainder once — noisier than ideal, and
+    // still bounded, which the previous behaviour was not.
+    void eph.agora.log(0, 2_000).then((entries) => {
+      cursor = entries.at(-1)?.seq ?? 0
     })
     const off = eph.agora.onAppend(drain)
     return () => {
@@ -667,11 +700,26 @@ export function FloorCanvas(): ReactElement {
     // inlines a small sheet as a `data:` URL, which has none. Observed live —
     // an installed pack fell back to procedural with a loader error. Nothing
     // about a tileset should depend on the shape of the URL it arrived on.
-    const loadSheet = async (): Promise<Texture | null> => {
-      if (!tileset.sheetUrl) return null
+    const loadCharacters = async (): Promise<ReadonlyMap<string, Texture>> => {
+      const loaded = new Map<string, Texture>()
+      for (const [name, url] of characters.urls) {
+        const texture = await loadOne(url)
+        if (texture) loaded.set(name, texture)
+      }
+      return loaded
+    }
+    const loadSheets = async (): Promise<ReadonlyMap<string, Texture>> => {
+      const loaded = new Map<string, Texture>()
+      for (const layer of tileset.layers) {
+        const texture = await loadOne(layer.sheetUrl)
+        if (texture) loaded.set(layer.sheet, texture)
+      }
+      return loaded
+    }
+    const loadOne = async (url: string): Promise<Texture | null> => {
       try {
         const image = new Image()
-        image.src = tileset.sheetUrl
+        image.src = url
         await image.decode()
         return new Texture({
           // `nearest` is not a preference: §1.1 is pixel-snapped everywhere, and
@@ -690,28 +738,30 @@ export function FloorCanvas(): ReactElement {
         background: tokens.marble200,
         antialias: false // pixel-snapped everything (§1.1)
       }),
-      loadSheet()
+      loadSheets(),
+      loadCharacters()
     ])
-      .then(([, sheet]) => {
-        const map = sheet ? tileset.map : null
+      .then(([, sheets, faces]) => {
+        // Only layers whose image actually decoded may paint.
+        const layers = tileset.layers.filter((layer) => sheets.has(layer.sheet))
         if (cancelled) {
           app.destroy(true)
           return
         }
         host.appendChild(app.canvas)
 
-        const ops = paintPlan(floorPlan(), map)
+        const ops = paintPlan(floorPlan(), layers)
         const room = new Graphics()
         const sheetTiles = new Container()
         // Fills under blits: a partially-mapped pack paints its own tiles over
         // the procedural floor rather than punching holes in it.
         app.stage.addChild(room)
         app.stage.addChild(sheetTiles)
-        drawRoom(ops, room, sheet, sheetTiles)
+        drawRoom(ops, room, sheets, sheetTiles)
 
         // §5.7 furnishings sit over the floor and under everything that moves:
         // place identity, static, and only ever from the pack's own map.
-        drawRoom(paintFurnishings(map), room, sheet, sheetTiles)
+        drawRoom(paintFurnishings(layers), room, sheets, sheetTiles)
 
         // The §5.4 station layer, redrawn each tick because its states are
         // projections of facts that change. It sits under the citizens so a
@@ -727,6 +777,10 @@ export function FloorCanvas(): ReactElement {
         const vfxLayer = new Graphics()
         app.stage.addChild(vfxLayer)
         const sprites = new Map<string, Graphics>()
+        // The pack paints the BODY; the Graphics above still paints the badge
+        // and the overlay, which are facts about an agent and ship with no pack.
+        const bodies = new Map<string, Sprite>()
+        const packManifest = characters.installed && faces.size > 0 ? characters.manifest : null
         const drawStates = new Map<string, DrawState>()
 
         app.ticker.add(() => {
@@ -769,7 +823,42 @@ export function FloorCanvas(): ReactElement {
               reducedMotionRef.current
             )
             drawStates.set(agentId, pose)
+            if (packManifest) {
+              let body = bodies.get(agentId)
+              if (!body) {
+                body = new Sprite()
+                bodies.set(agentId, body)
+                // Under the Graphics, so the badge and overlay stay on top.
+                citizens.addChildAt(body, 0)
+              }
+              const sheetName =
+                packManifest.sheets[sheetForAgent(agentId, packManifest.sheets.length)]
+              const texture = sheetName ? faces.get(sheetName) : undefined
+              if (texture) {
+                const rect = characterFrame(packManifest, {
+                  direction: directionFor(
+                    pose.x - (previous?.x ?? pose.x),
+                    pose.y - (previous?.y ?? pose.y)
+                  ),
+                  frame: pose.frame,
+                  walking: snapshot.walking
+                })
+                body.texture = new Texture({
+                  source: texture.source,
+                  frame: new Rectangle(rect.x, rect.y, rect.w, rect.h)
+                })
+                // §7: integer scaling only. 16x32 art at 2x fills the 32px cell
+                // width; the extra height is the pack's own head-room, so the
+                // feet are anchored to the citizen's baseline rather than the top.
+                body.scale.set(2)
+                body.x = pose.x
+                body.y = pose.y + CITIZEN_H - rect.h * 2
+                body.alpha = overlayFor(snapshot.phase).opacity
+                body.visible = snapshot.phase !== 'archived'
+              }
+            }
             drawCitizen(sprite, {
+              bodyFromPack: packManifest !== null,
               dx: pose.x - (previous?.x ?? pose.x),
               dy: pose.y - (previous?.y ?? pose.y),
               frame: pose.frame,
@@ -804,6 +893,11 @@ export function FloorCanvas(): ReactElement {
               sprite.destroy()
               sprites.delete(agentId)
               drawStates.delete(agentId)
+              const body = bodies.get(agentId)
+              if (body) {
+                body.destroy()
+                bodies.delete(agentId)
+              }
             }
           }
         })

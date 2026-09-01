@@ -1,10 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { CapacityLimit } from '../../shared/capacity'
 import type { HookEvent } from '../../shared/hooks'
 import type { PromptStore } from '../prompts'
 import type { SettingsRegistry } from '../settings-registry'
 import { InstalledSettingsPlan } from './settings-install'
 import { baseAgentEnv } from './spawn-env'
+import { writeFileAtomic } from '../fsx'
 import type {
   AgentSpawnConfig,
   BinarySpec,
@@ -15,18 +17,42 @@ import type {
   SettingsInjection,
   SpawnPlan,
   TranscriptReader,
-  UsageFact
+  NotificationKind,
+  UsageFact,
+  CostFact,
+  WorkspaceTrustResult
 } from './types'
 
 /**
  * Claude Code writes one JSONL transcript per session under
- * `~/.claude/projects/<slugged cwd>/<sessionId>.jsonl`, and slugs the cwd by
- * replacing every path separator with a dash. Verified against a real
- * transcript rather than assumed.
+ * `~/.claude/projects/<slugged cwd>/<sessionId>.jsonl`.
+ *
+ * The slug rule is "replace every character that is not ASCII alphanumeric
+ * with a dash" — NOT merely the path separators. That distinction is the point
+ * of this comment, because a narrower rule fails silently rather than loudly:
+ * the directory simply does not exist, `transcriptFiles` finds nothing, and the
+ * agent's ledger reads a permanent zero while `budgets.foldOne` still reports
+ * the `'engine'` tier (FR-11.2). A wrong slug is therefore a spend
+ * UNDER-reporting bug — the exact class ADR-0011 exists to close — so it is
+ * pinned to observed behaviour, not to a guess about which characters matter.
+ *
+ * Verified empirically against 31 real `~/.claude/projects/*` directories on
+ * Windows, matching each against the `cwd` recorded inside its own transcripts:
+ *
+ *   C:/Users/u/OneDrive/Masaüstü/ephesus     -> C--Users-u-OneDrive-Masa-st--ephesus
+ *   C:/Users/u/OneDrive/Masaüstü/IBM Z Proj  -> C--Users-u-OneDrive-Masa-st--IBM-Z-Proj
+ *   /home/user/ephesus                       -> -home-user-ephesus
+ *
+ * The drive-letter colon, both separators, a dotdir's dot, the space and the
+ * non-ASCII `ü` all collapse to a dash; `-`, digits and letter case survive.
+ * (An underscore is unattested in that corpus; this rule maps it to a dash.)
+ *
+ * `path.resolve` runs first because the engine slugs the ABSOLUTE cwd — a
+ * relative one would otherwise slug to a different, non-existent directory.
  */
 export function claudeTranscriptDir(cwd: string): string {
   const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
-  const slug = path.resolve(cwd).replace(/[\\/.:]/g, '-')
+  const slug = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-')
   return path.join(home, '.claude', 'projects', slug)
 }
 
@@ -46,6 +72,7 @@ export function claudeTranscriptDir(cwd: string): string {
  */
 const claudeTranscripts: TranscriptReader = {
   transcriptDir: (cfg) => claudeTranscriptDir(cfg.cwd),
+  limitOf: claudeCapacityLimit,
   read: async (filePath) => {
     // Read asynchronously and catch ENOENT rather than pre-checking: this runs
     // on the same event loop that carries PTY bytes and hook events (SDD §11,
@@ -71,7 +98,86 @@ const claudeTranscripts: TranscriptReader = {
       if (fact) facts.push(fact)
     }
     return facts
+  },
+  costs: async (filePath) => {
+    let text: string
+    try {
+      text = await fs.promises.readFile(filePath, 'utf8')
+    } catch {
+      return []
+    }
+    // Keyed by (session, model) and OVERWRITTEN as later lines are read, so a
+    // file carrying several snapshots yields only the newest running total —
+    // the contract `TranscriptReader.costs` states. The engine writes the line
+    // twice at session end (17 of 17 files in the corpus), and a resumed
+    // session can carry an older, smaller snapshot earlier in the same file;
+    // both collapse here rather than reaching the fold as separate figures.
+    const newest = new Map<string, CostFact>()
+    for (const line of text.split('\n')) {
+      if (line.trim().length === 0) continue
+      let raw: unknown
+      try {
+        raw = JSON.parse(line)
+      } catch {
+        continue
+      }
+      for (const fact of claudeCostFacts(raw)) {
+        newest.set(`${fact.sessionId}\u0000${fact.model}`, fact)
+      }
+    }
+    return [...newest.values()]
   }
+}
+
+/**
+ * Contract: pure. The engine's own money figures carried by one `cost-state`
+ * line, or none for any other line.
+ *
+ * Claude Code writes `cost-state` into the transcript itself:
+ *
+ * ```json
+ * { "type": "cost-state", "sessionId": "…", "totalCostUSD": 0.4845,
+ *   "modelUsage": { "claude-sonnet-5": { "costUSD": 0.4824, … } },
+ *   "hasUnknownModelCost": false }
+ * ```
+ *
+ * Three properties of that line drive everything downstream, and all three were
+ * established by reading a real corpus of 20 transcripts rather than assumed:
+ *
+ *  - **it is cumulative, not incremental.** Every file that had one carried
+ *    exactly one distinct `totalCostUSD`, and 17 of 17 wrote it TWICE. Hence
+ *    `foldCosts` differences rather than appends (see there);
+ *  - **it carries no timestamp**, so it cannot name the day it belongs to;
+ *  - **it is written at session end**, so a live agent has no money figure at
+ *    all until it stops — and 3 of the 20 files had none, which is what a
+ *    killed session looks like. That must stay distinguishable from "$0", which
+ *    is why an absent figure leaves `costUsd` null rather than zero.
+ *
+ * `totalCostUSD` is deliberately NOT read. The per-model `costUSD` figures are
+ * what the ledger is keyed on (SDD §4.6), they sum to the total anyway, and a
+ * model the engine could not price simply contributes no row — which is exactly
+ * the "not reported" the ledger already knows how to carry.
+ */
+export function claudeCostFacts(raw: unknown): readonly CostFact[] {
+  if (typeof raw !== 'object' || raw === null) return []
+  const row = raw as Record<string, unknown>
+  if (row['type'] !== 'cost-state') return []
+  const sessionId = row['sessionId']
+  const usage = row['modelUsage']
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return []
+  if (typeof usage !== 'object' || usage === null) return []
+  // Absent means "the engine did not say"; only an explicit `true` claims an
+  // unpriced model. A missing flag must not silently mark the bill incomplete.
+  const priced = row['hasUnknownModelCost'] !== true
+  const facts: CostFact[] = []
+  for (const [model, entry] of Object.entries(usage as Record<string, unknown>)) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const cost = (entry as Record<string, unknown>)['costUSD']
+    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) continue
+    if (model.length === 0 || model.length > 128) continue
+    facts.push({ sessionId, model, cumulativeUsd: cost, priced })
+  }
+  return facts
 }
 
 /** Contract: one fact, or null for any line that is not a usage-bearing one. */
@@ -105,6 +211,109 @@ export function claudeUsageFact(raw: unknown): UsageFact | null {
     costUsd: null,
     at: typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : null
   }
+}
+
+/**
+ * Contract: pure. One provider-capacity refusal, or null for every other line.
+ *
+ * ## What this matches, and the evidence for it
+ *
+ * When a turn ends because the provider refused on quota, Claude Code appends a
+ * SYNTHETIC assistant record to the session transcript. Three fields identify
+ * it, and all three are required here:
+ *
+ * ```
+ *   "type": "assistant"
+ *   "isApiErrorMessage": true
+ *   "error": "rate_limit"
+ * ```
+ *
+ * Two independent sources say so, and they agree:
+ *
+ *  1. **Recorded reality.** Three such records exist in a real transcript on the
+ *     Architect's own machine (`~/.claude/projects/…/39ba11ac-….jsonl`, engine
+ *     2.1.237, 2026-08-30T21:58:55Z and two more), each carrying exactly those
+ *     three fields plus `apiErrorStatus: 429` and an `errorDetails` string
+ *     holding the provider's `rate_limit_error` body.
+ *  2. **The engine's own test.** The shipped 2.1.252 binary contains the guard
+ *     `type === "assistant" && isApiErrorMessage && error === "rate_limit"`
+ *     before it reads `quotaLimits`. This predicate is the engine's, not ours.
+ *
+ * ## What it deliberately does NOT match
+ *
+ * The SAME transcript carries `error: "server_error"` records — a DNS failure
+ * and a `529 Overloaded` — which are a real negative control, not a supposed
+ * one. The engine's own taxonomy separates `rate_limit` ("wait and retry") from
+ * `server_error`, `overloaded`, `billing_error` and `invalid_request`; of those,
+ * waiting fixes only `rate_limit`. `billing_error` in particular is excluded on
+ * purpose: the engine glosses it "usage limit reached — check plan", and a
+ * company parked on it would wait for a reset that a human has to buy.
+ *
+ * `apiErrorStatus` is NOT required. It is absent from the older synthetic
+ * records in that corpus, and demanding it would make the detector miss the
+ * very events it was built from.
+ *
+ * ## The reset time
+ *
+ * `quotaLimits.resetsAt` is UNIX SECONDS: the engine builds `quotaLimits` from
+ * the `anthropic-ratelimit-unified-*` response headers
+ * (`resetsAt = Math.round(Number(header 'anthropic-ratelimit-unified-reset'))`)
+ * and elsewhere compares it as `resetsAt * 1000 <= Date.now()`. It is absent
+ * from every record observed here, so it is read when present and never
+ * substituted when missing — `CapacityLimit.resetsAt` stays null, and the wait
+ * falls back to a ladder rather than to a fabricated deadline.
+ */
+export function claudeCapacityLimit(raw: unknown): CapacityLimit | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const row = raw as Record<string, unknown>
+  if (row['type'] !== 'assistant') return null
+  if (row['isApiErrorMessage'] !== true) return null
+  if (row['error'] !== 'rate_limit') return null
+  const sessionId = row['sessionId']
+  const uuid = row['uuid']
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return null
+  // No uuid means no identity, and no identity means the same refusal would
+  // re-park the company on every tick. A record we cannot name is skipped.
+  if (typeof uuid !== 'string' || uuid.length === 0) return null
+  const timestamp = row['timestamp']
+  return {
+    kind: 'rate-limit',
+    recordId: uuid,
+    sessionId,
+    at: typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : '',
+    detail: claudeErrorText(row['message']) ?? 'the provider refused this turn on usage limits',
+    resetsAt: claudeResetsAt(row['quotaLimits'])
+  }
+}
+
+/** Contract: the engine's own sentence from a synthetic error record, or null. */
+function claudeErrorText(message: unknown): string | null {
+  if (typeof message !== 'object' || message === null) return null
+  const content = (message as Record<string, unknown>)['content']
+  if (!Array.isArray(content)) return null
+  const parts: string[] = []
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    const cell = block as Record<string, unknown>
+    if (cell['type'] !== 'text') continue
+    const text = cell['text']
+    if (typeof text === 'string' && text.trim().length > 0) parts.push(text.trim())
+  }
+  return parts.length === 0 ? null : parts.join(' ')
+}
+
+/**
+ * Contract: the provider's reset instant as ISO, or null when it did not say.
+ *
+ * Unix seconds in, ISO out. A value that is not a finite positive number is
+ * treated as "did not say" rather than coerced — a reset time of `0` would park
+ * a company until 1970, which is to say not at all.
+ */
+function claudeResetsAt(quotaLimits: unknown): string | null {
+  if (typeof quotaLimits !== 'object' || quotaLimits === null) return null
+  const seconds = (quotaLimits as Record<string, unknown>)['resetsAt']
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
+  return new Date(seconds * 1000).toISOString()
 }
 
 /**
@@ -204,6 +413,28 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
   }
 }
 
+/**
+ * Claude Code's own record of which working directories a human has approved:
+ * `~/.claude.json` → `projects[<cwd>].hasTrustDialogAccepted`.
+ *
+ * Two things about this file were established by experiment rather than assumed,
+ * and both matter:
+ *
+ *  - the key is the working directory with FORWARD slashes. The engine
+ *    normalises before it writes, and compares against the normalised form, so
+ *    a backslash key — the form Windows hands you, and the form this harness
+ *    spawns with — sits in the file being ignored;
+ *  - the prompt is per-workspace and once-only. No settings content triggers it
+ *    or re-triggers it after an answer; it is a first-run gate, not a content
+ *    check.
+ */
+export const CLAUDE_CONFIG_REL = '.claude.json'
+
+/** Contract: pure. The key Claude Code will actually match on for this directory. */
+export function claudeProjectKey(cwd: string): string {
+  return path.resolve(cwd).split(path.sep).join('/')
+}
+
 /** Claude Code's cancel key is Escape (ADR-0009 `interrupt()`): U+001B. */
 const ESCAPE_KEY = String.fromCharCode(0x1b)
 
@@ -214,6 +445,18 @@ interface ClaudeAdapterDeps {
   readonly prompts: PromptStore
   /** Absolute path to `shims/eph-hook.mjs`. */
   readonly hookShimPath: string
+  /**
+   * Absolute path to `shims/eph-usage.mjs`, and where it should write what it
+   * observes (ADR-0023). Both or neither: a shim with nowhere to write is a
+   * status line that costs a process launch and reports nothing.
+   *
+   * Optional because the statusline is a *pacing* input, not a correctness one.
+   * An engine installed without it still runs; the company simply paces on
+   * `unobserved`, which `paceFor` treats as `full`.
+   */
+  readonly usageShimPath?: string
+  /** Directory the shim writes one report per agent into. */
+  readonly usageStatusDir?: string
   /** Interpreter used to run the shim; `node`, resolved on the agent's PATH. */
   readonly nodeCommand?: string
   /** Durable record of installed settings, so a killed harness can undo them. */
@@ -297,6 +540,58 @@ function hookSettingsBlock(deps: ClaudeAdapterDeps): Record<string, unknown> {
  * something we cannot parse and writing our own over it would look like it
  * worked; refusing to spawn until the file is fixed is the honest answer.
  */
+/**
+ * Contract: true when this hook entry is one this harness installed. Pure, and
+ * deliberately conservative — an unrecognisable entry is never ours.
+ *
+ * Claude Code's settings schema has nowhere to hang a marker of our own, so the
+ * marker is the thing itself: only our entries invoke our hook shim. Nothing an
+ * Architect writes by hand does, which is what makes stripping these before a
+ * re-install safe. An empty shim path matches nothing rather than everything —
+ * a predicate that answers "yes" to every entry would silently delete the
+ * Architect's hooks.
+ */
+function isHarnessHookEntry(entry: unknown, shimPath: string): boolean {
+  if (shimPath.length === 0) return false
+  if (typeof entry !== 'object' || entry === null) return false
+  const hooks = (entry as Record<string, unknown>)['hooks']
+  if (!Array.isArray(hooks)) return false
+  return hooks.some((hook) => {
+    if (typeof hook !== 'object' || hook === null) return false
+    const command = (hook as Record<string, unknown>)['command']
+    return typeof command === 'string' && command.includes(shimPath)
+  })
+}
+
+/**
+ * The `statusLine` block that turns every status render into one observation of
+ * the account's usage window (ADR-0023).
+ *
+ * Returns null when the harness did not supply the shim, and the caller then
+ * leaves whatever `statusLine` the Architect already had entirely alone.
+ */
+function usageStatusLine(deps: ClaudeAdapterDeps): Record<string, unknown> | null {
+  if (!deps.usageShimPath || !deps.usageStatusDir) return null
+  const node = deps.nodeCommand ?? 'node'
+  return {
+    type: 'command',
+    command: `${node} ${shellQuote(deps.usageShimPath)} --dir ${shellQuote(deps.usageStatusDir)}`
+  }
+}
+
+/**
+ * Contract: true when this `statusLine` entry is one this harness installed.
+ * Same marker discipline as `isHarnessHookEntry` — the shim path IS the marker,
+ * because the engine's schema has nowhere to hang one of our own, and an empty
+ * path must match nothing rather than everything.
+ */
+function isHarnessStatusLine(entry: unknown, shimPath: string | undefined): boolean {
+  if (!shimPath || shimPath.length === 0) return false
+  if (typeof entry !== 'object' || entry === null) return false
+  const command = (entry as Record<string, unknown>)['command']
+  return typeof command === 'string' && command.includes(shimPath)
+}
+
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
@@ -331,10 +626,33 @@ export function mergeClaudeSettings(
   const merged: Record<string, unknown> = { ...existingHooks }
   for (const [engineEvent, entry] of Object.entries(hookSettingsBlock(deps))) {
     const prior = Array.isArray(existingHooks[engineEvent]) ? existingHooks[engineEvent] : []
-    merged[engineEvent] = [...prior, ...(entry as unknown[])]
+    // Drop what a previous install of ours left here before adding ours back.
+    // Without this the merge is an append: the base is re-read from disk per
+    // agent, so the second agent to enter a shared working directory merges
+    // into the first agent's output rather than into the Architect's, and every
+    // hook is registered again. Three crew agents in one repository produced
+    // nine events × three copies, and Claude Code reads that pile as a folder
+    // arming itself — which is exactly what its trust dialog then warns about.
+    // Our hook entries carry no agent id (the id travels in the environment),
+    // so all agents' copies are byte-identical and one copy serves every agent.
+    const kept = prior.filter((item) => !isHarnessHookEntry(item, deps.hookShimPath))
+    merged[engineEvent] = [...kept, ...(entry as unknown[])]
   }
 
-  if (!cfg) return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
+  // ADR-0023's observation point. Ours replaces a previous install of ours and
+  // nothing else: an Architect's own status line is left exactly where it is,
+  // and we simply do not install (so pacing runs on `unobserved`) rather than
+  // taking a surface they were already using.
+  const ourStatusLine = usageStatusLine(deps)
+  const priorStatusLine = base['statusLine']
+  const statusLine = ourStatusLine
+    ? priorStatusLine === undefined || isHarnessStatusLine(priorStatusLine, deps.usageShimPath)
+      ? ourStatusLine
+      : priorStatusLine
+    : priorStatusLine
+  const withStatus = statusLine === undefined ? {} : { statusLine }
+
+  if (!cfg) return `${JSON.stringify({ ...base, ...withStatus, hooks: merged }, null, 2)}\n`
 
   // Merge the mailbox grant into whatever the Architect already allowed, never
   // replacing their list.
@@ -350,13 +668,58 @@ export function mergeClaudeSettings(
     ? existingPermissions['additionalDirectories']
     : []
 
+  // Unlike hooks, a mailbox grant names one agent's own directory, so several
+  // agents sharing a working directory must accumulate several grants. What
+  // must not accumulate is the *same* agent's grant twice, which is what a
+  // plain append produced on every re-install.
+  const mine = new Set([
+    ...(grant['allow'] as unknown[]),
+    ...(grant['additionalDirectories'] as unknown[])
+  ])
   const permissions = {
     ...existingPermissions,
-    allow: [...priorAllow, ...(grant['allow'] as unknown[])],
-    additionalDirectories: [...priorDirs, ...(grant['additionalDirectories'] as unknown[])]
+    allow: [...priorAllow.filter((item) => !mine.has(item)), ...(grant['allow'] as unknown[])],
+    additionalDirectories: [
+      ...priorDirs.filter((item) => !mine.has(item)),
+      ...(grant['additionalDirectories'] as unknown[])
+    ]
   }
 
-  return `${JSON.stringify({ ...base, hooks: merged, permissions }, null, 2)}\n`
+  return `${JSON.stringify({ ...base, ...withStatus, hooks: merged, permissions }, null, 2)}\n`
+}
+
+/**
+ * Contract: the engine's permission mode for a composed autonomy level. Pure.
+ *
+ * Claude Code offers `default`, `acceptEdits`, `auto` and `bypassPermissions`.
+ * The mapping stops deliberately short at the top: `autonomous` becomes `auto`
+ * — the engine's own classifier — and NOT `bypassPermissions`, which disables
+ * every check rather than deciding it.
+ *
+ * That distinction is the whole argument. The case for autonomy here was that a
+ * standing policy beats a human who has stopped reading prompts, which is an
+ * argument for a better classifier, not for switching the classifier off. An
+ * Architect who wants the blanket bypass can still ask for it; nothing should
+ * arrive at it by way of a default.
+ */
+export function claudePermissionMode(
+  autonomy: 'manual' | 'supervised' | 'autonomous'
+): 'default' | 'acceptEdits' | 'auto' {
+  switch (autonomy) {
+    case 'manual':
+      return 'default'
+    case 'supervised':
+      return 'acceptEdits'
+    case 'autonomous':
+      return 'auto'
+  }
+}
+
+/** Contract: pure. The engine's own words on a notification payload, or null. */
+function claudeNotificationMessage(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const message = (payload as Record<string, unknown>)['message']
+  return typeof message === 'string' && message.trim().length > 0 ? message.trim() : null
 }
 
 export class ClaudeAdapter implements EngineAdapter {
@@ -382,17 +745,41 @@ export class ClaudeAdapter implements EngineAdapter {
   spawnArgs(cfg: AgentSpawnConfig): SpawnPlan {
     const identity = composeIdentity(cfg, this.deps.prompts)
     return {
-      argv: ['claude', '--append-system-prompt', identity],
+      argv: [
+        'claude',
+        '--permission-mode',
+        claudePermissionMode(cfg.autonomy),
+        '--append-system-prompt',
+        identity
+      ],
       cwd: cfg.cwd,
       env: {
         ...baseAgentEnv(),
         ...cfg.envGrants,
+        // The company authors, the agent co-authors itself (ADR-0022). Set as
+        // environment rather than repo config so nothing is written into the
+        // Architect's checkout, and absent entirely when no App is configured —
+        // an agent with no identity commits as whoever git already thought it
+        // was, which is visible, rather than as a name we invented.
+        ...(cfg.commitIdentity === null
+          ? {}
+          : {
+              GIT_AUTHOR_NAME: cfg.commitIdentity.name,
+              GIT_AUTHOR_EMAIL: cfg.commitIdentity.email,
+              GIT_COMMITTER_NAME: cfg.commitIdentity.name,
+              GIT_COMMITTER_EMAIL: cfg.commitIdentity.email,
+              // Ready-made so the agent never has to compose an address it
+              // cannot know: the company authors, and this names which of its
+              // agents actually did the work.
+              EPH_COAUTHOR: `Co-authored-by: ${cfg.agentId} <${cfg.commitIdentity.email}>`
+            }),
         EPH_AGENT_ID: cfg.agentId,
         EPH_HOOK_TOKEN: cfg.hookToken,
         EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
         // The Library's agent-facing surface (ADR-0006 layer 2). Harness-owned
         // and identical for every engine, so the adapter only forwards it.
-        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand })
+        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
+        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand })
       },
       settings: this.settingsInjections(cfg)
     }
@@ -418,8 +805,119 @@ export class ClaudeAdapter implements EngineAdapter {
     composeIdentity(cfg, this.deps.prompts)
   }
 
+  /**
+   * Claude Code says "Claude needs your permission to use X" when it is
+   * blocked on a decision, and "Claude is waiting for your input" when it is
+   * simply idle at an empty prompt. Both arrive as `Notification`.
+   *
+   * Measured, not assumed: on the 2026-09-01 live run, nine of the ten gates
+   * the Architect was asked to answer carried the idle message. They asked a
+   * human to approve an agent doing nothing, and approving them did nothing
+   * back.
+   */
+  notificationKind(payload: unknown): NotificationKind | null {
+    const message = claudeNotificationMessage(payload)
+    if (message === null) return null
+    if (/waiting for your input/i.test(message)) return 'waiting'
+    if (/needs your permission|permission to use/i.test(message)) return 'permission'
+    return null
+  }
+
   interrupt(): KeySequence {
     return { label: 'Escape', bytes: ESCAPE_KEY }
+  }
+
+  /**
+   * Writes the Architect's activation into Claude Code's own trust record, so
+   * the crew it just hired can start (ADR-0021).
+   *
+   * The prompt this answers is a first-run gate whose highlighted default is
+   * "No, exit", and it appears BEFORE any session begins — so no engine hook
+   * fires for it, nothing in the harness could see it, and on the live MUSAHIT
+   * run all three crew agents parked on that screen for their whole lives
+   * while the floor showed them as spawned.
+   *
+   * What keeps this narrow:
+   *
+   *  - it is called from an activation and nowhere else, with that activation's
+   *    own target, so the Architect's click is the consent and the scope is one
+   *    directory they named;
+   *  - the path is canonicalised through `realpath`, so the record names the
+   *    directory that was actually approved rather than a junction that can be
+   *    repointed at another one afterwards;
+   *  - a directory already trusted is reported as such and rewritten with
+   *    nothing, so the log can tell "the Architect had already approved this"
+   *    apart from "the harness approved it just now";
+   *  - it never widens anything else in the file: one key, one field.
+   *
+   * Known limitation, stated rather than hidden: a Claude Code process running
+   * elsewhere may rewrite this file wholesale from its own in-memory copy and
+   * drop the key. The failure is visible rather than dangerous — the dialog
+   * returns and the agent parks — but it is a race this cannot close from here.
+   */
+  trustWorkspace(cwd: string): WorkspaceTrustResult {
+    const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
+    if (home.length === 0) return { ok: false, because: 'no home directory to write the record in' }
+    const configPath = path.join(home, CLAUDE_CONFIG_REL)
+    let canonical: string
+    try {
+      canonical = claudeProjectKey(fs.realpathSync.native(cwd))
+    } catch (err) {
+      return {
+        ok: false,
+        because: `target does not resolve: ${
+          err instanceof Error ? err.message.split('\n')[0] : String(err)
+        }`
+      }
+    }
+    let config: Record<string, unknown> = {}
+    if (fs.existsSync(configPath)) {
+      try {
+        const parsed: unknown = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          return { ok: false, because: `${CLAUDE_CONFIG_REL} is not a JSON object` }
+        }
+        config = parsed as Record<string, unknown>
+      } catch (err) {
+        // Refusing beats repairing: this is the engine's own file and rewriting
+        // it from a guess would cost the Architect every project setting in it.
+        return {
+          ok: false,
+          because: `${CLAUDE_CONFIG_REL} unreadable, refusing to overwrite it: ${
+            err instanceof Error ? err.message.split('\n')[0] : String(err)
+          }`
+        }
+      }
+    }
+    const projects =
+      typeof config['projects'] === 'object' &&
+      config['projects'] !== null &&
+      !Array.isArray(config['projects'])
+        ? (config['projects'] as Record<string, unknown>)
+        : {}
+    const entry =
+      typeof projects[canonical] === 'object' &&
+      projects[canonical] !== null &&
+      !Array.isArray(projects[canonical])
+        ? (projects[canonical] as Record<string, unknown>)
+        : {}
+    const alreadyTrusted = entry['hasTrustDialogAccepted'] === true
+    if (alreadyTrusted) return { ok: true, path: canonical, alreadyTrusted: true }
+    const next = {
+      ...config,
+      projects: { ...projects, [canonical]: { ...entry, hasTrustDialogAccepted: true } }
+    }
+    try {
+      writeFileAtomic(configPath, `${JSON.stringify(next, null, 2)}\n`)
+    } catch (err) {
+      return {
+        ok: false,
+        because: `could not write ${CLAUDE_CONFIG_REL}: ${
+          err instanceof Error ? err.message.split('\n')[0] : String(err)
+        }`
+      }
+    }
+    return { ok: true, path: canonical, alreadyTrusted: false }
   }
 
   /**

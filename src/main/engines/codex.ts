@@ -142,10 +142,28 @@ export class CodexAdapter implements EngineAdapter {
       env: {
         ...baseAgentEnv(),
         ...cfg.envGrants,
+        // The company authors, the agent co-authors itself (ADR-0022). Set as
+        // environment rather than repo config so nothing is written into the
+        // Architect's checkout, and absent entirely when no App is configured —
+        // an agent with no identity commits as whoever git already thought it
+        // was, which is visible, rather than as a name we invented.
+        ...(cfg.commitIdentity === null
+          ? {}
+          : {
+              GIT_AUTHOR_NAME: cfg.commitIdentity.name,
+              GIT_AUTHOR_EMAIL: cfg.commitIdentity.email,
+              GIT_COMMITTER_NAME: cfg.commitIdentity.name,
+              GIT_COMMITTER_EMAIL: cfg.commitIdentity.email,
+              // Ready-made so the agent never has to compose an address it
+              // cannot know: the company authors, and this names which of its
+              // agents actually did the work.
+              EPH_COAUTHOR: `Co-authored-by: ${cfg.agentId} <${cfg.commitIdentity.email}>`
+            }),
         EPH_AGENT_ID: cfg.agentId,
         EPH_HOOK_TOKEN: cfg.hookToken,
         EPH_HOOK_ENDPOINT: cfg.hookEndpoint,
-        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand })
+        ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
+        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand })
       },
       settings: []
     }

@@ -56,12 +56,45 @@ export const CLOSING_ENDPOINT = 'agent.closing'
  */
 export const ODEON_ENDPOINT = 'agent.odeon'
 
+/**
+ * The Harbor's incident endpoint (FR-9.2, UC-09, SDD §7.5 — M7.4).
+ *
+ * Something came in through the port that looks like a failure, and the company
+ * has to be told. The harness cannot create the task itself — FR-5.2 gives the
+ * ledger to Artemis, and `LedgerEndpoint.submit` only ever applies a `propose`
+ * the router has already established came from her — so the incident travels
+ * the way everything else does: as mail, from a named correspondent, with the
+ * facts it was built from and nothing added.
+ *
+ * The on-call agent's triage report comes back to this address, the same
+ * endpoint hand-off `agent.closing` uses (the M3 standing rule for
+ * harness-owned correspondents). Never spawned, never a mailbox.
+ */
+export const HARBOR_ENDPOINT = 'agent.harbor'
+
+/**
+ * The profile subsystem's trigger endpoint (ADR-0012, SDD §7.5 — M7.4).
+ *
+ * A profile's schedule trigger comes due and the agent it names has to be told,
+ * or the crew is a roster of citizens nobody ever asks for anything. The wake
+ * is mail, from here, naming the runbook and nothing else — the harness does
+ * not describe the duty, because the duty is written in the playbook the
+ * Architect wrote and the agent reads.
+ *
+ * Separate from `agent.harbor` deliberately: the Harbor is the port, and a
+ * scheduled sweep did not come in through it. Conflating the two would make
+ * the book of record say a routine 15-minute duty arrived from outside.
+ */
+export const PROFILE_ENDPOINT = 'agent.profiles'
+
 export const RESERVED_AGENT_IDS: readonly string[] = [
   HERMES_SENDER,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
   CLOSING_ENDPOINT,
-  ODEON_ENDPOINT
+  ODEON_ENDPOINT,
+  HARBOR_ENDPOINT,
+  PROFILE_ENDPOINT
 ]
 
 /** Contract: whether this id belongs to the harness rather than to a hire. */

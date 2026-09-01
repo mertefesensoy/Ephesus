@@ -7,6 +7,7 @@ import type { Message } from '../../src/shared/message'
 import { ODEON_ENDPOINT } from '../../src/shared/reserved'
 import { MeetingDriver } from '../../src/main/meeting'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The meeting driver (FR-7.4, UC-07).
@@ -23,7 +24,7 @@ const homes: string[] = []
 
 afterEach(() => {
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

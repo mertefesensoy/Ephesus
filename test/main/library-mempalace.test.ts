@@ -7,6 +7,7 @@ import { Library } from '../../src/main/library'
 import { FtsIndex, MemoryFtsStore } from '../../src/main/library-fts'
 import { MEMPALACE_INSTALL, MemPalaceIndex } from '../../src/main/library-mempalace'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The MemPalace driver (ADR-0016) against a **scripted fake `mempalace` CLI** —
@@ -26,7 +27,7 @@ const FAKE_CLI = fileURLToPath(
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
   delete process.env['EPH_FAKE_MP_MODE']
   delete process.env['EPH_FAKE_MP_LOG']
 })

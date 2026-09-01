@@ -1,0 +1,69 @@
+SRS 6.1 - LIVE RUN on mertefesensoy/MUSAHIT (2026-09-01)
+
+Real repository. A real GitHub Actions run (33440874791) that failed ON ITS OWN
+- nothing was broken to provoke it. Real claude 2.1.195 agents. The Architect
+activated the Skeleton Crew from the PROFILES panel and approved gates by hand.
+
+THIS IS THE ACCEPTANCE RUN, not the fake-engine chain in m7-onehour-chain.txt.
+
+RESULT: the DETECTION half passed end to end. The ACTION half did not.
+  - the Harbor ingested the failure and raised the incident
+  - it mailed Artemis and left tasks.json untouched (FR-5.2)
+  - a re-ingest 10 minutes later did NOT duplicate the incident
+  - the Watch held every gated action; the Architect approved one spend gate
+  - Artemis replied "Task opened" to agent.harbor
+  - NO TASK WAS EVER CREATED. tasks.json holds 0. There are no task events.
+
+The run stopped with 3 gates opened, 1 approved, and the orchestrator blocked.
+
+--- the record ---
+
+ 331 21:56:51 spawn       {"agentId":"agent.artemis","engine":"claude","engineVersion":"2.1.195","role":"orchestrator","cwd":"C:\\Users\\senso\\.ephesus\\agora","hook
+ 332 21:56:51 orchestrator {"event":"spawned","agentId":"agent.artemis","engine":"claude","seat":"temple"}
+ 333 21:56:51 hook        {"event":"wake","agentId":"agent.artemis","pendingMail":1}
+ 334 21:57:49 gym         {"event":"metric-check-idle","on":"2026-08-31"}
+ 335 21:57:49 delivery    {"msgId":"2026-08-31T21-57-49-729Z-brfd626ab","from":"agent.odeon","to":"agent.artemis","act":"request","subject":"standup b-2026-08-31T21-5
+ 336 21:57:49 brief       {"event":"requested","briefId":"b-2026-08-31T21-57-49-729Z-2bbb","to":"agent.artemis","facts":8}
+ 337 21:57:49 orchestrator {"event":"retro","retroRef":"odeon/retros/2026-08-31T21-57-49-753Z.md","agents":4,"findings":0,"fromSeq":1,"toSeq":336}
+ 338 21:57:49 hook        {"event":"wake","agentId":"agent.artemis","pendingMail":1}
+ 339 21:58:44 delivery    {"msgId":"2026-08-31T21-58-44-537Z-endrngrul","from":"agent.odeon","to":"agent.artemis","act":"refuse","subject":"odeon: brief not archived"
+ 340 21:58:48 hook        {"event":"stop","agentId":"agent.artemis","decision":"block","because":"pending-work","pendingMail":1,"pendingTasks":0,"blocksThisSession":0
+ 341 21:59:27 spawn       {"agentId":"agent.skeleton-crew-musahit-ci-babysitter","engine":"claude","engineVersion":"2.1.195","role":"ci-babysitter","cwd":"C:\\Users\\
+ 342 21:59:27 spawn       {"agentId":"agent.skeleton-crew-musahit-ci-babysitter","grantsMissing":["GH_TOKEN"]}
+ 343 21:59:27 spawn       {"agentId":"agent.skeleton-crew-musahit-dependency-updater","engine":"claude","engineVersion":"2.1.195","role":"dependency-updater","cwd":"C
+ 344 21:59:27 spawn       {"agentId":"agent.skeleton-crew-musahit-dependency-updater","grantsMissing":["GH_TOKEN"]}
+ 345 21:59:28 spawn       {"agentId":"agent.skeleton-crew-musahit-health-watcher","engine":"claude","engineVersion":"2.1.195","role":"health-watcher","cwd":"C:\\Users
+ 346 21:59:28 profile     {"event":"activated","instanceId":"skeleton-crew@repo:musahit","profile":"skeleton-crew","profileVersion":1,"target":"repo:musahit","agents"
+ 347 21:59:36 brief       {"event":"archived","briefId":"b-2026-08-31T21-57-49-729Z-2bbb","briefRef":"odeon/briefs/2026-08-31T21-59-36-309Z.md","by":"agent.artemis","
+ 348 21:59:36 delivery    {"msgId":"2026-08-31T21-59-36-332Z-end609vl9","from":"agent.odeon","to":"agent.artemis","act":"agree","subject":"odeon: brief b-2026-08-31T2
+ 349 21:59:40 hook        {"event":"stop","agentId":"agent.artemis","decision":"continue","because":"stop-hook-active","pendingMail":1,"pendingTasks":0,"blocksThisSes
+ 350 21:59:49 profile     {"event":"trigger-fired","instanceId":"skeleton-crew@repo:musahit","triggerId":"skeleton-crew@repo:musahit/dependency-sweep","agentId":"agen
+ 351 21:59:49 profile     {"event":"trigger-fired","instanceId":"skeleton-crew@repo:musahit","triggerId":"skeleton-crew@repo:musahit/health-sweep","agentId":"agent.sk
+ 352 21:59:52 remote      {"source":"github","repo":"mertefesensoy/MUSAHIT","inbound":"ci-run","ref":33440874791,"title":"CI","state":"completed","conclusion":"failur
+ 353 21:59:52 delivery    {"msgId":"2026-08-31T21-59-52-062Z-incfd1u04n","from":"agent.harbor","to":"agent.artemis","act":"request","subject":"Incident: mertefesensoy
+ 354 21:59:52 profile     {"event":"incident-raised","instanceId":"skeleton-crew@repo:musahit","incident":"mertefesensoy/MUSAHIT#ci-run:33440874791","repo":"mertefese
+ 355 22:03:49 budget      {"agentId":"agent.artemis","state":"projected-breach","spent":360939,"remaining":1639061,"projected":99311419,"because":"projection"}
+ 356 22:03:49 breaker     {"agentId":"agent.artemis","from":0,"rung":1,"action":"steer","signals":["burn-rate"],"detail":[{"budget":"projected-breach"}]}
+ 357 22:03:49 breaker     {"action":"steer-channel","agentId":"agent.artemis","channel":"hook"}
+ 358 22:03:49 gate        {"event":"opened","gateId":"g-2026-08-31t22-03-49-955z-e674c1f30914cc29","agentId":"agent.artemis","gateKind":"spend","because":"no-rule","c
+ 359 22:09:52 remote      {"source":"github","repo":"mertefesensoy/MUSAHIT","inbound":"ci-run","ref":33440874791,"title":"CI","state":"completed","conclusion":"failur
+ 360 22:12:01 gate        {"event":"approved","gateId":"g-2026-08-31t22-03-49-955z-e674c1f30914cc29","agentId":"agent.artemis","gateKind":"spend","taskId":null,"chann
+ 361 22:14:49 profile     {"event":"trigger-fired","instanceId":"skeleton-crew@repo:musahit","triggerId":"skeleton-crew@repo:musahit/health-sweep","agentId":"agent.sk
+ 362 22:19:39 spawn       {"agentId":"agent.artemis","engine":"claude","engineVersion":"2.1.195","role":"orchestrator","cwd":"C:\\Users\\senso\\.ephesus\\agora","hook
+ 363 22:19:39 orchestrator {"event":"spawned","agentId":"agent.artemis","engine":"claude","seat":"temple"}
+ 364 22:19:40 hook        {"event":"wake","agentId":"agent.artemis","pendingMail":2}
+ 365 22:20:39 gym         {"event":"metric-check-idle","on":"2026-08-31"}
+ 366 22:20:39 delivery    {"msgId":"2026-08-31T22-20-39-510Z-brfc2dbaa","from":"agent.odeon","to":"agent.artemis","act":"request","subject":"standup b-2026-08-31T22-2
+ 367 22:20:39 brief       {"event":"requested","briefId":"b-2026-08-31T22-20-39-510Z-85fa","to":"agent.artemis","facts":11}
+ 368 22:20:39 orchestrator {"event":"retro","retroRef":"odeon/retros/2026-08-31T22-20-39-524Z.md","agents":4,"findings":1,"fromSeq":1,"toSeq":367}
+ 369 22:20:39 hook        {"event":"wake","agentId":"agent.artemis","pendingMail":1}
+ 370 22:21:12 bounce      {"msgId":"2026-09-01T00-00-00-000Z-art1h4rb","from":"agent.artemis","to":"agent.harbor","conversation":"2026-08-31T21-59-52-062Z-incfd1u04n"
+ 371 22:21:16 hook        {"event":"stop","agentId":"agent.artemis","decision":"block","because":"pending-work","pendingMail":1,"pendingTasks":0,"blocksThisSession":0
+ 372 22:21:33 profile     {"event":"incident-triage-refused","from":"agent.artemis","msgId":"2026-09-01T00-01-00-000Z-art2h4rb","reasons":["triage report: not JSON — 
+ 373 22:21:33 delivery    {"msgId":"2026-08-31T22-21-33-385Z-ref0dgznk","from":"agent.harbor","to":"agent.artemis","act":"refuse","subject":"re: Incident task opened 
+ 374 22:21:36 hook        {"event":"stop","agentId":"agent.artemis","decision":"continue","because":"stop-hook-active","pendingMail":1,"pendingTasks":0,"blocksThisSes
+ 375 22:22:37 gate        {"event":"opened","gateId":"g-2026-08-31t22-22-37-126z-b1341f06d27a2fc4","agentId":"agent.artemis","gateKind":"tool-permission","because":"n
+ 376 22:25:54 budget      {"agentId":"agent.artemis","state":"projected-breach","spent":857897,"remaining":1142103,"projected":134548309,"because":"projection"}
+ 377 22:25:54 breaker     {"agentId":"agent.artemis","from":0,"rung":1,"action":"steer","signals":["burn-rate"],"detail":[{"budget":"projected-breach"}]}
+ 378 22:25:54 breaker     {"action":"steer-channel","agentId":"agent.artemis","channel":"hook"}
+ 379 22:25:54 gate        {"event":"opened","gateId":"g-2026-08-31t22-25-54-670z-9941aa08875b7710","agentId":"agent.artemis","gateKind":"spend","because":"no-rule","c

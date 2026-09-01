@@ -1,6 +1,7 @@
 import {
   dayKey,
   evaluateBudget,
+  foldCosts,
   foldFacts,
   ledgerRowSchema,
   totalOf,
@@ -11,6 +12,7 @@ import {
   type FoldableFact,
   type LedgerRow
 } from '../../shared/cost'
+import type { CostFact } from '../engines/types'
 
 /**
  * The durable cost ledger (ADR-0011, SDD §4.6, FR-11.2).
@@ -79,6 +81,23 @@ export interface CostLedgerOptions {
    * the caller makes the choice visible (invariant §7).
    */
   onFoldRestart?(source: string): void
+  /**
+   * Raised when an engine's running cost total went DOWN — a replaced or
+   * rotated transcript. Nothing is recorded for it; the caller makes it seen.
+   */
+  onCostRegressed?(source: string, session: string, model: string): void
+  /** Raised when the engine said it could not price every model it used. */
+  onCostIncomplete?(source: string): void
+  /**
+   * What the engine says an agent's CURRENT session has cost so far, live.
+   *
+   * Injected as a lookup rather than stored, and that is the whole point: the
+   * ledger keeps no money in memory. This is read fresh on every `spendFor`
+   * from a file the status line rewrites, exactly as the pace is — so a restart
+   * loses nothing it cannot immediately re-observe, and ADR-0011's ban on
+   * in-memory cumulative figures is untouched.
+   */
+  liveCost?(agent: string): { readonly session: string; readonly usd: number } | null
 }
 
 export class CostLedger {
@@ -138,6 +157,42 @@ export class CostLedger {
     return folded.rows
   }
 
+  /**
+   * Folds the engine's own money figures into the ledger (ADR-0011's `cost_usd`
+   * column, which stood null from M3 until this).
+   *
+   * Contract: idempotent, and idempotent *structurally* rather than by
+   * bookkeeping. `foldCosts` differences the engine's running total against the
+   * rows already stored, so folding the same transcript a hundred times appends
+   * exactly one row — there is no cursor to keep in step and nothing a restart
+   * could zero. That is the same property ADR-0011 demands of cumulative token
+   * figures, applied to money.
+   *
+   * Never throws.
+   */
+  foldCosts(agent: string, source: string, costs: readonly CostFact[]): readonly LedgerRow[] {
+    if (costs.length === 0) return []
+    const existing = this.options.store.rowsFor(agent)
+    const folded = foldCosts(costs, {
+      existing,
+      agent,
+      source,
+      fallbackDay: dayKey(this.now())
+    })
+    for (const back of folded.regressed) {
+      // Spending cannot go down. A smaller running total means the transcript
+      // was replaced or rotated, and the honest answer is to say so rather than
+      // to invent a correction (invariant §7).
+      this.options.onCostRegressed?.(source, back.sessionId, back.model)
+    }
+    // A model the engine could not price contributes no row at all, so the
+    // total is an understatement. It has to be visible as one — a number the UI
+    // shows as "the bill" while quietly missing a model is worse than no number.
+    if (costs.some((cost) => !cost.priced)) this.options.onCostIncomplete?.(source)
+    if (folded.rows.length > 0) this.options.store.append(folded.rows)
+    return folded.rows
+  }
+
   private todayRows(agent: string): readonly LedgerRow[] {
     const today = dayKey(this.now())
     return this.options.store.rowsFor(agent).filter((row) => row.day === today)
@@ -160,6 +215,7 @@ export class CostLedger {
       session === null ? ZERO_TOTALS : totalOf(rows.filter((row) => row.session === session))
 
     const todayTotals = totalOf(todayRows)
+    const live = this.options.liveCost?.(agent) ?? null
     const observed = this.window.get(agent) ?? null
     const nowMs = this.now().getTime()
     const midnight = new Date(this.now())
@@ -173,6 +229,10 @@ export class CostLedger {
       todayTotals,
       cumulativeTotals: totalOf(rows),
       dailyTokens,
+      // Only when it names the SAME session the agent is running. A figure left
+      // behind by the previous session would otherwise be shown against this
+      // one, which is the same mis-attribution in miniature.
+      liveSessionCostUsd: live !== null && live.session === session ? live.usd : null,
       budget: evaluateBudget({
         spent: tokensOf(todayTotals),
         dailyTokens,

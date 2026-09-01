@@ -7,9 +7,17 @@
   "columns": 76,
   "frames": {
     "wall": 1217,
-    "floor-a": 4180,
-    "floor-b": 4198,
-    "path": 4204,
-    "temple": 4192
+    "wall-n": 1141,
+    "wall-s": 1217,
+    "wall-w": 1216,
+    "wall-e": 1218,
+    "wall-nw": 1140,
+    "wall-ne": 1142,
+    "wall-sw": 1216,
+    "wall-se": 1218,
+    "floor-a": 1794,
+    "floor-b": 1795,
+    "path": 1632,
+    "temple": 1790
   }
 }

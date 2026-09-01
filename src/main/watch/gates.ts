@@ -17,6 +17,7 @@ import {
   openGateSchema,
   parseGatePolicy,
   repeatBackRequired,
+  type AutonomyLevel,
   type GateDecision,
   type GateKind,
   type GatePackaging,
@@ -62,6 +63,21 @@ export interface GateManagerOptions {
    * machine-readable tag itself, which is data rather than prose.
    */
   refusalReason?(because: 'channel' | 'repeat-back'): string
+  /**
+   * The autonomy a PROFILE has granted this agent for this class, or null when
+   * the agent belongs to no active profile (ADR-0012, FR-11.1 — M7.2).
+   *
+   * Resolved here rather than passed in by every caller, and that is the whole
+   * reason it exists. `GateRequest.profileAutonomy` shipped at M3 and nothing
+   * ever set it; a field the call site has to remember is a field that gets
+   * forgotten, and a forgotten one means an agent whose profile TIGHTENED a
+   * class quietly gets the looser company default — an escalation relative to
+   * the plan the Architect approved at activation.
+   *
+   * Null means "no profile owns this agent", NOT "no restriction": the global
+   * policy then applies alone, which is where deny-by-default already lives.
+   */
+  profileAutonomy?(agentId: string, kind: GateKind): AutonomyLevel | null
 }
 
 /** What a caller asks for when it needs an action gated. */
@@ -101,7 +117,21 @@ export class GateManager {
    */
   submit(submission: GateSubmission, context: { repeatBackConfirmed?: boolean } = {}): GateOutcome {
     const policy = this.options.policy()
-    const decision = evaluateGate(policy, submission, context)
+    // Composition is applied HERE, to every submission, rather than trusted to
+    // arrive on it. When both a caller and a profile have an opinion the
+    // STRICTER one is taken — composition can only ever narrow (SDD §9).
+    const granted = this.options.profileAutonomy?.(submission.agentId, submission.kind) ?? null
+    const composed: GateSubmission =
+      granted === null
+        ? submission
+        : {
+            ...submission,
+            profileAutonomy:
+              submission.profileAutonomy === undefined
+                ? granted
+                : composeAutonomy(submission.profileAutonomy, granted)
+          }
+    const decision = evaluateGate(policy, composed, context)
     if (decision.allow) {
       this.options.onLogEvent?.({
         kind: 'gate',
@@ -119,7 +149,7 @@ export class GateManager {
     // bury the queue and turn `log.jsonl` into a metronome. The FIRST packaging
     // is kept: it is the one the Architect is being asked about.
     const existing = this.list().find(
-      (open) => open.agentId === submission.agentId && open.kind === submission.kind
+      (open) => open.agentId === composed.agentId && open.kind === composed.kind
     )
     if (existing) return { held: true, gate: existing, decision }
 
@@ -411,6 +441,21 @@ export function wireGateChokePoints(deps: {
   memoPolicy?(): MemoPolicy
   /** Raised when a choke point could not file its gate (invariant §7). */
   onError?(detail: string): void
+  /**
+   * What the engine's notification meant, from the adapter that knows its
+   * phrasing (NFR-12). Absent, or null, means "treat it as a permission
+   * prompt" — the safe direction, since a real prompt read as idleness would
+   * strand an agent with nobody told.
+   */
+  notificationKind?(agentId: string, payload: unknown): 'permission' | 'waiting' | null
+  /**
+   * The autonomy this agent runs at, already composed against the global
+   * ceiling. An engine prompt under a granted `autonomous` is not the
+   * Architect's to answer: they made that decision once, at activation.
+   */
+  autonomyFor?(agentId: string): AutonomyLevel | null
+  /** An engine prompt that was NOT gated, so the choice is still on the record. */
+  onUngated?(agentId: string, kind: 'permission' | 'waiting', message: string): void
 }): {
   submitNotification(agentId: string, payload: unknown): void
   submitMemoTrigger(agentId: string, action: MemoAction): MemoTrigger | null
@@ -439,6 +484,23 @@ export function wireGateChokePoints(deps: {
       const message =
         notificationMessage(payload) ??
         deps.prompts.render(path.join('watch', 'notification-unspecified.md'), {}).trim()
+      // An engine fires one notification for two unrelated situations. On the
+      // 2026-09-01 live run nine of ten gates the Architect was asked to answer
+      // said "Claude is waiting for your input" — an agent idle at an empty
+      // prompt, gated as though it had asked for something. Approving them did
+      // nothing back, because there was nothing to approve.
+      const kind = deps.notificationKind?.(agentId, payload) ?? null
+      if (kind === 'waiting') {
+        deps.onUngated?.(agentId, 'waiting', message)
+        return
+      }
+      // A prompt under a granted `autonomous` is not the Architect's to answer
+      // either: they made that decision once, at activation, and re-asking per
+      // tool call is the micromanagement the autonomy grant exists to end.
+      if (deps.autonomyFor?.(agentId) === 'autonomous') {
+        deps.onUngated?.(agentId, 'permission', message)
+        return
+      }
       deps.gates.submit({
         kind: 'tool-permission',
         agentId,
@@ -504,11 +566,21 @@ export function wireGateChokePoints(deps: {
       deps.gates.submit({
         kind: 'spend',
         agentId,
+        // The AMOUNT, which this submission used to omit.
+        //
+        // `evaluateGate` reads `request.spendTokens ?? Number.POSITIVE_INFINITY`
+        // and holds anything over the rule's cap — so a submission without it
+        // was held whatever cap the Architect wrote, and `maxSpendTokens` was a
+        // knob connected to nothing. The old comment reasoned that holding was
+        // "the safe direction", and it is, but a policy that cannot be
+        // satisfied is not a conservative policy: it is an absent one, and the
+        // Architect ends up clicking through the same gate forever without ever
+        // having been asked a question they could answer differently.
+        //
+        // `maxSpendTokens` is in TOKENS and so is this, which is the pairing
+        // the rule's own comment describes.
+        spendTokens: spentTokens,
         ...bound(agentId),
-        // Tokens, not cents: `maxSpendCents` compares dollars, and handing it a
-        // token count would make the policy knob silently meaningless. A spend
-        // gate with no amount is held by the cap check either way, which is the
-        // safe direction until the ledger reports a currency figure.
         packaging: parsePackaging(
           deps.prompts.render(path.join('watch', 'packaging-spend.md'), {
             agentId,

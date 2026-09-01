@@ -1,0 +1,7 @@
+{
+  "id": "triage-sweep",
+  "kind": "schedule",
+  "everyMs": 1800000,
+  "hire": "triage-agent",
+  "playbook": "triage.md"
+}

@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ExecGitRunner, Worktrees } from '../../src/main/git'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Worktree isolation (SRS UC-01 alternate 2a) against **real git in temp
@@ -17,7 +18,7 @@ import { ExecGitRunner, Worktrees } from '../../src/main/git'
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function rig(): { root: string; repo: string; agora: string; worktrees: Worktrees } {

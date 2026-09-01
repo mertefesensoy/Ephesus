@@ -14,5 +14,15 @@ out/
 src/renderer/src/assets/tileset/*
 !src/renderer/src/assets/tileset/.gitkeep
 !src/renderer/src/assets/tileset/*.tiles.json
+# Same rule, same reason: an emote table is a map from phases to frame
+# indices on somebody else's sheet — our work, not theirs.
+!src/renderer/src/assets/tileset/*.emotes.json
 src/renderer/public/fonts/*
 !src/renderer/public/fonts/README.md
+
+# Licensed character art (ATTRIBUTION rule 3, rewritten 2026-09-01). Same rule
+# as the tileset: the SHEETS are the licensed asset and never enter the
+# repository; the manifest that says how to read them is our own work and does.
+src/renderer/src/assets/characters/*
+!src/renderer/src/assets/characters/.gitkeep
+!src/renderer/src/assets/characters/*.chars.json

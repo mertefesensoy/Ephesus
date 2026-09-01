@@ -1,0 +1,7 @@
+{
+  "id": "release-prep",
+  "kind": "schedule",
+  "everyMs": 604800000,
+  "hire": "release-manager",
+  "playbook": "release-prep.md"
+}

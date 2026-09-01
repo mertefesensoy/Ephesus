@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import type { CapacityView } from '../../shared/capacity'
 import type { AgoraHealth, ConfigSnapshot, HooksState } from '../../shared/ipc'
 import type { ModeView } from '../../shared/mode-view'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
-import { CountBadge } from './StatusBadge'
+import { CapacityBadge, CountBadge } from './StatusBadge'
 import { ActivityPanel } from './ActivityPanel'
+import { AgentDock } from './AgentDock'
+import { AgentPanel } from './AgentPanel'
+import { AutonomyBadge } from './AutonomyBadge'
 import { CommandBar } from './CommandBar'
-import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
 import { GymPanel } from './GymPanel'
 import { StoaPanel } from './StoaPanel'
+import { ProfilesPanel } from './ProfilesPanel'
 import { OrgPanel } from './OrgPanel'
 import { DecksPanel } from './DecksPanel'
 import { MemosPanel } from './MemosPanel'
@@ -62,6 +66,7 @@ export function App(): ReactElement {
     | 'org'
     | 'gym'
     | 'stoa'
+    | 'profiles'
     | 'memory'
     | 'watch'
   >('floor')
@@ -92,6 +97,19 @@ export function App(): ReactElement {
    * showing "none" is a degradation failing as GOOD news (invariant §7).
    */
   const [memoQueue, setMemoQueue] = useState<number | 'error' | null>(null)
+  /**
+   * Who is waiting on the provider (`src/shared/capacity.ts`).
+   *
+   * The strip carries it because a usage limit stops the WHOLE company, and the
+   * question it answers — "is anything happening right now?" — is the one the
+   * strip exists for. Without this the Architect's only clue that a
+   * days-long run has stalled is that the terminals stopped scrolling, which is
+   * indistinguishable from work finishing.
+   *
+   * `null` is "not read yet" and renders nothing, never "clear": claiming a
+   * healthy company on an unknown is the direction invariant §7 forbids.
+   */
+  const [capacity, setCapacity] = useState<CapacityView | null>(null)
   // A newly spawned agent is selected only when nothing is: an agent appearing
   // must never yank the Architect's attention off the one they are watching.
   const onAgentSeen = useCallback((agentId: string) => {
@@ -122,6 +140,18 @@ export function App(): ReactElement {
         })
         .catch(() => {
           /* the bridge banner already reports a dead bridge */
+        })
+      // Provider capacity, on the same slow poll and the `capacity:state` push
+      // below — a park is the one degradation that makes every other badge on
+      // this strip stop changing, so it must not depend on a single event.
+      eph.watch
+        .capacity()
+        .then((view) => {
+          if (!cancelled) setCapacity(view)
+        })
+        .catch(() => {
+          // Held, not cleared: a failed read must never repaint a parked
+          // company as a working one.
         })
       // The status strip counts open gates (UI-DESIGN §4). It rides the same
       // slow poll so the badge is right even when the push was missed.
@@ -157,8 +187,22 @@ export function App(): ReactElement {
     }
     poll()
     const timer = setInterval(poll, HOOKS_POLL_MS)
+    // The push half. A park can land between two polls, and two seconds of a
+    // company looking busy while it is stopped is two seconds of the exact lie
+    // this badge exists to stop.
+    const offCapacity = eph.watch.onCapacityChange(() => {
+      eph.watch
+        .capacity()
+        .then((view) => {
+          if (!cancelled) setCapacity(view)
+        })
+        .catch(() => {
+          /* held, not cleared — see the poll */
+        })
+    })
     return () => {
       cancelled = true
+      offCapacity()
       clearInterval(timer)
     }
   }, [])
@@ -285,6 +329,11 @@ export function App(): ReactElement {
             <span style={{ color: 'var(--eph-status-success)' }}>● fonts: bundled</span>
           )}
         </span>
+        {/* First on the strip, before gates and memos: when the provider has
+            stopped taking turns, every other count on this line has stopped
+            changing too, and reading them without this one is how an Architect
+            concludes the company is merely quiet. */}
+        <CapacityBadge view={capacity} />
         <CountBadge
           label="gates"
           count={openGates}
@@ -325,6 +374,10 @@ export function App(): ReactElement {
               {' · '}mode: {mode.mode}
             </span>
           )}
+          {/* What the company may do without asking. Composed, not global:
+              stricter-wins means a profile can clamp the policy, and showing
+              the policy would state the opposite of what actually happens. */}
+          <AutonomyBadge />
         </span>
       </header>
       <nav style={{ display: 'flex', gap: '4px' }}>
@@ -340,6 +393,7 @@ export function App(): ReactElement {
             'org',
             'gym',
             'stoa',
+            'profiles',
             'memory',
             'watch'
           ] as const
@@ -376,11 +430,16 @@ export function App(): ReactElement {
         {tab === 'org' && <OrgPanel />}
         {tab === 'gym' && <GymPanel />}
         {tab === 'stoa' && <StoaPanel />}
+        {tab === 'profiles' && <ProfilesPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
-        {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
+        {bridge.kind === 'ready' && <AgentPanel agentId={selected} />}
       </div>
-      {/* UI-DESIGN §4 app shell: bottom = command bar. */}
+      {/* UI-DESIGN §4 app shell: bottom = the company, then the command bar.
+          The dock sits above the bar because selecting WHO comes before saying
+          WHAT to them, and because a company you cannot see is one you end up
+          interrogating an agent at a time. */}
+      {bridge.kind === 'ready' && <AgentDock selected={selected} onSelect={setSelected} />}
       {bridge.kind === 'ready' && (
         <CommandBar selected={selected} onSelect={setSelected} onAgentSeen={onAgentSeen} />
       )}

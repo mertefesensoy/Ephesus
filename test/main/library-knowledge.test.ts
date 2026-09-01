@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Library } from '../../src/main/library'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The knowledge shelf (FR-6.4) and the Memory panel's view (SDD §5
@@ -21,7 +22,7 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function rig(): { library: Library; agoraRoot: string; home: string } {

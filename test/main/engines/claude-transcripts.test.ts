@@ -8,6 +8,7 @@ import {
   ClaudeAdapter
 } from '../../../src/main/engines/claude'
 import { PromptStore } from '../../../src/main/prompts'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * The Claude Code transcript reader (ADR-0009 `transcripts`, FR-11.2), against
@@ -18,7 +19,7 @@ import { PromptStore } from '../../../src/main/prompts'
 
 const temps: string[] = []
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempDir(): string {
@@ -156,10 +157,41 @@ describe('the adapter’s reader', () => {
     expect(await adapter().transcripts.read(path.join(tempDir(), 'nope.jsonl'))).toEqual([])
   })
 
+  /**
+   * The cwd -> directory slug, asserted against golden values COPIED FROM real
+   * `~/.claude/projects` directory names rather than recomputed with the
+   * implementation's own rule — a test that re-derives its expectation the way
+   * the code does would pass for any rule, including a wrong one.
+   *
+   * The INPUT has to be per-platform because `path.resolve` is: the engine
+   * slugs an absolute path, and `path.resolve('/home/user/x')` on Windows is
+   * `C:\\home\\user\\x`, not `/home/user/x`. The slug RULE is the same on both.
+   */
+  const golden =
+    process.platform === 'win32'
+      ? {
+          cwd: 'C:\\Users\\u\\OneDrive\\Masaüstü\\ephesus',
+          slug: 'C--Users-u-OneDrive-Masa-st--ephesus'
+        }
+      : { cwd: '/home/user/ephesus', slug: '-home-user-ephesus' }
+
   it('points at the engine’s own project directory', () => {
-    const dir = claudeTranscriptDir('/home/user/ephesus')
+    const dir = claudeTranscriptDir(golden.cwd)
     expect(path.isAbsolute(dir)).toBe(true)
-    // The engine slugs the cwd by replacing separators with dashes.
-    expect(dir.endsWith(path.join('.claude', 'projects', '-home-user-ephesus'))).toBe(true)
+    expect(dir.endsWith(path.join('.claude', 'projects', golden.slug))).toBe(true)
+  })
+
+  it('slugs every character the engine slugs, not just the separators', () => {
+    // The regression this file was blind to: a rule covering only separators
+    // left `ü` and ` ` intact, so on any machine with a non-ASCII or spaced
+    // path the reader pointed at a directory that does not exist — and the
+    // budget folded a permanent, silent zero rather than failing loudly.
+    const root = path.parse(process.cwd()).root
+    const slug = (cwd: string): string => path.basename(claudeTranscriptDir(cwd))
+    expect(slug(path.join(root, 'Masaüstü', 'ephesus'))).toContain('Masa-st--ephesus')
+    expect(slug(path.join(root, 'IBM Z Project'))).toContain('IBM-Z-Project')
+    // Stated as an invariant too, so a later rule change cannot quietly let a
+    // character through: nothing but ASCII alphanumerics and dashes survives.
+    expect(slug(process.cwd())).toMatch(/^[A-Za-z0-9-]+$/)
   })
 })

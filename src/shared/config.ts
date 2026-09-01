@@ -51,7 +51,45 @@ export const configSchema = z
      * shipping one that only pretended to listen would be worse than the gap.
      * Recorded as owed in DECISIONS-LOG and PROGRESS rather than faked.
      */
-    wakeWordEnabled: z.boolean().optional()
+    wakeWordEnabled: z.boolean().optional(),
+    /**
+     * Usage-aware pacing (ADR-0023). Optional and absent-means-defaults, for
+     * the same no-migration reason as every field above it.
+     *
+     * These are Architect-facing dials rather than constants in code because
+     * they encode a judgement about *their* account, not about this program:
+     * how close to a limit is close enough to slow, and how much space a
+     * slowed company should leave between wakes. The defaults come from the
+     * Architect's own stated rule (slow at 90%) and from the measured wake
+     * cadence (`DEFAULT_SLOW_WAKE_GAP_MS`).
+     */
+    pacing: z
+      .object({
+        /** Used-percentage at which the company slows down. */
+        slowAtPercent: z.number().min(1).max(100).optional(),
+        /** Used-percentage at which it holds until the window resets. */
+        holdAtPercent: z.number().min(1).max(200).optional(),
+        /** Minimum gap between one agent's wakes while pacing `slow`, ms. */
+        slowWakeGapMs: z
+          .number()
+          .int()
+          .min(0)
+          .max(6 * 60 * 60 * 1000)
+          .optional(),
+        /**
+         * Wall-clock cap on a single wake, ms — the second, independent limit.
+         * A floor of one minute: anything under that would interrupt ordinary
+         * work, whose measured median wake was 49 s.
+         */
+        wakeCapMs: z
+          .number()
+          .int()
+          .min(60 * 1000)
+          .max(6 * 60 * 60 * 1000)
+          .optional()
+      })
+      .strict()
+      .optional()
   })
   .strict()
 

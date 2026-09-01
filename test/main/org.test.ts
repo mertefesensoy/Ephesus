@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LogEntry } from '../../src/shared/log'
 import { OrgLayer } from '../../src/main/org'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The retro archive (FR-11.5, UC-12).
@@ -16,7 +17,7 @@ import { OrgLayer } from '../../src/main/org'
 const homes: string[] = []
 afterEach(() => {
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

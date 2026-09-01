@@ -3,6 +3,7 @@ import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
+  CAPACITY_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
   IpcChannels,
   LOG_APPEND_CHANNEL,
@@ -19,12 +20,22 @@ import {
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
+import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { HarborView } from '../shared/harbor'
+import type { ShareExport, ShareInspection, ShareInstall } from '../shared/share-view'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from '../shared/profile-view'
+import type { ActivationPlanResult } from '../shared/profile-activation'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
@@ -134,6 +145,33 @@ const eph: EphApi = {
     briefs: () => ipcRenderer.invoke(IpcChannels.stoaBriefs) as Promise<readonly BriefView[]>,
     brief: (id) => ipcRenderer.invoke(IpcChannels.stoaBrief, { id }) as Promise<string | null>
   },
+  profiles: {
+    list: () => ipcRenderer.invoke(IpcChannels.profilesList) as Promise<readonly ProfileSummary[]>,
+    inspect: (name) =>
+      ipcRenderer.invoke(IpcChannels.profilesInspect, { name }) as Promise<ProfileLoad>,
+    preview: (request) =>
+      ipcRenderer.invoke(IpcChannels.profilesPreview, request) as Promise<ActivationPlanResult>,
+    activate: (request) =>
+      ipcRenderer.invoke(IpcChannels.profilesActivate, request) as Promise<ActivationResult>,
+    deactivate: (instanceId) =>
+      ipcRenderer.invoke(IpcChannels.profilesDeactivate, { instanceId }) as Promise<{
+        ok: boolean
+        reason: string | null
+      }>,
+    instances: () =>
+      ipcRenderer.invoke(IpcChannels.profilesInstances) as Promise<readonly ProfileInstanceView[]>
+  },
+  harbor: {
+    repos: () => ipcRenderer.invoke(IpcChannels.harborRepos) as Promise<HarborView>,
+    hireExport: (profile, hire) =>
+      ipcRenderer.invoke(IpcChannels.harborHireExport, { profile, hire }) as Promise<ShareExport>,
+    profileExport: (name) =>
+      ipcRenderer.invoke(IpcChannels.harborProfileExport, { name }) as Promise<ShareExport>,
+    importInspect: (blob) =>
+      ipcRenderer.invoke(IpcChannels.harborImportInspect, { blob }) as Promise<ShareInspection>,
+    importInstall: (blob) =>
+      ipcRenderer.invoke(IpcChannels.harborImportInstall, { blob }) as Promise<ShareInstall>
+  },
   org: {
     chart: () => ipcRenderer.invoke(IpcChannels.orgChart) as Promise<readonly OrgNode[]>,
     metrics: () => ipcRenderer.invoke(IpcChannels.orgMetrics) as Promise<RetroView>,
@@ -207,6 +245,12 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.watchDismiss, { messageId }) as Promise<boolean>,
     breakerState: () =>
       ipcRenderer.invoke(IpcChannels.watchBreaker) as Promise<readonly BreakerState[]>,
+    capacity: () => ipcRenderer.invoke(IpcChannels.watchCapacity) as Promise<CapacityView>,
+    onCapacityChange: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(CAPACITY_STATE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(CAPACITY_STATE_CHANNEL, listener)
+    },
     onGateChange: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(GATE_OPEN_CHANNEL, listener)

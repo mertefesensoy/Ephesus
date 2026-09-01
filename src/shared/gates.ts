@@ -21,14 +21,44 @@ export const GATE_SCHEMA_VERSION = 1
 
 /**
  * The action classes SRS FR-11.1 names: "spend above threshold, destructive
- * ops, scope changes, and prod-facing actions". `needs-human` is the Hermes
- * choke point (SDD §9) and `tool-permission` the engine one.
+ * ops, scope changes, prod-facing actions, and outbound public communication".
+ * `needs-human` is the Hermes choke point (SDD §9) and `tool-permission` the
+ * engine one.
+ *
+ * ## Why `outbound` is a seventh kind (Architect decision, 2026-08-31, M7.5)
+ *
+ * DECISIONS-LOG records a standing rule from M5.3: *a memo trigger borrows an
+ * existing gate KIND rather than inventing a seventh*, justified there because
+ * "the trigger itself is on the gate, so **the mapping loses nothing**".
+ *
+ * That qualifier is what fails here. FR-9.3 requires the Front Office's reply
+ * autonomy to be configurable on its own ladder (draft-only → auto-post), and
+ * the nearest existing kind is `prod-facing` — "this reaches the deployed
+ * system". Borrowing it would mean an Architect who wants the company to answer
+ * issues unattended has, in the same setting, granted it autonomous production
+ * actions; there would be no way to write "may reply, may not touch prod". The
+ * mapping would lose exactly the independence the requirement is about.
+ *
+ * Additive and backward-compatible by construction: a policy that never
+ * mentions `outbound` has no rule for it, and no rule means DENIED
+ * (`strictestRuleFor` returns null → `evaluateGate` holds). Every gate policy
+ * written before this kind existed therefore refuses outbound comment posting,
+ * which is the direction a new permission class must fail in.
  */
 export const GATE_KINDS = [
   'destructive',
   'spend',
   'scope-change',
   'prod-facing',
+  /**
+   * Public communication the company sends OUT under its own name: an issue or
+   * PR comment, a chat post. Distinct from `prod-facing` because the blast
+   * radius is reputational rather than operational, and because it is the first
+   * irreversible outward act the company can take on its own initiative — a
+   * posted comment has been read and mailed to subscribers before anyone can
+   * delete it.
+   */
+  'outbound',
   'tool-permission',
   'needs-human'
 ] as const

@@ -26,8 +26,37 @@ export const TILESET_SCHEMA_VERSION = 1
  * allowlist is the point — a typo'd key is a tile that silently never paints,
  * so it is a parse failure instead.
  */
+/**
+ * Wall variants, by which edge of the room the cell sits on.
+ *
+ * A room whose every wall is one repeated tile reads as a band, not a room:
+ * there is no cornice along the top, no return down the sides, no corner. A
+ * pack that ships a wall SET can name these; one that ships a single wall still
+ * works, because every variant falls back to plain `wall`.
+ */
+export const WALL_VARIANTS: readonly string[] = [
+  'wall-n',
+  'wall-s',
+  'wall-e',
+  'wall-w',
+  'wall-ne',
+  'wall-nw',
+  'wall-se',
+  'wall-sw'
+]
+
+/**
+ * Seat halves. A desk is two tiles wide (§5.4), and mapping the whole seat to
+ * one frame painted a computer on BOTH of them — twice the monitors and nowhere
+ * to sit. `seat-a` is the left tile, `seat-b` the right, so a workstation can be
+ * a desk and a chair instead of two of the same thing.
+ */
+export const SEAT_VARIANTS: readonly string[] = ['seat-a', 'seat-b']
+
 export const FRAME_KEYS: readonly string[] = [
   ...PLAN_KINDS,
+  ...WALL_VARIANTS,
+  ...SEAT_VARIANTS,
   ...STATIONS.map((station) => `station:${station}`)
 ]
 
@@ -139,14 +168,34 @@ export function atlasScale(map: Pick<TilesetMap, 'tilePx'>): number {
   return TILE_PX / map.tilePx
 }
 
+/**
+ * One installed pack: its map, and the sheet that map names.
+ *
+ * A layer rather than a merged map, because a pack's frame indices are only
+ * meaningful against its OWN sheet. Flattening two packs into one frame table
+ * would be the exact failure the map's `sheet` field was added to prevent —
+ * painting one pack's frames out of the other's image.
+ */
+export interface TilesetLayer {
+  readonly map: TilesetMap
+  /** The sheet's file name, as the map names it — the painter's texture key. */
+  readonly sheet: string
+  readonly sheetUrl: string
+}
+
 export interface TilesetState {
   /** True only when a sheet AND a valid map for it are installed. */
   readonly installed: boolean
   /** URLs of the installed sheets, in path order. */
   readonly sheets: readonly string[]
-  /** The sheet the map names, resolved to a URL — what the painter blits from. */
+  /**
+   * Every pack that resolved, in map-file order. Earlier layers win a contested
+   * frame key: a drop is a stack, and the first pack is the base.
+   */
+  readonly layers: readonly TilesetLayer[]
+  /** The first layer's sheet URL, or null. Kept for callers that want the base. */
   readonly sheetUrl: string | null
-  /** The validated map, or null when the floor stays procedural. */
+  /** The first layer's map, or null when the floor stays procedural. */
   readonly map: TilesetMap | null
   /** What the UI should say about the floor's art source. */
   readonly note: string
@@ -173,44 +222,70 @@ export function resolveTileset(
 ): TilesetState {
   const paths = Object.keys(sheetPaths).sort()
   const urls = paths.map((path) => sheetPaths[path]).filter((url): url is string => Boolean(url))
-  const base = { sheets: urls, sheetUrl: null, map: null, installed: false } as const
+  const base = { sheets: urls, layers: [], sheetUrl: null, map: null, installed: false } as const
 
   if (urls.length === 0) return { ...base, note: `${PROCEDURAL} (no sheet installed)` }
 
   const mapPaths = Object.keys(mapEntries).sort()
-  const firstMap = mapPaths[0]
-  if (firstMap === undefined) {
+  if (mapPaths.length === 0) {
     return { ...base, note: `${PROCEDURAL} (${urls.length} sheet(s), no tile map)` }
   }
 
-  const parsed = parseTilesetMap(mapEntries[firstMap])
-  if (!parsed.ok) {
-    return { ...base, note: `${PROCEDURAL} (tile map invalid — ${parsed.reason})` }
+  // Every pack that resolves becomes a layer, in map-file order. Before this,
+  // only `mapPaths[0]` was read, so a second installed pack sat inert — and a
+  // pack of office furniture could never reach a floor whose walls came from
+  // the interiors pack, because the two live on different sheets.
+  const layers: TilesetLayer[] = []
+  const refused: string[] = []
+  for (const mapPath of mapPaths) {
+    const parsed = parseTilesetMap(mapEntries[mapPath])
+    if (!parsed.ok) {
+      refused.push(`${mapPath.split('/').pop() ?? mapPath} invalid — ${parsed.reason}`)
+      continue
+    }
+    // The map names its sheet; matching by file name keeps a two-pack drop from
+    // painting one pack's frames out of the other's sheet.
+    const wanted = paths.find((path) => path.endsWith(`/${parsed.map.sheet}`))
+    const sheetUrl = wanted ? sheetPaths[wanted] : undefined
+    if (!sheetUrl) {
+      refused.push(`${parsed.map.name} names a missing sheet: ${parsed.map.sheet}`)
+      continue
+    }
+    layers.push({ map: parsed.map, sheet: parsed.map.sheet, sheetUrl })
   }
 
-  // The map names its sheet; matching by file name keeps a two-pack drop from
-  // painting one pack's frames out of the other's sheet.
-  const wanted = paths.find((path) => path.endsWith(`/${parsed.map.sheet}`))
-  const sheetUrl = wanted ? sheetPaths[wanted] : undefined
-  if (!sheetUrl) {
-    return { ...base, note: `${PROCEDURAL} (tile map names a missing sheet: ${parsed.map.sheet})` }
+  const first = layers[0]
+  if (first === undefined) {
+    return { ...base, note: `${PROCEDURAL} (${refused.join('; ')})` }
   }
 
-  // A composition that is silently the wrong size degrades that station to the
-  // procedural painter, and invariant §7 says every degradation is visible. The
-  // M6 close-out audit found this function had only test callers, so the
-  // fallback `compositionFor` performs was real and the "says so" half was not.
-  const problems = validateCompositions(parsed.map)
+  const problems = layers.flatMap((layer) => validateCompositions(layer.map))
+  // A key two packs both define is resolved, not guessed at silently: the
+  // earlier layer wins and the note says which keys were contested, so a floor
+  // that looks wrong can be explained without reading two JSON files.
+  const seen = new Set<string>()
+  const contested: string[] = []
+  for (const layer of layers) {
+    for (const key of Object.keys(layer.map.frames)) {
+      if (seen.has(key)) contested.push(key)
+      else seen.add(key)
+    }
+  }
 
   return {
     installed: true,
     sheets: urls,
-    sheetUrl,
-    map: parsed.map,
+    layers,
+    sheetUrl: first.sheetUrl,
+    map: first.map,
     // The credit rides the same line as the name: a licence term nobody can
     // see is a licence term nobody is honouring.
     note:
-      `tileset: ${parsed.map.name}${parsed.map.credit === undefined ? '' : ` — ${parsed.map.credit}`}` +
+      `tileset: ${layers.map((layer) => `${layer.map.name}${layer.map.credit === undefined ? '' : ` — ${layer.map.credit}`}`).join(' + ')}` +
+      (contested.length === 0
+        ? ''
+        : ` — ${String(contested.length)} key(s) taken from the first pack: ${contested.join(', ')}`) +
+      (refused.length === 0 ? '' : ` — ${refused.length} pack(s) refused: ${refused.join('; ')}`) +
       (problems.length === 0
         ? ''
         : ` — ${String(problems.length)} procedural: ${problems.join('; ')}`)

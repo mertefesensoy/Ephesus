@@ -12,6 +12,7 @@ import {
 } from '../../src/main/agora'
 import { ExecGitRunner, type GitResult, type GitRunner } from '../../src/main/git'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Integration against **real git in temp dirs** (TEST-STRATEGY §2): the
@@ -23,7 +24,7 @@ const BUNDLED_PROMPTS = fileURLToPath(new URL('../../prompts/', import.meta.url)
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempRoot(): string {

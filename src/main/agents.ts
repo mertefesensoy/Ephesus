@@ -106,17 +106,43 @@ export interface AgentWorktrees {
 export type VersionProber = (spec: BinarySpec) => Promise<string | null>
 
 /**
+ * Quotes one word for the Windows shell. `execFile` with `shell` set joins the
+ * command and its arguments into a single *string* for `cmd.exe`, which then
+ * re-splits it on whitespace — so an absolute path like
+ * `C:\Program Files\nodejs\node.exe` runs as `C:\Program` and fails, and an
+ * argument containing a space arrives as two. Node does not quote for you when
+ * `shell` is set; that is the caller's job, and this is the caller.
+ *
+ * Applies to arguments as well as the command, because they go through the same
+ * splitter: an unquoted `hello world` reaches the child as `hello`.
+ *
+ * Only whitespace matters here. A word already carrying its own quotes is left
+ * exactly as the adapter wrote it — re-quoting would break it in the same way
+ * not quoting breaks a bare path.
+ */
+function quoteForShell(word: string): string {
+  if (!/\s/.test(word) || word.startsWith('"')) return word
+  return `"${word}"`
+}
+
+/**
  * Runs the engine's version probe. Contract: never throws — a missing binary and
  * a probe that errors are the same answer (null), because both mean "we cannot
  * confirm the engine is here", and FR-1.6 responds to that with a visible
  * install offer, not a crash.
+ *
+ * Windows needs the shell because an engine CLI is usually a `.cmd` shim, which
+ * `execFile` cannot start directly. That shell is why the command needs
+ * quoting: without it a perfectly present engine probes as absent, and FR-1.6
+ * answers by offering to install a binary that is already on disk.
  */
 export const probeVersion: VersionProber = (spec) =>
   new Promise((resolve) => {
+    const shell = process.platform === 'win32'
     execFile(
-      spec.versionProbe.command,
-      [...spec.versionProbe.args],
-      { timeout: 10_000, windowsHide: true, shell: process.platform === 'win32' },
+      shell ? quoteForShell(spec.versionProbe.command) : spec.versionProbe.command,
+      shell ? spec.versionProbe.args.map(quoteForShell) : [...spec.versionProbe.args],
+      { timeout: 10_000, windowsHide: true, shell },
       (err, stdout) => {
         if (err) {
           resolve(null)
@@ -135,6 +161,17 @@ export interface AgentManagerOptions {
   /** `<harness home>/agora` — where agent directories and PROTOCOL.md live (SDD §2). */
   readonly agoraRoot: string
   readonly probe?: VersionProber
+  /**
+   * The autonomy this agent runs at — the profile's level composed against the
+   * global ceiling (FR-11.1, ADR-0012), or the ceiling alone for an agent on no
+   * profile. Absent means `manual`, which is the direction an unknown must
+   * fail in: an agent nobody placed does not get latitude by default.
+   *
+   * Injected rather than read here, because the composition belongs to the
+   * Watch and a second opinion about it in the spawn path would eventually
+   * disagree with the first — permissively.
+   */
+  autonomyFor?(agentId: string): 'manual' | 'supervised' | 'autonomous' | null
   /** Notified whenever a card changes, for pushing `state:agents` to the renderer. */
   onChange?(card: AgentCard): void
   /**
@@ -182,6 +219,13 @@ export interface AgentManagerOptions {
    * Contract: returns only names present in `declared`; `missing` names a
    * declared grant the broker does not hold, which the caller surfaces.
    */
+  /**
+   * The company's git identity for this spawn (ADR-0022), or null when no
+   * GitHub App is configured. A thunk because the identity is learnt from
+   * GitHub on the first token mint, which may not have happened by the time
+   * the AgentManager is built.
+   */
+  readonly commitIdentity?: () => { readonly name: string; readonly email: string } | null
   resolveGrants?(declared: readonly string[]): {
     readonly env: Record<string, string>
     readonly missing: readonly string[]
@@ -204,6 +248,8 @@ export interface AgentManagerOptions {
    * is composed here rather than in each adapter's deps.
    */
   readonly recallCommand?: string
+  /** `eph-gh-token`, for an agent whose spawn-time token has aged out (ADR-0022). */
+  readonly ghTokenCommand?: string
   /**
    * Git worktree isolation for a spawn that asks for it (UC-01 alternate 2a).
    * Injected rather than imported so the lifecycle never runs git itself —
@@ -227,6 +273,14 @@ export interface AgentManagerOptions {
    * restart would lose the declaration entirely.
    */
   rosterBudget?(agentId: string): number | null
+  /**
+   * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
+   *
+   * Optional so the lifecycle stays constructible without the Watch — and when
+   * it is absent the answer is `false`, which is the honest default: a harness
+   * that cannot see a park must not claim one.
+   */
+  capacityParked?(agentId: string): boolean
 }
 
 interface LiveAgent {
@@ -482,6 +536,10 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
+      commitIdentity: this.options.commitIdentity?.() ?? null,
+      // `manual` when nobody has an opinion: an agent on no profile does not
+      // get latitude by default (FR-11.1's conservative default).
+      autonomy: this.options.autonomyFor?.(request.agentId) ?? 'manual',
       // Empty until `start()`. ADR-0010 injects credentials *at spawn*, and
       // this config is built before the version probe has even run.
       envGrants: {},
@@ -492,7 +550,8 @@ export class AgentManager {
       // process actually starts, and this config is built before the version
       // probe has even run.
       memory: '',
-      recallCommand: this.options.recallCommand ?? ''
+      recallCommand: this.options.recallCommand ?? '',
+      ghTokenCommand: this.options.ghTokenCommand ?? ''
     }
   }
 
@@ -847,7 +906,12 @@ export class AgentManager {
     const offer: RespawnOffer = {
       resumable: agent.adapter.resume !== undefined && agent.sessionIds.length > 0,
       memorySections: this.options.memory?.layer(agentId).facts.totalSections ?? 0,
-      tasksReturned
+      tasksReturned,
+      // Asked, never inferred from the exit code: a provider refusal and a crash
+      // are indistinguishable at the pty seam, and the difference between them
+      // is the difference between "the harness will bring this back" and "a
+      // human needs to look at this".
+      waitingForCapacity: this.options.capacityParked?.(agentId) ?? false
     }
     this.options.onLogEvent?.({
       kind: 'ghost',
@@ -856,7 +920,8 @@ export class AgentManager {
       engine: agent.card.engine,
       resumable: offer.resumable,
       memorySections: offer.memorySections,
-      tasksReturned: [...tasksReturned]
+      tasksReturned: [...tasksReturned],
+      waitingForCapacity: offer.waitingForCapacity
     })
     return offer
   }

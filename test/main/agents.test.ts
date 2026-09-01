@@ -16,6 +16,7 @@ import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claud
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { postHookEvent, buildEnvelope } from '../../shims/hook-client.mjs'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Lifecycle integration on real fs in a temp harness home. The spawner is the
@@ -68,7 +69,7 @@ const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

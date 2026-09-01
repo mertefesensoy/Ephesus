@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
+import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import { gateApproveSchema, type OpenGate } from '../shared/gates'
 import { messageIdSchema, type Message } from '../shared/message'
@@ -22,11 +23,25 @@ import {
 } from '../shared/secrets'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
+import type { HarborView } from '../shared/harbor'
+import type { ShareExport, ShareInspection, ShareInstall } from '../shared/share-view'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
 import type { ModeSet, ModeView } from '../shared/mode-view'
 import { companyModeSchema } from '../shared/mode'
 import { registerDraftSchema, sourceIdSchema, briefIdSchema } from '../shared/stoa'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from '../shared/profile-view'
+import {
+  activationRequestSchema,
+  instanceIdSchema,
+  type ActivationPlanResult,
+  type ActivationRequest
+} from '../shared/profile-activation'
 import type {
   BriefRecord,
   RetroGenerated,
@@ -84,7 +99,17 @@ const gymVerdictSchema = z
 
 const gymSetModeSchema = z.object({ mode: companyModeSchema }).strict()
 
+const profileNamePayloadSchema = z.object({ name: z.string().min(1).max(64) }).strict()
 const stoaIdSchema = z.object({ id: sourceIdSchema }).strict()
+// Sharing payloads (FR-10.4 — M7.6). Validated in main like every other
+// renderer-supplied value (invariant §2). The blob cap is generous but finite:
+// an import is a file somebody else wrote, and an unbounded string from an
+// untrusted source is a denial of service wearing a profile's clothes.
+const hireExportSchema = z
+  .object({ profile: z.string().min(1).max(64), hire: z.string().min(1).max(64) })
+  .strict()
+const profileNameArgSchema = z.object({ name: z.string().min(1).max(64) }).strict()
+const importBlobSchema = z.object({ blob: z.string().min(1).max(2_000_000) }).strict()
 const stoaBriefIdSchema = z.object({ id: briefIdSchema }).strict()
 /**
  * The register payload is the DRAFT and nothing else — no id, no registrar, no
@@ -184,6 +209,8 @@ export interface IpcDeps {
   dismissFromHumanQueue(messageId: string): boolean
   /** Per-agent breaker state (ADR-0011). */
   breakerState(): readonly BreakerState[]
+  /** Who is waiting on provider capacity (`watch/capacity.ts`). */
+  capacity(): CapacityView
   /** Mail waiting for one agent — UI-DESIGN §5.4's desk tray flag (ADR-0013). */
   pendingMailFor(agentId: string): number
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
@@ -225,6 +252,21 @@ export interface IpcDeps {
   stoaBriefs(): readonly BriefView[]
   /** One archived brief's text. */
   stoaBrief(id: string): string | null
+  /** Every profile bundle, valid or not (ADR-0012). */
+  profilesList(): readonly ProfileSummary[]
+  /** One bundle, or every reason it was refused. Reading activates nothing. */
+  profilesInspect(name: string): ProfileLoad
+  /** What activating would do — the screen's source and `activate`'s own. */
+  profilesPreview(request: ActivationRequest): ActivationPlanResult
+  profilesActivate(request: ActivationRequest): Promise<ActivationResult>
+  profilesDeactivate(instanceId: string): { ok: boolean; reason: string | null }
+  profilesInstances(): readonly ProfileInstanceView[]
+  /** What the Harbor holds; reading touches no network (FR-10.1). */
+  harborRepos(): HarborView
+  harborHireExport(profile: string, hire: string): ShareExport
+  harborProfileExport(name: string): ShareExport
+  harborImportInspect(blob: string): ShareInspection
+  harborImportInstall(blob: string): ShareInstall
   /** The org chart, read off the roster (FR-11.5). */
   orgChart(): readonly OrgNode[]
   /** Per-agent metrics, folded from the book of record. */
@@ -282,6 +324,8 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.watchHumanQueue, (): readonly Message[] => deps.humanQueue())
 
   ipcMain.handle(IpcChannels.watchBreaker, (): readonly BreakerState[] => deps.breakerState())
+
+  ipcMain.handle(IpcChannels.watchCapacity, (): CapacityView => deps.capacity())
 
   ipcMain.handle(IpcChannels.watchDismiss, (_ev, raw: unknown): boolean =>
     deps.dismissFromHumanQueue(messageIdPayloadSchema.parse(raw).messageId)
@@ -395,6 +439,54 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.stoaBrief, (_ev, raw: unknown): string | null => {
     const { id } = stoaBriefIdSchema.parse(raw)
     return deps.stoaBrief(id)
+  })
+  // The READ half of SDD §5's `profiles:` group. There is deliberately no
+  // `activate` channel yet (M7.2): a handler that could instantiate a bundle
+  // before the stricter-wins composition exists would be a path to spawning
+  // agents at a profile's own asking-price.
+  ipcMain.handle(IpcChannels.profilesList, (): readonly ProfileSummary[] => deps.profilesList())
+  ipcMain.handle(IpcChannels.profilesInspect, (_ev, raw: unknown): ProfileLoad => {
+    const { name } = profileNamePayloadSchema.parse(raw)
+    return deps.profilesInspect(name)
+  })
+  ipcMain.handle(IpcChannels.profilesPreview, (_ev, raw: unknown): ActivationPlanResult => {
+    return deps.profilesPreview(activationRequestSchema.parse(raw))
+  })
+  ipcMain.handle(
+    IpcChannels.profilesActivate,
+    async (_ev, raw: unknown): Promise<ActivationResult> => {
+      // Validated before anything spawns. The renderer names the target
+      // directory, exactly as it already does for a bare spawn — and exactly
+      // as there, main is the one that checks it.
+      return deps.profilesActivate(activationRequestSchema.parse(raw))
+    }
+  )
+  ipcMain.handle(IpcChannels.profilesDeactivate, (_ev, raw: unknown) => {
+    const { instanceId } = z.object({ instanceId: instanceIdSchema }).strict().parse(raw)
+    return deps.profilesDeactivate(instanceId)
+  })
+  ipcMain.handle(IpcChannels.profilesInstances, (): readonly ProfileInstanceView[] =>
+    deps.profilesInstances()
+  )
+  ipcMain.handle(IpcChannels.harborRepos, (): HarborView => deps.harborRepos())
+  ipcMain.handle(IpcChannels.harborHireExport, (_ev, raw: unknown): ShareExport => {
+    const { profile, hire } = hireExportSchema.parse(raw)
+    return deps.harborHireExport(profile, hire)
+  })
+  ipcMain.handle(IpcChannels.harborProfileExport, (_ev, raw: unknown): ShareExport => {
+    const { name } = profileNameArgSchema.parse(raw)
+    return deps.harborProfileExport(name)
+  })
+  // Reads a blob and returns what importing it WOULD do. Writes nothing and
+  // starts nothing — FR-10.4's "import only pre-fills the spawn form".
+  ipcMain.handle(IpcChannels.harborImportInspect, (_ev, raw: unknown): ShareInspection => {
+    const { blob } = importBlobSchema.parse(raw)
+    return deps.harborImportInspect(blob)
+  })
+  // What a CONFIRMED form reaches. Writes the bundle; does not activate it.
+  ipcMain.handle(IpcChannels.harborImportInstall, (_ev, raw: unknown): ShareInstall => {
+    const { blob } = importBlobSchema.parse(raw)
+    return deps.harborImportInstall(blob)
   })
   ipcMain.handle(IpcChannels.orgChart, (): readonly OrgNode[] => deps.orgChart())
   ipcMain.handle(IpcChannels.orgMetrics, (): RetroView => deps.orgMetrics())

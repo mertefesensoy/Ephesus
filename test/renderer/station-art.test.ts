@@ -18,6 +18,15 @@ import {
 import { compositionFrameFor, frameFor } from '../../src/renderer/src/floor/atlas'
 import { paintFurnishings } from '../../src/renderer/src/floor/painter'
 import { tokens } from '../../src/renderer/src/tokens'
+import type { TilesetLayer } from '../../src/shared/tileset'
+
+/**
+ * One pack, as a layer. The painter takes layers now (a frame index only means
+ * something against its own sheet), so a single-pack test says so explicitly.
+ */
+function asLayer(map: TilesetMap): readonly TilesetLayer[] {
+  return [{ map, sheet: map.sheet, sheetUrl: `mem://${map.sheet}` }]
+}
 
 /**
  * The presentation half of UI-DESIGN §5.4 and §5.7.
@@ -207,8 +216,8 @@ describe('§5.4 compositions ride the pack, and are validated', () => {
 
 describe('§5.7 furnishings are place identity, and static', () => {
   it('paints nothing without a pack', () => {
-    expect(paintFurnishings(null)).toEqual([])
-    expect(paintFurnishings(baseMap())).toEqual([])
+    expect(paintFurnishings([])).toEqual([])
+    expect(paintFurnishings(asLayer(baseMap()))).toEqual([])
   })
 
   it('paints one static blit per placement', () => {
@@ -218,7 +227,7 @@ describe('§5.7 furnishings are place identity, and static', () => {
         { col: 9, row: 5, frame: 41 }
       ]
     })
-    const ops = paintFurnishings(map)
+    const ops = paintFurnishings(asLayer(map))
     expect(ops).toHaveLength(2)
     for (const op of ops) {
       // Blits only — a furnishing that could animate would be the decorative

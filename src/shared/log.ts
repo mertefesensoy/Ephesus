@@ -49,6 +49,16 @@ export const LOG_KINDS = [
   'stoa',
   /** Closing time (GYM-003): begin / ack / complete, with the shortfall named. */
   'shutdown',
+  /**
+   * Provider capacity (`src/shared/capacity.ts`): parked / resuming / cleared.
+   *
+   * Its own kind rather than a `breaker` or an `exit`, because it is neither.
+   * `breaker` is OUR ladder against an agent that is misbehaving; `exit` is a
+   * process that ended. A capacity park is a healthy agent that the provider
+   * declined to serve, and a forensic reader who cannot tell those three apart
+   * cannot reconstruct what the company did (NFR-13).
+   */
+  'capacity',
   'error'
 ] as const
 

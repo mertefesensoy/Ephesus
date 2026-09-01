@@ -9,11 +9,13 @@ import {
   CLAUDE_SETTINGS_BACKUP_REL,
   CLAUDE_SETTINGS_REL,
   ClaudeAdapter,
+  claudePermissionMode,
   mergeClaudeSettings
 } from '../../../src/main/engines/claude'
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig } from '../../../src/main/engines'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * Settings hygiene runs entirely inside temp cwds. Nothing here may touch the
@@ -26,7 +28,7 @@ const BUNDLED_PROMPTS = fileURLToPath(new URL('../../../prompts/', import.meta.u
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {
@@ -66,11 +68,14 @@ function rig(): Rig {
       hookToken: 'spawn-token-1',
       hookEndpoint: '/tmp/eph/events.sock',
       cwd,
+      commitIdentity: null,
+      ghTokenCommand: '',
       envGrants: { GH_TOKEN: 'granted-value' },
       identityPath: path.join(agora, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
       memory: '',
-      recallCommand: ''
+      recallCommand: '',
+      autonomy: 'manual'
     }
   }
 }
@@ -161,8 +166,11 @@ describe('claude adapter — spawn plan (SDD §3)', () => {
     const plan = adapter.spawnArgs(cfg)
 
     expect(plan.argv[0]).toBe('claude')
-    expect(plan.argv[1]).toBe('--append-system-prompt')
-    const appendix = plan.argv[2] ?? ''
+    // By pairing, not by position: argv gained `--permission-mode` at M7.7 and
+    // a positional assertion turned a correct addition into a failure. What
+    // matters is that the flag carries the identity, not where it sits.
+    expect(plan.argv).toContain('--append-system-prompt')
+    const appendix = plan.argv[plan.argv.indexOf('--append-system-prompt') + 1] ?? ''
     expect(appendix).toContain('agent.mason')
     expect(appendix).toContain('Role: ci-babysitter.')
     expect(appendix).toContain('Write only your outbox.')
@@ -383,5 +391,143 @@ describe('claude adapter — the mailbox grant (FR-3.2)', () => {
     ) as Record<string, unknown>
     expect(settings['permissions']).toBeUndefined()
     expect(adapter.id).toBe('claude')
+  })
+})
+
+describe('autonomy reaches the engine as its own permission mode', () => {
+  /**
+   * The harness gates its OWN actions, and `evaluateGate` refuses
+   * `tool-permission` by construction — correctly, since the harness has no
+   * action to permit there; the ENGINE is the thing blocked on a human. So
+   * until this, an Architect who granted a profile full autonomy still answered
+   * "Claude is waiting for your input" every few minutes, and no policy they
+   * could write would stop it.
+   */
+  it('maps each level to the mode that matches it', () => {
+    expect(claudePermissionMode('manual')).toBe('default')
+    expect(claudePermissionMode('supervised')).toBe('acceptEdits')
+    expect(claudePermissionMode('autonomous')).toBe('auto')
+  })
+
+  it('stops at `auto` and never reaches `bypassPermissions`', () => {
+    // The case for autonomy was that a standing policy beats a human who has
+    // stopped reading prompts. That is an argument for a better classifier,
+    // not for switching the classifier off — so the top of the ladder is the
+    // engine's own judgement, not the absence of judgement.
+    const modes = (['manual', 'supervised', 'autonomous'] as const).map(claudePermissionMode)
+    expect(modes).not.toContain('bypassPermissions')
+  })
+
+  it('puts the flag on the command line at spawn', () => {
+    const r = rig()
+    const argv = r.adapter.spawnArgs({ ...r.cfg, autonomy: 'autonomous' }).argv
+    expect(argv[0]).toBe('claude')
+    expect(argv).toContain('--permission-mode')
+    expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('auto')
+  })
+
+  it('asks by default for an agent nobody granted anything', () => {
+    const r = rig()
+    const argv = r.adapter.spawnArgs({ ...r.cfg, autonomy: 'manual' }).argv
+    expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('default')
+  })
+})
+
+/**
+ * The seam, not the two halves.
+ *
+ * `test/main/settings-registry.test.ts` already proves the refcount: three
+ * agents in one working directory, only the last one out restores the file.
+ * But it hand-simulates the merged content as `'{"who":"a+b"}'`, so
+ * `mergeClaudeSettings` never runs in it and nothing there could ever notice
+ * what the merge actually produced. What it produced was every hook registered
+ * once per agent, because the merge base is re-read from disk and agent two
+ * merges into agent one's output rather than into the Architect's.
+ *
+ * That is not a cosmetic duplicate. Claude Code reads the result as a folder
+ * pre-approving a pile of permissions for itself, and answers with a blocking
+ * trust dialog whose highlighted default is "No, exit" — so on a live run all
+ * three crew agents parked on that screen and never opened a session at all.
+ */
+describe('several agents sharing one working directory (live-run regression)', () => {
+  const crew = ['agent.mason', 'agent.smith', 'agent.cooper'] as const
+
+  /** Runs the real merge once per agent, feeding each result to the next. */
+  function mergeForCrew(r: Rig, start: string | null = null): Record<string, never> {
+    let text = start
+    for (const agentId of crew) {
+      const agentDir = path.join(path.dirname(path.dirname(r.cfg.identityPath)), agentId)
+      fs.mkdirSync(agentDir, { recursive: true })
+      fs.writeFileSync(path.join(agentDir, 'identity.md'), `# ${agentId}\n`, 'utf8')
+      text = mergeClaudeSettings(
+        text,
+        {
+          prompts: new PromptStore(path.join(r.cwd, 'home-prompts'), BUNDLED_PROMPTS),
+          hookShimPath: path.join(r.cwd, '..', 'shims', 'eph-hook.mjs')
+        },
+        { ...r.cfg, agentId, identityPath: path.join(agentDir, 'identity.md') }
+      )
+    }
+    return JSON.parse(text as string) as Record<string, never>
+  }
+
+  function agentDirOf(r: Rig, agentId: string): string {
+    return path
+      .join(path.dirname(path.dirname(r.cfg.identityPath)), agentId)
+      .split(path.sep)
+      .join('/')
+  }
+
+  it('registers each hook exactly once, however many agents share the directory', () => {
+    const r = rig()
+    const settings = mergeForCrew(r)
+    const hooks = settings['hooks'] as unknown as Record<string, unknown[]>
+    for (const engineEvent of Object.keys(CLAUDE_HOOK_EVENTS)) {
+      expect(hooks[engineEvent], `${engineEvent} should be installed once`).toHaveLength(1)
+    }
+  })
+
+  it('keeps every agent its own mailbox grant, and no agent two of them', () => {
+    const r = rig()
+    const settings = mergeForCrew(r)
+    const permissions = settings['permissions'] as unknown as {
+      allow: string[]
+      additionalDirectories: string[]
+    }
+    // Seven file tools per agent, three agents, none repeated.
+    expect(permissions.allow).toHaveLength(21)
+    expect(new Set(permissions.allow).size).toBe(21)
+    expect(permissions.additionalDirectories).toHaveLength(3)
+    for (const agentId of crew) {
+      expect(permissions.additionalDirectories).toContain(agentDirOf(r, agentId))
+      expect(permissions.allow).toContain(`Read(${agentDirOf(r, agentId)}/**)`)
+    }
+  })
+
+  it('grows nothing when the same crew is installed again', () => {
+    const r = rig()
+    const once = mergeForCrew(r)
+    const twice = mergeForCrew(r, JSON.stringify(once))
+    expect(twice).toEqual(once)
+  })
+
+  it('leaves the Architect\u2019s own hooks and permissions alone', () => {
+    const r = rig()
+    const theirs = {
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: 'node ./mine.js' }] }]
+      },
+      permissions: { allow: ['Bash(git status)'], additionalDirectories: ['/their/dir'] }
+    }
+    const settings = mergeForCrew(r, JSON.stringify(theirs))
+    const hooks = settings['hooks'] as unknown as Record<string, unknown[]>
+    expect(hooks['SessionStart']).toHaveLength(2)
+    expect(JSON.stringify(hooks['SessionStart'])).toContain('./mine.js')
+    const permissions = settings['permissions'] as unknown as {
+      allow: string[]
+      additionalDirectories: string[]
+    }
+    expect(permissions.allow).toContain('Bash(git status)')
+    expect(permissions.additionalDirectories).toContain('/their/dir')
   })
 })

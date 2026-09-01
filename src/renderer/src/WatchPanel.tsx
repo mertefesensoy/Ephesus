@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { SecretsPanel } from './SecretsPanel'
 import type { BreakerState } from '../../shared/breaker'
 import type { AgentSpend } from '../../shared/cost'
 import { RUNG_NAMES } from '../../shared/breaker'
@@ -187,6 +188,12 @@ export function WatchPanel(): ReactElement {
           ⚠ watch unavailable: {bridge}
         </p>
       )}
+
+      {/* The broker's only surface. It lives in the Watch because the Watch is
+          what already owns it (`src/main/watch/secrets.ts`), and because a
+          credential store nobody can reach is how five hires spent an evening
+          spawning with `grantsMissing: ["GH_TOKEN"]`. */}
+      <SecretsPanel />
 
       <h2 style={heading}>SPEND</h2>
       {state.spend.length === 0 && (

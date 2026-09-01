@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { statSync } from 'node:fs'
 import { app, BrowserWindow, dialog, screen, shell } from 'electron'
 import type { AgentCard } from '../shared/agents'
 import type { AvatarSnapshot } from '../shared/avatar'
@@ -9,6 +10,7 @@ import {
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
+  CAPACITY_STATE_CHANNEL,
   LOG_APPEND_CHANNEL,
   ODEON_QUEUE_CHANNEL,
   TASKS_STATE_CHANNEL,
@@ -17,7 +19,7 @@ import {
 } from '../shared/ipc'
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
-import { Artemis } from './artemis'
+import { Artemis, ARTEMIS_AGENT_ID } from './artemis'
 import { ExecGitRunner, Worktrees } from './git'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
@@ -26,6 +28,17 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
+import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
+import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
+import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
+import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
+import { targetRef, verifierAgentFor } from '../shared/profile-activation'
+import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
+import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
+import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
+import { HireExchange } from './harbor/hires'
+import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
+import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
 import { STOA_EVERY_MS, Stoa } from './stoa'
 import { CompanyModes } from './modes'
 import { stoaCadenceTick } from './stoa-cadence'
@@ -67,15 +80,22 @@ import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { Breaker } from './watch/breaker'
 import { BudgetWatcher } from './watch/budgets'
+import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
+import { UsageWatch } from './watch/usage-watch'
+import { DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
+import { DEFAULT_PACE_THRESHOLDS } from '../shared/pacing'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
+let capacityWatch: CapacityWatch | null = null
+let usageWatch: UsageWatch | null = null
+let wakeClock: WakeClock | null = null
 let gates: GateManager | null = null
 let breaker: Breaker | null = null
 /** SDD §9's choke points, wired once (see `wireGateChokePoints`). */
@@ -101,6 +121,26 @@ let meetings: MeetingDriver | null = null
 let org: OrgLayer | null = null
 let gymnasium: Gymnasium | null = null
 let stoa: Stoa | null = null
+// Profile activations (ADR-0012, M7.2). Late-bound like the rest: the Watch is
+// built before the AgentManager this needs, and the gate seam below reads
+// through the handle rather than capturing a value that does not exist yet.
+let activations: ProfileActivations | null = null
+// The targets already activated once (M7.9). Deliberately separate from
+// `activations`: that Map is what is RUNNING, this file is what has been TYPED,
+// and only the second is worth surviving a restart.
+let knownTargets: KnownTargets | null = null
+// The company's GitHub identity (ADR-0022). Null until boot; `configured()` is
+// false until BOTH github-app.json exists and the broker holds the signing key,
+// so an Ephesus with neither behaves exactly as it did before.
+let companyGitHub: GitHubAppIdentity | null = null
+let companyTokenTimer: NodeJS.Timeout | null = null
+// The Harbor's inbound half (FR-10.1, M7.3). Its registered repositories are the
+// ones the ACTIVE profiles declare in `harbor.json` — the company watches what
+// it was actually pointed at, not a second list that could disagree.
+let harbor: GitHubHarbor | null = null
+let incidents: IncidentEndpoint | null = null
+let frontOffice: FrontOffice | null = null
+let exchange: HireExchange | null = null
 let modes: CompanyModes | null = null
 // The prompt store the memo helpers below render from (invariant §8 keeps
 // every word an agent reads in a file). boot() assigns it before anything
@@ -238,6 +278,16 @@ const hookServer = new HookServer({
       agentManager?.noteSession(envelope.agentId, envelope.sessionId)
     }
 
+    // ADR-0023's wall-clock cap. A wake begins when a prompt is submitted and
+    // ends when the turn stops — the two events that bracket exactly one wake.
+    // `session-end` closes it too, because an agent that exits mid-turn emits
+    // no `stop` and would otherwise leave a timer that fires at an agent which
+    // is no longer there.
+    if (envelope.event === 'prompt-submitted') wakeClock?.began(envelope.agentId)
+    if (envelope.event === 'stop' || envelope.event === 'session-end') {
+      wakeClock?.ended(envelope.agentId)
+    }
+
     // GYM-002: a pending rung-1 steer rides this very boundary. `recordSpan`
     // above already ran the breaker's evaluate for a `post-tool`, so a trip on
     // THIS event is answered on THIS reply — zero added latency. (Non-post-tool
@@ -284,6 +334,37 @@ const hookServer = new HookServer({
   onRecall: (request) => {
     if (!library) throw new Error('recall: the Library is not up yet')
     return library.recall(request.query, request.scope, request.limit)
+  },
+  /**
+   * A fresh GitHub installation token for a still-running agent (ADR-0022).
+   *
+   * Least privilege survives the refresh: the endpoint's own gate is the
+   * per-spawn hook token, which proves only that a live agent is asking. What
+   * decides whether it may HAVE this is the same thing that decided at spawn —
+   * whether its hire declared the grant. Without this check the researcher,
+   * whose spawns are no-secrets by NFR-17, could ask for the company credential
+   * and get it.
+   */
+  onGhToken: (agentId) => {
+    const refuse = (because: string): GhTokenResponse => ({
+      schemaVersion: GH_TOKEN_SCHEMA_VERSION,
+      ok: false,
+      because
+    })
+    let declared: readonly string[]
+    try {
+      declared = agentManager?.card(agentId).envGrants ?? []
+    } catch {
+      return refuse(`no live spawn for "${agentId}"`)
+    }
+    if (!declared.includes(GITHUB_TOKEN_GRANT)) {
+      return refuse(`your role does not declare ${GITHUB_TOKEN_GRANT}`)
+    }
+    const token = companyGitHub?.token() ?? null
+    if (token === null) {
+      return refuse('the company has no current GitHub token — check the Watch for why')
+    }
+    return { schemaVersion: GH_TOKEN_SCHEMA_VERSION, ok: true, token, expiresAt: null }
   },
   onEventError: (err) =>
     reportDegradation(
@@ -572,6 +653,28 @@ async function boot(): Promise<void> {
   // Architect-editable copies (invariant §8).
   const appRoot = app.getAppPath()
   const prompts = new PromptStore(path.join(home.root, 'prompts'), path.join(appRoot, 'prompts'))
+  // Mission profiles (ADR-0012, SDD §2). Two roots, home first: the Architect's
+  // own bundles shadow the built-ins that ship in `profiles/`. Constructed here
+  // and read on demand — the store holds no state and caches nothing, so a
+  // bundle edited on disk is the bundle the next `inspect` reads.
+  // What has been activated before, so the panel offers a target instead of
+  // asking for a long absolute path again after every restart. Read-only to
+  // `list()`; written only by a successful activation below.
+  knownTargets = new KnownTargets(path.join(home.root, KNOWN_TARGETS_REL))
+  const knownTargetsWarning = knownTargets.warning()
+  if (knownTargetsWarning !== null) reportDegradation('profiles', knownTargetsWarning)
+  const profiles = new ProfileStore(
+    path.join(home.root, 'profiles'),
+    path.join(appRoot, 'profiles'),
+    () => knownTargets?.list() ?? []
+  )
+  // Export/import (FR-10.4 — M7.6). Accepted imports land in the HOME profiles
+  // directory, never beside the built-ins: a shared bundle must not be able to
+  // shadow or overwrite one that ships with the app.
+  exchange = new HireExchange({
+    homeProfilesDir: path.join(home.root, 'profiles'),
+    store: profiles
+  })
   promptStore = prompts
 
   // The broker is constructed before anything can spawn: an agent must never
@@ -588,6 +691,53 @@ async function boot(): Promise<void> {
     },
     onDegraded: (detail) => reportDegradation('secrets', detail)
   })
+
+  // The company's GitHub identity (ADR-0022). The signing key comes out of the
+  // broker by name and never leaves this process: it signs a JWT locally, and
+  // only the JWT is sent. What agents receive is an installation token that
+  // expires within the hour, so a leaked credential dies on its own and there
+  // is no long-lived PAT for the Architect to rotate.
+  companyGitHub = new GitHubAppIdentity({
+    configPath: path.join(home.root, 'github-app.json'),
+    privateKey: () => secrets?.grantsFor([GITHUB_APP_KEY_SECRET]).env[GITHUB_APP_KEY_SECRET] ?? null
+  })
+  const companyWarning = companyGitHub.warning()
+  if (companyWarning !== null) reportDegradation('secrets', companyWarning)
+  if (companyGitHub.configured()) {
+    const mintCompanyToken = (): void => {
+      void companyGitHub?.refresh().then((minted) => {
+        if (minted.ok) {
+          // The token is never logged. What is logged is that the company can
+          // act on GitHub and until when — enough to explain a 401 later.
+          const who = companyGitHub?.gitIdentity() ?? null
+          agora?.appendLog({
+            kind: 'remote',
+            source: 'github',
+            event: 'company-token-minted',
+            expiresAt: minted.expiresAt,
+            // Public, and the point of the exercise: if this is null the
+            // company can act on GitHub but its commits carry no author, which
+            // is a different degradation from having no token at all.
+            authorName: who?.name ?? null,
+            authorEmail: who?.email ?? null
+          })
+          if (who === null) {
+            reportDegradation(
+              'secrets',
+              'company GitHub token minted, but the bot identity could not be read — commits will not be authored as the company'
+            )
+          }
+          return
+        }
+        reportDegradation('secrets', `company GitHub identity unavailable: ${minted.because}`)
+      })
+    }
+    mintCompanyToken()
+    // Refreshed well inside the hour, so no spawn is handed a token with only
+    // minutes left — SRS §6.1's window is itself an hour, and a credential
+    // expiring mid-run would present as a permissions bug.
+    companyTokenTimer = setInterval(mintCompanyToken, TOKEN_REFRESH_MS)
+  }
 
   // Undo anything a force-killed run left in somebody else's repository. No
   // agent is live in a process that has just booted, so a recorded file can
@@ -637,6 +787,10 @@ async function boot(): Promise<void> {
       }
       return loaded.policy
     },
+    // ADR-0012's stricter-wins composition, wired into every submission
+    // (FR-11.1, SDD §9). Null for an agent no profile owns, which sends the
+    // decision to the global policy alone — never to a permissive default.
+    profileAutonomy: (agentId, kind) => activations?.autonomyFor(agentId, kind) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
@@ -659,13 +813,20 @@ async function boot(): Promise<void> {
       // agent is never told about is a stall it cannot act on (invariant §7).
       if (gate.memoTrigger !== null) noticeMemoOwed(gate)
     },
-    onSettled: (gate) => {
+    onSettled: (gate, verdict) => {
       // Only when the LAST gate on that agent clears: an agent held behind two
       // gates must not walk back to its desk after the first verdict.
       if (!gates?.isBlocked(gate.agentId)) {
         avatarDirector.apply(gate.agentId, { kind: 'gate-verdict' })
       }
       if (gate.taskId) ledger?.noteGate(gate.taskId, gate.id, false)
+      // UC-10 step 3's other half: an `outbound` gate the Architect decided
+      // releases (or drops) the draft it was holding. `onVerdict` returns false
+      // for a gate that held no draft, so every other gate kind passes through
+      // here untouched.
+      if (gate.kind === 'outbound') {
+        void frontOffice?.onVerdict(gate.id, verdict === 'approved')
+      }
       mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
     },
     // Invariant §8: the words a refusal shows are a prompt surface.
@@ -681,7 +842,36 @@ async function boot(): Promise<void> {
     // gate this app opens is now recorded against the work it blocks, so the
     // `status → done` refusal finally guards a field something fills.
     taskOf: (agentId) => ledger?.boundTaskFor(agentId) ?? null,
-    onError: (detail) => reportDegradation('gates', detail)
+    onError: (detail) => reportDegradation('gates', detail),
+    // The adapter owns the engine's phrasing (NFR-12); core only learns which
+    // of the two situations it was.
+    notificationKind: (agentId, payload) => {
+      try {
+        const card = agentManager?.card(agentId)
+        if (!card) return null
+        return engines.get(card.engine).notificationKind?.(payload) ?? null
+      } catch {
+        // Unknown reads as a permission prompt, which is the safe direction.
+        return null
+      }
+    },
+    autonomyFor: (agentId) =>
+      activations?.autonomyFor(agentId, 'tool-permission') ??
+      loadGatePolicy(gatePolicyPath).policy.autonomy,
+    // Not gated is not unrecorded: an engine prompt the harness declined to put
+    // in front of the Architect still belongs in the book of record, or
+    // "autonomy" becomes a synonym for "unobserved".
+    onUngated: (agentId, kind, message) => {
+      agora?.appendLog({
+        kind: 'gate',
+        event: 'ungated',
+        agentId,
+        gateKind: 'tool-permission',
+        because: kind,
+        what: message
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    }
   })
 
   // The circuit breaker (ADR-0011). Constructed before anything can spawn, so
@@ -774,13 +964,90 @@ async function boot(): Promise<void> {
   costLedger = new CostLedger({
     store: db,
     onFoldRestart: (source) =>
-      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`)
+      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`),
+    // Money the engine reports (ADR-0011 `cost_usd`). Both of these are ways
+    // the dollar figure can be less than the whole truth, and invariant §7 says
+    // a figure that is not the whole truth has to say so where it is shown.
+    onCostRegressed: (source, session, model) =>
+      reportDegradation(
+        'budgets',
+        `cost went backwards for ${model} in session ${session} (${source}); ` +
+          `the transcript was replaced — earlier spend stands, nothing was corrected`
+      ),
+    // The live half of the money figure (the durable half is folded from
+    // cost-state at session end). Read fresh on every call from the file the
+    // status line rewrites — the ledger stores none of it.
+    liveCost: (agent) => usageWatch?.liveCostFor(agent) ?? null,
+    onCostIncomplete: (source) =>
+      reportDegradation(
+        'budgets',
+        `${source}: the engine could not price every model it used; ` +
+          `the cost shown is an understatement, not the full bill`
+      )
   })
+
+  // ADR-0023: the account's usage window, observed by every agent's status
+  // line and read back here. Constructed before anything can spawn, so the
+  // first agent's first render already has somewhere to land.
+  // One report per agent: the windows are account-wide, but the live session
+  // cost is not, and a single shared file would let the last agent to render
+  // claim every other agent's spend.
+  const usageStatusDir = path.join(home.root, 'usage')
+  usageWatch = new UsageWatch({
+    dir: usageStatusDir,
+    thresholds: {
+      ...DEFAULT_PACE_THRESHOLDS,
+      ...(home.config.pacing?.slowAtPercent === undefined
+        ? {}
+        : { slowAtPercent: home.config.pacing.slowAtPercent }),
+      ...(home.config.pacing?.holdAtPercent === undefined
+        ? {}
+        : { holdAtPercent: home.config.pacing.holdAtPercent })
+    },
+    onDegraded: (detail) => reportDegradation('usage', detail),
+    onPaceChange: (verdict, previous) => {
+      // Only transitions reach the book of record, exactly as budget states do:
+      // a company held at `slow` for two hours must not turn log.jsonl into a
+      // metronome (SDD §4.3).
+      agora?.appendLog({
+        kind: 'budget',
+        event: 'pace',
+        pace: verdict.pace,
+        because: verdict.because,
+        from: previous?.pace ?? null,
+        window: verdict.tightest?.window ?? null,
+        usedPercent: verdict.tightest?.usedPercent ?? null,
+        projectedPercent: verdict.tightest?.projectedPercent ?? null,
+        resetsAt: verdict.resetsAt
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`pace ${verdict.pace} (${verdict.because})`)
+      // Anything but full speed is a degradation the Architect must be able to
+      // see, or a paced company is indistinguishable from a hung one.
+      if (verdict.pace !== 'full') {
+        const tight = verdict.tightest
+        reportDegradation(
+          'usage',
+          tight
+            ? `company pacing ${verdict.pace}: ${tight.window} window at ${Math.round(
+                tight.usedPercent
+              )}%, resets ${new Date(tight.resetsAt).toISOString()}`
+            : `company pacing ${verdict.pace} (${verdict.because})`
+        )
+      }
+    }
+  })
+  usageWatch.start()
 
   engines.register(
     new ClaudeAdapter({
       prompts,
       hookShimPath: path.join(appRoot, 'shims', 'eph-hook.mjs'),
+      // The statusline observation point (ADR-0023). Installed alongside the
+      // hooks because it rides the same settings file and the same backup and
+      // uninstall path — nothing new has to be cleaned up on the way out.
+      usageShimPath: path.join(appRoot, 'shims', 'eph-usage.mjs'),
+      usageStatusDir,
       settingsRegistry: db
     })
   )
@@ -1162,10 +1429,200 @@ async function boot(): Promise<void> {
     }
   })
 
+  // The Harbor's incident endpoint (FR-9.2, UC-09, SDD §7.5 — M7.4).
+  // Constructed here, before Hermes, for the same reason closing time is: the
+  // router hands triage reports to it. It never writes `tasks.json` — it mails
+  // Artemis, and the task is hers to propose (FR-5.2).
+  incidents = new IncidentEndpoint({
+    bindings: () =>
+      (activations?.instances() ?? []).flatMap((instance) =>
+        instance.plan.triggers
+          // On the machine-readable binding, never on `when` — `when` renders
+          // "on ci" for display, and filtering it as 'ci' is what silently
+          // dropped every CI failure as `incident-unclaimed` on the first real
+          // repository this was pointed at.
+          .filter((trigger) => trigger.event === 'ci')
+          .map((trigger) => ({
+            instanceId: instance.instanceId,
+            agentId: trigger.agentId,
+            playbook: trigger.playbook,
+            repos: instance.plan.repos
+          }))
+      ),
+    orchestratorId: () => agora?.registry().orchestratorId ?? ARTEMIS_AGENT_ID,
+    // What the ledger actually holds, so a triage report cannot claim a task
+    // that does not exist. Undefined when no ledger is up: an unverifiable
+    // claim is let through rather than refused by a check that could not run.
+    taskIds: () => (ledger?.tasks().tasks ?? []).map((row) => row.id),
+    // Who reads a root cause back against the repository it describes.
+    //
+    // The rule itself is `verifierAgentFor` — a pure function over the same
+    // activation plan the Architect approved, so it is reachable by a test
+    // rather than copied into one. Picking "some other live agent" here was the
+    // alternative and would have made the second opinion arrive from whoever
+    // happened to be idle, which is availability, not independence.
+    verifierFor: ({ incident, reportedBy }) =>
+      verifierAgentFor(activations?.instances() ?? [], incident.instanceId, reportedBy),
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`incident ${String(draft['event'] ?? 'event')}`)
+    },
+    // UC-09 step 4's announcement has no delivery leg: M6.9 is deferred and the
+    // Herald has no production caller. The obligation surfaces as a visible
+    // degradation (invariant §7) instead of being quietly dropped.
+    onUnmetObligation: (what) => reportDegradation('incident', what),
+    onEscalateNow: (incident, report) => {
+      // UC-09 step 4's "UC-08 escalation with an incident summary", through
+      // SDD §9's `needs_human` choke point — the surface that already exists
+      // and is already wired to the approvals queue. The summary is the
+      // AGENT'S sentence, not one composed here.
+      chokePoints?.submitNeedsHuman({
+        from: incident.agentId,
+        subject: `severity-1 incident ${incident.key}: ${report.summary}`,
+        conversation: incident.key
+      })
+    }
+  })
+
+  // The Front Office's outbound desk (FR-9.3, UC-10 step 3 — M7.5). The
+  // autonomy it reads is the COMPOSED one the Watch already computed, so a
+  // profile's request has been clamped against the global ceiling before it
+  // gets here and there is no second opinion about it in this file.
+  frontOffice = new FrontOffice({
+    outboundAutonomy: (agentId) => activations?.autonomyFor(agentId, 'outbound') ?? null,
+    openGate: (request) => {
+      // UC-08's four-part packaging. The facts are the harness's; every word
+      // around them is a prompt surface (invariant §8), because this is the
+      // text the Architect reads when deciding whether the company speaks.
+      const vars = {
+        key: request.key,
+        repo: request.draft.repo,
+        target: request.draft.target,
+        ref: String(request.draft.ref),
+        body: request.draft.body
+      }
+      const outcome = gates?.submit({
+        kind: 'outbound',
+        agentId: request.agentId,
+        packaging: {
+          what: prompts.render(path.join('watch', 'outbound-what.md'), vars).trim(),
+          why: prompts.render(path.join('watch', 'outbound-why.md'), vars).trim(),
+          blastRadius: prompts.render(path.join('watch', 'outbound-blast.md'), vars).trim(),
+          rollback: prompts.render(path.join('watch', 'outbound-rollback.md'), vars).trim()
+        }
+      })
+      return outcome?.held === true ? outcome.gate.id : null
+    },
+    post: (permit) =>
+      harbor?.postComment(permit) ?? Promise.resolve({ ok: false, because: 'no harbor' }),
+    deliver: (message) => hermes?.deliverFromHarness(message),
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    }
+  })
+
+  // ADR-0023's second, independent limit: a wake that runs too long in
+  // WALL-CLOCK time is ended, whatever it cost in tokens. Constructed here,
+  // beside Hermes, because Hermes issues the wakes this bounds.
+  wakeClock = new WakeClock({
+    capMs: home.config.pacing?.wakeCapMs ?? DEFAULT_WAKE_CAP_MS,
+    interrupt: (agentId) => {
+      try {
+        agentManager?.interrupt(agentId)
+      } catch (err) {
+        reportDegradation('usage', `wake-cap interrupt failed for ${agentId}: ${String(err)}`)
+      }
+    },
+    onOvertime: (agentId, ranMs, capMs) => {
+      agora?.appendLog({
+        kind: 'budget',
+        event: 'wake-overtime',
+        agentId,
+        ranMs: Math.round(ranMs),
+        capMs
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`wake cap reached for ${agentId}`)
+      reportDegradation(
+        'usage',
+        `${agentId} ran one wake for ${Math.round(ranMs / 1000)}s (cap ${Math.round(
+          capMs / 1000
+        )}s); the turn was interrupted`
+      )
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
+    // ADR-0023. The pace is computed fresh from the last observation and the
+    // clock at the moment it is asked, so a window that reset a second ago
+    // frees the company on the very next wake — the Architect's "if the weekly
+    // limit is reset it will march forward".
+    pace: () => usageWatch?.verdict().pace ?? 'full',
+    ...(home.config.pacing?.slowWakeGapMs === undefined
+      ? {}
+      : { slowWakeGapMs: home.config.pacing.slowWakeGapMs }),
+    onWakeDeferred: (agentId, detail) =>
+      reportDegradation(
+        'usage',
+        `${agentId}: wake deferred (${detail.pace}), ${detail.pendingMail} message(s) still waiting${
+          Number.isFinite(detail.waitMs) ? ` — ${Math.round(detail.waitMs / 1000)}s to go` : ''
+        }`
+      ),
     closing: (message) => closingTime?.noteReply(message) ?? false,
+    // One address, two filings — the ADR-0008 pattern the Odeon endpoint
+    // already uses. The Harbor is one subsystem (everything in and out), and
+    // giving incidents and outbound drafts separate reserved ids would put two
+    // harness identities where the design has one. Dispatch is on the subject
+    // the agent wrote, and an unrecognised one is refused rather than guessed.
+    /**
+     * A crew member reporting on a scheduled sweep (ADR-0012 triggers).
+     *
+     * Recorded, not adjudicated: the trigger asked for work, not for a
+     * decision. Until this existed the reply bounced, so the sweeps happened
+     * and the company never heard the result — the same silence that made the
+     * live run's action half so hard to read.
+     */
+    profiles: (message) => {
+      agora?.appendLog({
+        kind: 'profile',
+        // A sweep that was REFUSED is not a sweep that reported, and the log
+        // has to be able to tell them apart. "skipped, the workspace was
+        // locked" is the most useful thing a scheduled duty can say, and until
+        // the endpoint accepted a `refuse` at all it was the one answer that
+        // bounced — so the distinction had never had to exist.
+        event: message.act === 'refuse' ? 'sweep-refused' : 'sweep-reported',
+        act: message.act,
+        agentId: message.from,
+        subject: message.subject.slice(0, 200),
+        summary: message.body.slice(0, 2000)
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`sweep report from ${message.from}`)
+      return true
+    },
+    harbor: (message) => {
+      if (message.subject === OUTBOUND_SUBJECT) {
+        if (frontOffice === null) return false
+        void frontOffice.onDraft(message)
+        return true
+      }
+      if (incidents === null) return false
+      // A verdict on a root cause is not a triage report and must not be
+      // parsed as one. The endpoint answers the sender either way; what this
+      // branch decides is WHICH conversation the message belongs to.
+      if (message.subject === VERDICT_SUBJECT) {
+        incidents.onVerdict(message)
+        return true
+      }
+      incidents.onTriage(message)
+      return true
+    },
     ledger: (message) => ledger?.submit(message) ?? { ok: false, reasons: ['no ledger endpoint'] },
     // ADR-0008 filing endpoint. One address, three filings: the archive is one
     // subsystem, and giving each artifact its own reserved id would put three
@@ -1264,7 +1721,18 @@ async function boot(): Promise<void> {
         'hermes',
         `sweep failed: ${err instanceof Error ? err.message : String(err)}`
       ),
-    onRejected: ({ file, reason }) => reportDegradation('hermes', `rejected ${file}: ${reason}`)
+    // The author is told directly (Hermes returns the refusal to whoever wrote
+    // the file), so the Architect-facing report exists to catch the case the
+    // author CANNOT be told about — the only path by which an agent's work can
+    // still end in silence, and therefore the one worth naming out loud
+    // (invariant §7).
+    onRejected: ({ file, reason, notice }) =>
+      reportDegradation(
+        'hermes',
+        notice
+          ? `rejected ${file}: ${reason}`
+          : `rejected ${file} with no author to tell: ${reason}`
+      )
   })
   hermes.start()
 
@@ -1274,11 +1742,23 @@ async function boot(): Promise<void> {
     spawner: ptyManager,
     prompts,
     agoraRoot: agora.root,
+    // The composed answer the Watch already computes for `tool-permission` —
+    // the class that IS the engine's own permission prompt. Adapters turn it
+    // into whatever their engine calls "ask me less", which is the only place
+    // that prompt can be answered: `evaluateGate` refuses `tool-permission` by
+    // construction, because the harness has no action to permit there.
+    autonomyFor: (agentId) =>
+      activations?.autonomyFor(agentId, 'tool-permission') ??
+      loadGatePolicy(gatePolicyPath).policy.autonomy,
     onExitError: (agentId, err) =>
       reportDegradation(
         'agents',
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    // A ghost that was parked did not crash. Asked rather than inferred from
+    // the exit code, because a provider refusal and a crash look identical at
+    // the pty seam — and the difference is whether a human needs to do anything.
+    capacityParked: (agentId) => capacityWatch?.parked(agentId) !== null,
     rosterBudget: (agentId) => {
       try {
         return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
@@ -1306,6 +1786,7 @@ async function boot(): Promise<void> {
     // ADR-0006 layer 2: how an agent asks what the company knows. Harness-owned
     // and engine-independent, so every adapter merely forwards it.
     recallCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-recall.mjs')}`,
+    ghTokenCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-gh-token.mjs')}`,
     // ADR-0006 layer 1: what an agent remembers reaches its next spawn through
     // the Library, budgeted there rather than by whichever adapter runs it.
     memory: {
@@ -1324,8 +1805,19 @@ async function boot(): Promise<void> {
       create: (plan) => worktrees.create(plan),
       remove: (repo, worktreePath) => worktrees.remove(repo, worktreePath)
     },
-    resolveGrants: (declared) =>
-      secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
+    commitIdentity: () => companyGitHub?.gitIdentity() ?? null,
+    // The broker answers first: an Architect who stored a GH_TOKEN by hand
+    // meant it, and a minted token silently overriding it would make the stored
+    // one impossible to test. The App fills the gap rather than taking over.
+    resolveGrants: (declared) => {
+      const fromBroker = secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] }
+      const minted = companyGitHub?.token() ?? null
+      if (minted === null || !fromBroker.missing.includes(GITHUB_TOKEN_GRANT)) return fromBroker
+      return {
+        env: { ...fromBroker.env, [GITHUB_TOKEN_GRANT]: minted },
+        missing: fromBroker.missing.filter((name) => name !== GITHUB_TOKEN_GRANT)
+      }
+    },
     onGrantsMissing: (agentId, missing) =>
       reportDegradation(
         'secrets',
@@ -1381,6 +1873,10 @@ async function boot(): Promise<void> {
           .finally(() => {
             costLedger?.clearSession(card.agentId)
             budgetWatcher?.forget(card.agentId)
+            // NOT `capacityWatch.forget` — deliberately. An exit during a park
+            // is a parked agent whose process died, and it is still owed a
+            // continuation when capacity returns (`onResume` then takes the
+            // respawn path). Forgetting here is how the agent would be lost.
           })
       }
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
@@ -1398,6 +1894,106 @@ async function boot(): Promise<void> {
 
   // Spend is folded on a timer, not per hook: it is not a real-time quantity,
   // and a fold per tool call would re-read every transcript dozens of times a
+  // Profile activation (ADR-0012, FR-9.4, M7.2). Built after the AgentManager
+  // because it spawns through it, and after the scheduler because it arms
+  // triggers on it. Every judgment it makes — the plan, the composed autonomy —
+  // is `activationPlan`'s and was shown to the Architect before this ran.
+  activations = new ProfileActivations({
+    store: profiles,
+    globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
+    spawn: (request) => {
+      if (agentManager === null) return Promise.reject(new Error('agents: not started'))
+      return agentManager.spawn(request)
+    },
+    kill: (agentId) => agentManager?.kill(agentId),
+    addTrigger: (trigger) => scheduler.add(trigger),
+    removeTrigger: (triggerId) => scheduler.remove(triggerId),
+    targetExists: (target) => {
+      try {
+        return statSync(target).isDirectory()
+      } catch {
+        return false
+      }
+    },
+    onLogEvent: (draft) => {
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`profile ${String(draft['event'] ?? 'event')}`)
+    },
+    onTriggerFired: (instanceId, triggerId, agentId, playbook) => {
+      // SDD §7.5's first arrow: a profile trigger becomes work for the agent
+      // it names. The playbook is handed over as a REFERENCE — the harness
+      // never reads a runbook and never summarizes one (ADR-0005, ADR-0012).
+      agora?.appendLog({
+        kind: 'profile',
+        event: 'trigger-fired',
+        instanceId,
+        triggerId,
+        agentId,
+        playbook
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+
+      // …and the agent is actually told. Logging the fire and stopping there
+      // would leave the health watcher and the dependency updater spawned and
+      // never asked for anything — two of FR-9.2's four components inert
+      // behind a green suite, which is the one failure mode this build has
+      // already paid for once.
+      const instance = activations
+        ?.instances()
+        .find((candidate) => candidate.instanceId === instanceId)
+      hermes?.deliverFromHarness(
+        triggerWakeMessage(
+          {
+            instanceId,
+            triggerId,
+            agentId,
+            playbook,
+            profile: instance?.plan.profile ?? instanceId,
+            targetPath: instance?.plan.targetPath ?? ''
+          },
+          (kind, vars) => prompts.render(path.join('profiles', `trigger-${kind}.md`), vars),
+          new Date()
+        )
+      )
+    }
+  })
+
+  harbor = new GitHubHarbor({
+    repos: () => [
+      ...new Set((activations?.instances() ?? []).flatMap((instance) => instance.plan.repos))
+    ],
+    onLogEvent: (draft) => {
+      // FR-10.3: every inbound item lands in `log.jsonl` tagged `remote`.
+      agora?.appendLog(draft)
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    },
+    onDegraded: (what) => reportDegradation('harbor', what)
+  })
+  // The probe first (ADR-0009's subprocess discipline): until `gh` answers,
+  // the Harbor reports itself unavailable rather than returning empty queues
+  // that would read as "nothing to do".
+  void harbor.probe().then(() => harbor?.ingest())
+  scheduler.add({
+    id: 'harbor-github',
+    everyMs: HARBOR_INGEST_EVERY_MS,
+    // Only when something is actually watching a repository. An ingestion
+    // cadence that ran against an empty list would still shell out to `gh`
+    // every ten minutes for nothing.
+    enabled: () => (activations?.instances() ?? []).some((i) => i.plan.repos.length > 0),
+    run: async () => {
+      const view = await harbor?.ingest()
+      if (view === undefined) return
+      // UC-09 step 1, wired: what came in through the port becomes an incident
+      // for whoever is on call for that repository. Only repositories that
+      // actually ANSWERED — `ingest` deliberately keeps a failed repo's stale
+      // queue rather than blanking it (so a blind repo and an idle one do not
+      // look alike), and re-raising yesterday's items because `gh` is down
+      // would wake the crew for news that is not new.
+      incidents?.raise(view.repos.filter((row) => row.failure === null).flatMap((row) => row.items))
+    }
+  })
+
   // minute for a figure nobody reads that often (SDD §11).
   budgetWatcher = new BudgetWatcher({
     ledger: costLedger,
@@ -1426,21 +2022,173 @@ async function boot(): Promise<void> {
       if (verdict.state !== 'ok') {
         reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
       }
-      // SDD §9 choke point 3: spend is a harness-mediated action, so continuing
-      // past a budget is the Architect's call, not the agent's.
-      // Trip signal #4 (ADR-0011): the budget feeds the breaker directly.
+      // Trip signal #4 (ADR-0011): the budget feeds the breaker, and the
+      // breaker IS the enforcement — steer, then constrain (which halves the
+      // remaining budget), then stop, whose terminus the ADR gives as "Artemis
+      // decides reassignment".
+      //
+      // A breach no longer also opens a gate, and that is a correction rather
+      // than a loosening. ADR-0011 never specified one: the gate came from
+      // FR-11.1's "spend above threshold", whose threshold is the POLICY's
+      // `maxSpendTokens` — wiring a hire's `dailyTokens` to it conflated two
+      // different numbers. And the gate never stopped any spending: it
+      // discarded `submit()`'s answer, so it moved an avatar and interrupted a
+      // human while the agent carried on regardless. On the live run it fired
+      // for all three crew inside a minute, which is a limit behaving as a
+      // notification.
       breaker?.evaluate(agentId)
-      if (verdict.state === 'breached' || verdict.state === 'projected-breach') {
-        chokePoints?.submitSpend(
-          agentId,
-          verdict.spent,
-          verdict.state === 'breached' ? 'is exhausted' : 'is projected to be exhausted'
-        )
-      }
     },
     onDegraded: (detail) => reportDegradation('budgets', detail)
   })
   budgetWatcher.start()
+
+  // Provider capacity (`watch/capacity.ts`). Built beside the budget watcher
+  // and deliberately NOT inside it: they read the same transcripts to answer
+  // opposite questions, and this one must keep answering while a parked agent's
+  // spend has stopped changing.
+  //
+  // Nothing here kills, ghosts, or restarts on a refusal. A usage limit is a
+  // normal event in the life of a company meant to run for days — the correct
+  // response is to stop asking, say so where the Architect can see it, and come
+  // back. Every act below is one of those three.
+  /**
+   * The continuation an agent reads when capacity returns (invariant §8: the
+   * words are a file the Architect can edit, never a literal here).
+   *
+   * Returns null when the template will not read, and the caller then continues
+   * NOTHING rather than inventing a sentence. A resume prompt the harness made
+   * up is a resume prompt nobody reviewed, and this one tells an agent what to
+   * do with half-finished work.
+   */
+  const capacityResumeText = (detail: string): string | null => {
+    try {
+      return prompts.render(path.join('watch', 'capacity-resume.md'), { detail }).trim()
+    } catch (err) {
+      reportDegradation(
+        'capacity',
+        'the capacity resume prompt is unreadable, so no agent will be continued: ' +
+          `${err instanceof Error ? err.message : String(err)}`
+      )
+      return null
+    }
+  }
+
+  capacityWatch = new CapacityWatch({
+    agents: () => agentManager?.liveSpawns() ?? [],
+    alive: (agentId) => ptyManager.has(agentId),
+    onPark: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'parked',
+        agentId: row.agentId,
+        limitKind: row.limit.kind,
+        // The engine's own sentence, verbatim: "out of usage credits" and "rate
+        // limited" want different things from a human, and a harness that
+        // paraphrased them would erase that difference.
+        detail: row.limit.detail,
+        recordId: row.limit.recordId,
+        sessionId: row.limit.sessionId,
+        at: row.limit.at,
+        resetsAt: row.limit.resetsAt,
+        attempts: row.attempts,
+        retryAt: row.retryAt,
+        processAlive: row.processAlive
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity parked ${row.agentId}`)
+      // Invariant §7. A pause nobody can see is the failure mode this whole
+      // system is built against, so it goes to the degradation banner as well
+      // as to the strip.
+      reportDegradation(
+        'capacity',
+        `${row.agentId} is waiting for provider capacity — ${row.limit.detail}`
+      )
+      // Mail stops rather than piling into a session that cannot answer it. It
+      // is a pause, not a discard: the mailbox keeps everything and Hermes
+      // resumes delivering when the park clears.
+      hermes?.setPaused(row.agentId, true)
+      // FR-5.4's ladder counts crashes and ends. A refusal is not a crash, and
+      // restarting into one cannot succeed — every rung it burned would be a
+      // rung missing for the real crash later.
+      artemis?.holdForCapacity()
+    },
+    onResume: (row) => {
+      const text = capacityResumeText(row.limit.detail)
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'resuming',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        // Which of the two continuations ran. They are not equivalent and the
+        // book of record must not imply they are: one carries the live
+        // conversation, the other carries the engine session it was resumed
+        // onto (ADR-0009 `resume`).
+        via: row.processAlive ? 'live-session' : 'respawn',
+        waitedMs: Date.parse(row.retryAt) - Date.parse(row.since),
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity resume ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      if (row.processAlive) {
+        // The process never died, so there is nothing to restart: the agent is
+        // talked to, in the conversation it was already having. This is the
+        // strongest form of "continue where you left off" available — no new
+        // session, no re-injected identity, no lost context.
+        if (text === null) return
+        try {
+          commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not continue ${row.agentId}: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+        return
+      }
+      // The process did not survive the wait. Now — and only now — the existing
+      // resume path runs: `--resume <sessionId>` through `AgentManager.respawn`
+      // (ADR-0009 `ResumeSupport`), the same machinery crash recovery uses.
+      void (async (): Promise<void> => {
+        try {
+          await agentManager?.respawn(row.agentId)
+          // The continuation follows the respawn rather than riding it: the
+          // engine session carries what the agent was doing, and this says what
+          // to do about it. Held by the command queue until the fresh session
+          // reports idle, which is exactly when it can be read.
+          if (text !== null) commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not respawn ${row.agentId} after capacity returned: ` +
+              `${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })()
+    },
+    onClear: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'cleared',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        since: row.since,
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity cleared ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      // The ladder is only released once NOBODY is parked: releasing it while
+      // another agent is still refused would let the next exit spend a rung on
+      // the same limit this hold exists to absorb.
+      if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
+    },
+    onDegraded: (detail) => reportDegradation('capacity', detail)
+  })
+  capacityWatch.start()
 
   // FR-5.1/5.4: Artemis is hired like any other agent — this module owns her
   // lifecycle and nothing about what she decides (ADR-0005).
@@ -1480,6 +2228,7 @@ async function boot(): Promise<void> {
     gates,
     humanQueue: () => hermes?.humanQueue() ?? [],
     dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
+    capacity: () => capacityWatch?.view() ?? { parked: [], since: null, retryAt: null },
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')
@@ -1619,6 +2368,99 @@ async function boot(): Promise<void> {
       stoa?.retire(id, 'architect') ?? { ok: false, reason: 'the stoa is not available' },
     stoaBriefs: () => (stoa?.briefs() ?? []).map((row) => ({ ...row })),
     stoaBrief: (id) => stoa?.brief(id) ?? null,
+    profilesList: () => profiles.list(),
+    profilesInspect: (name) => profiles.load(name),
+    // `activations` is built in boot() before IPC is registered; the fallbacks
+    // are what a caller gets if that order ever changes — a refusal that names
+    // the reason, never a silent success or a crash mid-activation.
+    profilesPreview: (request) =>
+      activations?.preview(request) ?? { ok: false, reasons: ['profiles: not started'] },
+    // Remembered on success only: a chip that reproduces the Architect's own
+    // failed attempt is worse than an empty form.
+    profilesActivate: async (request) => {
+      // ADR-0021: the Architect's activation is the consent, and it is recorded
+      // in the engine's own trust store BEFORE the crew is hired — the prompt it
+      // answers appears before any session begins, so an agent that meets it has
+      // no hook to report with and simply parks forever. Logged either way:
+      // pre-trusting must never be a thing that happened quietly.
+      for (const adapter of engines.list()) {
+        if (!adapter.trustWorkspace) continue
+        const trusted = adapter.trustWorkspace(request.target.path)
+        agora?.appendLog({
+          kind: 'profile',
+          event: 'workspace-trusted',
+          engine: adapter.id,
+          target: targetRef(request.target),
+          ...(trusted.ok
+            ? { granted: !trusted.alreadyTrusted, path: trusted.path }
+            : { granted: false, because: trusted.because })
+        })
+        if (!trusted.ok) {
+          reportDegradation('profiles', `${adapter.id}: workspace not trusted — ${trusted.because}`)
+        }
+      }
+      const result = await (activations?.activate(request) ??
+        Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }))
+      if (result.ok) {
+        try {
+          knownTargets?.remember(request, new Date().toISOString())
+        } catch (err) {
+          // The activation succeeded; failing to write a convenience list must
+          // not turn that into a refusal the Architect has to reason about.
+          reportDegradation(
+            'profiles',
+            `known-targets.json not written: ${
+              err instanceof Error ? err.message.split('\n')[0] : String(err)
+            }`
+          )
+        }
+      }
+      return result
+    },
+    profilesDeactivate: (instanceId) =>
+      activations?.deactivate(instanceId) ?? { ok: false, reason: 'profiles: not started' },
+    profilesInstances: () => activations?.instances() ?? [],
+    harborRepos: () =>
+      harbor?.view() ?? {
+        schemaVersion: HARBOR_SCHEMA_VERSION,
+        ghVersion: null,
+        unavailable: 'the Harbor has not started',
+        repos: []
+      },
+    // Sharing (FR-10.4 — M7.6). `inspect` writes nothing; `install` writes
+    // files and does NOT activate — an imported profile is inert until the
+    // Architect activates it through `profiles:activate`.
+    harborHireExport: (profile, hire) =>
+      exchange?.exportHire(profile, hire) ?? { ok: false, reason: 'no profile store' },
+    harborProfileExport: (name) =>
+      exchange?.exportProfile(name) ?? { ok: false, reason: 'no profile store' },
+    harborImportInspect: (blob) => {
+      const inspected = exchange?.inspect(blob)
+      if (inspected === undefined) return { ok: false, reasons: ['no profile store'] }
+      if (!inspected.ok) return { ok: false, reasons: inspected.reasons }
+      return {
+        ok: true,
+        kind: inspected.manifest.kind,
+        // The RECOMPUTED manifest, never the one the envelope carried: what
+        // the Architect confirms against has to be derived from the payload.
+        manifest: inspected.manifest,
+        replaces: inspected.replaces
+      }
+    },
+    harborImportInstall: (blob) => {
+      const result = exchange?.install(blob)
+      if (result === undefined) return { ok: false, reasons: ['no profile store'] }
+      if (result.ok) {
+        agora?.appendLog({
+          kind: 'profile',
+          event: 'imported',
+          profile: result.name,
+          replaced: result.replaced
+        })
+        mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      }
+      return result
+    },
     orgChart: () => (org === null || agora === null ? [] : orgChartOf(agora.registry())),
     orgMetrics: () => {
       const report = org?.report() ?? {
@@ -1787,7 +2629,14 @@ function teardown(): void {
       avatarDirector.stop()
       hermes?.stop()
       scheduler.stop()
+      if (companyTokenTimer !== null) {
+        clearInterval(companyTokenTimer)
+        companyTokenTimer = null
+      }
       budgetWatcher?.stop()
+      capacityWatch?.stop()
+      usageWatch?.stop()
+      wakeClock?.stop()
       ptyManager.killAll()
       hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
       void agora?.drained().finally(() => db?.close())
@@ -1798,6 +2647,9 @@ function teardown(): void {
     hermes?.stop()
     scheduler.stop()
     budgetWatcher?.stop()
+    capacityWatch?.stop()
+    usageWatch?.stop()
+    wakeClock?.stop()
     ptyManager.killAll()
     hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
     db?.close()

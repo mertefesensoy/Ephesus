@@ -9,6 +9,11 @@ import {
   type HookEnvelope
 } from '../shared/hooks'
 import {
+  GH_TOKEN_ENDPOINT_PATH,
+  ghTokenRequestSchema,
+  type GhTokenResponse
+} from '../shared/gh-token'
+import {
   RECALL_ENDPOINT_PATH,
   recallRequestSchema,
   type RecallRequest,
@@ -109,6 +114,12 @@ export interface HookServerOptions {
    * owns: the one 0600 socket and the per-spawn token registry.
    */
   onRecall?(request: RecallRequest): RecallResponse | Promise<RecallResponse>
+  /**
+   * Hands a running agent a fresh GitHub installation token (ADR-0022).
+   * Absent when no company identity is configured, which the endpoint reports
+   * as a refusal with a reason rather than as a 404.
+   */
+  onGhToken?(agentId: string): GhTokenResponse | Promise<GhTokenResponse>
   /** Largest body the endpoint will read; anything larger is refused. */
   maxBodyBytes?: number
 }
@@ -204,7 +215,8 @@ export class HookServer {
 
   private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
     const recall = req.method === 'POST' && req.url === RECALL_ENDPOINT_PATH
-    if (!recall && (req.method !== 'POST' || req.url !== HOOK_ENDPOINT_PATH)) {
+    const ghToken = req.method === 'POST' && req.url === GH_TOKEN_ENDPOINT_PATH
+    if (!recall && !ghToken && (req.method !== 'POST' || req.url !== HOOK_ENDPOINT_PATH)) {
       this.reject(res, {
         reason: `unexpected ${req.method ?? 'request'} ${req.url ?? ''}`,
         agentId: null,
@@ -236,7 +248,11 @@ export class HookServer {
       // Nobody awaits this handler; its failure must be a reported degradation,
       // never an unhandledRejection in the main process.
       const body = Buffer.concat(chunks).toString('utf8')
-      const done = recall ? this.answerRecall(body, res) : this.accept(body, res)
+      const done = recall
+        ? this.answerRecall(body, res)
+        : ghToken
+          ? this.answerGhToken(body, res)
+          : this.accept(body, res)
       done.catch((err: unknown) => this.options.onEventError?.(err))
     })
   }
@@ -314,6 +330,67 @@ export class HookServer {
    * company knows nothing (invariant §7). So every failure here answers with a
    * reason the shim prints.
    */
+  /**
+   * Hands a running agent a fresh GitHub installation token (ADR-0022).
+   *
+   * Gated exactly as `/recall` is — the per-spawn token, which only a live
+   * process started by this harness holds. What it adds is that the answer IS a
+   * credential, so the refusal path matters more than usual: a refusal never
+   * carries a token, and the reason is written for the agent that must act on
+   * it rather than for a log reader.
+   */
+  private async answerGhToken(body: string, res: http.ServerResponse): Promise<void> {
+    let raw: unknown
+    try {
+      raw = JSON.parse(body)
+    } catch {
+      this.reject(res, { reason: 'body is not valid JSON', agentId: null, status: 400 })
+      return
+    }
+    const parsed = ghTokenRequestSchema.safeParse(raw)
+    if (!parsed.success) {
+      this.reject(res, {
+        reason: `malformed gh-token request — ${parsed.error.issues[0]?.message ?? 'invalid'}`,
+        agentId: null,
+        status: 400
+      })
+      return
+    }
+    const request = parsed.data
+    const expected = this.tokens.get(request.agentId)
+    if (expected === undefined || expected !== request.token) {
+      this.reject(res, {
+        reason: `gh-token refused for agent "${request.agentId}"`,
+        agentId: request.agentId,
+        status: 401
+      })
+      return
+    }
+    const answer = this.options.onGhToken
+    if (!answer) {
+      this.reject(res, {
+        reason: 'no company GitHub identity configured',
+        agentId: request.agentId,
+        status: 503
+      })
+      return
+    }
+    let response: GhTokenResponse
+    try {
+      response = await answer(request.agentId)
+    } catch (err) {
+      this.options.onEventError?.(err)
+      this.reject(res, {
+        reason: `gh-token failed: ${err instanceof Error ? err.message : String(err)}`,
+        agentId: request.agentId,
+        status: 500
+      })
+      return
+    }
+    res.writeHead(response.ok ? 200 : 403, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(response))
+  }
+
   private async answerRecall(body: string, res: http.ServerResponse): Promise<void> {
     let raw: unknown
     try {

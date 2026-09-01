@@ -3801,7 +3801,7 @@ the jsdom question for renderer interaction coverage; and BUILD-PROMPT §10's
 pre-approved dependency list, which never gained the two voice SDKs the
 Architect approved at M6.5.
 
-- [ ] **M7.1 Profile schema + loader** — ADR-0012's bundle exactly:
+- [x] **M7.1 Profile schema + loader** — ADR-0012's bundle exactly:
       `profiles/<name>/` with `profile.json` (name, version, `schemaVersion`,
       target binding, autonomy levels), `hires/*.json`, `triggers/*.json`,
       `playbooks/*.md`, `memo-policy.json`, `harbor.json`. The loader validates
@@ -3814,7 +3814,43 @@ Architect approved at M6.5.
       policy; loading is pure — no activation side effects. Risk: the schema
       is a PUBLIC CONTRACT from the day it ships — transcribe ADR-0012, do not
       extend it (the M1.1 lesson, restated).*
-- [ ] **M7.2 Activation, targets, and autonomy composition** — instantiate a
+      *Evidence: `typecheck && lint && check-invariants` green; 50 new cases
+      (`test/shared/profile.test.ts` 35, `test/main/profiles.test.ts` 12,
+      `test/main/ipc-handlers.test.ts` +3 seam cases); full suite **2453 passed /
+      6 skipped**. Failures are the recorded 9 Windows-local deterministic ones
+      (agent-worktree 4, s-crash 3, claude-transcripts 1, cost 1) plus
+      `s-stoploop`, which fails 1–2 cases under parallel load and passes 8/8 in
+      isolation — so consecutive runs report 10 and 11, and both numbers are
+      given here rather than the kinder one.*
+      **Production call path** (the M6 standing lesson — stated, not assumed):
+      `src/main/index.ts:580` constructs the `ProfileStore` over
+      `<home>/profiles` and the bundled `profiles/`; `src/main/index.ts:1631-1632`
+      binds it to `profilesList`/`profilesInspect`; `src/main/ipc.ts:409-413`
+      registers `profiles:list` and `profiles:inspect`;
+      `src/preload/index.ts:138-142` exposes them as `window.eph.profiles`.
+      **No renderer caller yet** — the panel is M7.2's activation UI, and that
+      gap is recorded here rather than left to be discovered.
+      *Proved by RUNNING the real app, not by reading it:* built, then booted
+      `npx electron .` against a temp `EPH_HOME` holding one valid bundle and
+      one broken one. `profiles.list()` returned both — `broken-crew` present
+      and `valid: false`, `skeleton-crew` `valid: true, version: 3`;
+      `inspect("skeleton-crew")` returned the whole bundle including the hire's
+      budget and the playbook text; `inspect("broken-crew")` refused by name
+      with *both* reasons (`memo-policy.json: missing from the bundle`,
+      `harbor.json: missing from the bundle`). After the boot the profiles tree
+      was byte-for-byte what it had been — **loading wrote nothing**, so purity
+      holds in the app and not only in the rig. The temporary `EVIDENCE` log was
+      removed before commit (BUILD-PROMPT §10.7).
+      *Mutation-checked, 21/21 killed:* the refusal table, the name/directory
+      match, `byKind`'s strictness, all four migration refusals and the ladder
+      walk, both trigger-binding checks, the playbook-is-not-policy claim (a
+      mutation that genuinely parsed a fenced JSON block out of the prose), the
+      every-reason-at-once claim, the list's invalid rows, home-shadows-builtin,
+      the no-seeding claim, and the three IPC-seam mutations. Two of the first
+      draft's mutations were duds that changed no behaviour and were rewritten
+      until they bit — recorded because a dud mutation proves nothing and
+      reports as success.
+- [x] **M7.2 Activation, targets, and autonomy composition** — instantiate a
       profile's hires as agents bound to a TARGET (repo/app); the same profile
       activatable per-target more than once; multiple profiles coexisting on
       one floor (FR-9.4). Autonomy composes with the global Watch defaults so
@@ -3828,7 +3864,49 @@ Architect approved at M6.5.
       profiles on one floor never share an agent. Risk: an autonomy level that
       composes by "profile wins" is a silent privilege escalation — assert the
       direction of composition, not merely its presence.*
-- [ ] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
+      *Evidence: `typecheck && lint && check-invariants` green; 38 new cases
+      (`test/shared/profile-activation.test.ts` 16,
+      `test/main/profile-activation.test.ts` 22, four of them a REAL
+      `GateManager` wired to a REAL `ProfileActivations`); full suite **2489
+      passed / 6 skipped**. Failures: the recorded 9 Windows-local deterministic
+      ones, unchanged, plus `s-stoploop` (2) and `hermes` (1) under parallel
+      load — hermes passes 40/40 and s-stoploop 8/8 in isolation, and neither
+      touches this package.*
+      **Production call path:** `src/main/index.ts:1421` constructs
+      `ProfileActivations` over the AgentManager, the scheduler and the real
+      `gate-policy.json`; `src/main/index.ts:641` gives `GateManager` its
+      `profileAutonomy` seam; `src/main/index.ts:1687-1697` binds the four deps;
+      `src/main/ipc.ts:414-434` registers `profiles:preview|activate|deactivate|
+      instances`; `src/preload/index.ts:141-153` exposes them. **No renderer
+      caller yet** — the activation SCREEN is not built; `preview` returns
+      everything it needs and nothing renders it. Recorded, not hidden.
+      **Two things this package made reachable that were not:** `effectivePolicy`
+      and `GateRequest.profileAutonomy` shipped at M3 and had no production
+      caller at all — the composition was correct arithmetic nothing could
+      invoke. `GateManager` now resolves it for EVERY submission rather than
+      trusting each call site to pass it, because a field the caller must
+      remember is a field that gets forgotten, and forgetting it silently gives
+      an agent whose profile TIGHTENED a class the looser company default.
+      *Proved by RUNNING the real app:* booted `npx electron .` against a temp
+      `EPH_HOME` carrying a real `gate-policy.json` (`autonomy: supervised`) and
+      a bundle asking for `autonomous` with `destructive: manual`.
+      `preview` returned `destructive → effective manual, clamped false` (the
+      profile's tightening honoured) and every other class
+      `requested autonomous → effective supervised, clamped true` (the profile's
+      widening refused and SAID SO). The temporary `EVIDENCE` log was removed
+      before commit.
+      *Mutation-checked, 18/18 killed*, including both directions of the
+      composition — "profile wins" (the escalation this line names) and "global
+      wins" (which would silently drop a profile's own tightening) — plus id
+      collisions across targets and across profiles, id truncation, the failed
+      -spawn unwind, deactivation leaving triggers armed, `autonomyFor` answering
+      after deactivation or defaulting to `autonomous`, and the Watch ceasing to
+      consult the profile at all. One survivor was found and closed: an event
+      trigger could be REPORTED as armed while nothing armed it, because no
+      assertion compared `instance.armed` against what the scheduler was
+      actually given — the UI would have shown a watcher on duty that no clock
+      would ever fire.
+- [x] **M7.3 Harbor: GitHub ingestion** — issues, PRs and CI runs for
       registered repos ingested via the `gh` CLI under the agent's own auth
       (FR-10.1); every remote-originated directive tagged `remote` in
       `log.jsonl` (FR-10.3). A scripted `gh` seam, so the suites never touch
@@ -3840,7 +3918,47 @@ Architect approved at M6.5.
       ingestion path (the S-SECRETS pattern). Risk: ingestion that invents a
       task the API did not report is the E-BRIEF-FAITH failure wearing a
       Harbor hat.*
-- [ ] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
+      *Evidence: `typecheck && lint && check-invariants` green; 41 new cases
+      (`test/shared/harbor.test.ts` 22, `test/main/harbor-github.test.ts` 19);
+      full suite **2530 passed / 6 skipped**, failures unchanged — the recorded
+      9 Windows-local deterministic ones plus `s-stoploop` (2) and `hermes` (1)
+      under parallel load, both green in isolation and neither related.*
+      **Production call path:** `src/main/index.ts:1465` constructs
+      `GitHubHarbor` whose registered repos are the ACTIVE profiles'
+      `harbor.json` entries (M7.1's schema, M7.2's instances — one list, not a
+      second that could disagree); `src/main/index.ts:1478` probes and ingests
+      at boot; `:1480-1490` adds the `harbor-github` scheduler cadence
+      (10 min, `enabled` only while some profile actually watches a repo);
+      `src/main/ipc.ts:410` registers `harbor:repos`; `src/preload/index.ts:138`
+      exposes it. **No renderer caller yet** — no Harbor panel is built.
+      Recorded, not hidden.
+      *Proved against the REAL `gh` CLI and the REAL GitHub API,* because the
+      parsers were written against an assumption of `gh --json`'s shapes and an
+      assumption is what a fixture would have re-tested: booted the built app
+      with the driver pointed at `mertefesensoy/Ephesus`. `gh 2.92.0`,
+      `unavailable: null`, **50 items, 0 dropped, failure null**, and **50
+      `remote` log entries — one per item, tagging total (FR-10.3)**. Zero rows
+      needed repairing, so the schemas match what GitHub actually returns. The
+      repo has no open issues or PRs, and that read as `items: 50, failure:
+      null` rather than as a fault — which is the distinction `RepoQueue.failure`
+      exists to make. (Incidentally: the two newest runs are this session's own
+      `feature/m7-1-profile-schema` and `feature/m7-2-activation-autonomy` CI
+      runs, both `success` — Ubuntu CI is green on both pushed branches.) The
+      temporary `EVIDENCE` block was removed before commit.
+      *Mutation-checked, 16/16 killed*, headed by the invention the risk line
+      names: a malformed row REPAIRED into the queue as `#0 ""`. Also killed —
+      dropped rows uncounted; a running CI job given a `failure` conclusion; a
+      non-array response read as "no rows"; the `remote` projection skipping a
+      kind or losing its tag; a cancelled run counted as a failure; a draft PR
+      reported ready; a `gh` failure yielding an empty queue with no failure
+      recorded; a failed repo forgetting what it last knew; ingestion without a
+      probe; an unrecognised `--version` accepted; one failing repo aborting the
+      others; calls unscoped from `--repo`; dropped rows raising no degradation.
+      One survivor found and closed: failing only the FIRST `gh` call left
+      nothing in flight to leak, so nothing tested whether a LATER failure would
+      still log the items collected before it — half a repo tagged `remote` in
+      the book of record that the queue never showed.
+- [x] **M7.4 Skeleton Crew profile (built-in)** — FR-9.2 as an ORDINARY
       ADR-0012 bundle exercising no private API (the dogfood rule, NFR-12):
       health-check watcher, CI babysitter (watch runs, triage failures, open
       fix PRs), dependency-update agent (batched PRs), and incident-response
@@ -3852,7 +3970,48 @@ Architect approved at M6.5.
       E-PLAYBOOK's incident drill measuring time-to-triage. Risk: a built-in
       that reaches past the schema invalidates ADR-0012's central claim — this
       profile must be buildable by an Architect with a text editor.*
-- [ ] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
+      *Evidence: `typecheck && lint && check-invariants` green; 61 new cases
+      (`test/main/skeleton-crew.test.ts` 9, `test/shared/incident.test.ts` 16,
+      `test/main/incidents.test.ts` 19, `test/scenarios/s-profile.test.ts` 10,
+      `test/evals/e-playbook.test.ts` 7) plus 3 on the extracted trigger wake;
+      full suite **2593 passed / 6 skipped**, failures unchanged — the recorded
+      9 Windows-local deterministic ones plus `s-stoploop` (2) under parallel
+      load, green in isolation (8/8) and unrelated.
+      **ADR-0012's dogfood claim HOLDS, and is now checked rather than stated:**
+      the bundle needed no field M7.1's frozen schema lacks, and
+      `skeleton-crew.test.ts` runs against the REAL shipped bundle through the
+      REAL loader — a private sidecar or a schema reach turns it red. One case
+      pins the directory listing itself.
+      **Production call path:** `src/main/index.ts:1195` constructs
+      `IncidentEndpoint`; the `harbor-github` cadence's `run` feeds it the
+      ingest result (repositories that ANSWERED only — a failed repo keeps its
+      stale queue, and re-raising from it would be news that is not new);
+      `src/shared/routing.ts:172` → `src/main/hermes.ts:587` carries the triage
+      report back; `onTriggerFired` now WAKES its agent through
+      `triggerWakeMessage` (through M7.2 it appended a log line and stopped, so
+      the health watcher and dependency updater were spawned and never asked for
+      anything — two of FR-9.2's four components inert behind a green suite).
+      **The harness never writes `tasks.json`:** a CI failure is mailed to
+      Artemis from `agent.harbor` and she proposes the task (FR-5.2's single
+      scribe); S-PROFILE asserts the ledger is UNCHANGED after `raise`.
+      **The harness never grades severity** — the escalation table is driven by
+      the severity the AGENT reported, and an unreadable report is refused, not
+      defaulted to the mild rung.
+      **9 mutations applied, 9 killed** (M1 drop the routing branch · M2 flatten
+      the ladder · M3 drop the dedupe · M4 misroute by repo · M5 default an
+      unreadable report · M6 invent a conclusion · M7 widen env grants · M8 ask
+      for `autonomous` on `destructive` · M9 announce silently). Two defects
+      found by writing them: `'reproduce'` CONTAINS `'prod'`, so the eval's
+      substring match scored playbook compliance as an un-gated production
+      action (the M6 repeat-back shape — now a closed vocabulary compared by
+      equality); and `agent.sk-<target>-<hire>` matches check-invariants'
+      OpenAI-key pattern, so the tests now use the id production actually mints.
+      **UC-09 step 4's spoken announcement is OWED, not faked:** M6.9 is deferred
+      and the Herald gains no caller here, so a severity-1 logs
+      `incident-announce-owed` and reports an unmet obligation through the
+      degradation channel while the gate queue takes the escalation. Mutation M9
+      proves that leg is load-bearing.*
+- [x] **M7.5 Front Office profile (built-in)** — FR-9.3: issue/PR triage,
       reply drafting with CONFIGURABLE autonomy (draft-only → auto-post),
       docs/changelog sync, and release-prep checklists (UC-10). Outbound
       comments above the configured level require Architect approval, batched
@@ -3863,7 +4022,43 @@ Architect approved at M6.5.
       Risk: "auto-post" is the first outward-facing irreversible act the
       company can take on its own — that gate belongs in the harness, not in a
       playbook's prose.*
-- [ ] **M7.6 Shareable hires and profiles** — export/import a role template or
+      *Evidence: `typecheck && lint && check-invariants` green; 39 new cases
+      (`test/shared/outbound.test.ts` 16, `test/main/frontoffice.test.ts` 14,
+      `test/main/front-office-profile.test.ts` 9); full suite **2636 passed /
+      6 skipped**, 11 failed — an IDENTICAL set to before this package (the
+      recorded 9 Windows-local ones plus `s-stoploop` (2) under load). **No
+      existing gate test broke**, which is the evidence that adding a seventh
+      gate kind was additive rather than a change of meaning.
+      **ONE SCHEMA CHANGE, ASKED BEFORE IT WAS MADE:** `outbound` joins
+      `GATE_KINDS` by ARCHITECT DECISION (BUILD-PROMPT §8.3 must-ask, three
+      options). M5.3's recorded rule — borrow a kind, never invent a seventh —
+      carries the qualifier "the mapping loses nothing", and here it does lose
+      something: borrowing `prod-facing` would mean enabling auto-post on issue
+      replies also granted autonomous PRODUCTION actions, with no way to write
+      "may reply, may not touch prod". **SRS FR-11.1 was amended in the same
+      change** to name outbound public communication. Safe by construction: a
+      policy that never mentions `outbound` denies it, so the addition can only
+      tighten an existing deployment.
+      **ADR-0012's dogfood claim HELD a second time:** the Front Office needed no
+      change to M7.1's profile schema. The gate kind is the WATCH's vocabulary,
+      not the bundle's. `front-office-profile.test.ts` runs against the real
+      shipped bundle through the real loader and pins the directory listing.
+      **The risk line is answered structurally, not by a guard:**
+      `GitHubHarbor.postComment` takes a branded `PostPermit` whose only two
+      constructors refuse everything below `autonomous` or unapproved — so a
+      draft-only profile has no code path that posts, asserted on the API
+      surface (the S-SECRETS pattern) rather than by inspection.
+      **Batching IS the gate:** `supervised` opens an ordinary `outbound` gate
+      and `BriefInput.openGates` is what the standup already reads, so there is
+      one record seen from two angles rather than a digest that could drift from
+      the approval it summarizes. The WHOLE draft reaches the gate — approving a
+      comment without its text is signing a blank page.
+      **Production call path:** `src/main/index.ts:1258` constructs
+      `FrontOffice`; the Harbor endpoint dispatches on `OUTBOUND_SUBJECT`
+      (one address, two filings — the ADR-0008 Odeon pattern);
+      `GateManager.onSettled` at `:695` routes an `outbound` verdict to
+      `onVerdict`; `:1271` posts. **10 mutations applied, 10 killed.**
+- [x] **M7.6 Shareable hires and profiles** — export/import a role template or
       a whole bundle via file/link (FR-10.4); **import only PRE-FILLS the
       spawn/activation form — a human always confirms.** Bundles are plain
       files, so a shared profile is diffable in review.
@@ -3874,15 +4069,255 @@ Architect approved at M6.5.
       export→import round-trips losslessly. Risk: an imported profile is
       UNTRUSTED CONTENT (invariant §13's spirit) — it may not raise its own
       privileges on the way in.*
-- [ ] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
+      *Evidence: `typecheck && lint && check-invariants` green; 56 new cases
+      (`test/shared/share.test.ts` 25, `test/main/hires-exchange.test.ts` 19,
+      `test/shared/secret-shapes.test.ts` 12); full suite **2692 passed /
+      6 skipped**, failures an identical set to before the package.
+      **FIVE REAL PRIVILEGE ESCALATIONS FOUND BY AN ADVERSARIAL PASS AGAINST MY
+      OWN CODE, ALL FIXED, EACH WITH A NAMED REGRESSION.** (1) **Path traversal**
+      — payload record KEYS were bare `z.string()` and `install` writes through
+      `path.join`, so a playbook named `../../../gate-policy.json` overwrote the
+      WATCH'S OWN POLICY, which SDD §2 says "can only ever loosen, never
+      tighten" — a complete bypass of the approval system, found by a probe that
+      asserted the import SUCCEEDED while the happy-path suite stayed green.
+      (2) **A JSON backslash-uXXXX escape walked past the secret scan**, which read the
+      raw blob text — the raw text matches nothing while `JSON.parse` yields a
+      real token; the scan now walks decoded values AND keys. (3) **`install`
+      merged instead of replacing**, so a v2 that dropped a hire left the old one
+      on disk and the loader read back the UNION — the Architect confirms two
+      hires and gets three, with the third still armed. (4) **The widening check
+      was skipped when the installed copy did not parse**, so a bundle arriving
+      while the installed profile happened to be broken got MORE latitude than
+      one arriving while it was healthy. (5) **The manifest disclosed NAMES but
+      not PROSE** — every name identical, every runbook rewritten, and a playbook
+      is the agent's task list on a timer with the profile's autonomy.
+      **The design:** the envelope carries FILES (ADR-0012's "diffable in
+      review" — round trip asserted byte-for-byte), and the manifest is
+      RECOMPUTED from the payload on import by the same function that produced
+      it, so a human confirms a derived fact rather than an author's claim. That
+      is what gives "an undeclared env grant" a mechanical meaning. Every gate
+      class is declared, including ones the bundle never mentions, so a
+      permissive DEFAULT cannot arrive undisclosed.
+      **Production call path:** `src/main/index.ts` constructs `HireExchange`
+      beside the `ProfileStore`; `harbor:import-inspect` -> `inspect` ->
+      `inspectImport` -> `secretShapeIn`; `harbor:import-install` -> `install`
+      -> `writeFileAtomic`. **Nothing here activates** — asserted on the API
+      surface (S-SECRETS pattern): the four sharing channels are pinned, and
+      `HireExchange` has no spawn, scheduler or activation seam to call.
+      `inspect`'s purity is asserted by a CENSUS of the file tree, not a claim.
+      **The runtime secret list cannot drift from the M0 build gate:**
+      `secret-shapes.test.ts` reads `check-invariants.cjs` as text and compares
+      element by element. **14 mutations applied, 14 killed** — two survived a
+      first pass and both were fixed rather than accepted (an assertion that
+      could not distinguish the key-scan from the strict schema's own refusal;
+      and an install-side guard that was unreachable dead code, now an exported
+      function with its own test — the M6 lesson restated).*
+- [x] **M7.7 Suites + exit review** — S-PROFILE green in CI; **the one-hour
       company test (SRS §6.1) run on a REAL repo** with its evidence captured;
       E-PLAYBOOK's drill recorded; the M6 carried items closed or re-recorded
       with their reason.
+      *Evidence: CI **green on the whole M7 stack** —
+      `feature/m7-6-shareable`, run `33438533520`, success, 1m57s — which is
+      S-PROFILE's "green in CI". `typecheck && lint && check-invariants` green;
+      full suite **2697 passed / 6 skipped**, 12 failed (the recorded 9
+      Windows-local ones plus `s-stoploop` (2) and `hermes` (1) under parallel
+      load, each verified green in isolation — `hermes` 40/40).
+      **A DEFECT THE EXIT REVIEW EXISTS TO CATCH, FOUND AND FIXED:**
+      `compileFacts` had NO INCIDENT BRANCH, so the incident entries the endpoint
+      has written since M7.4 reached the standup only sideways — as an open gate,
+      or as whatever task Artemis happened to create. **SRS §6.1's "the next
+      briefing narrates the incident accurately from the log" was unreachable BY
+      CONSTRUCTION while every suite was green.** VOICE-DESIGN §4 had specified
+      it all along ("Health — … breaker trips, **incidents**, Harbor queue
+      depth"), so this was an unimplemented requirement, not a new feature. The
+      agent's summary is carried VERBATIM, every fact carries a `log#<seq>` ref,
+      and the OWED announcement is narrated too — an obligation recorded only in
+      `log.jsonl` is one the Architect must go looking for. **5 mutations, 5
+      killed**; the owed-announcement branch survived the first pass and the
+      assertion was added rather than the branch accepted.
+      **Evidence, with a COMMITTED generator** (M6's standing complaint):
+      `test/scenarios/m7-evidence.test.ts` writes
+      `docs/demo/m7-onehour-chain.txt` and `docs/demo/m7-eplaybook-scorecard.md`,
+      reproducible with `npm test`. Both artifacts state in their own text what
+      they are NOT — the transcript that it is not the acceptance criterion, the
+      scorecard that its drill record is a fixture rather than a live agent run.
+      **`test/scenarios/s-onehour.test.ts`** walks §6.1's chain end to end over
+      the SHIPPED components (real git, real incident endpoint, real Hermes
+      router, real ledger endpoint, real gates, real briefing compiler) with only
+      the `gh` process and the ENGINE replaced at their seams.*
 - [ ] **M7 exit** — SRS §6.1 demonstrated on a real repo (the crew detects a
       broken test, fixes it or opens a fix PR, files the memo if policy was
       crossed, and the next briefing narrates the incident accurately from the
       log, with zero un-gated destructive actions); S-PROFILE pass; PROGRESS +
       docs synced.
+
+### M7 exit review (2026-09-01) — verdict: **M7.1–M7.7 DONE; the milestone's exit criterion is NOT met, and how it closes is an OPEN ARCHITECT DECISION**
+
+Every package is built, tested, mutation-checked and documented. The milestone's
+exit criterion is not met, and this review does not pretend otherwise: **SRS §6.1
+has not been demonstrated on a real repo.** What follows is what was verified by
+execution, what was not, and the decision that is the Architect's.
+
+**What M7.7 owed, and what it delivered.**
+
+1. **S-PROFILE green in CI — MET.** The whole M7 stack is on
+   `feature/m7-6-shareable` (each branch cut from the previous, since M7.1 never
+   reached `main`), pushed and green: run `33438533520`, `success`, 1m57s. That
+   run carries S-PROFILE, S-ONEHOUR and every other suite.
+2. **The one-hour company test on a REAL repo — NOT MET.** The CHAIN is
+   demonstrated end to end over shipped components (below); the real-repo,
+   real-engine half is owed. See the decision at the end.
+3. **E-PLAYBOOK's drill recorded — MET**, with the qualifier stated in the
+   artifact itself: `docs/demo/m7-eplaybook-scorecard.md` scores a well-run
+   drill through the shipped scorer, from a FIXTURE record. E-PLAYBOOK is a
+   weekly/pre-release eval against real engines (TEST-STRATEGY §6); the live run
+   is owed with §6.1.
+4. **Carried items closed or re-recorded — MET.** Re-recorded accurately below;
+   two of them had already been closed at M6.10 and the M7 paragraph still
+   listed them, which is the kind of staleness this row exists to catch.
+
+**A defect found by the exit review, and fixed.** `compileFacts` had **no
+incident branch at all**. The incident endpoint has written `incident-raised`,
+`incident-triaged` and `incident-announce-owed` to `log.jsonl` since M7.4, and
+the briefing compiler had never heard of any of them — so an incident reached
+the standup only sideways, as an open gate or as whatever task Artemis happened
+to create. The Architect was never told that something broke, in which
+repository, or what the on-call agent concluded. **SRS §6.1's last clause — "the
+next briefing narrates the incident accurately from the log" — was unreachable
+by construction**, and every suite was green. VOICE-DESIGN §4 had specified it
+all along ("Health — budgets vs burn, breaker trips, **incidents**, Harbor queue
+depth"); it was simply never implemented. Fixed, with the agent's summary
+carried verbatim and every fact carrying a `log#<seq>` ref, and mutation-checked
+five ways. This is the M6 shape a third time: two halves that had never met.
+
+**What was demonstrated, by execution.** `test/scenarios/s-onehour.test.ts`
+walks SRS §6.1's chain over the SHIPPED components — real git in a temp home,
+the real `IncidentEndpoint`, Hermes router, `LedgerEndpoint`, `GateManager` and
+briefing compiler. Two things are replaced at their seams (TEST-STRATEGY §1's
+"determinize the boundary, not the world"): the `gh` process, and the ENGINE.
+The transcript is committed at `docs/demo/m7-onehour-chain.txt`, and its
+generator is committed too — `test/scenarios/m7-evidence.test.ts`, re-runnable
+with `npm test`, which is the answer to M6's standing complaint that the demo
+generator was a scratch file.
+
+The chain, as it actually ran: CI reports run #4021 failed → the incident is
+raised and mailed to Artemis while **`tasks.json` is unchanged** (FR-5.2's single
+scribe) → Artemis proposes → the task lands assigned → the on-call agent files a
+triage report from its own outbox through the real router → a severity-1
+escalates now and opens a gate → the announcement the Herald cannot make is
+recorded as owed → **and the standup narrates all three, from the log, with
+refs**.
+
+**What was NOT demonstrated, and why the milestone does not close on it.**
+SRS §6.1 asks whether a REAL agent, given a REAL broken test in a REAL
+repository, actually detects it, triages it correctly, and fixes it or opens a
+sound fix PR — within an hour, unattended. That is *judgment*, and no fake
+engine stands in for it. What M7 has proved is that every arrow between "CI went
+red" and "the standup says so" exists, is wired, and carries the truth. What
+remains unproved is the half the harness cannot supply.
+
+The gap is not for want of tooling: `gh` is authenticated on this machine and
+`claude` is on PATH. It is that running §6.1 means **deliberately breaking a
+test in one of the Architect's repositories and leaving autonomous agents with
+`GH_TOKEN` grants running unattended against it for an hour**. Choosing that
+repository, and consenting to that, is the Architect's call and nobody else's.
+
+**Therefore M7 does not close on its criterion as written**, and — exactly as at
+M6 — the options are the Architect's: run §6.1 and close on it; amend the
+criterion on the record; or hold M7 open. What this review will not do is tick
+the row and call the chain the criterion. That substitution is the failure the
+M6 close-out audit was convened to catch, and committing it here would make this
+review worthless.
+
+**Carried items, re-recorded accurately (2026-09-01).**
+*Already closed at M6.10, and the M7 paragraph was stale in still listing them:*
+the jsdom question (answered — dev-only, pinned `^26`), and BUILD-PROMPT §10's
+dependency list (it does now carry both voice SDKs and jsdom — verified).
+*Closed here:* a committed generator for demo evidence — for M7's artifacts
+(`test/scenarios/m7-evidence.test.ts`); the M6 SVGs still have none, so the
+pattern is established and that specific debt stands.
+*Still owed, unchanged, and blocked on a session with the right access:* the two
+live voice proofs and the voice-driven day (all three unreachable while M6.9 is
+deferred); the v2 floor with a real company on it; wake-word detection; the M6
+floor screenshot; the Memory panel screenshot; codex/gemini hook wiring
+post-trust; a real-engine respawn demo; E-STOA's LLM-judged half; `stoa:pin`
+from a real checkout (verified: no such channel exists). *Newly owed:* SRS §6.1
+itself, and E-PLAYBOOK's live drill.
+
+### SRS §6.1 — the live run on `mertefesensoy/MUSAHIT` (2026-09-01) — verdict: **the DETECTION half passed; the ACTION half did NOT**
+
+The Architect named a real repository, chose to add CI to it, activated the
+Skeleton Crew from the panel, and approved gates by hand. `mertefesensoy/MUSAHIT`
+had no CI at all; a pytest workflow was added on `ci/add-pytest-workflow` and
+**failed on its own first run** (`33440874791`) — so the crew had a genuine
+failure to find rather than a planted one. Real `claude` 2.1.195 throughout.
+The record is `docs/demo/m7-onehour-live-musahit.txt`.
+
+**What passed, on real rails.** The Harbor ingested the failed run and tagged it
+`remote` (FR-10.3). The incident was raised, mailed to Artemis from
+`agent.harbor`, and **`tasks.json` was left untouched** — FR-5.2's single scribe
+held under live conditions. A re-ingest ten minutes later did **not** duplicate
+it: M7.4's idempotency cursor held on a real repository, which is what stops the
+crew being woken every ten minutes forever. Every gated action was held; the
+Architect approved one spend gate and the log records who, when and through
+which channel.
+
+**What did not pass, and it is the important half.** Artemis read the incident
+and replied to `agent.harbor` with the words **"Task opened…"**. No task was
+ever created. `tasks.json` holds zero and the log contains no `task` event at
+all. **The orchestrator reported work that did not happen**, and nothing in the
+harness noticed — the refusal that caught it was incidental, rejecting her prose
+for failing to be triage-report JSON. That is the E-BRIEF-FAITH failure class
+arriving in the one place M7 had not instrumented for it, and it is exactly what
+a scripted engine can never show: the fake engine always does what its script
+says.
+
+**Three defects behind it, all in M7's own code.**
+
+1. **`agent.harbor` refuses legitimate mail.** `submitToHarbor` treats every
+   inbound message as a triage report, so an orchestrator's ordinary courtesy
+   reply — legal under ADR-0003's act table — is refused by name. The endpoint
+   needs to distinguish a triage report from an acknowledgement instead of
+   assuming.
+2. **The incident prompt is ambiguous.** `prompts/harbor/incident-body.md` asks
+   Artemis to open a task and then prints the triage-report JSON schema in the
+   same message, addressed to her, describing what the ON-CALL agent should
+   send. Two audiences in one message; she reasonably read the schema as hers.
+3. **Nothing reconciles a claim against the ledger.** An agent may say it opened
+   a task, and no mechanism compares that to `tasks.json`. The incident stays
+   open with no work attached and no alarm. This is the serious one — the other
+   two are plumbing.
+
+**Five defects the run found before it got that far**, none of which any suite
+could see, and four already fixed: `agora.log(-1, …)` was always refused, so the
+floor's mail envelopes had never flown; M7.4's incident binding filtered
+`when === 'ci'` against a plan that renders `"on ci"`, so **every** CI failure
+was dropped as `incident-unclaimed`; `cmd.exe`'s 8,191-character command line
+made the orchestrator unspawnable at 10,908 bytes of identity, with the whole
+crew inside 250 bytes of the same cliff; and the wake nudge could be lost in a
+race between consuming an inbox and observing it empty. The fifth is identified
+and **not** fixed: **an avatar phase that never returns to `idle` makes an agent
+permanently unnudgeable**, which is what stalled this run for twenty minutes; a
+restart masks it, and the cause is not yet known.
+
+**Budget.** Artemis exhausted a 2,000,000-token daily allowance on *briefing*
+work before reaching the incident, and opened three gates in twenty-five
+minutes. Whether that is a budget too small, a briefing loop too expensive, or a
+priority the ledger should express is unresolved and worth its own look.
+
+**So §6.1 is not met, and this review does not round it up.** The criterion asks
+for a crew that detects a failure, fixes it or opens a fix PR, files the memo if
+policy was crossed, and has the next briefing narrate it accurately — with zero
+un-gated destructive actions. Two of those clauses passed outright (detection;
+zero un-gated actions, deny-all having held every time). One is now known to
+fail (the crew did not open work, and said it had). Two were never reached.
+
+
+**Checks.** `typecheck`, `lint`, `check-invariants` green. Full suite **2697
+passed / 6 skipped**, 12 failed — the recorded 9 Windows-local deterministic
+failures plus `s-stoploop` (2) and `hermes` (1) under parallel load, each
+verified green in isolation (`hermes` 40/40) and none related to M7. Ubuntu CI
+green on the stack.
 
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 

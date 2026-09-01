@@ -11,6 +11,7 @@ import { EngineRegistry } from '../../src/main/engines'
 import { ClaudeAdapter } from '../../src/main/engines/claude'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Seats reaching the roster (SDD §4.1, UI-DESIGN §5) — the M2 carried item, at
@@ -45,7 +46,7 @@ const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

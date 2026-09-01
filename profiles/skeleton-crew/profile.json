@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "name": "skeleton-crew",
+  "version": 2,
+  "target": {
+    "kind": "repo"
+  },
+  "autonomy": {
+    "default": "autonomous",
+    "byKind": {
+      "destructive": "supervised",
+      "prod-facing": "supervised"
+    }
+  }
+}

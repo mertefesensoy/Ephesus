@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "repos": [],
+  "channels": [],
+  "webhooks": [{ "id": "ci-runs", "event": "ci" }]
+}

@@ -52,8 +52,15 @@ ephesus/docs/                                             # this suite; ADRs app
   (`Co-authored-by: <Name> (agent.<id>) <machine-account+agent.<id>@users.noreply.github.com>`).
   The company account never authors on `main` except through an Architect-merged
   PR, never impersonates the Architect, and the no-vendor-identity rule applies to
-  it unchanged. The attribution check gains exactly this carve-out when FR-10.5
-  lands (M7) — until then the original rule is the enforced one.
+  it unchanged. **Enforced since 2026-09-01** (ADR-0022 corrects the identity to a
+  GitHub App bot, `<slug>[bot]`): `check-attribution.cjs` refuses a `[bot]` identity
+  on any branch but `agent/*` in its pre-commit path, and on `main`'s first-parent
+  chain over the whole history. Two limits, stated in full in the script's header
+  and load-bearing enough to repeat here — it reads the *shape* of history, so it
+  cannot tell that a merge was reviewed (that is branch protection's job, and per
+  the 2026-08-30 log entry protection is currently OFF), and the first-parent test
+  assumes merge commits, so **a squash or rebase merge would flag a legitimate
+  agent PR**. Change the merge policy and that clause must change with it.
 - **PRs carry evidence.** Every PR shows its change working: screenshots for UI, a
   terminal capture for behavior, test output for logic. "No visible surface" changes
   show the passing test that proves them. (Rule inherited from upstream's

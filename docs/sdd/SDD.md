@@ -88,6 +88,12 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  ⇒ deny-all: it can only ever loosen, never tighten
   authority.json             # Artemis's delegated-authority table (FR-5.5). Absent or
                              #  unreadable ⇒ no delegated authority: everything escalates
+  known-targets.json         # targets a profile has been activated against before, so the
+                             #  panel offers one instead of asking for a long path again.
+                             #  Absent or unreadable ⇒ offers nothing (the opposite failure
+                             #  mode to gate-policy: a convenience that cannot be read must
+                             #  not stop an activation). NOT a restore list — choosing one
+                             #  fills the form and still goes through preview and activate
   events.sock                # hook socket (0600) — also answers `POST /recall`
                              #  for the agent-facing `eph-recall` CLI (ADR-0006
                              #  layer 2): one socket, one per-spawn token registry
@@ -234,7 +240,12 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, stoa, shutdown, error }`. `shutdown` carries closing time (GYM-003):
+gym, stoa, shutdown, capacity, error }`. `capacity` carries the provider's usage
+limit (`src/shared/capacity.ts`): parked (with the engine's own refusal text and
+the retry it is waiting for), resuming (and by which of the two continuations),
+cleared. It is distinct from `breaker` and from `exit` on purpose — one is our
+ladder, one is a dead process, and this is a healthy agent the provider declined
+to serve. `shutdown` carries closing time (GYM-003):
 begin / ack / complete, with the shortfall named. `stoa` carries the research
 cycle (§7.7): study started, brief accepted/rejected, watchlist changes. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.
@@ -346,8 +357,29 @@ odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(mem
           // never writes the ledger, which is hers (FR-5.2, UC-05 step 4)
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
-harbor:   repos() bridgeStatus() hireExport(role) hireImport(blob)
-profiles: list() inspect(name) activate(name, target) deactivate(instanceId)
+harbor:   repos() bridgeStatus()
+          hireExport(profile, hire) profileExport(name)
+          importInspect(blob) importInstall(blob)
+          // FR-10.4's export/import, split because the requirement is: "import
+          // only pre-fills the spawn form — a human always confirms". INSPECT
+          // reads a blob and returns a RECOMPUTED disclosure, writing nothing;
+          // INSTALL is what a confirmed form reaches, and it writes files
+          // without activating. There is deliberately no channel that does both
+          // and none that activates — an imported profile is inert until
+          // `profiles:activate`, which is its own Architect action (M7.6)
+profiles: list() inspect(name) activate(request) deactivate(instanceId)
+          preview(request) instances()
+          // list() rows an INVALID bundle too (`valid: false`) — a profile that
+          // vanished when its JSON broke would look uninstalled. inspect() is
+          // pure: it activates nothing. `request` is `{ profile, target:
+          // { kind, id, path } }` — no document says how a target ref resolves
+          // to a local path, so the Architect names the directory, as they
+          // already do for a bare spawn, and main validates it. preview()
+          // returns the SAME plan activate() executes (hires, grants, budgets,
+          // composed autonomy, triggers, repos), so the screen ADR-0012's
+          // safety story rests on cannot drift from the act. Added at M7.1/M7.2
+          // under the M3.1 rule: a doc line and a DECISIONS-LOG entry, or it
+          // does not ship
 org:      chart() orgMetrics()                       // reviews()/applyReview land with
                                                      // UC-12's full loop (M7-era)
 gym:      ledger() proposal(id) verdict(id, v) metricResult(id, r)   // verdicts: architect-only (FR-12.3)

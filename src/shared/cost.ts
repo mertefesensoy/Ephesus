@@ -140,6 +140,104 @@ export function dayOfFact(fact: FoldableFact, fallback: string): string {
   return Number.isNaN(at.getTime()) ? fallback : dayKey(at)
 }
 
+/**
+ * One engine-reported **running total** of money, as `foldCosts` takes it.
+ * Mirrors `engines/types.ts` `CostFact`; restated here so this file stays pure
+ * and importable from the renderer side (NFR-12 — core learns no engine).
+ */
+export interface CumulativeCost {
+  readonly sessionId: string
+  readonly model: string
+  readonly cumulativeUsd: number
+}
+
+/**
+ * Contract: turns engine-reported **running totals** into the append-only rows
+ * that bring the ledger up to date, by DIFFERENCING against the rows it already
+ * holds. Pure.
+ *
+ * Why a difference and not the figure itself. Claude Code reports money as
+ * `cost-state`: one cumulative `costUSD` per (session, model), rewritten as the
+ * session goes on — measured across a real corpus of 20 transcripts, every file
+ * that had one carried exactly ONE distinct value, written twice. Appending the
+ * value would double the bill on the second line alone, and a resumed session
+ * whose total later grows from $0.20 to $0.50 would record $0.70. Appending the
+ * difference is correct in both cases and stays correct however many times a
+ * transcript is re-read — which matters, because the Watch re-reads every file
+ * every fifteen seconds.
+ *
+ * This deliberately derives the baseline from the LEDGER rather than from a
+ * counter. It is the same argument ADR-0011 makes about cumulative token
+ * figures: a counter is a thing a restart can zero, and the ledger is not. A
+ * fold that has already happened is visible in the rows, so re-folding
+ * subtracts to zero and appends nothing.
+ *
+ * A row produced here carries **no tokens**. The tokens for this session and
+ * model are already in the ledger from `foldFacts`, and the engine's own
+ * `modelUsage` repeats them; counting them again here is the double-count this
+ * whole function exists to avoid. These rows are money only.
+ */
+export function foldCosts(
+  costs: readonly CumulativeCost[],
+  context: {
+    /** Rows the ledger already holds for this agent. */
+    readonly existing: readonly LedgerRow[]
+    readonly agent: string
+    readonly source: string
+    /**
+     * The day to bill money to when the ledger holds no dated row for this
+     * (session, model).
+     *
+     * A `cost-state` line carries NO timestamp of its own — verified across the
+     * corpus — so unlike a `UsageFact` it cannot name its own day. The best
+     * available answer is the day that session's tokens for this model were
+     * last spent, which the caller supplies via `existing`; this is the
+     * fallback when even that is unavailable.
+     */
+    readonly fallbackDay: string
+  }
+): {
+  readonly rows: readonly LedgerRow[]
+  /** Figures that went backwards — a replaced or rotated transcript. */
+  readonly regressed: readonly CumulativeCost[]
+} {
+  const rows: LedgerRow[] = []
+  const regressed: CumulativeCost[] = []
+  for (const cost of costs) {
+    const mine = context.existing.filter(
+      (row) => row.session === cost.sessionId && row.model === cost.model
+    )
+    const already = mine.reduce((sum, row) => sum + (row.costUsd ?? 0), 0)
+    const delta = cost.cumulativeUsd - already
+    // Exactly zero is the overwhelmingly common case: the same transcript read
+    // again. It is not news and it is not a row.
+    if (delta === 0) continue
+    if (delta < 0) {
+      // The engine's running total went DOWN. That is not something spending
+      // can do, so the transcript was replaced or rotated under us. Recording a
+      // negative row is impossible (the schema forbids it) and recording a
+      // positive one would invent money; the honest move is to record nothing
+      // and let the caller say so out loud.
+      regressed.push(cost)
+      continue
+    }
+    // The day this session last spent tokens on this model. Money follows the
+    // work it paid for, rather than the moment the harness happened to look.
+    const day = mine.length > 0 ? (mine[mine.length - 1] as LedgerRow).day : context.fallbackDay
+    rows.push({
+      agent: context.agent,
+      session: cost.sessionId,
+      model: cost.model,
+      day,
+      inTokens: 0,
+      outTokens: 0,
+      costUsd: delta,
+      source: context.source
+    })
+  }
+  return { rows, regressed }
+}
+
 /** A folded total over some slice of the ledger. */
 export interface CostTotals {
   readonly inTokens: number
@@ -198,6 +296,65 @@ export interface AgentSpend {
   readonly dailyTokens: number | null
   /** Budget state today, deny-nothing when unbudgeted. */
   readonly budget: BudgetVerdict
+  /**
+   * What the engine says the CURRENT session has cost so far, live — observed
+   * from the status line, not folded from a transcript.
+   *
+   * It exists because the durable figure cannot be live: the engine writes its
+   * `cost-state` line when a session ENDS, so a running agent's
+   * `sessionTotals.costUsd` is null until it stops. This fills exactly that
+   * gap and nothing else.
+   *
+   * Deliberately NOT summed into `sessionTotals`, `todayTotals` or
+   * `cumulativeTotals`. Those are folds over the append-only ledger, and this
+   * is a reading of a file that the ledger's own rows will shortly restate —
+   * adding it in would count the same money twice. `sessionCostOf` is how the
+   * two are combined for display.
+   */
+  readonly liveSessionCostUsd: number | null
+}
+
+/** Which source a displayed session cost came from. */
+export interface SessionCost {
+  readonly usd: number | null
+  readonly from: 'ledger' | 'live' | 'none'
+}
+
+/**
+ * Contract: the session cost to SHOW, from the durable figure and the live one.
+ * Pure.
+ *
+ * The two are the same quantity measured at different times — verified, not
+ * assumed: across 17 real sessions the transcript's session scalar
+ * (`totalCostUSD`) equalled the sum of its per-model breakdown exactly, and the
+ * engine documents both `total_cost_usd` and `modelUsage` as *"cumulative …
+ * read the latest result rather than summing across results."*
+ *
+ * So the rule is **the larger of the two, never the sum**. Taking the maximum
+ * has three properties worth stating, because each is a bug it forecloses:
+ *
+ *  - it cannot double-count, which adding them would do the moment a session
+ *    ends and both sources describe the same spend;
+ *  - it cannot go backwards when the live reading disappears (the agent
+ *    exited, the file went stale), because the ledger figure it falls back to
+ *    is the final one;
+ *  - it cannot under-report while a session runs, because the live figure is
+ *    monotonic within a session and the ledger holds nothing yet.
+ *
+ * `from` is carried so the UI can say which it is showing. A live figure is
+ * provisional and a ledger figure is final, and a number that cannot say which
+ * it is invites being read as the wrong one.
+ */
+export function sessionCostOf(spend: {
+  readonly sessionTotals: CostTotals
+  readonly liveSessionCostUsd: number | null
+}): SessionCost {
+  const durable = spend.sessionTotals.costUsd
+  const live = spend.liveSessionCostUsd
+  if (durable === null && live === null) return { usd: null, from: 'none' }
+  if (durable === null) return { usd: live, from: 'live' }
+  if (live === null) return { usd: durable, from: 'ledger' }
+  return live > durable ? { usd: live, from: 'live' } : { usd: durable, from: 'ledger' }
 }
 
 export const BUDGET_STATES = ['ok', 'projected-breach', 'breached', 'unbudgeted'] as const

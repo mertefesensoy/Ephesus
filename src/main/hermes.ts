@@ -4,13 +4,17 @@ import { emptyCursor, parseCursor, type Cursor } from '../shared/cursor'
 import { composeMessage, makeMessageId, parseMessage, type Message } from '../shared/message'
 import {
   CLOSING_ENDPOINT,
+  HARBOR_ENDPOINT,
+  PROFILE_ENDPOINT,
   HERMES_SENDER,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
   ODEON_ENDPOINT
 } from '../shared/reserved'
+import { endpointContract } from '../shared/endpoints'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
+import { mayWake, type Pace } from '../shared/pacing'
 import type { Agora } from './agora'
 import { writeFileAtomic } from './fsx'
 import type { PromptStore } from './prompts'
@@ -48,6 +52,17 @@ export type HermesFaultInjector = (point: HermesFaultPoint) => void | Promise<vo
 export const WATCH_DEBOUNCE_MS = 50
 /** R6 mitigation: fs-watch is unreliable cross-platform, so a sweep backs it up. */
 export const SWEEP_INTERVAL_MS = 1000
+/**
+ * Minimum gap between one agent's wakes while the company is pacing `slow`
+ * (ADR-0023).
+ *
+ * Set from the measurement, not from taste: on 2026-09-01 Artemis took 39 wakes
+ * in roughly 10 hours — about one every 15 minutes on average, but arriving in
+ * bursts, with stop-hook re-wakes chasing inbox wakes within seconds. A
+ * five-minute floor leaves the average cadence untouched and removes the burst,
+ * which is where the 9.54M of stop-hook re-wake spend actually came from.
+ */
+export const DEFAULT_SLOW_WAKE_GAP_MS = 5 * 60 * 1000
 
 export interface DeliveryRecord {
   readonly message: Message
@@ -58,6 +73,13 @@ export interface DeliveryRecord {
 export interface RejectionRecord {
   readonly file: string
   readonly reason: string
+  /**
+   * The refusal returned to whoever wrote the file, or `null` when there was
+   * nobody to return it to. Symmetric with `BounceRecord.refusal`, and the
+   * null case is named rather than hidden because it is the only remaining way
+   * for an agent's work to end in silence (invariant §7).
+   */
+  readonly notice: Message | null
 }
 
 export interface SweepReport {
@@ -84,6 +106,11 @@ export interface HermesOptions {
    * live roster without touching delivery.
    */
   context?(): RoutingContext
+  /**
+   * Takes a crew member's report on a scheduled sweep. Returns false when no
+   * profile endpoint is listening, which bounces rather than drops.
+   */
+  profiles?(message: Message): boolean
   /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
   onBounced?(record: BounceRecord): void
   /**
@@ -131,6 +158,16 @@ export interface HermesOptions {
    * bounces it back to the sender ("no closing time is in progress", FR-3.4).
    */
   closing?(message: Message): boolean
+
+  /**
+   * The Harbor's incident endpoint (FR-9.2, UC-09) — carries an on-call
+   * agent's triage report to `IncidentEndpoint.onTriage`. Returns true when the
+   * report was consumed; false bounces it back with the reason, exactly as an
+   * out-of-season closing ack bounces. The endpoint writes its own refusal for
+   * a report it could read but could not match, so a `false` here means only
+   * "no incident subsystem is listening".
+   */
+  harbor?(message: Message): boolean
   /** Renders the block reason and the wake nudge — both are prompt surfaces. */
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
@@ -141,6 +178,31 @@ export interface HermesOptions {
   nudge?(agentId: string, text: string): void
   /** True when the agent has finished its turn and is waiting. */
   isIdle?(agentId: string): boolean
+  /**
+   * The company's pace (ADR-0023). Both wake paths below consult it, because
+   * both of them are where the harness *issues a wake* — and the wake, not the
+   * token, is the unit of spend: a measured Artemis wake cost a median 485k
+   * tokens, of which 91.4% was re-reading context that already existed before
+   * the wake began. Spacing wakes is therefore the only throttle that acts on
+   * the quantity actually driving the bill.
+   *
+   * Absent means `full`: pacing is a governor, not an interlock (ADR-0023), so
+   * a harness assembled without it behaves exactly as it did before.
+   */
+  pace?(): Pace
+  /** Minimum gap between wakes of one agent while the pace is `slow`. */
+  readonly slowWakeGapMs?: number
+  /**
+   * Raised when a wake was deferred by the pace, with the reason. Deferral must
+   * be visible or the company looks hung (invariant §7) — nothing about it is
+   * inferable from the outside, since a deferred wake leaves no trace in the
+   * mailbox at all.
+   */
+  onWakeDeferred?(
+    agentId: string,
+    detail: { pace: Pace; waitMs: number; pendingMail: number }
+  ): void
+  now?(): number
   /** Raised when a session's block count looks pathological (ADR-0011, M3). */
   onPathology?(agentId: string, blocks: number): void
   /**
@@ -177,7 +239,22 @@ export const DONE_DIR = '.done'
  */
 export function formatHandover(messages: readonly Message[]): string {
   if (messages.length === 0) return '(none)'
-  return messages.map((m) => JSON.stringify(m, null, 2)).join('\n')
+  // File names on ONE line, not the messages themselves.
+  //
+  // This used to hand over `JSON.stringify(m, null, 2)` — pretty-printed, ~14
+  // lines per message — and the nudge is typed into the agent's terminal. A
+  // real Claude Code TUI runs with bracketed paste enabled, sees a multi-line
+  // block arrive at once, decides it is a paste and stops for confirmation
+  // ("Enter to confirm · Esc to cancel"). Freshly spawned agents died there:
+  // two of the Skeleton Crew exited 1 within two seconds of their first wake,
+  // and the failure was invisible to every test because the fake engine reads
+  // its inbox from disk and never renders a terminal at all.
+  //
+  // So the hand-over is a POINTER now, not a payload. The harness says what
+  // arrived and where it was archived; the agent reads its own files with the
+  // tools it already has. Pushing kilobytes of JSON through a keyboard was
+  // never the sound half of this design.
+  return messages.map((m) => `inbox/.done/${m.id}.json`).join(', ')
 }
 
 export class Hermes {
@@ -187,16 +264,86 @@ export class Hermes {
   private sweeping: Promise<SweepReport> = Promise.resolve({ delivered: [], rejected: [] })
   /** Stop-hook continuations per session, for guard 2 (ADR-0013). */
   private readonly blocks = new Map<string, number>()
-  /** Agents already nudged for their current pending mail — "exactly once". */
-  private readonly nudged = new Set<string>()
+  /**
+   * Which message files each agent has already been nudged FOR.
+   *
+   * A set of agent IDS is what this used to be, and it left a race that can
+   * silence an agent for good. The old rule was "nudged once, no more until the
+   * inbox is empty": the nudge consumes the inbox, so the next tick normally
+   * sees zero pending and clears the flag. But mail landing in the window
+   * between the consume and that observation leaves `pending > 0` with the flag
+   * still set — and from then on `pending` never returns to zero, so the flag
+   * never clears and the agent is never nudged again.
+   *
+   * Found while investigating a live stall at M7.7. It was NOT the cause of
+   * that stall (the agent there was correctly skipped as busy), and it is
+   * recorded that way rather than dressed up as the fix — but it is a real way
+   * for an agent to go deaf, and it costs one map to close.
+   *
+   * Keyed on the message files instead, so "exactly once" means once per
+   * MESSAGE rather than once per agent. The same unread mail still nudges only
+   * once (S-WAKE's "no stale nudges"); genuinely new mail earns its own nudge,
+   * which is what FR-3.5 asks for — "mail that lands while an agent is idle
+   * must wake it".
+   */
+  private readonly nudged = new Map<string, ReadonlySet<string>>()
   /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
   private readonly heldLogged = new Set<string>()
   /** Diverted msgIds already logged and signalled — one divert, one record. */
   private readonly divertNotified = new Set<string>()
   /** Agents whose deliveries the breaker is holding (rung 2, ADR-0011). */
   private readonly paused = new Set<string>()
+  /**
+   * When each agent was last woken, so the pace can put a floor under the gap
+   * (ADR-0023). In-memory on purpose: this governs the *rate* of wakes, and a
+   * restart legitimately starts the company moving again — the durable record
+   * of what was spent stays where it belongs, in the ledger.
+   */
+  private readonly lastWokeAt = new Map<string, number>()
 
   constructor(private readonly options: HermesOptions) {}
+
+  private get now(): number {
+    return this.options.now?.() ?? Date.now()
+  }
+
+  /**
+   * The pace gate (ADR-0023). Contract: pure of side effects except the one
+   * `onWakeDeferred` report, and it NEVER touches the mailbox — a deferred wake
+   * must leave the mail exactly where it is, so the next pass finds it and the
+   * agent eventually hears it. Consuming the inbox on a deferral would archive
+   * messages no session ever saw, which is the one thing the wake path is not
+   * allowed to do.
+   */
+  private wakeAllowed(agentId: string, pendingMail: number): boolean {
+    const pace = this.options.pace?.() ?? 'full'
+    if (pace === 'full') return true
+    const verdict = mayWake({
+      pace,
+      lastWokeAt: this.lastWokeAt.get(agentId) ?? null,
+      now: this.now,
+      slowWakeGapMs: this.options.slowWakeGapMs ?? DEFAULT_SLOW_WAKE_GAP_MS
+    })
+    if (verdict.allowed) return true
+    this.options.onWakeDeferred?.(agentId, { pace, waitMs: verdict.waitMs, pendingMail })
+    this.agora.appendLog({
+      kind: 'hook',
+      event: 'wake-deferred',
+      agentId,
+      pace,
+      // `Infinity` is not JSON; a held wake reports its wait as null — "until
+      // the window resets" — rather than as a number that would serialise to
+      // `null` anyway and read as though we forgot to fill it in.
+      waitMs: Number.isFinite(verdict.waitMs) ? Math.round(verdict.waitMs) : null,
+      pendingMail
+    })
+    return false
+  }
+
+  /** Records that a wake was issued, so the next one can be spaced from it. */
+  private noteWoken(agentId: string): void {
+    this.lastWokeAt.set(agentId, this.now)
+  }
 
   private get agora(): Agora {
     return this.options.agora
@@ -334,6 +481,33 @@ export class Hermes {
   private submitToClosing(message: Message): void {
     const handled = this.options.closing?.(message) ?? false
     if (!handled) this.bounce(message, 'no closing time is in progress')
+  }
+
+  /**
+   * Hands a triage report to the incident endpoint (FR-9.2, UC-09 step 3/4).
+   *
+   * The endpoint answers the sender itself when it can read the report and
+   * cannot match it, because that refusal carries reasons only it knows. A
+   * `false` here is the coarser case — nothing is listening at all — and
+   * bounces with that reason rather than dropping the agent's work.
+   */
+  private submitToHarbor(message: Message): void {
+    const handled = this.options.harbor?.(message) ?? false
+    if (!handled) this.bounce(message, 'no incident endpoint is listening')
+  }
+
+  /**
+   * Takes a crew member's report on a scheduled sweep (ADR-0012 triggers).
+   *
+   * The trigger that woke them was sent `from: agent.profiles`, and the
+   * protocol tells an agent to reply to whoever asked. Nothing was listening,
+   * so every sweep report bounced — the work happened and the company never
+   * heard about it. Recorded rather than answered: a sweep report is an agent
+   * telling the harness what it found, and there is nothing to decide.
+   */
+  private submitToProfiles(message: Message): void {
+    const handled = this.options.profiles?.(message) ?? false
+    if (!handled) this.bounce(message, 'no profile endpoint is listening')
   }
 
   /**
@@ -483,6 +657,24 @@ export class Hermes {
     return this.sweeping
   }
 
+  /**
+   * Resolves once a sweep already in flight has finished. Starts none.
+   *
+   * `stop()` clears the timers, but a sweep that is already running keeps
+   * going — and a sweep calls `agora.commitSoon()`, which starts a git child.
+   * Shutting down by draining the commit queue alone therefore drains a queue
+   * the sweep is about to add to, and git can still be starting as the caller
+   * tears the directory down. Quiescing means: stop, settle, then drain.
+   *
+   * Deliberately does not sweep: a shutdown must not deliver mail nobody asked
+   * it to deliver. It absorbs the failure of the in-flight sweep because
+   * `onSweepError` already reported it — this answers "is it finished", not
+   * "did it work".
+   */
+  async settled(): Promise<void> {
+    await this.sweeping.catch(() => {})
+  }
+
   private async runSweep(): Promise<SweepReport> {
     const delivered: DeliveryRecord[] = []
     const rejected: RejectionRecord[] = []
@@ -521,21 +713,27 @@ export class Hermes {
     try {
       raw = JSON.parse(fs.readFileSync(file, 'utf8'))
     } catch (err) {
+      // `ownerId` is the directory this file was found in, so even bytes that
+      // are not JSON have an author to answer to.
       return this.reject(
         file,
-        `not valid JSON: ${err instanceof Error ? err.message : 'unreadable'}`
+        `not valid JSON: ${err instanceof Error ? err.message : 'unreadable'}`,
+        ownerId
       )
     }
 
     const parsed = parseMessage(raw)
-    if (!parsed.ok) return this.reject(file, parsed.reason)
+    if (!parsed.ok) return this.reject(file, parsed.reason, ownerId)
 
     // Single-writer-per-file (ADR-0003): a file in agent A's outbox claiming to
     // be from agent B is a forgery, whatever wrote it.
     if (parsed.message.from !== ownerId) {
+      // Answered to `ownerId`, deliberately, not to `parsed.message.from`:
+      // the claimed sender did not write this and must never be told it did.
       return this.reject(
         file,
-        `from "${parsed.message.from}" does not own this outbox ("${ownerId}")`
+        `from "${parsed.message.from}" does not own this outbox ("${ownerId}")`,
+        ownerId
       )
     }
 
@@ -552,6 +750,34 @@ export class Hermes {
     }
 
     if (route.kind === 'endpoint') {
+      // An ASIDE: an act the endpoint admits but its handler does not act on
+      // (`accepts` minus `handles` in src/shared/endpoints.ts) — an agent
+      // answering the Odeon "done" instead of filing a deck, or telling the
+      // Library it cannot condense its memory.
+      //
+      // Recorded and not answered. FR-3.4 forbids DROPPING, not answering, and
+      // a terminal act obliges nothing back; the alternative is what shipped,
+      // where every reply reached a handler that knew exactly one body shape
+      // and came back "your JSON is malformed" to an agent that had never
+      // claimed to send any.
+      const contract = endpointContract(route.endpoint)
+      if (contract !== undefined && !contract.handles.includes(parsed.message.act)) {
+        this.agora.appendLog({
+          kind: 'delivery',
+          msgId: parsed.message.id,
+          from: parsed.message.from,
+          to: route.endpoint,
+          act: parsed.message.act,
+          subject: parsed.message.subject,
+          conversation: parsed.message.conversation,
+          hops: parsed.message.hops,
+          aside: true,
+          summary: parsed.message.body.slice(0, 2000)
+        })
+        this.drainOutbox(file)
+        return { kind: 'skipped' }
+      }
+
       // Not delivered to a mailbox — handed to the harness, which validates it
       // and writes through the single committer. The sender gets an answer
       // either way: a proposal that vanished silently would leave Artemis
@@ -560,6 +786,8 @@ export class Hermes {
       if (route.endpoint === LIBRARY_ENDPOINT) this.submitToLibrary(parsed.message)
       else if (route.endpoint === CLOSING_ENDPOINT) this.submitToClosing(parsed.message)
       else if (route.endpoint === ODEON_ENDPOINT) this.submitToOdeon(parsed.message)
+      else if (route.endpoint === HARBOR_ENDPOINT) this.submitToHarbor(parsed.message)
+      else if (route.endpoint === PROFILE_ENDPOINT) this.submitToProfiles(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }
@@ -655,9 +883,37 @@ export class Hermes {
     return anyHeld && records.length === 0 ? { kind: 'skipped' } : { kind: 'delivered', records }
   }
 
-  private reject(file: string, reason: string): { kind: 'rejected'; record: RejectionRecord } {
-    // Parked, not deleted: the Architect can read what an agent got wrong, and
-    // it will not be re-processed forever (FR-3.4's spirit — never drop silently).
+  /**
+   * Parks a file the router will not carry, and returns the refusal to whoever
+   * wrote it.
+   *
+   * Parked, not deleted: the Architect can read what an agent got wrong, and it
+   * will not be re-processed forever. Parking is load-bearing now rather than
+   * merely forensic — the notice POINTS at the parked copy, so the author can
+   * recover its own text instead of rewriting from memory.
+   *
+   * `author` is supplied by the caller, because only the caller knows what its
+   * directory means:
+   *
+   *  - A file in `agents/<id>/outbox/` was written by `<id>`. That is read from
+   *    the PATH, not from the content, so even a file whose bytes are garbage
+   *    has a knowable author. Every outbox rejection is returnable.
+   *  - A file in an inbox names its RECIPIENT, and `from` is the very field
+   *    that just failed to validate. Nobody can be named without guessing:
+   *    `null`, and the log entry is all anyone can have.
+   *
+   * The silence this closes was live, not theoretical. On 2026-09-01 Artemis
+   * wrote a complete, fully-cited standup brief; one derived field was wrong;
+   * the whole message went to `.rejected/`, and the only symptom anywhere was
+   * one line in the error log. Her brief loop broke every window and nothing
+   * surfaced it. FR-3.4 says never drop silently — and a drop the author is
+   * never told about is silent to the one party that could have fixed it.
+   */
+  private reject(
+    file: string,
+    reason: string,
+    author: string | null
+  ): { kind: 'rejected'; record: RejectionRecord } {
     const parked = path.join(path.dirname(file), REJECTED_DIR, path.basename(file))
     fs.mkdirSync(path.dirname(parked), { recursive: true })
     try {
@@ -665,10 +921,99 @@ export class Hermes {
     } catch {
       fs.rmSync(file, { force: true })
     }
-    const record: RejectionRecord = { file: parked, reason }
-    this.agora.appendLog({ kind: 'error', subsystem: 'hermes', file: parked, reason })
+
+    // Parked before notified, deliberately: the notice cites the parked path,
+    // and a notice pointing at a file that is not there yet would be a lie.
+    const notice = author === null ? null : this.returnToAuthor(author, parked, reason)
+    const record: RejectionRecord = { file: parked, reason, notice }
+    this.agora.appendLog({
+      kind: 'error',
+      subsystem: 'hermes',
+      file: parked,
+      reason,
+      // Ties "this was refused" to "and this is what told its author", so the
+      // pair is reconstructible from `log.jsonl` alone (NFR-13). A null
+      // `noticeId` next to a non-null `author` is the notify-failed case.
+      //
+      // The notice's own `delivery` entry therefore lands one seq EARLIER than
+      // this one: it has to exist before it can be cited. Reading the log in
+      // order, the answer precedes the question by a millisecond.
+      author,
+      noticeId: notice?.id ?? null
+    })
     this.options.onRejected?.(record)
     return { kind: 'rejected', record }
+  }
+
+  /**
+   * Delivers the refusal for a parked file to its author. Returns the notice,
+   * or null when one could not be composed or delivered.
+   *
+   * A refusal that is itself refused would ping-pong, so loop safety rests on
+   * three independent things, none of which is a counter:
+   *
+   *  1. **The notice never enters an outbox.** `reject` fires only on files
+   *     found in an outbox sweep or an inbox consume; this goes straight into
+   *     the author's inbox, exactly as `bounce` does, because the harness has
+   *     no outbox of its own. There is no path by which a harness-written
+   *     notice re-enters `deliverOne` — the only rejecter that notifies — so a
+   *     refusal cannot be refused.
+   *  2. **It is validated before it is sent.** `composeMessage` parses against
+   *     the schema and throws, so an ill-formed notice is never written at all,
+   *     rather than being delivered to fail on the far side. Caught here: the
+   *     file stays parked and logged either way, and only the notification is
+   *     lost — visibly, which is the whole point. Not hypothetical: `to` must
+   *     match `agentIdSchema`, and a stray directory under `agents/` yields an
+   *     owner id that does not.
+   *  3. **It obligates nothing.** `refuse` is not a reply-obliging act
+   *     (`REPLY_OBLIGING_ACTS`), so `requires_reply` derives false and the
+   *     notice starts no chain. `hops: 0` for the same reason it carries no
+   *     `in_reply_to` — the harness wrote this; it is not the continuation of a
+   *     thread we were able to read.
+   */
+  private returnToAuthor(author: string, parked: string, reason: string): Message | null {
+    const name = path.basename(parked)
+    try {
+      // The refusal's words reach an LLM, so they are a prompt surface
+      // (invariant §8) — rendered from prompts/hermes/, never string literals.
+      const vars = {
+        file: name,
+        reason,
+        // Relative to the author's own directory. It can read its own outbox,
+        // and the harness home's absolute layout is not an agent's business.
+        parked: path.posix.join('outbox', REJECTED_DIR, name)
+      }
+      const notice = composeMessage({
+        id: makeMessageId(new Date(), `rej${Math.random().toString(36).slice(2, 8)}`),
+        // Its own thread, derived from the file so that re-rejecting the same
+        // name lands in the same one. Claiming the original's conversation is
+        // not an option — it is inside the part of the file we could not read.
+        conversation: `rejected-${name.replace(/\.json$/, '')}`.slice(0, 64),
+        in_reply_to: null,
+        // `agent.hermes` is reserved and no hire can take it, so the notice
+        // cannot be forged and is never attributed to someone who did not
+        // write it (`src/shared/reserved.ts`).
+        from: HERMES_SENDER,
+        to: author,
+        act: 'refuse',
+        subject: this.render('rejected-subject.md', vars).trim().slice(0, 200),
+        body: this.render('rejected-body.md', vars).trim(),
+        hops: 0,
+        created_at: new Date().toISOString()
+      })
+      this.deliverFromHarness(notice)
+      return notice
+    } catch (err) {
+      this.agora.appendLog({
+        kind: 'error',
+        subsystem: 'hermes',
+        file: parked,
+        reason: `could not tell "${author}" the message was refused: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      })
+      return null
+    }
   }
 
   /** The outbox is router-drained (SDD §2); the message now lives in the inbox. */
@@ -716,8 +1061,20 @@ export class Hermes {
 
     if (decision.kind === 'continue') return null
 
+    // ADR-0023: the pace gate on the other wake path. A Stop-hook block IS a
+    // wake — it hands the session new input and buys a whole new turn — and the
+    // measurement says these are 39% of the day's spend at a mean 561k tokens
+    // for about a kilobyte of new information.
+    //
+    // Deferring returns null, which lets the turn END. That is the point: the
+    // agent goes idle with its mail still pending, and `wakeCheck` picks it up
+    // once the gap has passed. Nothing is dropped and nothing is consumed —
+    // the work is simply done in one later wake instead of one immediate one.
+    if (!this.wakeAllowed(agentId, decision.pendingMail)) return null
+
     const blocks = this.blockCount(agentId) + 1
     this.blocks.set(agentId, blocks)
+    this.noteWoken(agentId)
     if (isPathological(blocks)) this.options.onPathology?.(agentId, blocks)
 
     // Hand-over consumption (ADR-0003, Architect verdict at the M2 close-out
@@ -764,15 +1121,26 @@ export class Hermes {
     if (!this.options.nudge) return []
     const woken: string[] = []
     for (const agentId of this.knownAgents()) {
-      const pending = this.pendingMailCount(agentId)
+      const pendingFiles = this.pendingMailFiles(agentId)
+      const pending = pendingFiles.length
       if (pending === 0) {
         this.nudged.delete(agentId)
         continue
       }
-      if (this.nudged.has(agentId)) continue
+      // New mail is mail this agent has not been nudged for. Everything it was
+      // already told about stays silent, however long it sits unread.
+      const told = this.nudged.get(agentId) ?? new Set<string>()
+      const unannounced = pendingFiles.filter((name) => !told.has(name))
+      if (unannounced.length === 0) continue
       if (this.options.isIdle && !this.options.isIdle(agentId)) continue
+      // ADR-0023. Checked AFTER the "is there new mail" and "is it idle" tests
+      // and BEFORE `nudged` is updated, so a deferred wake is not recorded as
+      // announced: the same mail must still earn its nudge once the pace
+      // allows one, or pacing would silently turn into dropping.
+      if (!this.wakeAllowed(agentId, pending)) continue
 
-      this.nudged.add(agentId)
+      this.nudged.set(agentId, new Set(pendingFiles))
+      this.noteWoken(agentId)
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
       const handed = await this.consumeInbox(agentId)
@@ -860,9 +1228,23 @@ export class Hermes {
 
   /** Unread messages waiting for an agent. */
   pendingMailCount(agentId: string): number {
+    return this.pendingMailFiles(agentId).length
+  }
+
+  /**
+   * The message files waiting in an agent's inbox, sorted.
+   *
+   * Names rather than a count, because the wake watchdog has to tell new mail
+   * from old: a count alone cannot, since consuming one message and receiving
+   * another leaves it unchanged.
+   */
+  pendingMailFiles(agentId: string): readonly string[] {
     const inbox = path.join(this.mailboxDir(agentId), 'inbox')
-    if (!fs.existsSync(inbox)) return 0
-    return fs.readdirSync(inbox).filter((name) => name.endsWith('.json')).length
+    if (!fs.existsSync(inbox)) return []
+    return fs
+      .readdirSync(inbox)
+      .filter((name) => name.endsWith('.json'))
+      .sort()
   }
 
   /**
@@ -925,13 +1307,16 @@ export class Hermes {
       try {
         const parsed = parseMessage(JSON.parse(fs.readFileSync(file, 'utf8')))
         if (!parsed.ok) {
-          this.reject(file, `inbox: ${parsed.reason}`)
+          // An inbox names the RECIPIENT, and `from` is the field that just
+          // failed to validate — there is nobody here who can be named without
+          // guessing, so this one really does end at the log entry.
+          this.reject(file, `inbox: ${parsed.reason}`, null)
           continue
         }
         fs.renameSync(file, path.join(done, name))
         consumed.push(parsed.message)
       } catch (err) {
-        this.reject(file, `inbox: ${err instanceof Error ? err.message : 'unreadable'}`)
+        this.reject(file, `inbox: ${err instanceof Error ? err.message : 'unreadable'}`, null)
       }
     }
 

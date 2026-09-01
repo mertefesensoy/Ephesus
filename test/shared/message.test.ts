@@ -59,11 +59,35 @@ describe('the obligation table (ADR-0003, FR-3.3)', () => {
     expect(composeMessage({ ...base, act: 'inform' }).requires_reply).toBe(false)
   })
 
-  it('refuses a message whose flag disagrees with its act', () => {
+  /**
+   * This replaces a case that asserted a REFUSAL, and the refusal is what the
+   * 2026-09-01 live run showed to be wrong. Artemis wrote a complete,
+   * fully-cited standup brief, set `requires_reply: false` on a `propose`, and
+   * the whole message was parked in `.rejected/`, which at the time told the
+   * author nothing, so she could neither learn nor retry. (Rejections are
+   * returned to their author now; this case is about not rejecting it at all.)
+   *
+   * `PROTOCOL.md` tells agents in as many words that they "do not get to choose
+   * it". A field the sender is not allowed to choose is the harness's to
+   * derive, and deriving is STRONGER than refusing against the threat the
+   * refusal was written for: an obligation that is computed cannot be dodged.
+   */
+  it('derives the obligation flag instead of destroying the message', () => {
     const forged = { ...composeMessage(base), requires_reply: false }
     const result = parseMessage(forged)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toContain('obligation table')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.message.requires_reply).toBe(true)
+      // Corrected, not silently: a correction nobody can see is how a buggy
+      // sender goes unnoticed.
+      expect(result.corrected.join(' ')).toContain('requires_reply')
+    }
+  })
+
+  it('reports nothing corrected when the sender got it right', () => {
+    const result = parseMessage(composeMessage(base))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.corrected).toEqual([])
   })
 })
 

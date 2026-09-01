@@ -124,6 +124,19 @@ export class BudgetWatcher {
       const dir = reader.transcriptDir(agent.cfg)
       for (const file of await transcriptFiles(dir, agent.sessionIds)) {
         this.options.ledger.fold(agent.agentId, file, await reader.read(file))
+        // Money, second and separately (ADR-0011's `cost_usd`). Tokens first is
+        // not incidental: `foldCosts` bills a session's money to the day that
+        // session last spent TOKENS on the model, so the rows it reads must
+        // already be there. Folding money first would send every figure to the
+        // fallback day — today — and a session that ran across midnight would
+        // have its dollars and its tokens on different dates.
+        //
+        // An engine with no `costs` reader is a real product tier, not a fault:
+        // its rows keep `costUsd` null, which the UI shows as "not reported"
+        // and never as "free".
+        if (reader.costs) {
+          this.options.ledger.foldCosts(agent.agentId, file, await reader.costs(file))
+        }
       }
     }
     const spend = this.options.ledger.spendFor(

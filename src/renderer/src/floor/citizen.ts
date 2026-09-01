@@ -1,11 +1,20 @@
 /**
  * Procedural citizens — UI-DESIGN §5.1, the normative sprite specification.
  *
- * Characters are DRAWN, never licensed: the purchased packs' character sets and
- * the Character Generator are deliberately unused (Architect decision
- * 2026-08-29; ATTRIBUTION rule 3), so no likeness of a real person and no other
- * IP's character can appear on this floor. Every citizen is composed here from
- * tunic/hair/skin recipes.
+ * Citizens are composed here from tunic/hair/skin recipes, and this remains the
+ * DEFAULT: an Ephesus with no character pack installed paints people from these
+ * rules, and that is what most installs look like.
+ *
+ * It is no longer the only way. The 2026-08-29 decision that characters are
+ * never licensed assets was rewritten on 2026-09-01 (ATTRIBUTION rule 3): the
+ * ban was broader than its own reason, since a licensed pack of an author's own
+ * generic characters is neither a real person nor another IP's character. What
+ * the rule protects — no recognisable likeness on the floor — is unchanged and
+ * is now stated directly rather than enforced by refusing all art.
+ *
+ * Nothing below changed for it. A pack, when installed, replaces the BODY these
+ * recipes draw; the badge, the overlay and the walk timing stay here, because
+ * they are facts about an agent rather than decoration.
  *
  * §5.1 makes the §7 quality bar exact, and three of its clauses are the reason
  * this module looks the way it does:
@@ -27,9 +36,22 @@
  * unit tests instead of eyeballs.
  */
 
+import type { CharacterDirection } from '../../../shared/characters'
+
 export const DIRECTIONS = ['s', 'se', 'e', 'ne', 'n', 'nw', 'w', 'sw'] as const
 
 export type Direction = (typeof DIRECTIONS)[number]
+
+/**
+ * `src/shared/characters.ts` declares the same eight directions, because shared
+ * code may not import from the renderer. These two assignments stop compiling
+ * if either list changes without the other, so the drift is caught here rather
+ * than by a citizen silently facing the wrong way.
+ */
+const _sharedCoversFloor: CharacterDirection = 'sw' as Direction
+const _floorCoversShared: Direction = 'sw' as CharacterDirection
+void _sharedCoversFloor
+void _floorCoversShared
 
 /** §5.1: four frames per direction — idle · step-A · idle · step-B. */
 export const WALK_FRAMES = 4

@@ -26,10 +26,25 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0018](./ADR-0018-company-modes-proof-gate.md) | Company modes: standing self-improvement is earned through a proof gate | accepted |
 | [ADR-0019](./ADR-0019-recursive-improvement-profile.md) | Recursive Improvement: the self-improvement mission as a third built-in profile | accepted |
 | [ADR-0020](./ADR-0020-company-github-identity.md) | A company GitHub identity: agents co-author as themselves, never as the Architect | accepted |
+| [ADR-0021](./ADR-0021-workspace-trust-at-activation.md) | The Architect's activation is the answer to the engine's trust prompt | accepted |
+| [ADR-0022](./ADR-0022-company-identity-is-a-github-app.md) | The company identity is a GitHub App, not a machine user | accepted |
+| [ADR-0023](./ADR-0023-usage-aware-pacing.md) | Pace the company against the account's usage window, not a fixed budget | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):
 
+- ADR-0023 "writes each observation to `<home>/usage.json`" — as built, one
+  report per agent at `<home>/usage/<agent>.json`. The account WINDOWS are
+  account-wide and a single file served them, but the report also carries the
+  live per-session cost, and one shared file is last-writer-wins: whichever
+  agent rendered most recently would have every other agent's spend attributed
+  to it. The decision is unchanged; only the file layout is.
+- ADR-0011 "Budgets are enforced pre-flight where possible (burn-rate
+  projection) … budget state feeds trip signal #4" — superseded by ADR-0023.
+  The per-agent `dailyTokens` ceiling survives as a runaway backstop and
+  `breached` still feeds signal #4, but `projected-breach` no longer trips the
+  breaker, and normal operation is governed by the account's resetting usage
+  window instead. The rest of ADR-0011 stands.
 - ADR-0008 §4 "minutes + action items written to blackboard + ledger on close" —
   as built (M5.5, DECISIONS-LOG 2026-08-28), minutes archive in `odeon/minutes/`
   and action items go to the orchestrator as a `request`; nothing but the single

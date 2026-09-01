@@ -12,9 +12,29 @@ is not shipped.**
 2. Asset files that the licence forbids redistributing *in source form* are kept
    out of this repository: they go in the gitignored drop below, and the
    restore path is documented so a fresh clone can be rebuilt from a purchase.
-3. Characters are never third-party assets. Citizens are drawn procedurally
-   (`src/renderer/src/floor/citizen.ts`) precisely so no likeness of a real
-   person and no other IP's character can appear on the floor.
+3. **No likeness of a real person, and no other IP's character, ever appears on
+   the floor.** That is the rule; it has not changed.
+
+   Until 2026-09-01 it was enforced by a blanket ban — citizens were drawn
+   procedurally and characters were never third-party assets at all. The ban was
+   broader than its own reason: a licensed character pack from the same author
+   as the floor is neither a real person nor another IP's character, and refusing
+   it protected nobody while costing the floor its legibility.
+
+   So the rule is now the reason, enforced directly. A character asset is
+   acceptable only when it is (a) licensed like any other asset under rule 1 and
+   kept out of the repository under rule 2, (b) the pack author's own original
+   characters, and (c) generic — no real person, no recognisable character from
+   another work. Anything a reader could identify as somebody is refused, whether
+   it is drawn procedurally or bought.
+
+   The procedural citizens remain, and remain the default: a floor with no
+   character pack installed still paints people. That is not a fallback nobody
+   exercises — it is what an Ephesus without the paid pack looks like, and
+   invariant §7 requires the difference to be visible rather than silent.
+
+   *Architect's decision, 2026-09-01, recorded because it rewrites a rule rather
+   than applying one.*
 
 ## Installed assets
 
@@ -25,7 +45,10 @@ is not shipped.**
 | IBM Plex Mono (`@fontsource/ibm-plex-mono`, latin-400) | npm-pinned | IBM / Bold Monday | SIL OFL 1.1 | yes | Data, logs, Odeon artifacts (UI-DESIGN §3) |
 
 | LimeZu *Modern Interiors* — Room Builder 16×16 (`limezu-interiors-room-builder.png`) | full (paid) version, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Commercial asset licence (`LICENSE.txt` in the pack): use and edit in any commercial or non-commercial project; **resale or redistribution of the asset is forbidden**; **credit required** | **no** — used in the app, never redistributed as an asset (rule 2) | The floor's walls and floors (UI-DESIGN §7). Active pack. |
-| LimeZu *Modern Office Revamped* v1.2 — Room Builder 16×16 (`limezu-office-room-builder.png`) | v1.2, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — same as above | An alternative floor palette; installed and mapped, inactive while the interiors map sorts first. |
+| LimeZu *Modern Office Revamped* v1.2 — Room Builder 16×16 (`limezu-office-room-builder.png`) | v1.2, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — same as above | An alternative floor palette. Layered after the interiors pack, so it fills only what that pack leaves unmapped. |
+| LimeZu *Modern Office Revamped* v1.2 — furniture 16×16 (`limezu-office-furniture.png`) | v1.2, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — same as above | Station furniture (UI-DESIGN §5.4). Mapped conservatively: only tiles that read as a whole object on their own. Half of a two-tile printer would look deliberate and be wrong. |
+| LimeZu *Modern Interiors* — premade characters 16×16 (`limezu-char-01..12.png`) | full (paid) version, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — used in the app, never redistributed (rule 2) | The citizens on the floor (UI-DESIGN §5.1), under rule 3 as rewritten 2026-09-01. Twelve of the sixty-one premade characters; the pack's own generic people, no likeness of anyone. Sheet layout measured, not assumed — facings run east, north, west, south with six walk frames each. |
+| LimeZu *Modern Interiors* — UI thinking emotes 16×16 (`limezu-emotes.png`) | full (paid) version, purchased 2026-08-28 | LimeZu ([limezu.itch.io](https://limezu.itch.io/)) | Same terms as above | **no** — same as above | Installed, NOT yet used. Intended for avatar status, which needs a decision about whether an emote replaces or accompanies the status word. |
 
 Citizens remain procedural (never third-party — rule 3). The LimeZu purchase
 ships a character generator and character sheets; **neither is used, and the

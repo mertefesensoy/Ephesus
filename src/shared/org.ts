@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { budgetSchema } from './agents'
 import type { LogEntry } from './log'
 
 /**
@@ -163,11 +164,49 @@ export const hireTemplateSchema = z
     /** Bumped whenever the template changes; a hire records which one it used. */
     version: z.number().int().min(1).max(10_000),
     role: z.string().min(1).max(64),
+    /**
+     * What to call this hire on screen — "Mason", not "ci-babysitter".
+     *
+     * Optional, and it changes NO identifier: the agent id stays the slug that
+     * names a mailbox directory, a registry row and every ledger reference, so
+     * adding a name cannot orphan an inbox. It exists because the id a machine
+     * needs and the name a person reads are different things, and using the
+     * role for both left every panel saying `ci-babysitter` twice while the
+     * floor showed `agent.skeleton-crew-musahit-ci-babysitter`.
+     *
+     * SDD §4.1's own examples have always called this hire `agent.mason`, so
+     * the design assumed names; only the template had nowhere to put one.
+     */
+    displayName: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^\S[^\r\n]*$/, 'a display name is one line')
+      .optional(),
     engine: z.string().min(1).max(32),
     capabilities: z.array(z.string().min(1).max(32)).max(32),
     /** Names only — a template that carried a secret VALUE would be a leak. */
     envGrants: z.array(z.string().min(1).max(64)).max(32),
-    brief: z.string().min(1).max(20_000)
+    brief: z.string().min(1).max(20_000),
+    /**
+     * The role's daily token budget (ADR-0011, FR-11.2).
+     *
+     * Added at M7.1 because both documents that describe a hire template name
+     * it and this one did not carry it: FR-9.1 lists "budgets" among what a
+     * mission profile declares, and ADR-0012's bundle listing spells the file
+     * out as "role templates: engine, prompt, skills, env grants, budget". A
+     * profile that could not say what a role may spend would have pushed the
+     * number into activation code, where it stops being a reviewable line in a
+     * file the Architect reads before activating.
+     *
+     * Optional for the same reason `spawnRequestSchema.budget` is: an
+     * unbudgeted hire is legal and shows as `unbudgeted`, rather than as a zero
+     * the Watch would treat as an immediate breach. Additive and optional, so
+     * every document written against the previous shape still validates —
+     * which is why it costs no `schemaVersion` bump. (No hire template file
+     * existed on disk when this landed; this schema had only test callers.)
+     */
+    budget: budgetSchema.optional()
   })
   .strict()
 

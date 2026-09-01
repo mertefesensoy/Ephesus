@@ -3,7 +3,8 @@ import {
   CLOSING_ENDPOINT,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
-  ODEON_ENDPOINT
+  ODEON_ENDPOINT,
+  PROFILE_ENDPOINT
 } from '../../src/shared/reserved'
 import {
   BROADCAST,
@@ -289,9 +290,25 @@ describe('the library endpoint (ADR-0006 layer 3)', () => {
     expect(route.kind).toBe('endpoint')
   })
 
-  it('bounces anything that is not a propose', () => {
+  it('takes a refusal too — the request obliges a reply, and "no" is one', () => {
+    // Reversed deliberately (2026-09-01). This endpoint sends a `request`
+    // (`Reflection.request`), which obligates a reply, and PROTOCOL.md tells an
+    // agent to refuse and say why when it cannot do what was asked. Bouncing
+    // that refusal left `Reflection.outstanding` holding the agent and the
+    // Architect with no record of why the memory was never condensed.
     const route = routeMessage(
-      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'inform' }),
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'refuse' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: LIBRARY_ENDPOINT })
+  })
+
+  it('still bounces an act that ASKS the endpoint for something', () => {
+    // Widening the accept-set is not the same as opening it. The Library has no
+    // answer to a question, so a `query` is still refused — by name, so the
+    // sender can correct itself.
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'query' }),
       { knownAgents: ['agent.mason'], orchestratorId: null }
     )
     expect(route.kind).toBe('bounce')
@@ -339,7 +356,21 @@ describe('the Odeon endpoint takes filings and meeting answers (ADR-0008)', () =
     expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
   })
 
-  it.each(['request', 'agree', 'refuse', 'done'] as const)('bounces a %s act', (act) => {
+  it.each(['agree', 'refuse', 'done'] as const)('takes a %s — it asked, so it listens', (act) => {
+    // Reversed deliberately (2026-09-01). Six reply-obliging asks go out from
+    // this address — five `request`s and the meeting floor as a `query` — and
+    // the accept-set was two acts wide, so `done`, the act PROTOCOL.md names
+    // for finishing ("When you finish, say so with a reference to the result"),
+    // bounced off the very endpoint that had asked.
+    //
+    // These three are ASIDES, not filings: `endpoints.ts` keeps them out of
+    // `handles`, so Hermes records them in `log.jsonl` and answers nothing,
+    // rather than running prose through the deck parser.
+    const route = routeMessage(message({ to: ODEON_ENDPOINT, act }), roster)
+    expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+
+  it.each(['request', 'query'] as const)('still bounces a %s — an ask, not an answer', (act) => {
     const route = routeMessage(message({ to: ODEON_ENDPOINT, act }), roster)
     expect(route.kind).toBe('bounce')
   })
@@ -352,5 +383,44 @@ describe('the Odeon endpoint takes filings and meeting answers (ADR-0008)', () =
       roster
     )
     expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+})
+
+/**
+ * A scheduled trigger arrives `from: agent.profiles`, and PROTOCOL.md tells an
+ * agent to reply to whoever asked it. Until this endpoint existed that reply
+ * fell through to the mailbox lookup and bounced with `no mailbox for
+ * "agent.profiles"` — observed twice on the 2026-09-01 live run. The crew did
+ * their sweeps and every report was dropped, which is exactly the silence that
+ * made the run's action half unreadable.
+ */
+describe('a crew member can report on the sweep it was woken for', () => {
+  const ctx = { knownAgents: ['agent.mason'], orchestratorId: 'agent.artemis' }
+
+  it('takes a report instead of bouncing it', () => {
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'inform' }),
+      ctx
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: PROFILE_ENDPOINT })
+  })
+
+  it('takes "done" as well, since a sweep that finished says so', () => {
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'done' }),
+      ctx
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: PROFILE_ENDPOINT })
+  })
+
+  it('refuses an act that asks the harness for something', () => {
+    // A sweep report tells the harness what was found. It never asks, and an
+    // endpoint that quietly accepted a `propose` would owe a verdict nothing
+    // is there to give.
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'propose' }),
+      ctx
+    )
+    expect(route.kind).toBe('bounce')
   })
 })

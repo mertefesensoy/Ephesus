@@ -1,4 +1,5 @@
-import { CLOSING_ENDPOINT, LEDGER_ENDPOINT, LIBRARY_ENDPOINT, ODEON_ENDPOINT } from './reserved'
+import { LEDGER_ENDPOINT } from './reserved'
+import { endpointContract, listActs } from './endpoints'
 import { BROADCAST, HUMAN, type Message } from './message'
 
 /**
@@ -94,73 +95,61 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
     }
   }
 
-  if (message.to === LEDGER_ENDPOINT) {
-    // "Agents never touch tasks.json." The endpoint is the only way in, and
-    // this is where the two rules that make it safe live — because ADR-0003
-    // calls these transport rules, not etiquette.
-    if (ctx.orchestratorId === null) {
-      return { kind: 'bounce', reason: 'the ledger endpoint has no orchestrator to write for it' }
-    }
-    if (message.from !== ctx.orchestratorId) {
-      return {
-        kind: 'bounce',
-        reason: `only the orchestrator may write the ledger; "${message.from}" may not`
+  // Every harness-owned address, in one place, against the contract declared in
+  // `endpoints.ts` (ADR-0003, SDD §7.1).
+  //
+  // This was six hand-written branches, each carrying its own act list, and
+  // that is precisely how the endpoints drifted from the mail they send:
+  // `agent.profiles` shipped with no branch at all — the crew swept all evening
+  // on the 2026-09-01 run and every report bounced — and of the six that DID
+  // have one, the five that ask agents questions ALL refused acts their own
+  // requests oblige an agent to answer with. `refuse`, which PROTOCOL.md tells
+  // every agent to use when it cannot do what was asked, bounced off all five.
+  // The accept-set now lives beside the send-set where the two can be checked
+  // against each other, instead of being re-derived from memory by whoever adds
+  // the eighth endpoint.
+  const contract = endpointContract(message.to)
+  if (contract !== undefined) {
+    // The ledger's two extra rules stay here rather than in the table: they
+    // read the routing context, which a static contract cannot. "Agents never
+    // touch tasks.json" — the endpoint is the only way in, and this is where
+    // the rules that make it safe live, because ADR-0003 calls these transport
+    // rules, not etiquette.
+    if (contract.id === LEDGER_ENDPOINT) {
+      if (ctx.orchestratorId === null) {
+        return { kind: 'bounce', reason: 'the ledger endpoint has no orchestrator to write for it' }
+      }
+      if (message.from !== ctx.orchestratorId) {
+        return {
+          kind: 'bounce',
+          reason: `only the orchestrator may write the ledger; "${message.from}" may not`
+        }
       }
     }
-    if (message.act !== 'propose') {
-      return {
-        kind: 'bounce',
-        reason: `the ledger endpoint takes "propose" acts; got "${message.act}"`
-      }
-    }
-    return { kind: 'endpoint', endpoint: LEDGER_ENDPOINT }
-  }
 
-  if (message.to === LIBRARY_ENDPOINT) {
-    // ADR-0006 layer 3. Unlike the ledger, ANY agent may write here — but only
-    // about its own memory, which is why there is no writer check: the endpoint
-    // condenses `message.from`'s memory and nobody else's, so an agent writing
-    // here can only ever act on itself.
-    if (message.act !== 'propose') {
+    // An address that hears nothing says so in its own words. Falling through
+    // to the mailbox lookup below would tell the sender `no mailbox for
+    // "agent.hermes"` — false, and the most misleading answer available: the
+    // address is not missing, it is the router's own.
+    if (contract.accepts.length === 0) {
       return {
         kind: 'bounce',
-        reason: `the library endpoint takes "propose" acts; got "${message.act}"`
+        reason: contract.deaf ?? `the ${contract.name} endpoint takes no mail`
       }
     }
-    return { kind: 'endpoint', endpoint: LIBRARY_ENDPOINT }
-  }
 
-  if (message.to === CLOSING_ENDPOINT) {
-    // GYM-003. Any agent may answer closing time — the request went to all of
-    // them — but only with a reply-shaped act: an ACK informs, it never asks.
-    // Whether a closing is actually in progress is state, not transport; the
-    // handler bounces an out-of-season ACK with a reason (FR-3.4).
-    if (message.act !== 'inform' && message.act !== 'done') {
+    // What an agent may write here FOR is the endpoint's own check, not the
+    // router's — the Odeon refuses a deck for a task the sender was not
+    // assigned, and the Harbor refuses a report for an incident nobody raised.
+    // Both are ledger and incident state, and the router reads neither.
+    if (!contract.accepts.includes(message.act)) {
       return {
         kind: 'bounce',
-        reason: `the closing endpoint takes "inform" or "done" acts; got "${message.act}"`
+        reason: `the ${contract.name} endpoint takes ${listActs(contract.accepts)} acts; got "${message.act}"`
       }
     }
-    return { kind: 'endpoint', endpoint: CLOSING_ENDPOINT }
-  }
 
-  if (message.to === ODEON_ENDPOINT) {
-    // ADR-0008, FR-7.2. Like the Library and unlike the ledger, ANY agent may
-    // file here — accountability that only the orchestrator could file would be
-    // accountability nobody owes. What an agent may file FOR is checked by the
-    // endpoint, which refuses a deck for a task the sender was not assigned;
-    // that is a ledger fact, and the router does not read the ledger.
-    // `propose` files an artifact; `inform` answers a meeting question. The
-    // floor is handed out as a `query`, and ADR-0003's act table makes the
-    // reply to a query an `inform` — so refusing one here would make the
-    // meeting driver unable to hear its own attendees.
-    if (message.act !== 'propose' && message.act !== 'inform') {
-      return {
-        kind: 'bounce',
-        reason: `the odeon endpoint takes "propose" or "inform" acts; got "${message.act}"`
-      }
-    }
-    return { kind: 'endpoint', endpoint: ODEON_ENDPOINT }
+    return { kind: 'endpoint', endpoint: contract.id }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

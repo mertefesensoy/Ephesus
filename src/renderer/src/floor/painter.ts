@@ -1,5 +1,5 @@
 import { TILE_PX, type PlanCell, type PlanKind } from '../../../shared/floor'
-import { furnishingsOf, type TilesetMap } from '../../../shared/tileset'
+import { furnishingsOf, type TilesetLayer } from '../../../shared/tileset'
 import { tokens } from '../tokens'
 import { atlasScale, frameFor, furnishingFrame, type AtlasFrame } from './atlas'
 
@@ -46,6 +46,13 @@ export interface BlitOp {
   /** Integer scale factor (§7: integer scaling only). */
   readonly scale: number
   readonly frame: AtlasFrame
+  /**
+   * Which installed sheet this frame indexes. A frame index only means anything
+   * against the pack that shipped it, so an op that did not carry its sheet
+   * would be a coordinate with no image — which is how a two-pack drop paints
+   * one pack's furniture out of the other pack's walls.
+   */
+  readonly sheet: string
 }
 
 export type PaintOp = FillOp | BlitOp
@@ -55,12 +62,16 @@ export type PaintOp = FillOp | BlitOp
  * not cover this cell, the result is the procedural drawing; with a mapped cell
  * it is a single blit.
  */
-export function paintCell(cell: PlanCell, map: TilesetMap | null): readonly PaintOp[] {
+export function paintCell(cell: PlanCell, layers: readonly TilesetLayer[]): readonly PaintOp[] {
   const x = cell.col * TILE_PX
   const y = cell.row * TILE_PX
-  if (map) {
-    const frame = frameFor(map, cell)
-    if (frame) return [{ op: 'blit', x, y, scale: atlasScale(map), frame }]
+  // First layer that covers this cell wins; a later pack fills what the base
+  // pack left unmapped rather than overpainting it.
+  for (const layer of layers) {
+    const frame = frameFor(layer.map, cell)
+    if (frame) {
+      return [{ op: 'blit', x, y, scale: atlasScale(layer.map), frame, sheet: layer.sheet }]
+    }
   }
   return proceduralCell(cell, x, y)
 }
@@ -179,8 +190,11 @@ function proceduralCell(cell: PlanCell, x: number, y: number): readonly PaintOp[
 }
 
 /** Contract: the whole room's ops, in plan order. */
-export function paintPlan(plan: readonly PlanCell[], map: TilesetMap | null): readonly PaintOp[] {
-  return plan.flatMap((cell) => paintCell(cell, map))
+export function paintPlan(
+  plan: readonly PlanCell[],
+  layers: readonly TilesetLayer[]
+): readonly PaintOp[] {
+  return plan.flatMap((cell) => paintCell(cell, layers))
 }
 
 /**
@@ -196,13 +210,20 @@ export function paintPlan(plan: readonly PlanCell[], map: TilesetMap | null): re
  * still reads because the plan (not the furniture) is what says a station is
  * there.
  */
-export function paintFurnishings(map: TilesetMap | null): readonly PaintOp[] {
-  if (!map) return []
+export function paintFurnishings(layers: readonly TilesetLayer[]): readonly PaintOp[] {
+  // Every pack's furnishings, not just the base pack's: a furniture pack that
+  // shipped no walls exists precisely to add these.
+  return layers.flatMap((layer) => furnishingsFor(layer))
+}
+
+function furnishingsFor(layer: TilesetLayer): readonly PaintOp[] {
+  const map = layer.map
   return furnishingsOf(map).map((item) => ({
     op: 'blit' as const,
     x: item.col * TILE_PX,
     y: item.row * TILE_PX,
     scale: atlasScale(map),
+    sheet: layer.sheet,
     frame: furnishingFrame(map, item)
   }))
 }

@@ -6,6 +6,15 @@ import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
 import type { GymDecided, GymRowView } from './gym-view'
 import type { BriefView, SourceView, StoaCurated } from './stoa-view'
+import type {
+  ActivationResult,
+  ProfileInstanceView,
+  ProfileLoad,
+  ProfileSummary
+} from './profile-view'
+import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
+import type { HarborView } from './harbor'
+import type { ShareExport, ShareInspection, ShareInstall } from './share-view'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
   BriefRecord,
@@ -29,6 +38,7 @@ export type MemoQueueName = 'open' | 'decided' | 'all'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
+import type { CapacityView } from './capacity'
 import type { AgentSpend } from './cost'
 import type { GateVerdict, OpenGate } from './gates'
 import type { Message } from './message'
@@ -95,6 +105,42 @@ export const IpcChannels = {
   stoaRetire: 'stoa:retire',
   stoaBriefs: 'stoa:briefs',
   stoaBrief: 'stoa:brief',
+  // Mission profiles (SDD §5 `profiles:`, ADR-0012). M7.1 ships the READ half —
+  // `list` and `inspect` — because loading is pure and inspecting a bundle
+  // before trusting it is the safety story ADR-0012 chose profiles for.
+  // `activate`/`deactivate` are M7.2's and are deliberately absent until the
+  // composition they depend on exists.
+  profilesList: 'profiles:list',
+  profilesInspect: 'profiles:inspect',
+  // SDD §5 lists `activate(name, target)` and `deactivate(instanceId)`.
+  // `preview` and `instances` are added beside them under the M3.1 rule — a new
+  // channel gets a doc line and a DECISIONS-LOG entry, or it does not ship.
+  // `preview` is not a convenience: it is the screen ADR-0012's safety story
+  // rests on, and it returns the SAME plan `activate` executes, so the two
+  // cannot drift.
+  profilesPreview: 'profiles:preview',
+  profilesActivate: 'profiles:activate',
+  profilesDeactivate: 'profiles:deactivate',
+  profilesInstances: 'profiles:instances',
+  // The Harbor's inbound half (SDD §5 `harbor: repos()`, FR-10.1). Reading is
+  // free: `repos` answers from what the last ingestion held and touches no
+  // network — the scheduler drives ingestion, so a panel opening cannot make
+  // the company shell out to `gh`.
+  harborRepos: 'harbor:repos',
+  // Sharing (SDD §5 `harbor: hireExport(role) hireImport(blob)`, FR-10.4 — M7.6).
+  // FOUR channels where the SDD's abridged list names two, recorded in
+  // DECISIONS-LOG with SDD §5 updated to name them (the M3.1 rule).
+  //
+  // The split is the requirement, not a convenience. FR-10.4 says "import only
+  // pre-fills the spawn form — a human always confirms", so INSPECT reads a
+  // blob and returns a disclosure while writing nothing, and INSTALL is what a
+  // confirmed form reaches. There is deliberately no channel that does both,
+  // and none that activates: an imported profile is inert until the Architect
+  // activates it through `profiles:activate`, which is its own action.
+  harborHireExport: 'harbor:hire-export',
+  harborProfileExport: 'harbor:profile-export',
+  harborImportInspect: 'harbor:import-inspect',
+  harborImportInstall: 'harbor:import-install',
   orgChart: 'org:chart',
   orgMetrics: 'org:metrics',
   orgRetros: 'org:retros',
@@ -119,6 +165,7 @@ export const IpcChannels = {
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
   watchBreaker: 'watch:breaker-state',
+  watchCapacity: 'watch:capacity',
   watchDismiss: 'watch:dismiss'
 } as const
 
@@ -172,6 +219,16 @@ export const LOG_APPEND_CHANNEL = 'log:append'
  * never disagree with main about what is open (the renderer is a projection).
  */
 export const GATE_OPEN_CHANNEL = 'gate:open'
+
+/**
+ * Push channel signalling that the provider-capacity picture changed — an agent
+ * parked, was continued, or came back (`src/shared/capacity.ts`).
+ *
+ * A nudge, not a payload, for the same reason `gate:open` is one: the strip
+ * re-reads `watch:capacity`, so it can never hold a second copy of the park
+ * that disagrees with main.
+ */
+export const CAPACITY_STATE_CHANNEL = 'capacity:state'
 
 /** One agent's avatar snapshot, addressed. */
 export interface AvatarUpdate {
@@ -335,6 +392,59 @@ export interface EphApi {
     /** One brief's text, as archived and immutable. */
     brief: (id: string) => Promise<string | null>
   }
+  profiles: {
+    /**
+     * Every bundle under the harness home or the built-ins, home shadowing
+     * builtin. An INVALID bundle still gets a row (`valid: false`) — a profile
+     * that disappeared from the list when its JSON broke would look
+     * uninstalled, which is the silent degradation invariant §7 forbids.
+     */
+    list: () => Promise<readonly ProfileSummary[]>
+    /**
+     * One bundle, or every reason it was refused (ADR-0012). Reading is pure:
+     * inspecting a profile activates nothing, spawns nothing and writes
+     * nothing — it is how the Architect reads what a profile MAY do before
+     * deciding whether it may.
+     */
+    inspect: (name: string) => Promise<ProfileLoad>
+    /**
+     * What activating this profile on this target WOULD do — hires, grants,
+     * budgets, composed autonomy, triggers, repos — without doing any of it.
+     * The activation screen reads this; `activate` executes the same plan.
+     */
+    preview: (request: ActivationRequest) => Promise<ActivationPlanResult>
+    /** Activates it. All or nothing: a hire that cannot spawn unwinds the rest. */
+    activate: (request: ActivationRequest) => Promise<ActivationResult>
+    /** Tears one instance down — triggers disarmed first, then agents killed. */
+    deactivate: (instanceId: string) => Promise<{ ok: boolean; reason: string | null }>
+    /** Every live instance (FR-9.4: many profiles, many targets, one floor). */
+    instances: () => Promise<readonly ProfileInstanceView[]>
+  }
+  harbor: {
+    /**
+     * What the port holds: the registered repositories, their queues, the rows
+     * that were dropped, and any failure — per repo, and for `gh` overall.
+     * A failure is a FIELD, never an empty list: a repo whose call errored and
+     * one with nothing open must not look alike (invariant §7).
+     */
+    repos: () => Promise<HarborView>
+    /** One role template as a shareable blob (FR-10.4). */
+    hireExport: (profile: string, hire: string) => Promise<ShareExport>
+    /** A whole ADR-0012 bundle, as the FILES it is made of. */
+    profileExport: (name: string) => Promise<ShareExport>
+    /**
+     * What importing this blob WOULD do. Writes nothing, starts nothing —
+     * this is the pre-fill FR-10.4 requires, and the manifest it returns is
+     * recomputed from the payload rather than taken from the envelope.
+     */
+    importInspect: (blob: string) => Promise<ShareInspection>
+    /**
+     * Writes an accepted import into the harness home. The human confirming
+     * is what reaches this. It does NOT activate: the imported profile is
+     * inert until `profiles:activate`, which is a separate Architect action.
+     */
+    importInstall: (blob: string) => Promise<ShareInstall>
+  }
   org: {
     /** The org chart, read off the roster (FR-11.5). */
     chart: () => Promise<readonly OrgNode[]>
@@ -441,6 +551,17 @@ export interface EphApi {
      * which ADR-0011 requires on the agent card rather than hidden.
      */
     breakerState: () => Promise<readonly BreakerState[]>
+    /**
+     * Who is waiting on the provider, since when, and when the harness will ask
+     * again (`src/shared/capacity.ts`).
+     *
+     * On the Watch surface rather than beside the agent cards because a park is
+     * a COMPANY fact: one refusal usually stops everyone, and the Architect's
+     * question is "is the company stopped", not "what is agent 4 doing".
+     */
+    capacity: () => Promise<CapacityView>
+    /** Subscribe to "a park opened, continued, or cleared"; the view re-reads. */
+    onCapacityChange: (cb: () => void) => () => void
   }
   pty: {
     /**

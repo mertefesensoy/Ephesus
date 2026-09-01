@@ -1,0 +1,7 @@
+{
+  "id": "docs-sweep",
+  "kind": "schedule",
+  "everyMs": 86400000,
+  "hire": "docs-agent",
+  "playbook": "docs-sync.md"
+}

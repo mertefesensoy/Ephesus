@@ -1,3 +1,4 @@
+import type { CapacityLimit } from '../../shared/capacity'
 import type { EngineId, HookSupport } from '../../shared/engines'
 
 /**
@@ -58,6 +59,18 @@ export interface AgentSpawnConfig {
    * Least-privilege: only what the hire template declares reaches this map.
    */
   readonly envGrants: Readonly<Record<string, string>>
+  /**
+   * The git author the company's work is committed under (ADR-0022), or null
+   * when no company identity is configured.
+   *
+   * Deliberately NOT carried in `envGrants`: a grant is a credential the broker
+   * released to a role that declared it, and re-scoping grants to the declared
+   * names is the invariant that keeps undeclared variables out of a spawn. An
+   * author name is neither secret nor declared, so smuggling it through that map
+   * would weaken the one check standing between a spawn and the harness's whole
+   * environment.
+   */
+  readonly commitIdentity: { readonly name: string; readonly email: string } | null
   /** Absolute path to `agora/agents/<id>/identity.md` (SDD §2). */
   readonly identityPath: string
   /** Absolute path to the agent-facing `agora/PROTOCOL.md` (SDD §2). */
@@ -80,6 +93,36 @@ export interface AgentSpawnConfig {
    * it is the thing that must not be printed.
    */
   readonly recallCommand: string
+  /**
+   * The command an agent runs to get a FRESH GitHub installation token
+   * (`eph-gh-token`, ADR-0022). Adapters export it as `EPH_GH_TOKEN`.
+   *
+   * Separate from the token itself, which arrives in `envGrants` and is a
+   * snapshot: a token lives an hour, an agent may not, and an agent holding a
+   * stale copy gets a 401 that reads like a permissions mistake. Empty when no
+   * company identity is configured, in which case the adapter exports nothing
+   * and `PROTOCOL.md`'s instruction to use it is the thing that must not print.
+   */
+  readonly ghTokenCommand: string
+  /**
+   * The autonomy this spawn runs at — the profile's level composed against the
+   * global ceiling (ADR-0012, FR-11.1), or the ceiling alone for an agent on no
+   * profile.
+   *
+   * Adapters map it to whatever their engine calls "ask me less". It is handed
+   * over here rather than read from the Watch, because an adapter that reached
+   * for policy would be a second place autonomy is decided, and the more
+   * permissive of two such places always wins in the end.
+   *
+   * Why it exists: through M7 the harness gated its OWN actions and left the
+   * engine's permission prompt untouched, so an Architect who had granted a
+   * profile full autonomy was still answering "Claude is waiting for your
+   * input" every few minutes. `evaluateGate` refuses `tool-permission` by
+   * construction, and correctly — the harness has no action to permit there,
+   * the ENGINE does — so the only place that interruption can be answered is
+   * the engine's own flag.
+   */
+  readonly autonomy: 'manual' | 'supervised' | 'autonomous'
 }
 
 /**
@@ -170,6 +213,34 @@ export interface UsageFact {
   readonly at: string | null
 }
 
+/**
+ * A **cumulative** money figure the engine reports for one (session, model).
+ *
+ * Distinct from `UsageFact` because it behaves in the opposite way, and
+ * conflating the two would double-count on the first re-read. A `UsageFact` is
+ * an INCREMENT — one turn's tokens, appended once. A `CostFact` is a RUNNING
+ * TOTAL, rewritten as the session goes on: Claude Code emits it as a
+ * `cost-state` line whose `totalCostUSD` and per-model `costUSD` cover
+ * everything the session has spent so far.
+ *
+ * Folding therefore takes the difference against what the ledger already holds,
+ * never the value itself (`foldCosts` in `shared/cost.ts`).
+ */
+export interface CostFact {
+  readonly sessionId: string
+  readonly model: string
+  /** Total USD this session has spent on this model, since the session began. */
+  readonly cumulativeUsd: number
+  /**
+   * False when the engine said it could not price every model it used
+   * (`hasUnknownModelCost`). The priced models' figures are still true, so they
+   * are still folded — but the total they add up to is an UNDERSTATEMENT, and
+   * the caller has to be able to say so out loud rather than presenting it as
+   * the whole bill (invariant §7).
+   */
+  readonly priced: boolean
+}
+
 /** ADR-0009 `transcripts?`: the token/cost telemetry source for an engine. */
 export interface TranscriptReader {
   /** Absolute directory where this engine writes transcripts for the spawn. */
@@ -180,6 +251,36 @@ export interface TranscriptReader {
    * facts, not invented ones.
    */
   read(filePath: string): Promise<readonly UsageFact[]>
+  /**
+   * Contract: pure. Classifies ONE already-parsed transcript record as a
+   * provider-capacity refusal, or returns null for everything else.
+   *
+   * OPTIONAL, and the optionality is the honest part: an engine whose
+   * transcript does not distinguish "the provider refused" from "the turn
+   * ended" cannot support parking, and the Watch says so (`CapacityWatch`
+   * reports `unwatched`) rather than pretending an agent is covered.
+   *
+   * Pure and per-record rather than per-file so the Watch owns the reading —
+   * one tail-read, one JSONL split — and the adapter owns only the shape it
+   * alone knows (NFR-12). It is the same division as `claudeUsageFact`.
+   *
+   * A classifier must be NARROW. Waiting fixes a rate limit; it does not fix a
+   * billing failure, a bad request, or an overloaded server. Matching those too
+   * would park a company on a condition that never clears.
+   */
+  limitOf?(raw: unknown): CapacityLimit | null
+  /**
+   * Contract: the engine's own money figures for one transcript, or none.
+   *
+   * OPTIONAL, and its absence is a real product tier rather than a fault: an
+   * engine that reports tokens but not dollars leaves `costUsd` null, which the
+   * UI must show as "not reported" and never as "free" (ADR-0011).
+   *
+   * At most ONE fact per (session, model) — the newest running total. An engine
+   * that writes several snapshots into one file must yield only the last, or
+   * the caller cannot tell a re-read from real spending.
+   */
+  costs?(filePath: string): Promise<readonly CostFact[]>
 }
 
 /** The conformance surface every engine integration implements (ADR-0009). */
@@ -200,4 +301,44 @@ export interface EngineAdapter {
   interrupt(): KeySequence
   resume?: ResumeSupport
   transcripts?: TranscriptReader
+  /**
+   * Records the Architect's approval of a working directory in whatever store
+   * the engine consults before it will start there (ADR-0021).
+   *
+   * OPTIONAL, and absent on purpose for engines whose only route past their own
+   * trust prompt is a bypass flag: DECISIONS-LOG 2026-08 pinned codex and gemini
+   * at `pty-heuristic` rather than pass `--dangerously-bypass-hook-trust` or
+   * `--skip-trust`, and this hook does not reopen that. It exists for engines
+   * that keep a per-workspace record a human's decision can be written into,
+   * which today means Claude Code alone.
+   *
+   * Contract: called ONLY from an activation the Architect performed, with the
+   * target of that activation, and never from spawn. Returns what it did so the
+   * caller can log it — pre-trusting must never be silent.
+   */
+  trustWorkspace?(cwd: string): WorkspaceTrustResult
+  /**
+   * Sorts one `notification` event into what the engine actually meant.
+   *
+   * Engines fire a single notification for at least two unrelated situations,
+   * and the words are the only thing that tells them apart — so the words live
+   * here (NFR-12) and core never learns an engine's phrasing.
+   *
+   * `null` means "cannot tell", and the caller must treat that as a permission
+   * prompt: a real prompt mistaken for idleness would leave an agent blocked
+   * with nobody told, which is the worse of the two errors.
+   */
+  notificationKind?(payload: unknown): NotificationKind | null
 }
+
+/**
+ * What an engine's notification meant. `waiting` is an agent sitting at an
+ * empty prompt with nothing to do — a fact about idleness, not a request for a
+ * decision, and gating it asks the Architect to approve an agent's silence.
+ */
+export type NotificationKind = 'permission' | 'waiting'
+
+/** What `trustWorkspace` did, for the log line that must follow it. */
+export type WorkspaceTrustResult =
+  | { readonly ok: true; readonly path: string; readonly alreadyTrusted: boolean }
+  | { readonly ok: false; readonly because: string }

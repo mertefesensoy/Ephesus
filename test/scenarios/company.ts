@@ -12,6 +12,7 @@ import {
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
 import { ClosingTime } from '../../src/main/closing'
+import { IncidentEndpoint, type IncidentBinding } from '../../src/main/incidents'
 import { LedgerEndpoint } from '../../src/main/ledger'
 import { Odeon } from '../../src/main/odeon'
 import { Gymnasium } from '../../src/main/gymnasium'
@@ -23,6 +24,7 @@ import { wireOdeonEndpoint } from '../../src/main/odeon-endpoint'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 import { Breaker } from '../../src/main/watch/breaker'
 import { SteerNotes } from '../../src/main/watch/steer-notes'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
@@ -108,6 +110,14 @@ export interface Company {
   readonly breakerActs: readonly string[]
   /** Closing time (GYM-003) — the SHIPPED protocol, wired to this company. */
   readonly closing: ClosingTime
+  /** The incident endpoint (FR-9.2, UC-09) — the SHIPPED one. */
+  readonly incidents: IncidentEndpoint
+  /** Mutable ci-event bindings, so a scenario can put a crew on call. */
+  readonly incidentBindings: IncidentBinding[]
+  /** Obligations the table owed and could not meet (the unwired Herald). */
+  readonly unmetObligations: readonly string[]
+  /** Incidents that demanded the Architect now (UC-09 step 4). */
+  readonly escalatedNow: readonly string[]
   /** The durable cost plane, so a restarted company can be given the same one. */
   readonly ledgerStore: LedgerStore
   /** The durable cost ledger (ADR-0011). */
@@ -157,9 +167,7 @@ const openHomes: string[] = []
 
 /** Removes every temp home created this run. Call after closing the companies. */
 export function cleanupHomes(): void {
-  for (const home of openHomes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-  }
+  for (const home of openHomes.splice(0)) removeTempDir(home)
 }
 
 let seq = 0
@@ -296,6 +304,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   // below exactly as `index.ts` hands them. Constructed first because Hermes's
   // options close over it.
   let closingRef: ClosingTime | null = null
+  let incidentsRef: IncidentEndpoint | null = null
 
   // The Odeon and its neighbours, wired the way `index.ts` wires them so the
   // S-suites exercise the shipped path (the M2 close-out lesson).
@@ -402,6 +411,14 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     agora,
     prompts,
     closing: (message) => closingRef?.noteReply(message) ?? false,
+    // FR-9.2 / UC-09's triage report, routed exactly as `index.ts` routes it —
+    // so S-PROFILE's report travels the real mail plane rather than being
+    // handed to the endpoint by the test.
+    harbor: (message) => {
+      if (incidentsRef === null) return false
+      incidentsRef.onTriage(message)
+      return true
+    },
     odeon: (message) => {
       // A meeting reply is an `inform`, not a filing — exactly as `index.ts`
       // routes it.
@@ -459,6 +476,34 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs })
   })
   closingRef = closing
+
+  // The incident endpoint (FR-9.2, UC-09, SDD §7.5) — the SHIPPED one, wired to
+  // this company the way `index.ts` wires it: it mails Artemis and never writes
+  // `tasks.json`, so S-PROFILE's "triage task auto-created" has to travel
+  // through her, which is the claim worth testing.
+  const incidentBindings: IncidentBinding[] = []
+  const unmetObligations: string[] = []
+  const escalatedNow: string[] = []
+  const incidents = new IncidentEndpoint({
+    bindings: () => incidentBindings,
+    orchestratorId: () => agora.registry().orchestratorId ?? 'agent.artemis',
+    deliver: (message) => hermes.deliverFromHarness(message),
+    render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
+    onLogEvent: (draft) => {
+      agora.appendLog(draft)
+      agora.commitSoon(`incident ${String(draft['event'] ?? 'event')}`)
+    },
+    onUnmetObligation: (what) => unmetObligations.push(what),
+    onEscalateNow: (incident, report) => {
+      escalatedNow.push(incident.key)
+      chokePoints.submitNeedsHuman({
+        from: incident.agentId,
+        subject: `severity-1 incident ${incident.key}: ${report.summary}`,
+        conversation: incident.key
+      })
+    }
+  })
+  incidentsRef = incidents
 
   const hookEvents: HookEventRecord[] = []
   const hookServer = new HookServer({
@@ -525,6 +570,10 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     breaker,
     breakerActs,
     closing,
+    incidents,
+    incidentBindings,
+    unmetObligations,
+    escalatedNow,
     ledgerStore,
     costs,
 
@@ -633,6 +682,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       budgets.stop()
       hermes.stop()
       await hookServer.stop()
+      // Stop, SETTLE, then drain. `stop()` only clears the timers; a sweep
+      // already running keeps going and calls `agora.commitSoon()`, so draining
+      // first drains a queue that is about to be added to — and the git child
+      // that commit starts is still alive when `cleanupHomes` deletes the
+      // directory it is running in.
+      await hermes.settled()
       await agora.drained().catch(() => {})
     }
   }
