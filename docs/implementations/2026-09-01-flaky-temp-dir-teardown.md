@@ -142,12 +142,16 @@ loaded Windows machine.
 
 ## Design decisions
 
-**Why not stop pinning the directory at the source.** *(Superseded: it was done
-straight after this landed — see
-`docs/implementations/2026-09-01-git-runs-from-a-neutral-cwd.md`. The reasoning
-below is kept because it is why this layer exists at all, and the waiting is
-still what makes the teardown safe against anything else that holds a
-directory.)* The structural fix is to stop giving git the repository as its
+**Why not stop pinning the directory at the source.** *(This was attempted
+afterwards — running git from a neutral cwd with `--git-dir`/`--work-tree` — and
+REVERTED, because it does not work: git chdirs into its `--work-tree`, so the
+pin moves from the cwd we passed to the work tree rather than disappearing, and
+at every call site here those are the same directory. Measured with 8 concurrent
+`git status` processes against an empty work tree, git's own cwd elsewhere:
+`EBUSY` on the work-tree directory, and no error on a bystander directory git
+was not using. For any command that has a work tree — `add`, `commit`, `status`,
+which is nearly all of them — the pin is unavoidable, so the waiting below is
+not a stopgap under a better fix. It is the fix.)* The structural fix is to stop giving git the repository as its
 `cwd` — `--git-dir`/`--work-tree` from a neutral directory — which would make
 the pin impossible in production too. Not done here: it changes the semantics of every git invocation in the
 app (pathspec resolution for `add -A`, `init`, `worktree add`) to fix a symptom
