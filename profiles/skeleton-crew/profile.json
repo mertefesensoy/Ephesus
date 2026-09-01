@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "name": "skeleton-crew",
   "version": 1,
-  "target": { "kind": "repo" },
+  "target": {
+    "kind": "repo"
+  },
   "autonomy": {
-    "default": "supervised",
+    "default": "autonomous",
     "byKind": {
-      "destructive": "manual",
-      "prod-facing": "manual",
-      "spend": "manual",
-      "scope-change": "manual"
+      "destructive": "supervised",
+      "prod-facing": "supervised"
     }
   }
 }

@@ -128,18 +128,34 @@ describe('skeleton-crew ships as an ordinary ADR-0012 bundle', () => {
 describe('skeleton-crew cannot grant itself latitude', () => {
   const target = { kind: 'repo' as const, id: 'myapp', path: REPO_ROOT }
 
-  it('asks for manual on every irreversible class', () => {
+  /**
+   * Rewritten 2026-09-01 on the Architect's instruction, and the old case is
+   * worth stating because its argument was good: a built-in that ships
+   * `autonomous` teaches every profile derived from it that default.
+   *
+   * What changed is which risk dominates. Blanket `manual` meant the crew
+   * stopped for a human on routine work — spend in particular, which fired for
+   * all three agents inside a minute of a live run and interrupted the Architect
+   * to approve a limit that was itself miscalibrated. A profile that asks
+   * permission for everything is not cautious, it is unusable, and an unusable
+   * safety posture gets switched off wholesale.
+   *
+   * So the irreversible OUTWARD acts keep a check and the routine ones do not.
+   * `destructive` and `prod-facing` are `supervised` rather than `autonomous`:
+   * that is a deliberate middle, and it is the one choice here the Architect did
+   * not name explicitly.
+   */
+  it('keeps a check on the irreversible acts, and lets routine work run', () => {
     const loaded = builtinStore().load('skeleton-crew')
     if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
     const { autonomy } = loaded.bundle.document
-    // The first outward-facing irreversible acts this crew can take — opening a
-    // PR, force-pushing, touching production, spending — are the ones it asks
-    // for the LEAST latitude on. A built-in that shipped `autonomous` here
-    // would be teaching every profile derived from it the wrong default.
-    expect(autonomy.byKind.destructive).toBe('manual')
-    expect(autonomy.byKind['prod-facing']).toBe('manual')
-    expect(autonomy.byKind.spend).toBe('manual')
-    expect(autonomy.byKind['scope-change']).toBe('manual')
+    expect(autonomy.default).toBe('autonomous')
+    // Outward and irreversible: still not the agent's call alone.
+    expect(autonomy.byKind.destructive).toBe('supervised')
+    expect(autonomy.byKind['prod-facing']).toBe('supervised')
+    // Routine: no longer a reason to stop the company and ask.
+    expect(autonomy.byKind.spend).toBeUndefined()
+    expect(autonomy.byKind['scope-change']).toBeUndefined()
   })
 
   it('is clamped by a stricter global ceiling, never widened by a laxer one', () => {
