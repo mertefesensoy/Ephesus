@@ -35,6 +35,28 @@ export function secretNameOk(name: string): boolean {
   return name.length > 0 && name.length <= 64 && NAME_PATTERN.test(name)
 }
 
+/**
+ * Contract: pure. What can be said about a pending value WITHOUT echoing it.
+ *
+ * The field is masked, so a paste that silently lost its newlines looked
+ * identical to a good one — which is exactly how a key got stored that OpenSSL
+ * refused. Shape, never content: how many lines, and whether a thing claiming
+ * to be a PEM actually opens like one.
+ */
+export function describeDraft(value: string): string {
+  if (value.length === 0) return ''
+  const lines = value.trim().split('\n').length
+  const claimsPem = /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(value)
+  if (claimsPem && lines === 1) {
+    return 'a PEM key on one line — the newlines were lost; paste it again'
+  }
+  if (claimsPem) return `looks like a PEM private key · ${String(lines)} lines`
+  if (value.includes('BEGIN') && value.includes('KEY')) {
+    return 'looks like a key but not a PEM header — paste the whole file'
+  }
+  return `${String(value.length)} characters`
+}
+
 /** Contract: pure. What the Architect is told about a secret they asked about. */
 export function describeStatus(status: SecretStatus | null): string {
   if (status === null) return 'not checked'
@@ -219,6 +241,9 @@ export function SecretsPanel(): ReactElement {
         </button>
       </p>
 
+      {value.length === 0 ? null : (
+        <p style={describeDraft(value).includes('again') ? warn : note}>{describeDraft(value)}</p>
+      )}
       {tested === null ? null : (
         <p style={tested.ok ? note : warn}>
           {tested.ok ? 'the broker can still retrieve it' : `cannot retrieve it: ${tested.reason}`}

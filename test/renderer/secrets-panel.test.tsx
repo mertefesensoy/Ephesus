@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { SecretsPanel, describeStatus, secretNameOk } from '../../src/renderer/src/SecretsPanel'
+import {
+  SecretsPanel,
+  describeDraft,
+  describeStatus,
+  secretNameOk
+} from '../../src/renderer/src/SecretsPanel'
 
 /**
  * The broker's only surface (ADR-0010, FR-11.4).
@@ -84,5 +89,37 @@ describe('the name field refuses before the round trip', () => {
     expect(secretNameOk('GH-TOKEN')).toBe(false)
     expect(secretNameOk('GH TOKEN')).toBe(false)
     expect(secretNameOk('X'.repeat(65))).toBe(false)
+  })
+})
+
+/**
+ * The field is masked, so a paste that lost its newlines looked exactly like a
+ * good one — which is how a key OpenSSL refused came to be stored, tested, and
+ * only found at boot. These say the shape out loud without echoing a character
+ * of the value.
+ */
+describe('telling a good paste from a broken one without showing it', () => {
+  const PEM = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nAAAA\n-----END RSA PRIVATE KEY-----'
+
+  it('names the exact failure when a PEM arrives on one line', () => {
+    const said = describeDraft(PEM.replace(/\n/g, ' '))
+    expect(said).toContain('newlines were lost')
+    expect(said).toContain('again')
+  })
+
+  it('confirms a PEM that kept its lines, and counts them', () => {
+    const said = describeDraft(PEM)
+    expect(said).toContain('PEM private key')
+    expect(said).toContain('4 lines')
+  })
+
+  it('says nothing at all about an empty field', () => {
+    expect(describeDraft('')).toBe('')
+  })
+
+  it('never repeats the value back', () => {
+    expect(describeDraft(PEM)).not.toContain('MIIEow')
+    expect(describeDraft('hunter2')).not.toContain('hunter2')
+    expect(describeDraft('hunter2')).toBe('7 characters')
   })
 })
