@@ -4,6 +4,7 @@ import type { ModeView } from '../../shared/mode-view'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { CountBadge } from './StatusBadge'
 import { ActivityPanel } from './ActivityPanel'
+import { AgentDock } from './AgentDock'
 import { CommandBar } from './CommandBar'
 import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
@@ -384,7 +385,11 @@ export function App(): ReactElement {
         {tab === 'watch' && <WatchPanel />}
         {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
       </div>
-      {/* UI-DESIGN §4 app shell: bottom = command bar. */}
+      {/* UI-DESIGN §4 app shell: bottom = the company, then the command bar.
+          The dock sits above the bar because selecting WHO comes before saying
+          WHAT to them, and because a company you cannot see is one you end up
+          interrogating an agent at a time. */}
+      {bridge.kind === 'ready' && <AgentDock selected={selected} onSelect={setSelected} />}
       {bridge.kind === 'ready' && (
         <CommandBar selected={selected} onSelect={setSelected} onAgentSeen={onAgentSeen} />
       )}
