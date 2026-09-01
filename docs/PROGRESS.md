@@ -4319,6 +4319,106 @@ failures plus `s-stoploop` (2) and `hermes` (1) under parallel load, each
 verified green in isolation (`hermes` 40/40) and none related to M7. Ubuntu CI
 green on the stack.
 
+### M7 exit re-review (2026-09-02) — verdict: **still NOT MET; the three defects behind the failed half are closed, §6.1 has not been re-run, and a fourth defect is confirmed open**
+
+Run after the M7 line was merged to `main` (`5728862`) and pushed. This review
+re-verifies the 2026-09-01 verdict against the current tip rather than repeating
+it: three of the defects that broke the live run are fixed, the suite is green
+for the first time, and the criterion is **still not met** because the thing it
+asks for has not happened again.
+
+**Verified by execution, at `5728862`.**
+
+| Criterion / claim | Command | Result |
+|---|---|---|
+| S-PROFILE passes | `vitest run test/scenarios/s-profile.test.ts` | pass (in the 25 below) |
+| The §6.1 chain over shipped components | `vitest run test/scenarios/s-onehour.test.ts` | pass |
+| Committed evidence regenerates | `vitest run test/scenarios/m7-evidence.test.ts` | pass, artifact byte-stable |
+| Briefing narrates the incident | `vitest run test/scenarios/s-brief.test.ts` | pass |
+| Named M7 suites together | the four above | **25 passed** |
+| Whole suite | `vitest run --no-file-parallelism` | **3182 passed, 8 skipped, 0 failed (173 files)** |
+| Gate | `typecheck` · `lint` · `check-invariants` · `check-attribution` | all green, 243 commits |
+| Stub debt | `grep -rnE "TODO\|FIXME\|XXX\|HACK" src/ shims/` | **0** |
+
+**The 2026-09-01 "Checks" paragraph is superseded, in the milestone's favour.**
+It recorded 2,697 passed / 12 failed. The suite is now **0 failed**, and none of
+the twelve was a flake in the useless sense: nine were two real bugs (a version
+probe that never quoted its command, so any binary under a spaced path probed as
+absent and every spawn took the FR-1.6 install branch; and `dayKey` read as UTC
+by a test that straddled the wrong midnight), and the rest were a 5-second
+default `testTimeout` under tests TEST-STRATEGY §2 deliberately puts on real fs
+and real git. They had been recorded as "Windows-local" on 2026-08-29 and read
+as environmental for three days.
+
+**Three of the live run's defects are closed** — verified at the seam, not by
+reading the fix:
+
+1. **`agent.harbor` refusing legitimate mail** — closed. `src/shared/endpoints.ts`
+   now declares each reserved address's contract (sends / accepts / handles /
+   deaf) and routing reads it instead of repeating it; `test/shared/endpoints.test.ts`
+   iterates `RESERVED_AGENT_IDS` and executes `routeMessage`, so an eighth
+   endpoint fails closed. **24 passed.** The audit found the fault wider than the
+   run showed: `refuse` — the act PROTOCOL.md tells every agent to use when it
+   cannot comply — bounced off all five endpoints that ask questions.
+2. **The two-audience incident prompt** — closed. `prompts/harbor/incident-body.md`
+   now separates *What you are being asked to do* from *What you are NOT being
+   asked to do*, which is the ambiguity Artemis reasonably resolved the wrong way.
+3. **Nothing reconciles a claim against the ledger** — closed, and this was the
+   serious one. `checkTriage` refuses a report whose narrative claims a task that
+   `tasks.json` does not support, porting E-BRIEF-FAITH's precedent to triage.
+   **29 passed.**
+
+**A fourth defect is confirmed OPEN, and it is the one that stalls an unattended
+run.** The 2026-09-01 record listed it as identified and not fixed; it is still
+present, and the mechanism is now traced end to end:
+
+- `src/main/hermes.ts:1135` — `if (this.options.isIdle && !this.options.isIdle(agentId)) continue`
+- `src/main/index.ts:1700` — `isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle'`
+- `src/shared/avatar.ts` — the phase leaves `idle` on `prompt-submitted` and
+  returns only on a terminal hook event.
+
+So **the floor's animation state gates message delivery**. A dropped or missed
+terminal hook leaves an agent permanently unnudgeable, which is what cost the
+live run twenty minutes, and a restart masks it. A presentation concern is
+load-bearing for the company's communication path — the wake decision should
+rest on the delivery plane, not on what the avatar is drawing.
+
+**The exit criterion is NOT met.** SRS §6.1 asks for a crew that detects a
+failure, **fixes it or opens a fix PR**, files the memo if policy was crossed,
+and has the next briefing narrate it accurately, with zero un-gated destructive
+actions. On 2026-09-01 detection passed and zero un-gated actions held; the
+action half failed — Artemis said "Task opened…" and no task existed. Fixing the
+three defects behind that failure is **not** evidence that the next run
+succeeds; only a run is. §6.1 has not been re-run since, and this review will not
+tick the row on the strength of the repairs. That substitution is what the M6
+close-out audit was convened to catch.
+
+**Gaps blocking M7's close, as unchecked items:**
+
+- [ ] **Re-run SRS §6.1 on a real repo** — the action half specifically: the crew
+      opens real work for a real failure, and the standup narrates it. Requires
+      the Architect to name the repository and consent to autonomous agents
+      holding `GH_TOKEN` grants running unattended against it. Nobody else's call.
+- [ ] **Wake must not depend on the avatar phase** — `isIdle` reads a rendering
+      state, so a missed terminal hook silences an agent permanently. Blocks any
+      unattended run, §6.1's included.
+- [ ] **E-PLAYBOOK's live drill** — the recorded scorecard scores a FIXTURE
+      record through the shipped scorer; the real-engine drill (TEST-STRATEGY §6)
+      is owed with §6.1.
+
+**Unchanged and still owed** (not re-litigated here): the two live voice proofs
+and the voice-driven day, all three unreachable while M6.9 is deferred and none
+of them waived; the v2 floor with a real company on it; wake-word detection; the
+M6 floor and Memory panel screenshots; codex/gemini hook wiring post-trust; a
+real-engine respawn demo; E-STOA's LLM-judged half.
+
+**Recorded as unresolved, not as gaps:** the budget question from the live run
+is now partly answered — ADR-0023 replaced the projection-trip with usage-aware
+pacing, and the 91.4% of a 24.47M-token day spent re-reading context at wake is
+the measurement that matters and is untouched. `s-closing`, `s-livelock`,
+`s-stoploop` and `s-wake` remain parallel-load races against wall-clock
+deadlines (recorded 2026-08-29); `s-closing` is characterised and assigned.
+
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
 Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +
