@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AgentDock, dockRows, toneFor } from '../../src/renderer/src/AgentDock'
 import { strictestLevel } from '../../src/renderer/src/AutonomyBadge'
+import { spendLines } from '../../src/renderer/src/AgentPanel'
 import type { AgentCard } from '../../src/shared/agents'
 
 function card(over: Partial<AgentCard> = {}): AgentCard {
@@ -185,5 +186,56 @@ describe('what the company may do without asking', () => {
   it('says nothing is active rather than implying manual', () => {
     expect(strictestLevel([]).level).toBeNull()
     expect(strictestLevel([]).detail).toBe('no profile is active')
+  })
+})
+
+/**
+ * Everything about ONE agent, beside the floor.
+ *
+ * The app's tabs replace the whole view, so reading an agent's terminal meant
+ * losing the floor and reading what it was ALLOWED to do meant leaving the
+ * terminal. Every question about one agent became a sequence of navigations
+ * and, in practice, a question to me.
+ */
+describe('what one agent is spending', () => {
+  const base = {
+    agent: 'agent.mason',
+    reporting: 'engine' as const,
+    session: 's',
+    sessionTotals: { inTokens: 10, outTokens: 5, costUsd: null, rows: 1 },
+    todayTotals: { inTokens: 10, outTokens: 5, costUsd: null, rows: 1 },
+    cumulativeTotals: { inTokens: 10, outTokens: 5, costUsd: null, rows: 1 },
+    dailyTokens: 20_000_000,
+    budget: { state: 'ok', spent: 1000, remaining: 19_999_000, projected: null, because: '' }
+  }
+
+  it('says an engine measures nothing, rather than printing zeroes', () => {
+    const said = spendLines({ ...base, reporting: 'none' } as never)
+    expect(said.join(' ')).toContain('reports no usage')
+    expect(said.join(' ')).not.toContain('0 tokens')
+  })
+
+  it('says cost is not reported rather than inventing a dollar figure', () => {
+    // Ephesus never derives dollars from a guessed price table (M3): a guessed
+    // number is worse than an honest silence.
+    expect(spendLines(base as never).join(' ')).toContain('not reported')
+  })
+
+  it('reports a real cost when the engine gave one', () => {
+    const said = spendLines({
+      ...base,
+      todayTotals: { ...base.todayTotals, costUsd: 1.5 }
+    } as never)
+    expect(said.join(' ')).toContain('$1.50')
+  })
+
+  it('distinguishes an unbudgeted role from a budget of zero', () => {
+    expect(spendLines({ ...base, dailyTokens: null } as never).join(' ')).toContain(
+      'no daily budget'
+    )
+  })
+
+  it('says so when there is nothing recorded at all', () => {
+    expect(spendLines(null).join(' ')).toContain('no spend recorded')
   })
 })

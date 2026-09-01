@@ -5,9 +5,9 @@ import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { CountBadge } from './StatusBadge'
 import { ActivityPanel } from './ActivityPanel'
 import { AgentDock } from './AgentDock'
+import { AgentPanel } from './AgentPanel'
 import { AutonomyBadge } from './AutonomyBadge'
 import { CommandBar } from './CommandBar'
-import { TerminalPanel } from './TerminalPanel'
 import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
 import { GymPanel } from './GymPanel'
@@ -388,7 +388,7 @@ export function App(): ReactElement {
         {tab === 'profiles' && <ProfilesPanel />}
         {tab === 'memory' && <MemoryPanel />}
         {tab === 'watch' && <WatchPanel />}
-        {bridge.kind === 'ready' && <TerminalPanel agentId={selected} />}
+        {bridge.kind === 'ready' && <AgentPanel agentId={selected} />}
       </div>
       {/* UI-DESIGN §4 app shell: bottom = the company, then the command bar.
           The dock sits above the bar because selecting WHO comes before saying
