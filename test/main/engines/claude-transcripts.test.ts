@@ -168,7 +168,10 @@ describe('the adapter’s reader', () => {
    */
   const golden =
     process.platform === 'win32'
-      ? { cwd: 'C:\\Users\\u\\OneDrive\\Masaüstü\\ephesus', slug: 'C--Users-u-OneDrive-Masa-st--ephesus' }
+      ? {
+          cwd: 'C:\\Users\\u\\OneDrive\\Masaüstü\\ephesus',
+          slug: 'C--Users-u-OneDrive-Masa-st--ephesus'
+        }
       : { cwd: '/home/user/ephesus', slug: '-home-user-ephesus' }
 
   it('points at the engine’s own project directory', () => {
