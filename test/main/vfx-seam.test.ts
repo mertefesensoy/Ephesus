@@ -9,6 +9,7 @@ import { Hermes } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 import { envelopeFor, envelopeInfo, reduceEnvelope } from '../../src/shared/vfx'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The seam between Hermes and the floor's envelopes (UI-DESIGN §5.5).
@@ -32,7 +33,7 @@ afterEach(async () => {
   for (const hermes of routers.splice(0)) hermes.stop()
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const dir of temps.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(dir)
   }
 })
 

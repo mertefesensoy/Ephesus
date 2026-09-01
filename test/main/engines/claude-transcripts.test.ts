@@ -8,6 +8,7 @@ import {
   ClaudeAdapter
 } from '../../../src/main/engines/claude'
 import { PromptStore } from '../../../src/main/prompts'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * The Claude Code transcript reader (ADR-0009 `transcripts`, FR-11.2), against
@@ -18,7 +19,7 @@ import { PromptStore } from '../../../src/main/prompts'
 
 const temps: string[] = []
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempDir(): string {

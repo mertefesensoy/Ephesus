@@ -7,6 +7,7 @@ import type { Trigger } from '../../src/main/scheduler'
 import type { SpawnRequest } from '../../src/shared/agents'
 import { GATE_SCHEMA_VERSION, type AutonomyLevel, type GatePolicy } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Activation and deactivation over a real store (ADR-0012, FR-9.4, FR-11.1).
@@ -27,7 +28,7 @@ import { GateManager } from '../../src/main/watch/gates'
 const roots: string[] = []
 
 afterEach(() => {
-  for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of roots.splice(0)) removeTempDir(dir)
 })
 
 interface BundleOptions {

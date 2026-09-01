@@ -6,6 +6,7 @@ import { HireExchange, escapingNames, factsOf } from '../../src/main/harbor/hire
 import { ProfileStore } from '../../src/main/profiles'
 import { IpcChannels } from '../../src/shared/ipc'
 import { digestOf, filesOf, inspectImport, manifestOfProfile } from '../../src/shared/share'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Export/import over real files (FR-10.4, ADR-0012 — M7.6).
@@ -24,7 +25,7 @@ const REPO_ROOT = path.join(__dirname, '..', '..')
 const homes: string[] = []
 
 afterEach(() => {
-  for (const dir of homes.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of homes.splice(0)) removeTempDir(dir)
 })
 
 function tempHome(): string {

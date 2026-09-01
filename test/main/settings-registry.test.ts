@@ -8,6 +8,7 @@ import {
   type InstalledSettings
 } from '../../src/main/settings-registry'
 import { InstalledSettingsPlan, settingsOwners } from '../../src/main/engines/settings-install'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The M1 carried item: a *force-killed* harness used to leave
@@ -20,7 +21,7 @@ import { InstalledSettingsPlan, settingsOwners } from '../../src/main/engines/se
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempCwd(): string {

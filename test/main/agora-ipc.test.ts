@@ -7,6 +7,7 @@ import { Agora } from '../../src/main/agora'
 import { PromptStore } from '../../src/main/prompts'
 import { REGISTRY_SCHEMA_VERSION, type RegistryEntry } from '../../src/shared/registry'
 import { TASKS_SCHEMA_VERSION } from '../../src/shared/tasks'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The `agora:` read surface (SDD §5) that the Activity tab and the roster read
@@ -22,7 +23,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

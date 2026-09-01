@@ -3,11 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resolveExecutable, unwrapWindowsShim } from '../../src/main/which'
+import { removeTempDir } from '../tmpdir'
 
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function binDir(files: readonly string[]): string {
@@ -83,7 +84,7 @@ describe('a Windows shim is unwrapped to the executable it invokes', () => {
   const shims: string[] = []
 
   afterEach(() => {
-    for (const dir of shims.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+    for (const dir of shims.splice(0)) removeTempDir(dir)
   })
 
   function shimDir(): string {

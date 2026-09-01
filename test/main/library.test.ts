@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Library } from '../../src/main/library'
 import { PromptStore } from '../../src/main/prompts'
 import { parseMemorySections } from '../../src/shared/memory'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The Library's layer 1 (ADR-0006, FR-6.1) against a real filesystem — the
@@ -20,7 +21,7 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function rig(): { library: Library; agoraRoot: string } {

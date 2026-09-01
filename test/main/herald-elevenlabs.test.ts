@@ -21,6 +21,7 @@ import {
 } from '../../src/main/herald/elevenlabs'
 import { VoiceError, isConversational, type Transcript } from '../../src/main/herald/seam'
 import { bargeIn } from '../../src/main/herald/policy'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The ElevenLabs adapter (ADR-0007's reference implementation) and the phrase
@@ -37,7 +38,7 @@ const BUNDLED = fileURLToPath(new URL('../../prompts/', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 /** The adapter's source with comments stripped — for the "in code" assertions. */

@@ -570,6 +570,24 @@ export class Hermes {
     return this.sweeping
   }
 
+  /**
+   * Resolves once a sweep already in flight has finished. Starts none.
+   *
+   * `stop()` clears the timers, but a sweep that is already running keeps
+   * going — and a sweep calls `agora.commitSoon()`, which starts a git child.
+   * Shutting down by draining the commit queue alone therefore drains a queue
+   * the sweep is about to add to, and git can still be starting as the caller
+   * tears the directory down. Quiescing means: stop, settle, then drain.
+   *
+   * Deliberately does not sweep: a shutdown must not deliver mail nobody asked
+   * it to deliver. It absorbs the failure of the in-flight sweep because
+   * `onSweepError` already reported it — this answers "is it finished", not
+   * "did it work".
+   */
+  async settled(): Promise<void> {
+    await this.sweeping.catch(() => {})
+  }
+
   private async runSweep(): Promise<SweepReport> {
     const delivered: DeliveryRecord[] = []
     const rejected: RejectionRecord[] = []

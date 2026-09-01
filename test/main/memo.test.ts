@@ -11,6 +11,7 @@ import { Agora } from '../../src/main/agora'
 import { Odeon } from '../../src/main/odeon'
 import { PromptStore } from '../../src/main/prompts'
 import { GateManager, wireGateChokePoints } from '../../src/main/watch/gates'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The memo mechanism (ADR-0008 §3, FR-7.3, SDD §7.3, UC-06) — S-MEMO's spine.
@@ -30,7 +31,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

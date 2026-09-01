@@ -6,6 +6,7 @@ import { ProfileStore, triggerWakeMessage } from '../../src/main/profiles'
 import { PROFILE_ENDPOINT } from '../../src/shared/reserved'
 import { PROFILE_SCHEMA_VERSION } from '../../src/shared/profile'
 import { ORG_SCHEMA_VERSION } from '../../src/shared/org'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The profile store (SDD §1.1 `profiles.ts`, SDD §2, ADR-0012 — M7.1).
@@ -23,7 +24,7 @@ import { ORG_SCHEMA_VERSION } from '../../src/shared/org'
 const homes: string[] = []
 
 afterEach(() => {
-  for (const dir of homes.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of homes.splice(0)) removeTempDir(dir)
 })
 
 function tempRoot(): string {

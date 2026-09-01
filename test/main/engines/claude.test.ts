@@ -15,6 +15,7 @@ import {
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig } from '../../../src/main/engines'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * Settings hygiene runs entirely inside temp cwds. Nothing here may touch the
@@ -27,7 +28,7 @@ const BUNDLED_PROMPTS = fileURLToPath(new URL('../../../prompts/', import.meta.u
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

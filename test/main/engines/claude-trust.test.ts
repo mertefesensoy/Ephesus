@@ -12,13 +12,14 @@ import { CodexAdapter } from '../../../src/main/engines/codex'
 import { GeminiAdapter } from '../../../src/main/engines/gemini'
 import { PromptStore } from '../../../src/main/prompts'
 import type { EngineAdapter } from '../../../src/main/engines/types'
+import { removeTempDir } from '../../tmpdir'
 
 const BUNDLED_PROMPTS = fileURLToPath(new URL('../../../prompts/', import.meta.url))
 const temps: string[] = []
 const savedHome = { HOME: process.env['HOME'], USERPROFILE: process.env['USERPROFILE'] }
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
   process.env['HOME'] = savedHome.HOME
   process.env['USERPROFILE'] = savedHome.USERPROFILE
 })

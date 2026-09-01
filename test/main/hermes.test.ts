@@ -13,6 +13,7 @@ import {
   type StopReply
 } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 import { HERMES_SENDER } from '../../src/shared/reserved'
 import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 import { PATHOLOGY_SIGNAL_AT } from '../../src/shared/autonomy'
@@ -29,13 +30,16 @@ const routers: Hermes[] = []
 const agoras: Agora[] = []
 
 afterEach(async () => {
-  for (const hermes of routers.splice(0)) hermes.stop()
-  // Delivery queues its commits rather than awaiting them (ADR-0004), so a
-  // teardown that does not drain them races git for the temp directory.
-  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
-  for (const dir of temps.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  // Stop, settle, then drain. Delivery queues its commits rather than awaiting
+  // them (ADR-0004), and the sweep that queues them outlives `stop()` — so a
+  // teardown that drains without settling first races git for the temp
+  // directory, which on Windows the git child is still sitting in.
+  for (const hermes of routers.splice(0)) {
+    hermes.stop()
+    await hermes.settled()
   }
+  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {
@@ -187,6 +191,85 @@ describe('Hermes — delivery (ADR-0003, FR-3.2)', () => {
 
     expect(report.delivered.map((d) => d.message.subject)).toEqual(['first', 'second'])
     expect(r.inbox('agent.b')).toHaveLength(2)
+  })
+})
+
+describe('Hermes — quiescing (stop, settle, then drain)', () => {
+  /**
+   * `stop()` clears the timers; it does not stop a sweep already running. That
+   * sweep calls `agora.commitSoon()`, which starts a git child — and on Windows
+   * a git child sits IN the repository directory, so a teardown that deletes
+   * that directory while the commit is starting fails with EBUSY. Quiescing has
+   * to be stop → settle → drain, and `settled()` is the middle step.
+   */
+  it('resolves only once a sweep already in flight has finished', async () => {
+    let releaseSweep = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      releaseSweep = resolve
+    })
+    let faulted = false
+    const r = await rig({
+      faults: async (point) => {
+        // Hold the FIRST sweep open, inside the production path.
+        if (point === 'before-deliver' && !faulted) {
+          faulted = true
+          await held
+        }
+      }
+    })
+    r.send('agent.a', message())
+
+    const sweeping = r.hermes.sweep()
+    // Let the sweep reach the fault and park there.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    r.hermes.stop()
+    let settledYet = false
+    const settling = r.hermes.settled().then(() => {
+      settledYet = true
+    })
+
+    // Still in flight: `stop()` did not end it, and `settled()` must not claim
+    // it did.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settledYet).toBe(false)
+
+    releaseSweep()
+    await settling
+    await sweeping
+    expect(settledYet).toBe(true)
+    // The sweep really did complete — its delivery landed.
+    expect(r.inbox('agent.b')).toHaveLength(1)
+  })
+
+  it('starts no sweep of its own — a shutdown delivers nothing new', async () => {
+    const r = await rig()
+    r.hermes.stop()
+    // Mail written after the stop must still be sitting in the outbox: settling
+    // asks "is the running sweep finished", not "sweep once more".
+    const sent = message()
+    r.send('agent.a', sent)
+
+    await r.hermes.settled()
+
+    expect(r.outbox('agent.a')).toEqual([`${sent.id}.json`])
+    expect(r.inbox('agent.b')).toEqual([])
+  })
+
+  it('resolves rather than rejecting when the in-flight sweep failed', async () => {
+    const r = await rig({
+      faults: (point) => {
+        if (point === 'before-deliver') throw new Error('disk fell over')
+      },
+      onSweepError: () => {}
+    })
+    r.send('agent.a', message())
+    await r.hermes.sweep().catch(() => {})
+
+    // `onSweepError` already reported the failure; settling answers "is it
+    // finished", so an unhandled rejection here would take the process down at
+    // the exact moment it is trying to shut down cleanly.
+    await expect(r.hermes.settled()).resolves.toBeUndefined()
   })
 })
 
