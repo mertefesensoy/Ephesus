@@ -28,6 +28,8 @@ import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
 import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
+import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
+import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { targetRef } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
@@ -118,6 +120,11 @@ let activations: ProfileActivations | null = null
 // `activations`: that Map is what is RUNNING, this file is what has been TYPED,
 // and only the second is worth surviving a restart.
 let knownTargets: KnownTargets | null = null
+// The company's GitHub identity (ADR-0022). Null until boot; `configured()` is
+// false until BOTH github-app.json exists and the broker holds the signing key,
+// so an Ephesus with neither behaves exactly as it did before.
+let companyGitHub: GitHubAppIdentity | null = null
+let companyTokenTimer: NodeJS.Timeout | null = null
 // The Harbor's inbound half (FR-10.1, M7.3). Its registered repositories are the
 // ones the ACTIVE profiles declare in `harbor.json` — the company watches what
 // it was actually pointed at, not a second list that could disagree.
@@ -634,6 +641,41 @@ async function boot(): Promise<void> {
     },
     onDegraded: (detail) => reportDegradation('secrets', detail)
   })
+
+  // The company's GitHub identity (ADR-0022). The signing key comes out of the
+  // broker by name and never leaves this process: it signs a JWT locally, and
+  // only the JWT is sent. What agents receive is an installation token that
+  // expires within the hour, so a leaked credential dies on its own and there
+  // is no long-lived PAT for the Architect to rotate.
+  companyGitHub = new GitHubAppIdentity({
+    configPath: path.join(home.root, 'github-app.json'),
+    privateKey: () => secrets?.grantsFor([GITHUB_APP_KEY_SECRET]).env[GITHUB_APP_KEY_SECRET] ?? null
+  })
+  const companyWarning = companyGitHub.warning()
+  if (companyWarning !== null) reportDegradation('secrets', companyWarning)
+  if (companyGitHub.configured()) {
+    const mintCompanyToken = (): void => {
+      void companyGitHub?.refresh().then((minted) => {
+        if (minted.ok) {
+          // The token is never logged. What is logged is that the company can
+          // act on GitHub and until when — enough to explain a 401 later.
+          agora?.appendLog({
+            kind: 'remote',
+            source: 'github',
+            event: 'company-token-minted',
+            expiresAt: minted.expiresAt
+          })
+          return
+        }
+        reportDegradation('secrets', `company GitHub identity unavailable: ${minted.because}`)
+      })
+    }
+    mintCompanyToken()
+    // Refreshed well inside the hour, so no spawn is handed a token with only
+    // minutes left — SRS §6.1's window is itself an hour, and a credential
+    // expiring mid-run would present as a permissions bug.
+    companyTokenTimer = setInterval(mintCompanyToken, TOKEN_REFRESH_MS)
+  }
 
   // Undo anything a force-killed run left in somebody else's repository. No
   // agent is live in a process that has just booted, so a recorded file can
@@ -1487,8 +1529,19 @@ async function boot(): Promise<void> {
       create: (plan) => worktrees.create(plan),
       remove: (repo, worktreePath) => worktrees.remove(repo, worktreePath)
     },
-    resolveGrants: (declared) =>
-      secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] },
+    commitIdentity: () => companyGitHub?.gitIdentity() ?? null,
+    // The broker answers first: an Architect who stored a GH_TOKEN by hand
+    // meant it, and a minted token silently overriding it would make the stored
+    // one impossible to test. The App fills the gap rather than taking over.
+    resolveGrants: (declared) => {
+      const fromBroker = secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] }
+      const minted = companyGitHub?.token() ?? null
+      if (minted === null || !fromBroker.missing.includes(GITHUB_TOKEN_GRANT)) return fromBroker
+      return {
+        env: { ...fromBroker.env, [GITHUB_TOKEN_GRANT]: minted },
+        missing: fromBroker.missing.filter((name) => name !== GITHUB_TOKEN_GRANT)
+      }
+    },
     onGrantsMissing: (agentId, missing) =>
       reportDegradation(
         'secrets',
@@ -2143,6 +2196,10 @@ function teardown(): void {
       avatarDirector.stop()
       hermes?.stop()
       scheduler.stop()
+      if (companyTokenTimer !== null) {
+        clearInterval(companyTokenTimer)
+        companyTokenTimer = null
+      }
       budgetWatcher?.stop()
       ptyManager.killAll()
       hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))

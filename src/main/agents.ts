@@ -193,6 +193,13 @@ export interface AgentManagerOptions {
    * Contract: returns only names present in `declared`; `missing` names a
    * declared grant the broker does not hold, which the caller surfaces.
    */
+  /**
+   * The company's git identity for this spawn (ADR-0022), or null when no
+   * GitHub App is configured. A thunk because the identity is learnt from
+   * GitHub on the first token mint, which may not have happened by the time
+   * the AgentManager is built.
+   */
+  readonly commitIdentity?: () => { readonly name: string; readonly email: string } | null
   resolveGrants?(declared: readonly string[]): {
     readonly env: Record<string, string>
     readonly missing: readonly string[]
@@ -493,6 +500,7 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
+      commitIdentity: this.options.commitIdentity?.() ?? null,
       // `manual` when nobody has an opinion: an agent on no profile does not
       // get latitude by default (FR-11.1's conservative default).
       autonomy: this.options.autonomyFor?.(request.agentId) ?? 'manual',

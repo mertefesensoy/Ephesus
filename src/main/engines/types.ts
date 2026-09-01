@@ -58,6 +58,18 @@ export interface AgentSpawnConfig {
    * Least-privilege: only what the hire template declares reaches this map.
    */
   readonly envGrants: Readonly<Record<string, string>>
+  /**
+   * The git author the company's work is committed under (ADR-0022), or null
+   * when no company identity is configured.
+   *
+   * Deliberately NOT carried in `envGrants`: a grant is a credential the broker
+   * released to a role that declared it, and re-scoping grants to the declared
+   * names is the invariant that keeps undeclared variables out of a spawn. An
+   * author name is neither secret nor declared, so smuggling it through that map
+   * would weaken the one check standing between a spawn and the harness's whole
+   * environment.
+   */
+  readonly commitIdentity: { readonly name: string; readonly email: string } | null
   /** Absolute path to `agora/agents/<id>/identity.md` (SDD §2). */
   readonly identityPath: string
   /** Absolute path to the agent-facing `agora/PROTOCOL.md` (SDD §2). */

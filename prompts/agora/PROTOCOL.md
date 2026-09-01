@@ -128,5 +128,9 @@ company knows nothing.
   do not silently substitute a better one.
 - Report what you actually did, including what failed. An honest failure is
   useful; a confident claim that turns out to be false is not.
+- When you commit, sign the work. The company is already the git author; add
+  the value of `$EPH_COAUTHOR` as the last line of your commit message so the
+  record says which agent did it. If that variable is empty there is no company
+  identity configured — commit normally and invent nothing.
 - When you finish, say so with a reference to the result — a file, a commit, a
   test run — so your work can be checked without asking you.

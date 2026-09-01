@@ -24,6 +24,7 @@ function dummyAdapter(id: EngineId): EngineAdapter {
     spawnArgs: (cfg) => ({
       argv: [id],
       cwd: cfg.cwd,
+      commitIdentity: null,
       env: { ...cfg.envGrants, EPH_AGENT_ID: cfg.agentId, EPH_HOOK_TOKEN: cfg.hookToken },
       settings: []
     }),
@@ -42,6 +43,7 @@ const spawnConfig: AgentSpawnConfig = {
   hookToken: 'token-abc',
   hookEndpoint: '/tmp/eph/events.sock',
   cwd: '/tmp/eph/repo',
+  commitIdentity: null,
   envGrants: { GH_TOKEN: 'granted' },
   identityPath: '/tmp/eph/agora/agents/agent.test/identity.md',
   protocolPath: '/tmp/eph/agora/PROTOCOL.md',
