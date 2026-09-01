@@ -135,6 +135,17 @@ export interface AgentManagerOptions {
   /** `<harness home>/agora` — where agent directories and PROTOCOL.md live (SDD §2). */
   readonly agoraRoot: string
   readonly probe?: VersionProber
+  /**
+   * The autonomy this agent runs at — the profile's level composed against the
+   * global ceiling (FR-11.1, ADR-0012), or the ceiling alone for an agent on no
+   * profile. Absent means `manual`, which is the direction an unknown must
+   * fail in: an agent nobody placed does not get latitude by default.
+   *
+   * Injected rather than read here, because the composition belongs to the
+   * Watch and a second opinion about it in the spawn path would eventually
+   * disagree with the first — permissively.
+   */
+  autonomyFor?(agentId: string): 'manual' | 'supervised' | 'autonomous' | null
   /** Notified whenever a card changes, for pushing `state:agents` to the renderer. */
   onChange?(card: AgentCard): void
   /**
@@ -482,6 +493,9 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
+      // `manual` when nobody has an opinion: an agent on no profile does not
+      // get latitude by default (FR-11.1's conservative default).
+      autonomy: this.options.autonomyFor?.(request.agentId) ?? 'manual',
       // Empty until `start()`. ADR-0010 injects credentials *at spawn*, and
       // this config is built before the version probe has even run.
       envGrants: {},

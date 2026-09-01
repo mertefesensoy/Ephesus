@@ -9,6 +9,7 @@ import {
   CLAUDE_SETTINGS_BACKUP_REL,
   CLAUDE_SETTINGS_REL,
   ClaudeAdapter,
+  claudePermissionMode,
   mergeClaudeSettings
 } from '../../../src/main/engines/claude'
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
@@ -70,7 +71,8 @@ function rig(): Rig {
       identityPath: path.join(agora, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
       memory: '',
-      recallCommand: ''
+      recallCommand: '',
+      autonomy: 'manual'
     }
   }
 }
@@ -161,8 +163,11 @@ describe('claude adapter — spawn plan (SDD §3)', () => {
     const plan = adapter.spawnArgs(cfg)
 
     expect(plan.argv[0]).toBe('claude')
-    expect(plan.argv[1]).toBe('--append-system-prompt')
-    const appendix = plan.argv[2] ?? ''
+    // By pairing, not by position: argv gained `--permission-mode` at M7.7 and
+    // a positional assertion turned a correct addition into a failure. What
+    // matters is that the flag carries the identity, not where it sits.
+    expect(plan.argv).toContain('--append-system-prompt')
+    const appendix = plan.argv[plan.argv.indexOf('--append-system-prompt') + 1] ?? ''
     expect(appendix).toContain('agent.mason')
     expect(appendix).toContain('Role: ci-babysitter.')
     expect(appendix).toContain('Write only your outbox.')
@@ -383,5 +388,44 @@ describe('claude adapter — the mailbox grant (FR-3.2)', () => {
     ) as Record<string, unknown>
     expect(settings['permissions']).toBeUndefined()
     expect(adapter.id).toBe('claude')
+  })
+})
+
+describe('autonomy reaches the engine as its own permission mode', () => {
+  /**
+   * The harness gates its OWN actions, and `evaluateGate` refuses
+   * `tool-permission` by construction — correctly, since the harness has no
+   * action to permit there; the ENGINE is the thing blocked on a human. So
+   * until this, an Architect who granted a profile full autonomy still answered
+   * "Claude is waiting for your input" every few minutes, and no policy they
+   * could write would stop it.
+   */
+  it('maps each level to the mode that matches it', () => {
+    expect(claudePermissionMode('manual')).toBe('default')
+    expect(claudePermissionMode('supervised')).toBe('acceptEdits')
+    expect(claudePermissionMode('autonomous')).toBe('auto')
+  })
+
+  it('stops at `auto` and never reaches `bypassPermissions`', () => {
+    // The case for autonomy was that a standing policy beats a human who has
+    // stopped reading prompts. That is an argument for a better classifier,
+    // not for switching the classifier off — so the top of the ladder is the
+    // engine's own judgement, not the absence of judgement.
+    const modes = (['manual', 'supervised', 'autonomous'] as const).map(claudePermissionMode)
+    expect(modes).not.toContain('bypassPermissions')
+  })
+
+  it('puts the flag on the command line at spawn', () => {
+    const r = rig()
+    const argv = r.adapter.spawnArgs({ ...r.cfg, autonomy: 'autonomous' }).argv
+    expect(argv[0]).toBe('claude')
+    expect(argv).toContain('--permission-mode')
+    expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('auto')
+  })
+
+  it('asks by default for an agent nobody granted anything', () => {
+    const r = rig()
+    const argv = r.adapter.spawnArgs({ ...r.cfg, autonomy: 'manual' }).argv
+    expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('default')
   })
 })

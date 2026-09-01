@@ -1416,6 +1416,14 @@ async function boot(): Promise<void> {
     spawner: ptyManager,
     prompts,
     agoraRoot: agora.root,
+    // The composed answer the Watch already computes for `tool-permission` —
+    // the class that IS the engine's own permission prompt. Adapters turn it
+    // into whatever their engine calls "ask me less", which is the only place
+    // that prompt can be answered: `evaluateGate` refuses `tool-permission` by
+    // construction, because the harness has no action to permit there.
+    autonomyFor: (agentId) =>
+      activations?.autonomyFor(agentId, 'tool-permission') ??
+      loadGatePolicy(gatePolicyPath).policy.autonomy,
     onExitError: (agentId, err) =>
       reportDegradation(
         'agents',

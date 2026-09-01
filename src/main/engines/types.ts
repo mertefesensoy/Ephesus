@@ -80,6 +80,25 @@ export interface AgentSpawnConfig {
    * it is the thing that must not be printed.
    */
   readonly recallCommand: string
+  /**
+   * The autonomy this spawn runs at — the profile's level composed against the
+   * global ceiling (ADR-0012, FR-11.1), or the ceiling alone for an agent on no
+   * profile.
+   *
+   * Adapters map it to whatever their engine calls "ask me less". It is handed
+   * over here rather than read from the Watch, because an adapter that reached
+   * for policy would be a second place autonomy is decided, and the more
+   * permissive of two such places always wins in the end.
+   *
+   * Why it exists: through M7 the harness gated its OWN actions and left the
+   * engine's permission prompt untouched, so an Architect who had granted a
+   * profile full autonomy was still answering "Claude is waiting for your
+   * input" every few minutes. `evaluateGate` refuses `tool-permission` by
+   * construction, and correctly — the harness has no action to permit there,
+   * the ENGINE does — so the only place that interruption can be answered is
+   * the engine's own flag.
+   */
+  readonly autonomy: 'manual' | 'supervised' | 'autonomous'
 }
 
 /**

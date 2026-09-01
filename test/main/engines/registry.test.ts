@@ -46,7 +46,8 @@ const spawnConfig: AgentSpawnConfig = {
   identityPath: '/tmp/eph/agora/agents/agent.test/identity.md',
   protocolPath: '/tmp/eph/agora/PROTOCOL.md',
   memory: '',
-  recallCommand: ''
+  recallCommand: '',
+  autonomy: 'manual'
 }
 
 describe('EngineRegistry (ADR-0009, SDD §1.1)', () => {

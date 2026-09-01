@@ -49,7 +49,8 @@ function rig(): { adapter: EngineAdapter; cfg: AgentSpawnConfig; cwd: string } {
       identityPath: path.join(agentDir, 'identity.md'),
       protocolPath: path.join(root, 'agora', 'PROTOCOL.md'),
       memory: '## Your memory\n\nThe kiln fires at 1280C.',
-      recallCommand: 'node /shims/eph-recall.mjs'
+      recallCommand: 'node /shims/eph-recall.mjs',
+      autonomy: 'manual'
     }
   }
 }

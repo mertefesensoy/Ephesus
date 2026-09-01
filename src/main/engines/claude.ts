@@ -359,6 +359,33 @@ export function mergeClaudeSettings(
   return `${JSON.stringify({ ...base, hooks: merged, permissions }, null, 2)}\n`
 }
 
+/**
+ * Contract: the engine's permission mode for a composed autonomy level. Pure.
+ *
+ * Claude Code offers `default`, `acceptEdits`, `auto` and `bypassPermissions`.
+ * The mapping stops deliberately short at the top: `autonomous` becomes `auto`
+ * — the engine's own classifier — and NOT `bypassPermissions`, which disables
+ * every check rather than deciding it.
+ *
+ * That distinction is the whole argument. The case for autonomy here was that a
+ * standing policy beats a human who has stopped reading prompts, which is an
+ * argument for a better classifier, not for switching the classifier off. An
+ * Architect who wants the blanket bypass can still ask for it; nothing should
+ * arrive at it by way of a default.
+ */
+export function claudePermissionMode(
+  autonomy: 'manual' | 'supervised' | 'autonomous'
+): 'default' | 'acceptEdits' | 'auto' {
+  switch (autonomy) {
+    case 'manual':
+      return 'default'
+    case 'supervised':
+      return 'acceptEdits'
+    case 'autonomous':
+      return 'auto'
+  }
+}
+
 export class ClaudeAdapter implements EngineAdapter {
   readonly id = 'claude' as const
   /**
@@ -382,7 +409,13 @@ export class ClaudeAdapter implements EngineAdapter {
   spawnArgs(cfg: AgentSpawnConfig): SpawnPlan {
     const identity = composeIdentity(cfg, this.deps.prompts)
     return {
-      argv: ['claude', '--append-system-prompt', identity],
+      argv: [
+        'claude',
+        '--permission-mode',
+        claudePermissionMode(cfg.autonomy),
+        '--append-system-prompt',
+        identity
+      ],
       cwd: cfg.cwd,
       env: {
         ...baseAgentEnv(),
