@@ -4415,9 +4415,34 @@ real-engine respawn demo; E-STOA's LLM-judged half.
 **Recorded as unresolved, not as gaps:** the budget question from the live run
 is now partly answered — ADR-0023 replaced the projection-trip with usage-aware
 pacing, and the 91.4% of a 24.47M-token day spent re-reading context at wake is
-the measurement that matters and is untouched. `s-closing`, `s-livelock`,
-`s-stoploop` and `s-wake` remain parallel-load races against wall-clock
-deadlines (recorded 2026-08-29); `s-closing` is characterised and assigned.
+the measurement that matters and is untouched.
+
+**Correction, same day (2026-09-02).** This review first recorded `s-closing`,
+`s-livelock`, `s-stoploop` and `s-wake` as one family of "parallel-load races
+against wall-clock deadlines", inheriting the grouping from the 2026-08-29 M6
+doc that lists them on one line. **They are two problems, not one**, and the
+grouping was never checked:
+
+| suite | `setTimeout` / deadline / timing constant | actual cause |
+|---|---|---|
+| `s-closing` | 3 | a real race: a 500 ms deadline against a live spawn |
+| `s-livelock` | 0 | merely slow — 4.65 s |
+| `s-stoploop` | 0 | merely slow — 10.89 s |
+| `s-wake` | 0 | merely slow — 3.84 s |
+
+The three siblings carry no deadline at all. They were failing against vitest's
+old 5-second default, which `39aad30` already raised to 30 s, and nothing in
+them is broken. Only `s-closing` was a race, and it is now **fixed** (`4143464`):
+`ClosingTime` already accepted `now?()`, but the deadline was a bare
+`setTimeout`, so injecting the clock changed only what the log SAYS and not when
+the deadline FIRES. A `schedule?()` seam closes it, `unref` preserved. Verified:
+`company(1)` failed 100% with the identical assertion before and passes after —
+the duration no longer matters, which is the evidence a bigger constant could
+never provide. `test/scenarios/` now **202 passed** under parallel load.
+
+Being listed on one line made four suites look like one bug for four days. The
+error is the one this milestone keeps finding: a grouping accepted as a property
+of the things grouped.
 
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
