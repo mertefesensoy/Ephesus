@@ -131,6 +131,10 @@ async function restartOver(home: string): Promise<Company> {
       render: () => '',
       onLogEvent: () => {}
     }),
+    // Nothing here begins a closing, so no deadline is ever armed. False is the
+    // contract's answer for that, not a stub: a scenario that tripped a
+    // deadline which never existed would be asserting against nothing.
+    tripClosingDeadline: () => false,
     // The incident plane is deliberately not exercised by a blackout: what a
     // restart owes an in-flight incident is its own question (the endpoint
     // re-raises a still-failing run by design), and S-PROFILE owns it. An
