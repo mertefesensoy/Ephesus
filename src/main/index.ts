@@ -10,6 +10,7 @@ import {
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
+  CAPACITY_STATE_CHANNEL,
   LOG_APPEND_CHANNEL,
   ODEON_QUEUE_CHANNEL,
   TASKS_STATE_CHANNEL,
@@ -79,6 +80,7 @@ import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { Breaker } from './watch/breaker'
 import { BudgetWatcher } from './watch/budgets'
+import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
@@ -88,6 +90,7 @@ import { SteerNotes } from './watch/steer-notes'
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
+let capacityWatch: CapacityWatch | null = null
 let gates: GateManager | null = null
 let breaker: Breaker | null = null
 /** SDD §9's choke points, wired once (see `wireGateChokePoints`). */
@@ -1614,6 +1617,10 @@ async function boot(): Promise<void> {
         'agents',
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    // A ghost that was parked did not crash. Asked rather than inferred from
+    // the exit code, because a provider refusal and a crash look identical at
+    // the pty seam — and the difference is whether a human needs to do anything.
+    capacityParked: (agentId) => capacityWatch?.parked(agentId) !== null,
     rosterBudget: (agentId) => {
       try {
         return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
@@ -1728,6 +1735,10 @@ async function boot(): Promise<void> {
           .finally(() => {
             costLedger?.clearSession(card.agentId)
             budgetWatcher?.forget(card.agentId)
+            // NOT `capacityWatch.forget` — deliberately. An exit during a park
+            // is a parked agent whose process died, and it is still owed a
+            // continuation when capacity returns (`onResume` then takes the
+            // respawn path). Forgetting here is how the agent would be lost.
           })
       }
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
@@ -1893,6 +1904,154 @@ async function boot(): Promise<void> {
   })
   budgetWatcher.start()
 
+  // Provider capacity (`watch/capacity.ts`). Built beside the budget watcher
+  // and deliberately NOT inside it: they read the same transcripts to answer
+  // opposite questions, and this one must keep answering while a parked agent's
+  // spend has stopped changing.
+  //
+  // Nothing here kills, ghosts, or restarts on a refusal. A usage limit is a
+  // normal event in the life of a company meant to run for days — the correct
+  // response is to stop asking, say so where the Architect can see it, and come
+  // back. Every act below is one of those three.
+  /**
+   * The continuation an agent reads when capacity returns (invariant §8: the
+   * words are a file the Architect can edit, never a literal here).
+   *
+   * Returns null when the template will not read, and the caller then continues
+   * NOTHING rather than inventing a sentence. A resume prompt the harness made
+   * up is a resume prompt nobody reviewed, and this one tells an agent what to
+   * do with half-finished work.
+   */
+  const capacityResumeText = (detail: string): string | null => {
+    try {
+      return prompts.render(path.join('watch', 'capacity-resume.md'), { detail }).trim()
+    } catch (err) {
+      reportDegradation(
+        'capacity',
+        'the capacity resume prompt is unreadable, so no agent will be continued: ' +
+          `${err instanceof Error ? err.message : String(err)}`
+      )
+      return null
+    }
+  }
+
+  capacityWatch = new CapacityWatch({
+    agents: () => agentManager?.liveSpawns() ?? [],
+    alive: (agentId) => ptyManager.has(agentId),
+    onPark: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'parked',
+        agentId: row.agentId,
+        limitKind: row.limit.kind,
+        // The engine's own sentence, verbatim: "out of usage credits" and "rate
+        // limited" want different things from a human, and a harness that
+        // paraphrased them would erase that difference.
+        detail: row.limit.detail,
+        recordId: row.limit.recordId,
+        sessionId: row.limit.sessionId,
+        at: row.limit.at,
+        resetsAt: row.limit.resetsAt,
+        attempts: row.attempts,
+        retryAt: row.retryAt,
+        processAlive: row.processAlive
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity parked ${row.agentId}`)
+      // Invariant §7. A pause nobody can see is the failure mode this whole
+      // system is built against, so it goes to the degradation banner as well
+      // as to the strip.
+      reportDegradation(
+        'capacity',
+        `${row.agentId} is waiting for provider capacity — ${row.limit.detail}`
+      )
+      // Mail stops rather than piling into a session that cannot answer it. It
+      // is a pause, not a discard: the mailbox keeps everything and Hermes
+      // resumes delivering when the park clears.
+      hermes?.setPaused(row.agentId, true)
+      // FR-5.4's ladder counts crashes and ends. A refusal is not a crash, and
+      // restarting into one cannot succeed — every rung it burned would be a
+      // rung missing for the real crash later.
+      artemis?.holdForCapacity()
+    },
+    onResume: (row) => {
+      const text = capacityResumeText(row.limit.detail)
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'resuming',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        // Which of the two continuations ran. They are not equivalent and the
+        // book of record must not imply they are: one carries the live
+        // conversation, the other carries the engine session it was resumed
+        // onto (ADR-0009 `resume`).
+        via: row.processAlive ? 'live-session' : 'respawn',
+        waitedMs: Date.parse(row.retryAt) - Date.parse(row.since),
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity resume ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      if (row.processAlive) {
+        // The process never died, so there is nothing to restart: the agent is
+        // talked to, in the conversation it was already having. This is the
+        // strongest form of "continue where you left off" available — no new
+        // session, no re-injected identity, no lost context.
+        if (text === null) return
+        try {
+          commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not continue ${row.agentId}: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+        return
+      }
+      // The process did not survive the wait. Now — and only now — the existing
+      // resume path runs: `--resume <sessionId>` through `AgentManager.respawn`
+      // (ADR-0009 `ResumeSupport`), the same machinery crash recovery uses.
+      void (async (): Promise<void> => {
+        try {
+          await agentManager?.respawn(row.agentId)
+          // The continuation follows the respawn rather than riding it: the
+          // engine session carries what the agent was doing, and this says what
+          // to do about it. Held by the command queue until the fresh session
+          // reports idle, which is exactly when it can be read.
+          if (text !== null) commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not respawn ${row.agentId} after capacity returned: ` +
+              `${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })()
+    },
+    onClear: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'cleared',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        since: row.since,
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity cleared ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      // The ladder is only released once NOBODY is parked: releasing it while
+      // another agent is still refused would let the next exit spend a rung on
+      // the same limit this hold exists to absorb.
+      if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
+    },
+    onDegraded: (detail) => reportDegradation('capacity', detail)
+  })
+  capacityWatch.start()
+
   // FR-5.1/5.4: Artemis is hired like any other agent — this module owns her
   // lifecycle and nothing about what she decides (ADR-0005).
   artemis = new Artemis({
@@ -1931,6 +2090,7 @@ async function boot(): Promise<void> {
     gates,
     humanQueue: () => hermes?.humanQueue() ?? [],
     dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
+    capacity: () => capacityWatch?.view() ?? { parked: [], since: null, retryAt: null },
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')
@@ -2336,6 +2496,7 @@ function teardown(): void {
         companyTokenTimer = null
       }
       budgetWatcher?.stop()
+      capacityWatch?.stop()
       ptyManager.killAll()
       hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
       void agora?.drained().finally(() => db?.close())
@@ -2346,6 +2507,7 @@ function teardown(): void {
     hermes?.stop()
     scheduler.stop()
     budgetWatcher?.stop()
+    capacityWatch?.stop()
     ptyManager.killAll()
     hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
     db?.close()

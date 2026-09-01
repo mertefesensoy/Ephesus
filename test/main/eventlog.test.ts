@@ -25,7 +25,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty-four documented kinds', () => {
+  it('carries the twenty-five documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -57,6 +57,11 @@ describe('log line format (SDD §4.3)', () => {
       'stoa',
       // Added by GYM-003: closing time's begin / ack / complete (SDD §4.3).
       'shutdown',
+      // Provider capacity: parked / resuming / cleared. Its own kind because a
+      // healthy agent the provider declined to serve is neither a `breaker`
+      // trip nor an `exit`, and a forensic reader who cannot tell the three
+      // apart cannot reconstruct what the company did (NFR-13).
+      'capacity',
       'error'
     ])
   })

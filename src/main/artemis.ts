@@ -129,6 +129,21 @@ export class Artemis {
   /** True while a respawn is being built, so her brief says she was restarted. */
   private respawning = false
   private lastAuthorityWarning: string | null = null
+  /**
+   * True while the company is parked on provider capacity (`watch/capacity.ts`).
+   *
+   * The ladder below counts CRASHES, and it ends — deliberately, because an
+   * orchestrator that will not start is a fault a human has to see. A usage
+   * limit is not that fault. Restarting into it cannot succeed, so every rung it
+   * consumed would be a rung unavailable for the real crash later, and five
+   * refusals in a row would end the ladder and leave the company with no
+   * orchestrator over a condition guaranteed to clear on its own. So while this
+   * is set, an exit costs no rung — it is remembered instead, and served by
+   * `releaseForCapacity` when the provider comes back.
+   */
+  private capacityHeld = false
+  /** An exit that arrived during a hold, waiting for capacity to return. */
+  private heldExit: { exitCode: number | null } | null = null
 
   constructor(private readonly options: ArtemisOptions) {
     this.agentId = options.agentId ?? ARTEMIS_AGENT_ID
@@ -208,8 +223,61 @@ export class Artemis {
     this.scheduleRespawn(card.exitCode)
   }
 
+  /**
+   * The company is waiting on provider capacity: stop spending the ladder.
+   *
+   * Idempotent — the watch parks per agent and may say so more than once.
+   */
+  holdForCapacity(): void {
+    if (this.capacityHeld) return
+    this.capacityHeld = true
+    this.options.onLogEvent?.({
+      kind: 'orchestrator',
+      event: 'held-for-capacity',
+      agentId: this.agentId,
+      attempt: this.attempts
+    })
+  }
+
+  /**
+   * Capacity is back. Serves an exit that arrived during the hold, WITHOUT
+   * charging it to the ladder: she did not crash, she was refused.
+   */
+  releaseForCapacity(): void {
+    if (!this.capacityHeld) return
+    this.capacityHeld = false
+    const held = this.heldExit
+    this.heldExit = null
+    if (held === null || this.stopped || this.pending) return
+    this.options.onLogEvent?.({
+      kind: 'orchestrator',
+      event: 'respawn-after-capacity',
+      agentId: this.agentId,
+      attempt: this.attempts,
+      exitCode: held.exitCode
+    })
+    this.pending = this.waitThenRespawn(0)
+  }
+
+  /** True while the ladder is being held for capacity. For tests and the card. */
+  heldForCapacity(): boolean {
+    return this.capacityHeld
+  }
+
   private scheduleRespawn(exitCode: number | null): void {
     if (this.stopped || this.pending) return
+    if (this.capacityHeld) {
+      // Remembered, not charged. `releaseForCapacity` brings her back.
+      this.heldExit = { exitCode }
+      this.options.onLogEvent?.({
+        kind: 'orchestrator',
+        event: 'respawn-deferred-for-capacity',
+        agentId: this.agentId,
+        attempt: this.attempts,
+        exitCode
+      })
+      return
+    }
     const wait = this.policy.backoffMs[this.attempts]
     if (wait === undefined) {
       // The ladder is spent. Saying so is the point: an Architect whose

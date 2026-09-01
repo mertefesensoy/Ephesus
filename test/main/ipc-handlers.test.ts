@@ -76,6 +76,7 @@ async function rig(options: RigOptions = {}): Promise<{
     budgets: () => [],
     humanQueue: () => [],
     dismissFromHumanQueue: () => true,
+    capacity: () => ({ parked: [], since: null, retryAt: null }),
     breakerState: () => [],
     pendingMailFor: options.pendingMail ?? ((): number => 0),
     hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),
