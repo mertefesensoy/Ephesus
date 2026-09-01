@@ -125,3 +125,60 @@ export function sheetForAgent(agentId: string, sheetCount: number): number {
   }
   return hash % sheetCount
 }
+
+export interface CharactersState {
+  readonly installed: boolean
+  readonly manifest: CharactersManifest | null
+  /** Sheet file name → URL, for the sheets the manifest actually names. */
+  readonly urls: ReadonlyMap<string, string>
+  /** What the floor should say about where its people come from. */
+  readonly note: string
+}
+
+/**
+ * Contract: pure over its two inputs, so the rules are testable without a build
+ * that has art in it. Every path that is not "a manifest and the sheets it
+ * names" returns no pack AND a reason (invariant §7).
+ */
+export function resolveCharacters(
+  sheetPaths: Readonly<Record<string, string>>,
+  manifestEntries: Readonly<Record<string, unknown>>
+): CharactersState {
+  const none = { installed: false, manifest: null, urls: new Map<string, string>() } as const
+  const first = Object.keys(manifestEntries).sort()[0]
+  if (first === undefined) {
+    return { ...none, note: 'citizens: procedural (no character pack installed)' }
+  }
+  const parsed = charactersManifestSchema.safeParse(manifestEntries[first])
+  if (!parsed.success) {
+    return {
+      ...none,
+      note: `citizens: procedural (manifest invalid — ${parsed.error.issues[0]?.message ?? 'schema mismatch'})`
+    }
+  }
+  const manifest = parsed.data
+  const paths = Object.keys(sheetPaths)
+  const urls = new Map<string, string>()
+  const missing: string[] = []
+  for (const sheet of manifest.sheets) {
+    const match = paths.find((path) => path.endsWith(`/${sheet}`))
+    const url = match ? sheetPaths[match] : undefined
+    if (url === undefined) missing.push(sheet)
+    else urls.set(sheet, url)
+  }
+  // A partial pack is refused rather than half-used: `sheetForAgent` indexes
+  // into the manifest's own list, so a hole in it would give some citizens a
+  // face and others nothing, with no way to tell which from the floor.
+  if (urls.size === 0 || missing.length > 0) {
+    return {
+      ...none,
+      note: `citizens: procedural (${String(missing.length)} sheet(s) named but not installed: ${missing.slice(0, 3).join(', ')})`
+    }
+  }
+  return {
+    installed: true,
+    manifest,
+    urls,
+    note: `citizens: ${manifest.name}${manifest.credit === undefined ? '' : ` — ${manifest.credit}`}`
+  }
+}
