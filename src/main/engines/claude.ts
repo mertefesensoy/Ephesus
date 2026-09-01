@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { CapacityLimit } from '../../shared/capacity'
 import type { HookEvent } from '../../shared/hooks'
 import type { PromptStore } from '../prompts'
 import type { SettingsRegistry } from '../settings-registry'
@@ -70,6 +71,7 @@ export function claudeTranscriptDir(cwd: string): string {
  */
 const claudeTranscripts: TranscriptReader = {
   transcriptDir: (cfg) => claudeTranscriptDir(cfg.cwd),
+  limitOf: claudeCapacityLimit,
   read: async (filePath) => {
     // Read asynchronously and catch ENOENT rather than pre-checking: this runs
     // on the same event loop that carries PTY bytes and hook events (SDD §11,
@@ -129,6 +131,109 @@ export function claudeUsageFact(raw: unknown): UsageFact | null {
     costUsd: null,
     at: typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : null
   }
+}
+
+/**
+ * Contract: pure. One provider-capacity refusal, or null for every other line.
+ *
+ * ## What this matches, and the evidence for it
+ *
+ * When a turn ends because the provider refused on quota, Claude Code appends a
+ * SYNTHETIC assistant record to the session transcript. Three fields identify
+ * it, and all three are required here:
+ *
+ * ```
+ *   "type": "assistant"
+ *   "isApiErrorMessage": true
+ *   "error": "rate_limit"
+ * ```
+ *
+ * Two independent sources say so, and they agree:
+ *
+ *  1. **Recorded reality.** Three such records exist in a real transcript on the
+ *     Architect's own machine (`~/.claude/projects/…/39ba11ac-….jsonl`, engine
+ *     2.1.237, 2026-08-30T21:58:55Z and two more), each carrying exactly those
+ *     three fields plus `apiErrorStatus: 429` and an `errorDetails` string
+ *     holding the provider's `rate_limit_error` body.
+ *  2. **The engine's own test.** The shipped 2.1.252 binary contains the guard
+ *     `type === "assistant" && isApiErrorMessage && error === "rate_limit"`
+ *     before it reads `quotaLimits`. This predicate is the engine's, not ours.
+ *
+ * ## What it deliberately does NOT match
+ *
+ * The SAME transcript carries `error: "server_error"` records — a DNS failure
+ * and a `529 Overloaded` — which are a real negative control, not a supposed
+ * one. The engine's own taxonomy separates `rate_limit` ("wait and retry") from
+ * `server_error`, `overloaded`, `billing_error` and `invalid_request`; of those,
+ * waiting fixes only `rate_limit`. `billing_error` in particular is excluded on
+ * purpose: the engine glosses it "usage limit reached — check plan", and a
+ * company parked on it would wait for a reset that a human has to buy.
+ *
+ * `apiErrorStatus` is NOT required. It is absent from the older synthetic
+ * records in that corpus, and demanding it would make the detector miss the
+ * very events it was built from.
+ *
+ * ## The reset time
+ *
+ * `quotaLimits.resetsAt` is UNIX SECONDS: the engine builds `quotaLimits` from
+ * the `anthropic-ratelimit-unified-*` response headers
+ * (`resetsAt = Math.round(Number(header 'anthropic-ratelimit-unified-reset'))`)
+ * and elsewhere compares it as `resetsAt * 1000 <= Date.now()`. It is absent
+ * from every record observed here, so it is read when present and never
+ * substituted when missing — `CapacityLimit.resetsAt` stays null, and the wait
+ * falls back to a ladder rather than to a fabricated deadline.
+ */
+export function claudeCapacityLimit(raw: unknown): CapacityLimit | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const row = raw as Record<string, unknown>
+  if (row['type'] !== 'assistant') return null
+  if (row['isApiErrorMessage'] !== true) return null
+  if (row['error'] !== 'rate_limit') return null
+  const sessionId = row['sessionId']
+  const uuid = row['uuid']
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return null
+  // No uuid means no identity, and no identity means the same refusal would
+  // re-park the company on every tick. A record we cannot name is skipped.
+  if (typeof uuid !== 'string' || uuid.length === 0) return null
+  const timestamp = row['timestamp']
+  return {
+    kind: 'rate-limit',
+    recordId: uuid,
+    sessionId,
+    at: typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : '',
+    detail: claudeErrorText(row['message']) ?? 'the provider refused this turn on usage limits',
+    resetsAt: claudeResetsAt(row['quotaLimits'])
+  }
+}
+
+/** Contract: the engine's own sentence from a synthetic error record, or null. */
+function claudeErrorText(message: unknown): string | null {
+  if (typeof message !== 'object' || message === null) return null
+  const content = (message as Record<string, unknown>)['content']
+  if (!Array.isArray(content)) return null
+  const parts: string[] = []
+  for (const block of content) {
+    if (typeof block !== 'object' || block === null) continue
+    const cell = block as Record<string, unknown>
+    if (cell['type'] !== 'text') continue
+    const text = cell['text']
+    if (typeof text === 'string' && text.trim().length > 0) parts.push(text.trim())
+  }
+  return parts.length === 0 ? null : parts.join(' ')
+}
+
+/**
+ * Contract: the provider's reset instant as ISO, or null when it did not say.
+ *
+ * Unix seconds in, ISO out. A value that is not a finite positive number is
+ * treated as "did not say" rather than coerced — a reset time of `0` would park
+ * a company until 1970, which is to say not at all.
+ */
+function claudeResetsAt(quotaLimits: unknown): string | null {
+  if (typeof quotaLimits !== 'object' || quotaLimits === null) return null
+  const seconds = (quotaLimits as Record<string, unknown>)['resetsAt']
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
+  return new Date(seconds * 1000).toISOString()
 }
 
 /**

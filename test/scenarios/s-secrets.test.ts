@@ -82,6 +82,7 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       budgets: () => [],
       humanQueue: () => [],
       dismissFromHumanQueue: () => true,
+      capacity: () => ({ parked: [], since: null, retryAt: null }),
       breakerState: () => [],
       pendingMailFor: () => 0,
       hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),

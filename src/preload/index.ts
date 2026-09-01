@@ -3,6 +3,7 @@ import {
   AGENTS_STATE_CHANNEL,
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
+  CAPACITY_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
   IpcChannels,
   LOG_APPEND_CHANNEL,
@@ -19,6 +20,7 @@ import {
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
+import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import type { OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
@@ -243,6 +245,12 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.watchDismiss, { messageId }) as Promise<boolean>,
     breakerState: () =>
       ipcRenderer.invoke(IpcChannels.watchBreaker) as Promise<readonly BreakerState[]>,
+    capacity: () => ipcRenderer.invoke(IpcChannels.watchCapacity) as Promise<CapacityView>,
+    onCapacityChange: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(CAPACITY_STATE_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(CAPACITY_STATE_CHANNEL, listener)
+    },
     onGateChange: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(GATE_OPEN_CHANNEL, listener)

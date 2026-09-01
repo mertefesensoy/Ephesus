@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { capacitySentence, type CapacityView } from '../../shared/capacity'
 
 /**
  * A status-strip count badge (UI-DESIGN §4) — gates, memos, and anything else
@@ -39,6 +40,48 @@ export function CountBadge(props: {
       {typeof count === 'number' && count > 0 && (
         <span style={{ color: tone }}>
           ⚠ {label}: {some(count)}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The provider-capacity badge (invariant §7).
+ *
+ * A company that has hit the provider's usage limit looks EXACTLY like a
+ * company that has finished its work: quiet terminals, still avatars, no
+ * errors. That is the failure this badge exists to make impossible, on a system
+ * whose whole premise is running unattended for days.
+ *
+ * Three states, and the middle one is why this is not a `CountBadge`: an
+ * unknown must not render as reassurance, so `null` says "…" rather than
+ * "clear". A stale badge claiming the provider is talking to us is a
+ * degradation failing as GOOD news — the one direction invariant §7 does not
+ * allow.
+ */
+export function CapacityBadge(props: {
+  readonly view: CapacityView | null
+  /** Injected in tests so the "retry in N min" phrasing is deterministic. */
+  readonly now?: number
+}): ReactElement {
+  const { view } = props
+  const now = props.now ?? Date.now()
+  const sentence = view === null ? null : capacitySentence(view, now)
+  return (
+    <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
+      {view === null && 'capacity: …'}
+      {view !== null && sentence === null && (
+        <span style={{ color: 'var(--eph-status-success)' }}>● capacity: clear</span>
+      )}
+      {sentence !== null && (
+        <span
+          style={{ color: 'var(--eph-status-blocked)' }}
+          title={view?.parked
+            .map((row) => `${row.agentId}: ${row.limit.detail}`)
+            .join(String.fromCharCode(10))}
+        >
+          ⚠ {sentence}
         </span>
       )}
     </span>

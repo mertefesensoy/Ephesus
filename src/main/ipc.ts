@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
+import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import { gateApproveSchema, type OpenGate } from '../shared/gates'
 import { messageIdSchema, type Message } from '../shared/message'
@@ -208,6 +209,8 @@ export interface IpcDeps {
   dismissFromHumanQueue(messageId: string): boolean
   /** Per-agent breaker state (ADR-0011). */
   breakerState(): readonly BreakerState[]
+  /** Who is waiting on provider capacity (`watch/capacity.ts`). */
+  capacity(): CapacityView
   /** Mail waiting for one agent — UI-DESIGN §5.4's desk tray flag (ADR-0013). */
   pendingMailFor(agentId: string): number
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
@@ -321,6 +324,8 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.watchHumanQueue, (): readonly Message[] => deps.humanQueue())
 
   ipcMain.handle(IpcChannels.watchBreaker, (): readonly BreakerState[] => deps.breakerState())
+
+  ipcMain.handle(IpcChannels.watchCapacity, (): CapacityView => deps.capacity())
 
   ipcMain.handle(IpcChannels.watchDismiss, (_ev, raw: unknown): boolean =>
     deps.dismissFromHumanQueue(messageIdPayloadSchema.parse(raw).messageId)

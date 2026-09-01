@@ -247,6 +247,14 @@ export interface AgentManagerOptions {
    * restart would lose the declaration entirely.
    */
   rosterBudget?(agentId: string): number | null
+  /**
+   * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
+   *
+   * Optional so the lifecycle stays constructible without the Watch — and when
+   * it is absent the answer is `false`, which is the honest default: a harness
+   * that cannot see a park must not claim one.
+   */
+  capacityParked?(agentId: string): boolean
 }
 
 interface LiveAgent {
@@ -872,7 +880,12 @@ export class AgentManager {
     const offer: RespawnOffer = {
       resumable: agent.adapter.resume !== undefined && agent.sessionIds.length > 0,
       memorySections: this.options.memory?.layer(agentId).facts.totalSections ?? 0,
-      tasksReturned
+      tasksReturned,
+      // Asked, never inferred from the exit code: a provider refusal and a crash
+      // are indistinguishable at the pty seam, and the difference between them
+      // is the difference between "the harness will bring this back" and "a
+      // human needs to look at this".
+      waitingForCapacity: this.options.capacityParked?.(agentId) ?? false
     }
     this.options.onLogEvent?.({
       kind: 'ghost',
@@ -881,7 +894,8 @@ export class AgentManager {
       engine: agent.card.engine,
       resumable: offer.resumable,
       memorySections: offer.memorySections,
-      tasksReturned: [...tasksReturned]
+      tasksReturned: [...tasksReturned],
+      waitingForCapacity: offer.waitingForCapacity
     })
     return offer
   }
