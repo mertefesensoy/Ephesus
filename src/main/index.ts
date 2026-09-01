@@ -961,7 +961,22 @@ async function boot(): Promise<void> {
   costLedger = new CostLedger({
     store: db,
     onFoldRestart: (source) =>
-      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`)
+      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`),
+    // Money the engine reports (ADR-0011 `cost_usd`). Both of these are ways
+    // the dollar figure can be less than the whole truth, and invariant §7 says
+    // a figure that is not the whole truth has to say so where it is shown.
+    onCostRegressed: (source, session, model) =>
+      reportDegradation(
+        'budgets',
+        `cost went backwards for ${model} in session ${session} (${source}); ` +
+          `the transcript was replaced — earlier spend stands, nothing was corrected`
+      ),
+    onCostIncomplete: (source) =>
+      reportDegradation(
+        'budgets',
+        `${source}: the engine could not price every model it used; ` +
+          `the cost shown is an understatement, not the full bill`
+      )
   })
 
   // ADR-0023: the account's usage window, observed by every agent's status

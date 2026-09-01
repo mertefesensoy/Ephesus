@@ -410,10 +410,12 @@ what this change actually rests on.
 
 ## 9. What this does NOT do
 
-- **No dollar figures.** The statusline payload also carries
-  `cost.total_cost_usd` — a real engine-reported cost, which the ledger currently
-  records as `null` because `claudeUsageFact` had no price source in M3. Wiring
-  it would close that gap honestly. Out of scope here; recorded as owed.
+- **No dollar figures.** — *closed on this branch by*
+  [2026-09-01-cost-usd-into-the-ledger.md](2026-09-01-cost-usd-into-the-ledger.md),
+  which wires the engine's own per-model figures into ADR-0011's `cost_usd`
+  column. It uses the transcript's `cost-state` line rather than the statusline
+  payload noted here: it is per-model, which is what the ledger is keyed on, and
+  it arrives through a reader that already exists.
 - **No reduction of the ~70k baseline context** — see §7.
 - **No UI surface.** Pace changes, deferrals and wake overruns are log events and
   runtime-health degradations, which is how the Architect sees them today; no
