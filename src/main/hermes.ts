@@ -14,6 +14,7 @@ import {
 import { endpointContract } from '../shared/endpoints'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
+import { mayWake, type Pace } from '../shared/pacing'
 import type { Agora } from './agora'
 import { writeFileAtomic } from './fsx'
 import type { PromptStore } from './prompts'
@@ -51,6 +52,17 @@ export type HermesFaultInjector = (point: HermesFaultPoint) => void | Promise<vo
 export const WATCH_DEBOUNCE_MS = 50
 /** R6 mitigation: fs-watch is unreliable cross-platform, so a sweep backs it up. */
 export const SWEEP_INTERVAL_MS = 1000
+/**
+ * Minimum gap between one agent's wakes while the company is pacing `slow`
+ * (ADR-0023).
+ *
+ * Set from the measurement, not from taste: on 2026-09-01 Artemis took 39 wakes
+ * in roughly 10 hours — about one every 15 minutes on average, but arriving in
+ * bursts, with stop-hook re-wakes chasing inbox wakes within seconds. A
+ * five-minute floor leaves the average cadence untouched and removes the burst,
+ * which is where the 9.54M of stop-hook re-wake spend actually came from.
+ */
+export const DEFAULT_SLOW_WAKE_GAP_MS = 5 * 60 * 1000
 
 export interface DeliveryRecord {
   readonly message: Message
@@ -166,6 +178,31 @@ export interface HermesOptions {
   nudge?(agentId: string, text: string): void
   /** True when the agent has finished its turn and is waiting. */
   isIdle?(agentId: string): boolean
+  /**
+   * The company's pace (ADR-0023). Both wake paths below consult it, because
+   * both of them are where the harness *issues a wake* — and the wake, not the
+   * token, is the unit of spend: a measured Artemis wake cost a median 485k
+   * tokens, of which 91.4% was re-reading context that already existed before
+   * the wake began. Spacing wakes is therefore the only throttle that acts on
+   * the quantity actually driving the bill.
+   *
+   * Absent means `full`: pacing is a governor, not an interlock (ADR-0023), so
+   * a harness assembled without it behaves exactly as it did before.
+   */
+  pace?(): Pace
+  /** Minimum gap between wakes of one agent while the pace is `slow`. */
+  readonly slowWakeGapMs?: number
+  /**
+   * Raised when a wake was deferred by the pace, with the reason. Deferral must
+   * be visible or the company looks hung (invariant §7) — nothing about it is
+   * inferable from the outside, since a deferred wake leaves no trace in the
+   * mailbox at all.
+   */
+  onWakeDeferred?(
+    agentId: string,
+    detail: { pace: Pace; waitMs: number; pendingMail: number }
+  ): void
+  now?(): number
   /** Raised when a session's block count looks pathological (ADR-0011, M3). */
   onPathology?(agentId: string, blocks: number): void
   /**
@@ -256,8 +293,57 @@ export class Hermes {
   private readonly divertNotified = new Set<string>()
   /** Agents whose deliveries the breaker is holding (rung 2, ADR-0011). */
   private readonly paused = new Set<string>()
+  /**
+   * When each agent was last woken, so the pace can put a floor under the gap
+   * (ADR-0023). In-memory on purpose: this governs the *rate* of wakes, and a
+   * restart legitimately starts the company moving again — the durable record
+   * of what was spent stays where it belongs, in the ledger.
+   */
+  private readonly lastWokeAt = new Map<string, number>()
 
   constructor(private readonly options: HermesOptions) {}
+
+  private get now(): number {
+    return this.options.now?.() ?? Date.now()
+  }
+
+  /**
+   * The pace gate (ADR-0023). Contract: pure of side effects except the one
+   * `onWakeDeferred` report, and it NEVER touches the mailbox — a deferred wake
+   * must leave the mail exactly where it is, so the next pass finds it and the
+   * agent eventually hears it. Consuming the inbox on a deferral would archive
+   * messages no session ever saw, which is the one thing the wake path is not
+   * allowed to do.
+   */
+  private wakeAllowed(agentId: string, pendingMail: number): boolean {
+    const pace = this.options.pace?.() ?? 'full'
+    if (pace === 'full') return true
+    const verdict = mayWake({
+      pace,
+      lastWokeAt: this.lastWokeAt.get(agentId) ?? null,
+      now: this.now,
+      slowWakeGapMs: this.options.slowWakeGapMs ?? DEFAULT_SLOW_WAKE_GAP_MS
+    })
+    if (verdict.allowed) return true
+    this.options.onWakeDeferred?.(agentId, { pace, waitMs: verdict.waitMs, pendingMail })
+    this.agora.appendLog({
+      kind: 'hook',
+      event: 'wake-deferred',
+      agentId,
+      pace,
+      // `Infinity` is not JSON; a held wake reports its wait as null — "until
+      // the window resets" — rather than as a number that would serialise to
+      // `null` anyway and read as though we forgot to fill it in.
+      waitMs: Number.isFinite(verdict.waitMs) ? Math.round(verdict.waitMs) : null,
+      pendingMail
+    })
+    return false
+  }
+
+  /** Records that a wake was issued, so the next one can be spaced from it. */
+  private noteWoken(agentId: string): void {
+    this.lastWokeAt.set(agentId, this.now)
+  }
 
   private get agora(): Agora {
     return this.options.agora
@@ -957,8 +1043,20 @@ export class Hermes {
 
     if (decision.kind === 'continue') return null
 
+    // ADR-0023: the pace gate on the other wake path. A Stop-hook block IS a
+    // wake — it hands the session new input and buys a whole new turn — and the
+    // measurement says these are 39% of the day's spend at a mean 561k tokens
+    // for about a kilobyte of new information.
+    //
+    // Deferring returns null, which lets the turn END. That is the point: the
+    // agent goes idle with its mail still pending, and `wakeCheck` picks it up
+    // once the gap has passed. Nothing is dropped and nothing is consumed —
+    // the work is simply done in one later wake instead of one immediate one.
+    if (!this.wakeAllowed(agentId, decision.pendingMail)) return null
+
     const blocks = this.blockCount(agentId) + 1
     this.blocks.set(agentId, blocks)
+    this.noteWoken(agentId)
     if (isPathological(blocks)) this.options.onPathology?.(agentId, blocks)
 
     // Hand-over consumption (ADR-0003, Architect verdict at the M2 close-out
@@ -1017,8 +1115,14 @@ export class Hermes {
       const unannounced = pendingFiles.filter((name) => !told.has(name))
       if (unannounced.length === 0) continue
       if (this.options.isIdle && !this.options.isIdle(agentId)) continue
+      // ADR-0023. Checked AFTER the "is there new mail" and "is it idle" tests
+      // and BEFORE `nudged` is updated, so a deferred wake is not recorded as
+      // announced: the same mail must still earn its nudge once the pace
+      // allows one, or pacing would silently turn into dropping.
+      if (!this.wakeAllowed(agentId, pending)) continue
 
       this.nudged.set(agentId, new Set(pendingFiles))
+      this.noteWoken(agentId)
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
       const handed = await this.consumeInbox(agentId)

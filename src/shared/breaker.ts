@@ -134,7 +134,23 @@ export function evaluateSignals(input: SignalInput): readonly SignalHit[] {
     }
   }
 
-  if (input.budgetState === 'breached' || input.budgetState === 'projected-breach') {
+  // Trip signal #4, narrowed by ADR-0023 to `breached` only.
+  //
+  // ADR-0011 fed the *projection* to the breaker as well, on the reasoning that
+  // a pre-flight forecast beats a post-hoc discovery. That reasoning was sound
+  // and its input was not: the forecast was made against `budget.dailyTokens`,
+  // a per-agent constant, and a constant cannot forecast anything in a company
+  // with no fixed lifetime. In practice all four agents reached
+  // `projected-breach` within twenty minutes of a run whose ceilings had just
+  // been raised fifty-fold, and the breaker throttled two of them to rung 2 —
+  // a governor firing on ordinary work, which ADR-0011 itself says is the one
+  // way to make an Architect switch a breaker off.
+  //
+  // Forecasting now belongs to the pacer (`shared/pacing.ts`), which projects
+  // against the account's real, resetting usage window. What is left here is
+  // what a ceiling can honestly say: this agent has actually gone over. That is
+  // a runaway backstop, and a backstop should only fire on the thing itself.
+  if (input.budgetState === 'breached') {
     hits.push({ signal: 'burn-rate', detail: { budget: input.budgetState } })
   }
 

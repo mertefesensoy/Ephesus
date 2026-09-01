@@ -19,6 +19,7 @@ import type {
   TranscriptReader,
   NotificationKind,
   UsageFact,
+  CostFact,
   WorkspaceTrustResult
 } from './types'
 
@@ -97,7 +98,86 @@ const claudeTranscripts: TranscriptReader = {
       if (fact) facts.push(fact)
     }
     return facts
+  },
+  costs: async (filePath) => {
+    let text: string
+    try {
+      text = await fs.promises.readFile(filePath, 'utf8')
+    } catch {
+      return []
+    }
+    // Keyed by (session, model) and OVERWRITTEN as later lines are read, so a
+    // file carrying several snapshots yields only the newest running total —
+    // the contract `TranscriptReader.costs` states. The engine writes the line
+    // twice at session end (17 of 17 files in the corpus), and a resumed
+    // session can carry an older, smaller snapshot earlier in the same file;
+    // both collapse here rather than reaching the fold as separate figures.
+    const newest = new Map<string, CostFact>()
+    for (const line of text.split('\n')) {
+      if (line.trim().length === 0) continue
+      let raw: unknown
+      try {
+        raw = JSON.parse(line)
+      } catch {
+        continue
+      }
+      for (const fact of claudeCostFacts(raw)) {
+        newest.set(`${fact.sessionId}\u0000${fact.model}`, fact)
+      }
+    }
+    return [...newest.values()]
   }
+}
+
+/**
+ * Contract: pure. The engine's own money figures carried by one `cost-state`
+ * line, or none for any other line.
+ *
+ * Claude Code writes `cost-state` into the transcript itself:
+ *
+ * ```json
+ * { "type": "cost-state", "sessionId": "…", "totalCostUSD": 0.4845,
+ *   "modelUsage": { "claude-sonnet-5": { "costUSD": 0.4824, … } },
+ *   "hasUnknownModelCost": false }
+ * ```
+ *
+ * Three properties of that line drive everything downstream, and all three were
+ * established by reading a real corpus of 20 transcripts rather than assumed:
+ *
+ *  - **it is cumulative, not incremental.** Every file that had one carried
+ *    exactly one distinct `totalCostUSD`, and 17 of 17 wrote it TWICE. Hence
+ *    `foldCosts` differences rather than appends (see there);
+ *  - **it carries no timestamp**, so it cannot name the day it belongs to;
+ *  - **it is written at session end**, so a live agent has no money figure at
+ *    all until it stops — and 3 of the 20 files had none, which is what a
+ *    killed session looks like. That must stay distinguishable from "$0", which
+ *    is why an absent figure leaves `costUsd` null rather than zero.
+ *
+ * `totalCostUSD` is deliberately NOT read. The per-model `costUSD` figures are
+ * what the ledger is keyed on (SDD §4.6), they sum to the total anyway, and a
+ * model the engine could not price simply contributes no row — which is exactly
+ * the "not reported" the ledger already knows how to carry.
+ */
+export function claudeCostFacts(raw: unknown): readonly CostFact[] {
+  if (typeof raw !== 'object' || raw === null) return []
+  const row = raw as Record<string, unknown>
+  if (row['type'] !== 'cost-state') return []
+  const sessionId = row['sessionId']
+  const usage = row['modelUsage']
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return []
+  if (typeof usage !== 'object' || usage === null) return []
+  // Absent means "the engine did not say"; only an explicit `true` claims an
+  // unpriced model. A missing flag must not silently mark the bill incomplete.
+  const priced = row['hasUnknownModelCost'] !== true
+  const facts: CostFact[] = []
+  for (const [model, entry] of Object.entries(usage as Record<string, unknown>)) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const cost = (entry as Record<string, unknown>)['costUSD']
+    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) continue
+    if (model.length === 0 || model.length > 128) continue
+    facts.push({ sessionId, model, cumulativeUsd: cost, priced })
+  }
+  return facts
 }
 
 /** Contract: one fact, or null for any line that is not a usage-bearing one. */
@@ -365,6 +445,17 @@ interface ClaudeAdapterDeps {
   readonly prompts: PromptStore
   /** Absolute path to `shims/eph-hook.mjs`. */
   readonly hookShimPath: string
+  /**
+   * Absolute path to `shims/eph-usage.mjs`, and where it should write what it
+   * observes (ADR-0023). Both or neither: a shim with nowhere to write is a
+   * status line that costs a process launch and reports nothing.
+   *
+   * Optional because the statusline is a *pacing* input, not a correctness one.
+   * An engine installed without it still runs; the company simply paces on
+   * `unobserved`, which `paceFor` treats as `full`.
+   */
+  readonly usageShimPath?: string
+  readonly usageStatusPath?: string
   /** Interpreter used to run the shim; `node`, resolved on the agent's PATH. */
   readonly nodeCommand?: string
   /** Durable record of installed settings, so a killed harness can undo them. */
@@ -471,6 +562,35 @@ function isHarnessHookEntry(entry: unknown, shimPath: string): boolean {
   })
 }
 
+/**
+ * The `statusLine` block that turns every status render into one observation of
+ * the account's usage window (ADR-0023).
+ *
+ * Returns null when the harness did not supply the shim, and the caller then
+ * leaves whatever `statusLine` the Architect already had entirely alone.
+ */
+function usageStatusLine(deps: ClaudeAdapterDeps): Record<string, unknown> | null {
+  if (!deps.usageShimPath || !deps.usageStatusPath) return null
+  const node = deps.nodeCommand ?? 'node'
+  return {
+    type: 'command',
+    command: `${node} ${shellQuote(deps.usageShimPath)} --out ${shellQuote(deps.usageStatusPath)}`
+  }
+}
+
+/**
+ * Contract: true when this `statusLine` entry is one this harness installed.
+ * Same marker discipline as `isHarnessHookEntry` — the shim path IS the marker,
+ * because the engine's schema has nowhere to hang one of our own, and an empty
+ * path must match nothing rather than everything.
+ */
+function isHarnessStatusLine(entry: unknown, shimPath: string | undefined): boolean {
+  if (!shimPath || shimPath.length === 0) return false
+  if (typeof entry !== 'object' || entry === null) return false
+  const command = (entry as Record<string, unknown>)['command']
+  return typeof command === 'string' && command.includes(shimPath)
+}
+
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
@@ -518,7 +638,20 @@ export function mergeClaudeSettings(
     merged[engineEvent] = [...kept, ...(entry as unknown[])]
   }
 
-  if (!cfg) return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
+  // ADR-0023's observation point. Ours replaces a previous install of ours and
+  // nothing else: an Architect's own status line is left exactly where it is,
+  // and we simply do not install (so pacing runs on `unobserved`) rather than
+  // taking a surface they were already using.
+  const ourStatusLine = usageStatusLine(deps)
+  const priorStatusLine = base['statusLine']
+  const statusLine = ourStatusLine
+    ? priorStatusLine === undefined || isHarnessStatusLine(priorStatusLine, deps.usageShimPath)
+      ? ourStatusLine
+      : priorStatusLine
+    : priorStatusLine
+  const withStatus = statusLine === undefined ? {} : { statusLine }
+
+  if (!cfg) return `${JSON.stringify({ ...base, ...withStatus, hooks: merged }, null, 2)}\n`
 
   // Merge the mailbox grant into whatever the Architect already allowed, never
   // replacing their list.
@@ -551,7 +684,7 @@ export function mergeClaudeSettings(
     ]
   }
 
-  return `${JSON.stringify({ ...base, hooks: merged, permissions }, null, 2)}\n`
+  return `${JSON.stringify({ ...base, ...withStatus, hooks: merged, permissions }, null, 2)}\n`
 }
 
 /**

@@ -86,11 +86,16 @@ import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
+import { UsageWatch } from './watch/usage-watch'
+import { DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
+import { DEFAULT_PACE_THRESHOLDS } from '../shared/pacing'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
 let capacityWatch: CapacityWatch | null = null
+let usageWatch: UsageWatch | null = null
+let wakeClock: WakeClock | null = null
 let gates: GateManager | null = null
 let breaker: Breaker | null = null
 /** SDD §9's choke points, wired once (see `wireGateChokePoints`). */
@@ -271,6 +276,16 @@ const hookServer = new HookServer({
       // The Watch folds only the transcripts these sessions produced, so a
       // shared repo cannot cross-attribute spend between agents (ADR-0011).
       agentManager?.noteSession(envelope.agentId, envelope.sessionId)
+    }
+
+    // ADR-0023's wall-clock cap. A wake begins when a prompt is submitted and
+    // ends when the turn stops — the two events that bracket exactly one wake.
+    // `session-end` closes it too, because an agent that exits mid-turn emits
+    // no `stop` and would otherwise leave a timer that fires at an agent which
+    // is no longer there.
+    if (envelope.event === 'prompt-submitted') wakeClock?.began(envelope.agentId)
+    if (envelope.event === 'stop' || envelope.event === 'session-end') {
+      wakeClock?.ended(envelope.agentId)
     }
 
     // GYM-002: a pending rung-1 steer rides this very boundary. `recordSpan`
@@ -949,13 +964,83 @@ async function boot(): Promise<void> {
   costLedger = new CostLedger({
     store: db,
     onFoldRestart: (source) =>
-      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`)
+      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`),
+    // Money the engine reports (ADR-0011 `cost_usd`). Both of these are ways
+    // the dollar figure can be less than the whole truth, and invariant §7 says
+    // a figure that is not the whole truth has to say so where it is shown.
+    onCostRegressed: (source, session, model) =>
+      reportDegradation(
+        'budgets',
+        `cost went backwards for ${model} in session ${session} (${source}); ` +
+          `the transcript was replaced — earlier spend stands, nothing was corrected`
+      ),
+    onCostIncomplete: (source) =>
+      reportDegradation(
+        'budgets',
+        `${source}: the engine could not price every model it used; ` +
+          `the cost shown is an understatement, not the full bill`
+      )
   })
+
+  // ADR-0023: the account's usage window, observed by every agent's status
+  // line and read back here. Constructed before anything can spawn, so the
+  // first agent's first render already has somewhere to land.
+  const usageStatusPath = path.join(home.root, 'usage.json')
+  usageWatch = new UsageWatch({
+    path: usageStatusPath,
+    thresholds: {
+      ...DEFAULT_PACE_THRESHOLDS,
+      ...(home.config.pacing?.slowAtPercent === undefined
+        ? {}
+        : { slowAtPercent: home.config.pacing.slowAtPercent }),
+      ...(home.config.pacing?.holdAtPercent === undefined
+        ? {}
+        : { holdAtPercent: home.config.pacing.holdAtPercent })
+    },
+    onDegraded: (detail) => reportDegradation('usage', detail),
+    onPaceChange: (verdict, previous) => {
+      // Only transitions reach the book of record, exactly as budget states do:
+      // a company held at `slow` for two hours must not turn log.jsonl into a
+      // metronome (SDD §4.3).
+      agora?.appendLog({
+        kind: 'budget',
+        event: 'pace',
+        pace: verdict.pace,
+        because: verdict.because,
+        from: previous?.pace ?? null,
+        window: verdict.tightest?.window ?? null,
+        usedPercent: verdict.tightest?.usedPercent ?? null,
+        projectedPercent: verdict.tightest?.projectedPercent ?? null,
+        resetsAt: verdict.resetsAt
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`pace ${verdict.pace} (${verdict.because})`)
+      // Anything but full speed is a degradation the Architect must be able to
+      // see, or a paced company is indistinguishable from a hung one.
+      if (verdict.pace !== 'full') {
+        const tight = verdict.tightest
+        reportDegradation(
+          'usage',
+          tight
+            ? `company pacing ${verdict.pace}: ${tight.window} window at ${Math.round(
+                tight.usedPercent
+              )}%, resets ${new Date(tight.resetsAt).toISOString()}`
+            : `company pacing ${verdict.pace} (${verdict.because})`
+        )
+      }
+    }
+  })
+  usageWatch.start()
 
   engines.register(
     new ClaudeAdapter({
       prompts,
       hookShimPath: path.join(appRoot, 'shims', 'eph-hook.mjs'),
+      // The statusline observation point (ADR-0023). Installed alongside the
+      // hooks because it rides the same settings file and the same backup and
+      // uninstall path — nothing new has to be cleaned up on the way out.
+      usageShimPath: path.join(appRoot, 'shims', 'eph-usage.mjs'),
+      usageStatusPath,
       settingsRegistry: db
     })
   )
@@ -1433,9 +1518,55 @@ async function boot(): Promise<void> {
     }
   })
 
+  // ADR-0023's second, independent limit: a wake that runs too long in
+  // WALL-CLOCK time is ended, whatever it cost in tokens. Constructed here,
+  // beside Hermes, because Hermes issues the wakes this bounds.
+  wakeClock = new WakeClock({
+    capMs: home.config.pacing?.wakeCapMs ?? DEFAULT_WAKE_CAP_MS,
+    interrupt: (agentId) => {
+      try {
+        agentManager?.interrupt(agentId)
+      } catch (err) {
+        reportDegradation('usage', `wake-cap interrupt failed for ${agentId}: ${String(err)}`)
+      }
+    },
+    onOvertime: (agentId, ranMs, capMs) => {
+      agora?.appendLog({
+        kind: 'budget',
+        event: 'wake-overtime',
+        agentId,
+        ranMs: Math.round(ranMs),
+        capMs
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`wake cap reached for ${agentId}`)
+      reportDegradation(
+        'usage',
+        `${agentId} ran one wake for ${Math.round(ranMs / 1000)}s (cap ${Math.round(
+          capMs / 1000
+        )}s); the turn was interrupted`
+      )
+    }
+  })
+
   hermes = new Hermes({
     agora,
     prompts,
+    // ADR-0023. The pace is computed fresh from the last observation and the
+    // clock at the moment it is asked, so a window that reset a second ago
+    // frees the company on the very next wake — the Architect's "if the weekly
+    // limit is reset it will march forward".
+    pace: () => usageWatch?.verdict().pace ?? 'full',
+    ...(home.config.pacing?.slowWakeGapMs === undefined
+      ? {}
+      : { slowWakeGapMs: home.config.pacing.slowWakeGapMs }),
+    onWakeDeferred: (agentId, detail) =>
+      reportDegradation(
+        'usage',
+        `${agentId}: wake deferred (${detail.pace}), ${detail.pendingMail} message(s) still waiting${
+          Number.isFinite(detail.waitMs) ? ` — ${Math.round(detail.waitMs / 1000)}s to go` : ''
+        }`
+      ),
     closing: (message) => closingTime?.noteReply(message) ?? false,
     // One address, two filings — the ADR-0008 pattern the Odeon endpoint
     // already uses. The Harbor is one subsystem (everything in and out), and
@@ -2497,6 +2628,8 @@ function teardown(): void {
       }
       budgetWatcher?.stop()
       capacityWatch?.stop()
+      usageWatch?.stop()
+      wakeClock?.stop()
       ptyManager.killAll()
       hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
       void agora?.drained().finally(() => db?.close())
@@ -2508,6 +2641,8 @@ function teardown(): void {
     scheduler.stop()
     budgetWatcher?.stop()
     capacityWatch?.stop()
+    usageWatch?.stop()
+    wakeClock?.stop()
     ptyManager.killAll()
     hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
     db?.close()
