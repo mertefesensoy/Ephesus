@@ -26,6 +26,25 @@ export interface ProfileSummary {
   readonly valid: boolean
   /** `profile.json`'s version, or null when the document could not be read. */
   readonly version: number | null
+  /**
+   * Targets this profile has been activated against before, most recent first,
+   * so the panel can offer one instead of asking for a long absolute path to be
+   * retyped at every restart. Empty for a profile never activated.
+   *
+   * A remembered target is a convenience, never an authorisation: choosing one
+   * fills the form and still goes through preview and activate like anything
+   * typed by hand.
+   */
+  readonly knownTargets: readonly RememberedTarget[]
+}
+
+/** One remembered activation target, as the panel shows it on a chip. */
+export interface RememberedTarget {
+  readonly kind: string
+  readonly id: string
+  readonly path: string
+  /** ISO-8601 of the activation that last used it. */
+  readonly lastUsedAt: string
 }
 
 /**

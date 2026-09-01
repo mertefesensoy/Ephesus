@@ -45,7 +45,15 @@ describe('skeleton-crew ships as an ordinary ADR-0012 bundle', () => {
     const row = builtinStore()
       .list()
       .find((candidate) => candidate.name === 'skeleton-crew')
-    expect(row).toEqual({ name: 'skeleton-crew', source: 'builtin', valid: true, version: 1 })
+    // A store built with no remembered-targets provider offers none, which is
+    // what an Ephesus that has never activated anything should show.
+    expect(row).toEqual({
+      name: 'skeleton-crew',
+      source: 'builtin',
+      valid: true,
+      version: 1,
+      knownTargets: []
+    })
   })
 
   it('carries every component FR-9.2 names', () => {

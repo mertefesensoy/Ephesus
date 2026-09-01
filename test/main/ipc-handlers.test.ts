@@ -408,7 +408,7 @@ describe('profiles: — the channel reaches the store, and the store reaches the
   it('lists and inspects a real bundle off a real disk', async () => {
     const { call } = await rig({ profiles: storeWithOneBundle() })
     await expect(call('profiles:list')).resolves.toEqual([
-      { name: 'skeleton-crew', source: 'home', valid: true, version: 4 }
+      { name: 'skeleton-crew', source: 'home', valid: true, version: 4, knownTargets: [] }
     ])
     const loaded = (await call('profiles:inspect', { name: 'skeleton-crew' })) as {
       ok: boolean

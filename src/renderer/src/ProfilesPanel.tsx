@@ -116,6 +116,22 @@ const field = {
   color: 'var(--eph-ink-900)'
 } as const
 
+/**
+ * A remembered target. Deliberately quieter than `button`: choosing one fills
+ * the form, and the thing that activates is still the same two-step read-then-
+ * activate below it. A chip that looked like the activate button would be
+ * offering an approval it does not carry.
+ */
+const chip = {
+  fontFamily: 'var(--eph-face-data)',
+  fontSize: '11px',
+  padding: '1px 6px',
+  marginRight: '4px',
+  border: '1px solid var(--eph-ink-500)',
+  background: 'var(--eph-marble-200)',
+  color: 'var(--eph-ink-900)'
+} as const
+
 const note = { color: 'var(--eph-ink-500)', margin: '4px 0' } as const
 
 const warn = { color: 'var(--eph-wine)', margin: '4px 0' } as const
@@ -371,6 +387,31 @@ export function ProfilesPanel(): ReactElement {
               {row.version === null ? '' : `, v${String(row.version)}`})
             </span>
           </p>
+          {row.knownTargets.length > 0 ? (
+            <p style={{ margin: '0 0 4px' }}>
+              <span style={note}>used before: </span>
+              {row.knownTargets.map((known) => (
+                <button
+                  key={`${known.kind}:${known.id}`}
+                  type="button"
+                  style={chip}
+                  title={known.path}
+                  onClick={() => {
+                    // Fills the form and nothing else. Preview and activate
+                    // still run exactly as they do for a typed path — a
+                    // remembered target is a convenience, never an approval.
+                    setTarget({
+                      kind: known.kind === 'app' ? 'app' : 'repo',
+                      id: known.id,
+                      path: known.path
+                    })
+                  }}
+                >
+                  {known.kind}:{known.id}
+                </button>
+              ))}
+            </p>
+          ) : null}
           {row.valid ? (
             <button
               type="button"

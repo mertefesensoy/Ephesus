@@ -8,6 +8,7 @@ import {
   type ActivationPlanResult,
   type ActivationRequest
 } from '../shared/profile-activation'
+import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { AutonomyLevel, GateKind } from '../shared/gates'
 import type { SpawnRequest } from '../shared/agents'
@@ -47,7 +48,14 @@ export class ProfileStore {
    */
   constructor(
     private readonly homeProfilesDir: string,
-    private readonly builtinProfilesDir: string
+    private readonly builtinProfilesDir: string,
+    /**
+     * What the Architect has activated this profile against before, so the
+     * panel can offer a target instead of asking for one to be retyped. A store
+     * built without it lists profiles with no remembered targets, which is
+     * exactly what an Ephesus that has never activated anything should show.
+     */
+    private readonly knownTargets: () => readonly KnownTarget[] = () => []
   ) {}
 
   /**
@@ -73,7 +81,13 @@ export class ProfileStore {
           name,
           source,
           valid: loaded.ok,
-          version: loaded.ok ? loaded.bundle.document.version : null
+          version: loaded.ok ? loaded.bundle.document.version : null,
+          knownTargets: knownTargetsFor(this.knownTargets(), name).map((row) => ({
+            kind: row.target.kind,
+            id: row.target.id,
+            path: row.target.path,
+            lastUsedAt: row.lastUsedAt
+          }))
         })
       }
     }

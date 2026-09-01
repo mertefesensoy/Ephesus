@@ -27,6 +27,7 @@ import type { OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
+import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint } from './incidents'
@@ -112,6 +113,10 @@ let stoa: Stoa | null = null
 // built before the AgentManager this needs, and the gate seam below reads
 // through the handle rather than capturing a value that does not exist yet.
 let activations: ProfileActivations | null = null
+// The targets already activated once (M7.9). Deliberately separate from
+// `activations`: that Map is what is RUNNING, this file is what has been TYPED,
+// and only the second is worth surviving a restart.
+let knownTargets: KnownTargets | null = null
 // The Harbor's inbound half (FR-10.1, M7.3). Its registered repositories are the
 // ones the ACTIVE profiles declare in `harbor.json` — the company watches what
 // it was actually pointed at, not a second list that could disagree.
@@ -594,9 +599,16 @@ async function boot(): Promise<void> {
   // own bundles shadow the built-ins that ship in `profiles/`. Constructed here
   // and read on demand — the store holds no state and caches nothing, so a
   // bundle edited on disk is the bundle the next `inspect` reads.
+  // What has been activated before, so the panel offers a target instead of
+  // asking for a long absolute path again after every restart. Read-only to
+  // `list()`; written only by a successful activation below.
+  knownTargets = new KnownTargets(path.join(home.root, KNOWN_TARGETS_REL))
+  const knownTargetsWarning = knownTargets.warning()
+  if (knownTargetsWarning !== null) reportDegradation('profiles', knownTargetsWarning)
   const profiles = new ProfileStore(
     path.join(home.root, 'profiles'),
-    path.join(appRoot, 'profiles')
+    path.join(appRoot, 'profiles'),
+    () => knownTargets?.list() ?? []
   )
   // Export/import (FR-10.4 — M7.6). Accepted imports land in the HOME profiles
   // directory, never beside the built-ins: a shared bundle must not be able to
@@ -1876,9 +1888,27 @@ async function boot(): Promise<void> {
     // the reason, never a silent success or a crash mid-activation.
     profilesPreview: (request) =>
       activations?.preview(request) ?? { ok: false, reasons: ['profiles: not started'] },
-    profilesActivate: (request) =>
-      activations?.activate(request) ??
-      Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }),
+    // Remembered on success only: a chip that reproduces the Architect's own
+    // failed attempt is worse than an empty form.
+    profilesActivate: async (request) => {
+      const result = await (activations?.activate(request) ??
+        Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }))
+      if (result.ok) {
+        try {
+          knownTargets?.remember(request, new Date().toISOString())
+        } catch (err) {
+          // The activation succeeded; failing to write a convenience list must
+          // not turn that into a refusal the Architect has to reason about.
+          reportDegradation(
+            'profiles',
+            `known-targets.json not written: ${
+              err instanceof Error ? err.message.split('\n')[0] : String(err)
+            }`
+          )
+        }
+      }
+      return result
+    },
     profilesDeactivate: (instanceId) =>
       activations?.deactivate(instanceId) ?? { ok: false, reason: 'profiles: not started' },
     profilesInstances: () => activations?.instances() ?? [],

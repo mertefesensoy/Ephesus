@@ -88,6 +88,12 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  ⇒ deny-all: it can only ever loosen, never tighten
   authority.json             # Artemis's delegated-authority table (FR-5.5). Absent or
                              #  unreadable ⇒ no delegated authority: everything escalates
+  known-targets.json         # targets a profile has been activated against before, so the
+                             #  panel offers one instead of asking for a long path again.
+                             #  Absent or unreadable ⇒ offers nothing (the opposite failure
+                             #  mode to gate-policy: a convenience that cannot be read must
+                             #  not stop an activation). NOT a restore list — choosing one
+                             #  fills the form and still goes through preview and activate
   events.sock                # hook socket (0600) — also answers `POST /recall`
                              #  for the agent-facing `eph-recall` CLI (ADR-0006
                              #  layer 2): one socket, one per-spawn token registry
