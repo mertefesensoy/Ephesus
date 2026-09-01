@@ -168,3 +168,52 @@ describe('who gets credit for the work', () => {
     expect(trailer).not.toMatch(/claude|anthropic/i)
   })
 })
+
+/**
+ * The first live mint reported a token with `authorName: null`, because the
+ * bot-user lookup was sent with the App JWT. A JWT is valid only for `/app`
+ * endpoints; GitHub refuses it everywhere else, so the identity stayed null and
+ * the company would have committed with no author at all — visible only once a
+ * commit landed. This pins which credential goes to which endpoint.
+ */
+describe('which credential each endpoint gets', () => {
+  const keysFor = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+  })
+
+  it('sends the installation token to /users, never the App JWT', async () => {
+    const seen: { url: string; auth: string }[] = []
+    const spy = ((url: string, init?: { headers?: Record<string, string> }) => {
+      seen.push({ url, auth: init?.headers?.['Authorization'] ?? '' })
+      if (url.endsWith('/access_tokens')) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({ token: 'an-installation-token', expires_at: '2026-09-01T13:00:00Z' })
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 987654 }) })
+    }) as unknown as typeof fetch
+
+    const root = home({ ...CONFIG })
+    const identity = new GitHubAppIdentity({
+      configPath: path.join(root, 'github-app.json'),
+      privateKey: () => keysFor.privateKey,
+      fetchImpl: spy,
+      now: () => Date.parse('2026-09-01T12:00:00Z')
+    })
+    await identity.refresh()
+
+    const users = seen.find((call) => call.url.includes('/users/'))
+    expect(users, 'the bot-user lookup should have happened').toBeDefined()
+    expect(users?.auth).toBe('Bearer an-installation-token')
+
+    const mint = seen.find((call) => call.url.endsWith('/access_tokens'))
+    expect(mint?.auth.startsWith('Bearer ey')).toBe(true)
+    expect(mint?.auth).not.toBe('Bearer an-installation-token')
+
+    expect(identity.gitIdentity()?.name).toBe('ephesus-crew[bot]')
+  })
+})

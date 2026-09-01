@@ -207,7 +207,7 @@ export class GitHubAppIdentity {
     }
     const expiry = Date.parse(expiresAt)
     this.cached = { token, expiresAt: Number.isFinite(expiry) ? expiry : now + TOKEN_REFRESH_MS }
-    await this.learnIdentity(config, headers, doFetch)
+    await this.learnIdentity(config, headers, token, doFetch)
     return { ok: true, token, expiresAt }
   }
 
@@ -264,20 +264,28 @@ export class GitHubAppIdentity {
    */
   private async learnIdentity(
     config: GitHubAppConfig,
-    headers: Record<string, string>,
+    appHeaders: Record<string, string>,
+    installationToken: string,
     doFetch: typeof fetch
   ): Promise<void> {
     if (this.identity !== null) return
     let slug = config.slug ?? null
     try {
       if (slug === null) {
-        const app = await doFetch(`${GITHUB_API}/app`, { headers })
+        // `/app` is the one family of endpoints an App JWT is valid for.
+        const app = await doFetch(`${GITHUB_API}/app`, { headers: appHeaders })
         if (!app.ok) return
         const body = (await app.json()) as { slug?: unknown }
         if (typeof body.slug !== 'string') return
         slug = body.slug
       }
-      const user = await doFetch(`${GITHUB_API}/users/${slug}%5Bbot%5D`, { headers })
+      // `/users/…` is NOT one of them. Sending the JWT here is what made the
+      // first live mint report a token with no author: GitHub refused it, the
+      // identity stayed null, and the company would have committed with no
+      // name at all. The installation token is the credential for this call.
+      const user = await doFetch(`${GITHUB_API}/users/${slug}%5Bbot%5D`, {
+        headers: { ...appHeaders, Authorization: `Bearer ${installationToken}` }
+      })
       if (!user.ok) return
       const body = (await user.json()) as { id?: unknown }
       if (typeof body.id !== 'number') return
