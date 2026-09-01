@@ -329,6 +329,74 @@ describe('an unreadable report is refused, never defaulted', () => {
     expect(delivered.at(-1)?.act).toBe('refuse')
   })
 
+  /**
+   * The second instance of the half-wired-endpoint bug, fixed here.
+   *
+   * `agent.harbor` sends the triage `request`, which obligates a reply, and
+   * PROTOCOL.md tells an agent to refuse and say why when it cannot do what it
+   * was asked. Every reply that reached this endpoint went through the triage
+   * report parser, so an on-call agent that explained itself perfectly clearly
+   * was told "the body is not valid JSON" — the address accepted the message
+   * and then read it as the only thing it knew how to read.
+   */
+  it('takes a declination as a declination, not as a malformed report', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    const request = delivered[0] as Message
+    const declined = composeMessage({
+      id: makeMessageId(new Date('2026-08-31T10:05:00.000Z'), 'dec1'),
+      conversation: request.conversation,
+      in_reply_to: request.id,
+      from: 'agent.skeleton-crew-myapp-ci-babysitter',
+      to: HARBOR_ENDPOINT,
+      act: 'refuse',
+      subject: `re: ${request.subject}`,
+      body: 'The run logs have already been garbage-collected; I cannot tell what failed.',
+      hops: 1,
+      created_at: '2026-08-31T10:05:00.000Z'
+    })
+
+    expect(endpoint.onTriage(declined)).toBeNull()
+    // Recorded as what it is, with the agent's own words and the incident it
+    // was about — not as a parse failure.
+    const record = logged.find((row) => row.event === 'incident-triage-declined')
+    expect(record).toBeDefined()
+    expect(record?.incident).toBe('owner/app#ci-run:4021')
+    expect(String(record?.because)).toContain('garbage-collected')
+    expect(logged.find((row) => row.event === 'incident-triage-refused')).toBeUndefined()
+    // And nothing is mailed back complaining about JSON: a `refuse` obliges no
+    // reply, and the endpoint has nothing to add.
+    expect(delivered).toHaveLength(1)
+  })
+
+  it('leaves the incident awaiting triage when the on-call agent declines', () => {
+    // The one outcome worse than the old bounce would be treating "I cannot
+    // triage this" as triage. Nobody has looked at the incident yet.
+    const { endpoint, delivered, escalated } = rig()
+    endpoint.raise([ciRun()])
+    const request = delivered[0] as Message
+    endpoint.onTriage(
+      composeMessage({
+        id: makeMessageId(new Date('2026-08-31T10:05:00.000Z'), 'dec2'),
+        conversation: request.conversation,
+        in_reply_to: request.id,
+        from: 'agent.skeleton-crew-myapp-ci-babysitter',
+        to: HARBOR_ENDPOINT,
+        act: 'refuse',
+        subject: `re: ${request.subject}`,
+        body: 'not mine to triage',
+        hops: 1,
+        created_at: '2026-08-31T10:05:00.000Z'
+      })
+    )
+    expect(escalated).toEqual([])
+    // Nothing was mailed back at the declination — in particular not a refusal
+    // about JSON the agent never claimed to send.
+    expect(delivered).toHaveLength(1)
+    // Still awaiting: a real report on the same incident is still accepted.
+    expect(endpoint.onTriage(triage(request, { ...REPORT, severity: 1 }))?.severity).toBe(1)
+  })
+
   it('does not act twice on one incident', () => {
     const { endpoint, delivered, escalated } = rig()
     endpoint.raise([ciRun()])

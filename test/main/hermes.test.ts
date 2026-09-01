@@ -657,6 +657,83 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     expect(r.agora.readLog().some((e) => e['kind'] === 'bounce')).toBe(true)
   })
 
+  /**
+   * An ASIDE: an act a harness endpoint admits but its handler does not act on
+   * (`accepts` minus `handles`, src/shared/endpoints.ts).
+   *
+   * The Odeon sends six reply-obliging asks — five `request`s and the meeting
+   * floor as a `query` — so an agent answering `done` is doing exactly what
+   * PROTOCOL.md tells it to ("When you finish, say so with a reference to the
+   * result"). Until the accept-set was widened that answer bounced; the trap on
+   * the other side of widening is handing it to a handler that knows one body
+   * shape, which answers a plain sentence with a JSON parse error.
+   */
+  it('records an aside to an endpoint and answers nothing', async () => {
+    const r = await rig()
+    r.send(
+      'agent.a',
+      message({ to: 'agent.odeon', act: 'done', body: 'Filed as commit 4f1a2b; nothing owed.' })
+    )
+
+    await r.hermes.sweep()
+
+    // Not dropped (FR-3.4): it is in the book of record, marked as an aside,
+    // with the agent's own words.
+    const entry = r.agora
+      .readLog()
+      .find((e) => e['kind'] === 'delivery' && e['to'] === 'agent.odeon')
+    expect(entry).toBeDefined()
+    expect(entry?.['aside']).toBe(true)
+    expect(entry?.['act']).toBe('done')
+    expect(String(entry?.['summary'])).toContain('4f1a2b')
+
+    // And nothing came back. A terminal act obliges no reply, and the endpoint
+    // has nothing to add — least of all a complaint about JSON it never got.
+    expect(r.inbox('agent.a')).toEqual([])
+    // The outbox is still drained, so the sweep cannot re-read it forever.
+    expect(r.outbox('agent.a')).toEqual([])
+  })
+
+  it('still hands a filing to the endpoint, which answers it', async () => {
+    // The other side of the same branch: a `propose` IS in the Odeon's
+    // `handles`, so it reaches the handler and the sender is answered — no
+    // handler is wired in this rig, so the answer is the unavailable refusal.
+    const r = await rig()
+    r.send('agent.a', message({ to: 'agent.odeon', act: 'propose', body: '{"kind":"deck"}' }))
+
+    await r.hermes.sweep()
+
+    const inbox = r.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const answer = JSON.parse(
+      fs.readFileSync(path.join(r.agora.agentDir('agent.a'), 'inbox', inbox[0] ?? ''), 'utf8')
+    ) as Message
+    expect(answer.from).toBe('agent.odeon')
+    expect(answer.act).toBe('refuse')
+  })
+
+  /**
+   * The router is not a correspondent. A reply to a bounce used to fall through
+   * to the mailbox lookup and come back `no mailbox for "agent.hermes"` — false,
+   * and the most misleading answer available: the address is not missing, it is
+   * the router's own, with nobody behind it to answer.
+   */
+  it('tells an agent the truth about replying to the router itself', async () => {
+    const r = await rig()
+    r.send('agent.a', message({ to: 'agent.hermes', act: 'inform', body: 'understood' }))
+
+    await r.hermes.sweep()
+
+    const inbox = r.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const refusal = JSON.parse(
+      fs.readFileSync(path.join(r.agora.agentDir('agent.a'), 'inbox', inbox[0] ?? ''), 'utf8')
+    ) as Message
+    expect(refusal.act).toBe('refuse')
+    expect(refusal.body).not.toContain('no mailbox')
+    expect(refusal.body).toContain('reads no mail')
+  })
+
   it('fans a broadcast out to every other agent', async () => {
     const r = await rig()
     r.hermes.ensureMailbox('agent.c')

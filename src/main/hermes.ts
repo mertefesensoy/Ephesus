@@ -11,6 +11,7 @@ import {
   LIBRARY_ENDPOINT,
   ODEON_ENDPOINT
 } from '../shared/reserved'
+import { endpointContract } from '../shared/endpoints'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import type { Agora } from './agora'
@@ -645,6 +646,34 @@ export class Hermes {
     }
 
     if (route.kind === 'endpoint') {
+      // An ASIDE: an act the endpoint admits but its handler does not act on
+      // (`accepts` minus `handles` in src/shared/endpoints.ts) — an agent
+      // answering the Odeon "done" instead of filing a deck, or telling the
+      // Library it cannot condense its memory.
+      //
+      // Recorded and not answered. FR-3.4 forbids DROPPING, not answering, and
+      // a terminal act obliges nothing back; the alternative is what shipped,
+      // where every reply reached a handler that knew exactly one body shape
+      // and came back "your JSON is malformed" to an agent that had never
+      // claimed to send any.
+      const contract = endpointContract(route.endpoint)
+      if (contract !== undefined && !contract.handles.includes(parsed.message.act)) {
+        this.agora.appendLog({
+          kind: 'delivery',
+          msgId: parsed.message.id,
+          from: parsed.message.from,
+          to: route.endpoint,
+          act: parsed.message.act,
+          subject: parsed.message.subject,
+          conversation: parsed.message.conversation,
+          hops: parsed.message.hops,
+          aside: true,
+          summary: parsed.message.body.slice(0, 2000)
+        })
+        this.drainOutbox(file)
+        return { kind: 'skipped' }
+      }
+
       // Not delivered to a mailbox — handed to the harness, which validates it
       // and writes through the single committer. The sender gets an answer
       // either way: a proposal that vanished silently would leave Artemis

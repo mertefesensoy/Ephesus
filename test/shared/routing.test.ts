@@ -290,9 +290,25 @@ describe('the library endpoint (ADR-0006 layer 3)', () => {
     expect(route.kind).toBe('endpoint')
   })
 
-  it('bounces anything that is not a propose', () => {
+  it('takes a refusal too — the request obliges a reply, and "no" is one', () => {
+    // Reversed deliberately (2026-09-01). This endpoint sends a `request`
+    // (`Reflection.request`), which obligates a reply, and PROTOCOL.md tells an
+    // agent to refuse and say why when it cannot do what was asked. Bouncing
+    // that refusal left `Reflection.outstanding` holding the agent and the
+    // Architect with no record of why the memory was never condensed.
     const route = routeMessage(
-      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'inform' }),
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'refuse' }),
+      { knownAgents: ['agent.mason'], orchestratorId: null }
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: LIBRARY_ENDPOINT })
+  })
+
+  it('still bounces an act that ASKS the endpoint for something', () => {
+    // Widening the accept-set is not the same as opening it. The Library has no
+    // answer to a question, so a `query` is still refused — by name, so the
+    // sender can correct itself.
+    const route = routeMessage(
+      message({ from: 'agent.mason', to: LIBRARY_ENDPOINT, act: 'query' }),
       { knownAgents: ['agent.mason'], orchestratorId: null }
     )
     expect(route.kind).toBe('bounce')
@@ -340,7 +356,21 @@ describe('the Odeon endpoint takes filings and meeting answers (ADR-0008)', () =
     expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
   })
 
-  it.each(['request', 'agree', 'refuse', 'done'] as const)('bounces a %s act', (act) => {
+  it.each(['agree', 'refuse', 'done'] as const)('takes a %s — it asked, so it listens', (act) => {
+    // Reversed deliberately (2026-09-01). Six reply-obliging asks go out from
+    // this address — five `request`s and the meeting floor as a `query` — and
+    // the accept-set was two acts wide, so `done`, the act PROTOCOL.md names
+    // for finishing ("When you finish, say so with a reference to the result"),
+    // bounced off the very endpoint that had asked.
+    //
+    // These three are ASIDES, not filings: `endpoints.ts` keeps them out of
+    // `handles`, so Hermes records them in `log.jsonl` and answers nothing,
+    // rather than running prose through the deck parser.
+    const route = routeMessage(message({ to: ODEON_ENDPOINT, act }), roster)
+    expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+
+  it.each(['request', 'query'] as const)('still bounces a %s — an ask, not an answer', (act) => {
     const route = routeMessage(message({ to: ODEON_ENDPOINT, act }), roster)
     expect(route.kind).toBe('bounce')
   })

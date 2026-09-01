@@ -1441,7 +1441,13 @@ async function boot(): Promise<void> {
     profiles: (message) => {
       agora?.appendLog({
         kind: 'profile',
-        event: 'sweep-reported',
+        // A sweep that was REFUSED is not a sweep that reported, and the log
+        // has to be able to tell them apart. "skipped, the workspace was
+        // locked" is the most useful thing a scheduled duty can say, and until
+        // the endpoint accepted a `refuse` at all it was the one answer that
+        // bounced — so the distinction had never had to exist.
+        event: message.act === 'refuse' ? 'sweep-refused' : 'sweep-reported',
+        act: message.act,
         agentId: message.from,
         subject: message.subject.slice(0, 200),
         summary: message.body.slice(0, 2000)
