@@ -5,6 +5,7 @@ import type { PromptStore } from '../prompts'
 import type { SettingsRegistry } from '../settings-registry'
 import { InstalledSettingsPlan } from './settings-install'
 import { baseAgentEnv } from './spawn-env'
+import { writeFileAtomic } from '../fsx'
 import type {
   AgentSpawnConfig,
   BinarySpec,
@@ -15,7 +16,8 @@ import type {
   SettingsInjection,
   SpawnPlan,
   TranscriptReader,
-  UsageFact
+  UsageFact,
+  WorkspaceTrustResult
 } from './types'
 
 /**
@@ -202,6 +204,28 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
     allow: tools.map((tool) => `${tool}(${agentDir}/**)`),
     additionalDirectories: [agentDir]
   }
+}
+
+/**
+ * Claude Code's own record of which working directories a human has approved:
+ * `~/.claude.json` → `projects[<cwd>].hasTrustDialogAccepted`.
+ *
+ * Two things about this file were established by experiment rather than assumed,
+ * and both matter:
+ *
+ *  - the key is the working directory with FORWARD slashes. The engine
+ *    normalises before it writes, and compares against the normalised form, so
+ *    a backslash key — the form Windows hands you, and the form this harness
+ *    spawns with — sits in the file being ignored;
+ *  - the prompt is per-workspace and once-only. No settings content triggers it
+ *    or re-triggers it after an answer; it is a first-run gate, not a content
+ *    check.
+ */
+export const CLAUDE_CONFIG_REL = '.claude.json'
+
+/** Contract: pure. The key Claude Code will actually match on for this directory. */
+export function claudeProjectKey(cwd: string): string {
+  return path.resolve(cwd).split(path.sep).join('/')
 }
 
 /** Claude Code's cancel key is Escape (ADR-0009 `interrupt()`): U+001B. */
@@ -497,6 +521,99 @@ export class ClaudeAdapter implements EngineAdapter {
 
   interrupt(): KeySequence {
     return { label: 'Escape', bytes: ESCAPE_KEY }
+  }
+
+  /**
+   * Writes the Architect's activation into Claude Code's own trust record, so
+   * the crew it just hired can start (ADR-0021).
+   *
+   * The prompt this answers is a first-run gate whose highlighted default is
+   * "No, exit", and it appears BEFORE any session begins — so no engine hook
+   * fires for it, nothing in the harness could see it, and on the live MUSAHIT
+   * run all three crew agents parked on that screen for their whole lives
+   * while the floor showed them as spawned.
+   *
+   * What keeps this narrow:
+   *
+   *  - it is called from an activation and nowhere else, with that activation's
+   *    own target, so the Architect's click is the consent and the scope is one
+   *    directory they named;
+   *  - the path is canonicalised through `realpath`, so the record names the
+   *    directory that was actually approved rather than a junction that can be
+   *    repointed at another one afterwards;
+   *  - a directory already trusted is reported as such and rewritten with
+   *    nothing, so the log can tell "the Architect had already approved this"
+   *    apart from "the harness approved it just now";
+   *  - it never widens anything else in the file: one key, one field.
+   *
+   * Known limitation, stated rather than hidden: a Claude Code process running
+   * elsewhere may rewrite this file wholesale from its own in-memory copy and
+   * drop the key. The failure is visible rather than dangerous — the dialog
+   * returns and the agent parks — but it is a race this cannot close from here.
+   */
+  trustWorkspace(cwd: string): WorkspaceTrustResult {
+    const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
+    if (home.length === 0) return { ok: false, because: 'no home directory to write the record in' }
+    const configPath = path.join(home, CLAUDE_CONFIG_REL)
+    let canonical: string
+    try {
+      canonical = claudeProjectKey(fs.realpathSync.native(cwd))
+    } catch (err) {
+      return {
+        ok: false,
+        because: `target does not resolve: ${
+          err instanceof Error ? err.message.split('\n')[0] : String(err)
+        }`
+      }
+    }
+    let config: Record<string, unknown> = {}
+    if (fs.existsSync(configPath)) {
+      try {
+        const parsed: unknown = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          return { ok: false, because: `${CLAUDE_CONFIG_REL} is not a JSON object` }
+        }
+        config = parsed as Record<string, unknown>
+      } catch (err) {
+        // Refusing beats repairing: this is the engine's own file and rewriting
+        // it from a guess would cost the Architect every project setting in it.
+        return {
+          ok: false,
+          because: `${CLAUDE_CONFIG_REL} unreadable, refusing to overwrite it: ${
+            err instanceof Error ? err.message.split('\n')[0] : String(err)
+          }`
+        }
+      }
+    }
+    const projects =
+      typeof config['projects'] === 'object' &&
+      config['projects'] !== null &&
+      !Array.isArray(config['projects'])
+        ? (config['projects'] as Record<string, unknown>)
+        : {}
+    const entry =
+      typeof projects[canonical] === 'object' &&
+      projects[canonical] !== null &&
+      !Array.isArray(projects[canonical])
+        ? (projects[canonical] as Record<string, unknown>)
+        : {}
+    const alreadyTrusted = entry['hasTrustDialogAccepted'] === true
+    if (alreadyTrusted) return { ok: true, path: canonical, alreadyTrusted: true }
+    const next = {
+      ...config,
+      projects: { ...projects, [canonical]: { ...entry, hasTrustDialogAccepted: true } }
+    }
+    try {
+      writeFileAtomic(configPath, `${JSON.stringify(next, null, 2)}\n`)
+    } catch (err) {
+      return {
+        ok: false,
+        because: `could not write ${CLAUDE_CONFIG_REL}: ${
+          err instanceof Error ? err.message.split('\n')[0] : String(err)
+        }`
+      }
+    }
+    return { ok: true, path: canonical, alreadyTrusted: false }
   }
 
   /**

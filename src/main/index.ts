@@ -28,6 +28,7 @@ import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
 import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
+import { targetRef } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint } from './incidents'
@@ -1891,6 +1892,27 @@ async function boot(): Promise<void> {
     // Remembered on success only: a chip that reproduces the Architect's own
     // failed attempt is worse than an empty form.
     profilesActivate: async (request) => {
+      // ADR-0021: the Architect's activation is the consent, and it is recorded
+      // in the engine's own trust store BEFORE the crew is hired — the prompt it
+      // answers appears before any session begins, so an agent that meets it has
+      // no hook to report with and simply parks forever. Logged either way:
+      // pre-trusting must never be a thing that happened quietly.
+      for (const adapter of engines.list()) {
+        if (!adapter.trustWorkspace) continue
+        const trusted = adapter.trustWorkspace(request.target.path)
+        agora?.appendLog({
+          kind: 'profile',
+          event: 'workspace-trusted',
+          engine: adapter.id,
+          target: targetRef(request.target),
+          ...(trusted.ok
+            ? { granted: !trusted.alreadyTrusted, path: trusted.path }
+            : { granted: false, because: trusted.because })
+        })
+        if (!trusted.ok) {
+          reportDegradation('profiles', `${adapter.id}: workspace not trusted — ${trusted.because}`)
+        }
+      }
       const result = await (activations?.activate(request) ??
         Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }))
       if (result.ok) {
