@@ -36,22 +36,28 @@ export default defineConfig({
      * ```text
      * isolated, warm repeat   ~3.1 s      (flatters: nothing contends)
      * isolated, cold shell    ~11 s
-     * FULL SUITE, default parallelism   12.3 s, 13.4 s   <- what CI runs
+     * FULL SUITE, default parallelism, n=5, machine otherwise quiet:
+     *   10.3  11.6  12.3  13.4  17.3  s   <- the condition CI runs
      * ```
      *
-     * So the real headroom is about **2.2×**, not the ~3.4× the isolated number
-     * implied. `signals the breaker at rung 1` and `honours the hard block cap`
-     * are the two slowest; S-LIVELOCK's worst sits at 9.0–11.0 s, which is the
-     * same band — the two files are not distinguishable, contrary to an earlier
-     * claim made from isolated runs.
+     * Worst observed 17.3 s, so headroom is about **1.7×** — not the ~3.4× the
+     * isolated number implied, and not the 2.2× an earlier n=2 of this same
+     * condition implied. `signals the breaker at rung 1` and `honours the hard
+     * block cap` are the two slowest; S-LIVELOCK's worst is in the same band, so
+     * the two files are not distinguishable.
      *
-     * 30 s stays. The suite is green under real parallelism across repeated
-     * runs, and a ceiling nothing reaches in the condition CI actually uses is
-     * not worth raising. But the ceiling IS reachable — three concurrent
-     * scenario suites hit it 3/3 — so this is a live margin, not an unreachable
-     * one. If the suite grows or a runner is slower than this machine, raise it
-     * against a fresh measurement in the parallel condition, and do not quote an
-     * isolated run as evidence.
+     * **The worst has risen with every increase in sample size** — 13.4 s at
+     * n=2, 17.3 s at n=5 — which is what a tail looks like and is the reason the
+     * numbers above are a range rather than a figure. Do not quote one of them.
+     *
+     * 30 s stays, for now and on thinner grounds than this comment first
+     * claimed: the suite is green under real parallelism across five full runs,
+     * and no test has come near the ceiling in the condition CI uses. But 1.7×
+     * is not comfortable, the ceiling is demonstrably reachable (three
+     * concurrent scenario suites hit it 3/3), and n=5 cannot rule out a worse
+     * tail. If a sample ever exceeds ~20 s, or the suite grows, raise this —
+     * against a fresh measurement in the PARALLEL condition, never an isolated
+     * run, and report the range and the sample count rather than the worst.
      */
     testTimeout: 30_000,
     /** Teardown shells out to git too, and waits for it (see `test/tmpdir.ts`). */

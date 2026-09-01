@@ -110,10 +110,12 @@ The first exists to answer a specific objection: that driving the clock in the
 scenario leaves the production timer untested. It does not, and this is the check
 that proves it rather than asserting it.
 
-## The three siblings: nothing to do, and why
+## The three siblings: a different failure, left unchanged
 
 The M6 doc lists `s-livelock`, `s-stoploop` and `s-wake` beside `s-closing`. They
-were **a different failure**, and they are already fixed.
+are **a different failure**, and no code was changed for them — but the first
+version of this section reached that conclusion through arithmetic that did not
+hold, which is corrected below.
 
 Those three carry no deadline, no `setTimeout` and no timing constant — they are
 loop-shaped tests that pay a real round-trip per iteration (S-LIVELOCK's ping-pong
@@ -142,17 +144,22 @@ caught by someone other than whoever made it.
 Slowest single test, `--reporter=verbose`, same machine:
 
 ```text
-isolated, warm repeat            ~3.1 s
-isolated, cold shell             ~11 s
-FULL SUITE, default parallelism  12.3 s, 13.4 s   <- the condition that matters
+isolated, warm repeat   ~3.1 s
+isolated, cold shell    ~11 s
+FULL SUITE, default parallelism, n=5, machine otherwise quiet:
+  10.3  11.6  12.3  13.4  17.3  s        <- the condition that matters
 ```
 
-The real headroom is about **2.2×**. S-LIVELOCK's worst is 9.0–11.0 s — the same
-band, so the earlier claim that it was "in much better shape" was also an artifact
-of isolated measurement and is withdrawn.
+Worst observed 17.3 s, so the real headroom is about **1.7×** — and note that
+the worst rose with every increase in sample size (13.4 s at n=2, 17.3 s at n=5),
+which is what a tail looks like. n=5 cannot rule out a worse one.
 
-The conclusion survives, on better grounds: the suite is green under real
-parallelism across repeated full runs, so nothing is changed for the three. But
+S-LIVELOCK's worst is 9.0–11.0 s — the same band — so the earlier claim that it
+was "in much better shape" was also an artifact of isolated measurement, and is
+withdrawn.
+
+The conclusion survives, on thinner grounds than first stated: the suite is green
+under real parallelism across five full runs, so nothing is changed for the three. But
 the ceiling is **reachable** — three concurrent scenario suites hit it 3/3 — so
 this is a live margin rather than an unreachable one. `vitest.config.mts` now
 records the distribution and the condition instead of a single figure, because a
