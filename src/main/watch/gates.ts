@@ -534,11 +534,21 @@ export function wireGateChokePoints(deps: {
       deps.gates.submit({
         kind: 'spend',
         agentId,
+        // The AMOUNT, which this submission used to omit.
+        //
+        // `evaluateGate` reads `request.spendTokens ?? Number.POSITIVE_INFINITY`
+        // and holds anything over the rule's cap — so a submission without it
+        // was held whatever cap the Architect wrote, and `maxSpendTokens` was a
+        // knob connected to nothing. The old comment reasoned that holding was
+        // "the safe direction", and it is, but a policy that cannot be
+        // satisfied is not a conservative policy: it is an absent one, and the
+        // Architect ends up clicking through the same gate forever without ever
+        // having been asked a question they could answer differently.
+        //
+        // `maxSpendTokens` is in TOKENS and so is this, which is the pairing
+        // the rule's own comment describes.
+        spendTokens: spentTokens,
         ...bound(agentId),
-        // Tokens, not cents: `maxSpendCents` compares dollars, and handing it a
-        // token count would make the policy knob silently meaningless. A spend
-        // gate with no amount is held by the cap check either way, which is the
-        // safe direction until the ledger reports a currency figure.
         packaging: parsePackaging(
           deps.prompts.render(path.join('watch', 'packaging-spend.md'), {
             agentId,

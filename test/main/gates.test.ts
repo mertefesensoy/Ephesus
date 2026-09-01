@@ -434,6 +434,36 @@ describe('the choke-point wiring (SDD §9), shared with production', () => {
     expect(gate?.packaging.why).toContain('is exhausted')
   })
 
+  /**
+   * `evaluateGate` reads `request.spendTokens ?? Number.POSITIVE_INFINITY`, so
+   * a submission that omitted the amount was held whatever cap the Architect
+   * wrote — `maxSpendTokens` was a knob connected to nothing, and the same
+   * unanswerable gate reopened forever. Found on a live run where the
+   * orchestrator reached 4.3M tokens against a 2M budget and every breach piled
+   * up another gate that could only be rubber-stamped.
+   */
+  const cappedPolicy = {
+    schemaVersion: 1 as const,
+    autonomy: 'autonomous' as const,
+    rules: [{ kind: 'spend' as const, autonomy: 'supervised' as const, maxSpendTokens: 5_000_000 }]
+  }
+
+  it('permits a breach UNDER the policy cap instead of holding it', () => {
+    const gates = manager(cappedPolicy)
+    const wired = wireGateChokePoints({ gates, prompts })
+    wired.submitSpend('agent.mason', 4_308_140, 'is exhausted')
+    // Under the cap, so it is allowed outright and nothing reaches the queue.
+    expect(gates.list()).toHaveLength(0)
+  })
+
+  it('still holds a breach ABOVE the cap', () => {
+    const gates = manager(cappedPolicy)
+    const wired = wireGateChokePoints({ gates, prompts })
+    wired.submitSpend('agent.mason', 9_000_000, 'is exhausted')
+    expect(gates.list()).toHaveLength(1)
+    expect(gates.list()[0]?.kind).toBe('spend')
+  })
+
   it('reports a template it could not use instead of losing the gate silently', () => {
     const gates = manager(DENY_ALL)
     const errors: string[] = []
