@@ -3,7 +3,8 @@ import {
   CLOSING_ENDPOINT,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
-  ODEON_ENDPOINT
+  ODEON_ENDPOINT,
+  PROFILE_ENDPOINT
 } from '../../src/shared/reserved'
 import {
   BROADCAST,
@@ -352,5 +353,44 @@ describe('the Odeon endpoint takes filings and meeting answers (ADR-0008)', () =
       roster
     )
     expect(route).toEqual({ kind: 'endpoint', endpoint: ODEON_ENDPOINT })
+  })
+})
+
+/**
+ * A scheduled trigger arrives `from: agent.profiles`, and PROTOCOL.md tells an
+ * agent to reply to whoever asked it. Until this endpoint existed that reply
+ * fell through to the mailbox lookup and bounced with `no mailbox for
+ * "agent.profiles"` — observed twice on the 2026-09-01 live run. The crew did
+ * their sweeps and every report was dropped, which is exactly the silence that
+ * made the run's action half unreadable.
+ */
+describe('a crew member can report on the sweep it was woken for', () => {
+  const ctx = { knownAgents: ['agent.mason'], orchestratorId: 'agent.artemis' }
+
+  it('takes a report instead of bouncing it', () => {
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'inform' }),
+      ctx
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: PROFILE_ENDPOINT })
+  })
+
+  it('takes "done" as well, since a sweep that finished says so', () => {
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'done' }),
+      ctx
+    )
+    expect(route).toEqual({ kind: 'endpoint', endpoint: PROFILE_ENDPOINT })
+  })
+
+  it('refuses an act that asks the harness for something', () => {
+    // A sweep report tells the harness what was found. It never asks, and an
+    // endpoint that quietly accepted a `propose` would owe a verdict nothing
+    // is there to give.
+    const route = routeMessage(
+      message({ to: PROFILE_ENDPOINT, from: 'agent.mason', act: 'propose' }),
+      ctx
+    )
+    expect(route.kind).toBe('bounce')
   })
 })

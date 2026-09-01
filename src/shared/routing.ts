@@ -3,6 +3,7 @@ import {
   HARBOR_ENDPOINT,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
+  PROFILE_ENDPOINT,
   ODEON_ENDPOINT
 } from './reserved'
 import { BROADCAST, HUMAN, type Message } from './message'
@@ -183,6 +184,24 @@ export function routeMessage(message: Message, ctx: RoutingContext): Route {
       }
     }
     return { kind: 'endpoint', endpoint: HARBOR_ENDPOINT }
+  }
+
+  if (message.to === PROFILE_ENDPOINT) {
+    // A scheduled trigger arrives `from: agent.profiles`, and PROTOCOL.md tells
+    // an agent to reply to whatever asked it. Until this branch existed, that
+    // reply hit the mailbox lookup below and bounced: the crew did their sweeps
+    // all evening and every report was dropped, which is precisely the silence
+    // that made the last live run so hard to read.
+    //
+    // Reply-shaped acts only, like the harbor endpoint. A sweep report tells
+    // the harness what an agent found; it never asks the harness for anything.
+    if (message.act !== 'inform' && message.act !== 'done') {
+      return {
+        kind: 'bounce',
+        reason: `the profiles endpoint takes "inform" or "done" acts; got "${message.act}"`
+      }
+    }
+    return { kind: 'endpoint', endpoint: PROFILE_ENDPOINT }
   }
 
   // FR-3.4: a missing or archived inbox bounces, never drops.

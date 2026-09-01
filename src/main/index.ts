@@ -1426,6 +1426,26 @@ async function boot(): Promise<void> {
     // giving incidents and outbound drafts separate reserved ids would put two
     // harness identities where the design has one. Dispatch is on the subject
     // the agent wrote, and an unrecognised one is refused rather than guessed.
+    /**
+     * A crew member reporting on a scheduled sweep (ADR-0012 triggers).
+     *
+     * Recorded, not adjudicated: the trigger asked for work, not for a
+     * decision. Until this existed the reply bounced, so the sweeps happened
+     * and the company never heard the result — the same silence that made the
+     * live run's action half so hard to read.
+     */
+    profiles: (message) => {
+      agora?.appendLog({
+        kind: 'profile',
+        event: 'sweep-reported',
+        agentId: message.from,
+        subject: message.subject.slice(0, 200),
+        summary: message.body.slice(0, 2000)
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      agora?.commitSoon(`sweep report from ${message.from}`)
+      return true
+    },
     harbor: (message) => {
       if (message.subject === OUTBOUND_SUBJECT) {
         if (frontOffice === null) return false
@@ -1816,17 +1836,21 @@ async function boot(): Promise<void> {
       if (verdict.state !== 'ok') {
         reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
       }
-      // SDD §9 choke point 3: spend is a harness-mediated action, so continuing
-      // past a budget is the Architect's call, not the agent's.
-      // Trip signal #4 (ADR-0011): the budget feeds the breaker directly.
+      // Trip signal #4 (ADR-0011): the budget feeds the breaker, and the
+      // breaker IS the enforcement — steer, then constrain (which halves the
+      // remaining budget), then stop, whose terminus the ADR gives as "Artemis
+      // decides reassignment".
+      //
+      // A breach no longer also opens a gate, and that is a correction rather
+      // than a loosening. ADR-0011 never specified one: the gate came from
+      // FR-11.1's "spend above threshold", whose threshold is the POLICY's
+      // `maxSpendTokens` — wiring a hire's `dailyTokens` to it conflated two
+      // different numbers. And the gate never stopped any spending: it
+      // discarded `submit()`'s answer, so it moved an avatar and interrupted a
+      // human while the agent carried on regardless. On the live run it fired
+      // for all three crew inside a minute, which is a limit behaving as a
+      // notification.
       breaker?.evaluate(agentId)
-      if (verdict.state === 'breached' || verdict.state === 'projected-breach') {
-        chokePoints?.submitSpend(
-          agentId,
-          verdict.spent,
-          verdict.state === 'breached' ? 'is exhausted' : 'is projected to be exhausted'
-        )
-      }
     },
     onDegraded: (detail) => reportDegradation('budgets', detail)
   })

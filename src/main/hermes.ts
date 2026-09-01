@@ -5,6 +5,7 @@ import { composeMessage, makeMessageId, parseMessage, type Message } from '../sh
 import {
   CLOSING_ENDPOINT,
   HARBOR_ENDPOINT,
+  PROFILE_ENDPOINT,
   HERMES_SENDER,
   LEDGER_ENDPOINT,
   LIBRARY_ENDPOINT,
@@ -85,6 +86,11 @@ export interface HermesOptions {
    * live roster without touching delivery.
    */
   context?(): RoutingContext
+  /**
+   * Takes a crew member's report on a scheduled sweep. Returns false when no
+   * profile endpoint is listening, which bounces rather than drops.
+   */
+  profiles?(message: Message): boolean
   /** Notified for each bounce, for the sender-facing notification (FR-3.4). */
   onBounced?(record: BounceRecord): void
   /**
@@ -397,6 +403,20 @@ export class Hermes {
   }
 
   /**
+   * Takes a crew member's report on a scheduled sweep (ADR-0012 triggers).
+   *
+   * The trigger that woke them was sent `from: agent.profiles`, and the
+   * protocol tells an agent to reply to whoever asked. Nothing was listening,
+   * so every sweep report bounced — the work happened and the company never
+   * heard about it. Recorded rather than answered: a sweep report is an agent
+   * telling the harness what it found, and there is nothing to decide.
+   */
+  private submitToProfiles(message: Message): void {
+    const handled = this.options.profiles?.(message) ?? false
+    if (!handled) this.bounce(message, 'no profile endpoint is listening')
+  }
+
+  /**
    * Hands an artifact filing to the Odeon and answers its author (ADR-0008,
    * FR-7.2). Same contract as the other two endpoints: `propose` obligates a
    * reply, and a refusal carries every reason so the next filing can be right.
@@ -621,6 +641,7 @@ export class Hermes {
       else if (route.endpoint === CLOSING_ENDPOINT) this.submitToClosing(parsed.message)
       else if (route.endpoint === ODEON_ENDPOINT) this.submitToOdeon(parsed.message)
       else if (route.endpoint === HARBOR_ENDPOINT) this.submitToHarbor(parsed.message)
+      else if (route.endpoint === PROFILE_ENDPOINT) this.submitToProfiles(parsed.message)
       else this.submitToLedger(parsed.message)
       this.drainOutbox(file)
       return { kind: 'skipped' }
