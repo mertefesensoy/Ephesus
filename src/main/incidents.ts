@@ -398,7 +398,9 @@ export class IncidentEndpoint {
     }
 
     const escalation = escalationFor(report.severity)
-    this.awaiting.delete(incident.key)
+    // Cleared by value, not by key: `awaiting` is keyed by the msgId the request
+    // went out under, so the entry to drop is found by matching incident keys.
+    // `awaiting.delete(incident.key)` would look up a key that is never a key.
     for (const [key, value] of this.awaiting) {
       if (value.key === incident.key) this.awaiting.delete(key)
     }
