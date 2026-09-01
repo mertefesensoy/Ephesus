@@ -241,6 +241,32 @@ export class IncidentEndpoint {
    * for an incident path to fail in.
    */
   onTriage(message: Message): IncidentEscalation | null {
+    // Not every honest answer to a triage request is a triage report.
+    // PROTOCOL.md tells an agent to refuse and say why when it cannot do what
+    // it was asked, and the triage request is an ask like any other — but every
+    // reply that reached here went through the report parser, so an on-call
+    // agent that explained itself perfectly clearly got "the body is not valid
+    // JSON" back. That is the second instance of the endpoint-hears-nothing
+    // bug: the address accepted the message and then read it as the only thing
+    // it knew how to read.
+    //
+    // The incident stays awaiting in both cases. Nobody has triaged it yet, and
+    // closing it because the on-call agent said "no" or "working on it" is the
+    // one outcome worse than the refusal this replaces.
+    if (message.act === 'refuse' || message.act === 'agree') {
+      const incident =
+        message.in_reply_to === null ? undefined : this.awaiting.get(message.in_reply_to)
+      this.options.onLogEvent({
+        kind: 'profile',
+        event: message.act === 'refuse' ? 'incident-triage-declined' : 'incident-triage-accepted',
+        from: message.from,
+        msgId: message.id,
+        incident: incident?.key ?? null,
+        because: message.body.slice(0, 2000)
+      })
+      return null
+    }
+
     const parsed = parseTriageReport(message.body)
     if (!parsed.ok) {
       this.options.onLogEvent({
