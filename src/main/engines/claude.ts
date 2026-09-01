@@ -22,13 +22,34 @@ import type {
 
 /**
  * Claude Code writes one JSONL transcript per session under
- * `~/.claude/projects/<slugged cwd>/<sessionId>.jsonl`, and slugs the cwd by
- * replacing every path separator with a dash. Verified against a real
- * transcript rather than assumed.
+ * `~/.claude/projects/<slugged cwd>/<sessionId>.jsonl`.
+ *
+ * The slug rule is "replace every character that is not ASCII alphanumeric
+ * with a dash" — NOT merely the path separators. That distinction is the point
+ * of this comment, because a narrower rule fails silently rather than loudly:
+ * the directory simply does not exist, `transcriptFiles` finds nothing, and the
+ * agent's ledger reads a permanent zero while `budgets.foldOne` still reports
+ * the `'engine'` tier (FR-11.2). A wrong slug is therefore a spend
+ * UNDER-reporting bug — the exact class ADR-0011 exists to close — so it is
+ * pinned to observed behaviour, not to a guess about which characters matter.
+ *
+ * Verified empirically against 31 real `~/.claude/projects/*` directories on
+ * Windows, matching each against the `cwd` recorded inside its own transcripts:
+ *
+ *   C:/Users/u/OneDrive/Masaüstü/ephesus     -> C--Users-u-OneDrive-Masa-st--ephesus
+ *   C:/Users/u/OneDrive/Masaüstü/IBM Z Proj  -> C--Users-u-OneDrive-Masa-st--IBM-Z-Proj
+ *   /home/user/ephesus                       -> -home-user-ephesus
+ *
+ * The drive-letter colon, both separators, a dotdir's dot, the space and the
+ * non-ASCII `ü` all collapse to a dash; `-`, digits and letter case survive.
+ * (An underscore is unattested in that corpus; this rule maps it to a dash.)
+ *
+ * `path.resolve` runs first because the engine slugs the ABSOLUTE cwd — a
+ * relative one would otherwise slug to a different, non-existent directory.
  */
 export function claudeTranscriptDir(cwd: string): string {
   const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
-  const slug = path.resolve(cwd).replace(/[\\/.:]/g, '-')
+  const slug = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-')
   return path.join(home, '.claude', 'projects', slug)
 }
 
