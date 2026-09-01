@@ -7,6 +7,7 @@ import { ClaudeAdapter } from '../../src/main/engines/claude'
 import { PromptStore } from '../../src/main/prompts'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
 import { CostLedger, MemoryLedgerStore } from '../../src/main/watch/ledger'
+import { sessionCostOf } from '../../src/shared/cost'
 import type { AgentSpawnConfig, EngineAdapter } from '../../src/main/engines'
 
 /**
@@ -385,5 +386,93 @@ describe('the production watcher actually calls it', () => {
     const spend = ledger.spendFor('agent.artemis', null)
     expect(spend.cumulativeTotals.inTokens).toBe(1019)
     expect(spend.cumulativeTotals.costUsd).toBeNull()
+  })
+})
+
+describe('the live figure and the durable one, reconciled', () => {
+  /** A ledger whose live-cost lookup the test drives. */
+  function rig(live: { session: string; usd: number } | null) {
+    const store = new MemoryLedgerStore()
+    const ledger = new CostLedger({
+      store,
+      now: () => new Date('2026-09-02T09:00:00Z'),
+      liveCost: () => live
+    })
+    ledger.noteSession('agent.artemis', 'sess-1')
+    return ledger
+  }
+
+  it('shows the live figure while the session is still running', () => {
+    // The durable figure cannot exist yet: the engine writes cost-state when a
+    // session ENDS. This is the whole gap the live reading closes.
+    const ledger = rig({ session: 'sess-1', usd: 0.3 })
+    const spend = ledger.spendFor('agent.artemis', null)
+    expect(spend.sessionTotals.costUsd).toBeNull()
+    expect(spend.liveSessionCostUsd).toBe(0.3)
+    expect(sessionCostOf(spend)).toEqual({ usd: 0.3, from: 'live' })
+  })
+
+  it('never adds the two together', () => {
+    // The moment a session ends, both sources describe the SAME spend. Summing
+    // is the double-count this reconciliation exists to prevent.
+    const ledger = rig({ session: 'sess-1', usd: 0.48 })
+    ledger.foldCosts('agent.artemis', 'sess-1.jsonl', [
+      { sessionId: 'sess-1', model: 'claude-sonnet-5', cumulativeUsd: 0.4845594, priced: true }
+    ])
+    const spend = ledger.spendFor('agent.artemis', null)
+    const shown = sessionCostOf(spend)
+    expect(shown.usd).toBeCloseTo(0.4845594, 9)
+    // The ledger's is the larger and the final one, so it wins.
+    expect(shown.from).toBe('ledger')
+  })
+
+  it('prefers whichever is larger, so a stale reading cannot under-report', () => {
+    // The live file lags the transcript by up to a poll interval.
+    const ledger = rig({ session: 'sess-1', usd: 0.2 })
+    ledger.foldCosts('agent.artemis', 'sess-1.jsonl', [
+      { sessionId: 'sess-1', model: 'claude-sonnet-5', cumulativeUsd: 0.5, priced: true }
+    ])
+    expect(sessionCostOf(ledger.spendFor('agent.artemis', null))).toEqual({
+      usd: 0.5,
+      from: 'ledger'
+    })
+  })
+
+  it('does not go backwards when the live reading disappears', () => {
+    // The agent exited; its report went stale and liveCostFor returns null. The
+    // figure must fall back to the durable one, not to nothing.
+    const ledger = rig(null)
+    ledger.foldCosts('agent.artemis', 'sess-1.jsonl', [
+      { sessionId: 'sess-1', model: 'claude-sonnet-5', cumulativeUsd: 0.5, priced: true }
+    ])
+    const spend = ledger.spendFor('agent.artemis', null)
+    expect(spend.liveSessionCostUsd).toBeNull()
+    expect(sessionCostOf(spend)).toEqual({ usd: 0.5, from: 'ledger' })
+  })
+
+  it('ignores a live figure left behind by a DIFFERENT session', () => {
+    // The same mis-attribution in miniature: the previous session's running
+    // total must not be shown against this one.
+    const ledger = rig({ session: 'sess-OLD', usd: 99 })
+    const spend = ledger.spendFor('agent.artemis', null)
+    expect(spend.liveSessionCostUsd).toBeNull()
+    expect(sessionCostOf(spend)).toEqual({ usd: null, from: 'none' })
+  })
+
+  it('leaves the durable totals untouched by the live figure', () => {
+    // today/cumulative are folds over the append-only ledger. A file reading
+    // must never leak into them, or a restart would change history.
+    const ledger = rig({ session: 'sess-1', usd: 0.3 })
+    const spend = ledger.spendFor('agent.artemis', null)
+    expect(spend.todayTotals.costUsd).toBeNull()
+    expect(spend.cumulativeTotals.costUsd).toBeNull()
+  })
+
+  it('says "none" when neither source has anything', () => {
+    const ledger = rig(null)
+    expect(sessionCostOf(ledger.spendFor('agent.artemis', null))).toEqual({
+      usd: null,
+      from: 'none'
+    })
   })
 })

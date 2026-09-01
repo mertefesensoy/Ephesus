@@ -16,11 +16,11 @@ import { randomBytes } from 'node:crypto'
  * a company that runs for days be paced instead of merely capped.
  *
  * This shim's whole job: read that document, write what it saw to
- * `<harness home>/usage.json`, and print a short human line back so the
+ * `<harness home>/usage/<agent>.json`, and print a short human line back so the
  * Architect can see the same number the harness is steering on.
  *
  * Usage (as written into an engine's settings by its adapter):
- *   node eph-usage.mjs --out <path-to-usage.json>
+ *   node eph-usage.mjs --dir <directory for per-agent reports>
  *
  * Environment, from the spawn plan (SDD §3):
  *   EPH_AGENT_ID
@@ -34,14 +34,37 @@ import { randomBytes } from 'node:crypto'
  * written there.
  */
 
-/** @param {readonly string[]} argv @returns {{ out: string | null }} */
+/** @param {readonly string[]} argv @returns {{ dir: string | null }} */
 function parseArgs(argv) {
   /** @type {string | null} */
-  let out = null
+  let dir = null
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out' && i + 1 < argv.length) out = argv[++i] ?? null
+    if (argv[i] === '--dir' && i + 1 < argv.length) dir = argv[++i] ?? null
   }
-  return { out }
+  return { dir }
+}
+
+/**
+ * One report file per agent, named after it.
+ *
+ * A single shared file was enough while the only content was the account's
+ * usage windows, because those are account-wide — any agent's reading is every
+ * agent's. It stops being enough the moment the report also carries THIS
+ * session's cost: several agents render status lines constantly, and one file
+ * means last-writer-wins, so whichever agent rendered most recently would have
+ * every other agent's spend attributed to it. That is the mis-attribution
+ * ADR-0011 rejected provider-side caps for.
+ *
+ * Agent ids are `agent.<slug>` by construction, but the filename is sanitised
+ * anyway: this value reaches a path, and a path built from an unsanitised id is
+ * a traversal waiting for the first id with a dot-dot or a separator in it.
+ *
+ * @param {string | null} agentId
+ */
+function reportName(agentId) {
+  if (!agentId) return '_account.json'
+  const safe = agentId.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/\.\.+/g, '-')
+  return `${safe.slice(0, 100)}.json`
 }
 
 /** @returns {Promise<string>} */
@@ -87,10 +110,10 @@ function windowOf(raw) {
 }
 
 /**
- * Temp-then-rename (invariant §4). `usage.json` is read by the harness on a
- * timer while several agents' status lines write it, so a reader must never
- * see a half-written file. The temp name carries random bytes because two
- * agents rendering at once would otherwise collide on it.
+ * Temp-then-rename (invariant §4). These reports are read by the harness on a
+ * timer while the status line rewrites them, so a reader must never see a
+ * half-written file. The temp name carries random bytes because one agent can
+ * render twice before the first write lands.
  *
  * @param {string} file @param {string} data
  */
@@ -107,8 +130,24 @@ function part(w, label) {
   return w ? `${label} ${Math.round(w.usedPercent)}%` : null
 }
 
+/**
+ * The engine's live running cost for this session, or null when it does not
+ * say. Documented by the engine as cumulative — *"read the latest result
+ * rather than summing across results"* — which is why the harness differences
+ * it rather than accumulating it.
+ *
+ * @param {unknown} raw
+ * @returns {number | null}
+ */
+function sessionCostOf(raw) {
+  if (typeof raw !== 'object' || raw === null) return null
+  const usd = /** @type {Record<string, unknown>} */ (raw)['total_cost_usd']
+  if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0) return null
+  return usd
+}
+
 async function main() {
-  const { out } = parseArgs(process.argv.slice(2))
+  const { dir } = parseArgs(process.argv.slice(2))
   const raw = await readStdin()
 
   /** @type {Record<string, unknown>} */
@@ -136,7 +175,12 @@ async function main() {
   // at all for accounts that have no subscription limit. A report is written
   // either way: "we looked and there was nothing" is a fact the harness needs,
   // and its absence is what tells the Watch the shim is not running at all.
-  if (out) {
+  const agentId = process.env['EPH_AGENT_ID'] ?? null
+  const session = typeof status['session_id'] === 'string' ? status['session_id'] : null
+  const sessionCostUsd = sessionCostOf(status['cost'])
+
+  if (dir) {
+    const out = path.join(dir, reportName(agentId))
     try {
       writeAtomic(
         out,
@@ -144,9 +188,11 @@ async function main() {
           {
             schemaVersion: 1,
             observedAt: Date.now(),
-            agentId: process.env['EPH_AGENT_ID'] ?? null,
+            agentId,
             fiveHour,
-            sevenDay
+            sevenDay,
+            session,
+            sessionCostUsd
           },
           null,
           2

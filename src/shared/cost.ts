@@ -296,6 +296,65 @@ export interface AgentSpend {
   readonly dailyTokens: number | null
   /** Budget state today, deny-nothing when unbudgeted. */
   readonly budget: BudgetVerdict
+  /**
+   * What the engine says the CURRENT session has cost so far, live — observed
+   * from the status line, not folded from a transcript.
+   *
+   * It exists because the durable figure cannot be live: the engine writes its
+   * `cost-state` line when a session ENDS, so a running agent's
+   * `sessionTotals.costUsd` is null until it stops. This fills exactly that
+   * gap and nothing else.
+   *
+   * Deliberately NOT summed into `sessionTotals`, `todayTotals` or
+   * `cumulativeTotals`. Those are folds over the append-only ledger, and this
+   * is a reading of a file that the ledger's own rows will shortly restate —
+   * adding it in would count the same money twice. `sessionCostOf` is how the
+   * two are combined for display.
+   */
+  readonly liveSessionCostUsd: number | null
+}
+
+/** Which source a displayed session cost came from. */
+export interface SessionCost {
+  readonly usd: number | null
+  readonly from: 'ledger' | 'live' | 'none'
+}
+
+/**
+ * Contract: the session cost to SHOW, from the durable figure and the live one.
+ * Pure.
+ *
+ * The two are the same quantity measured at different times — verified, not
+ * assumed: across 17 real sessions the transcript's session scalar
+ * (`totalCostUSD`) equalled the sum of its per-model breakdown exactly, and the
+ * engine documents both `total_cost_usd` and `modelUsage` as *"cumulative …
+ * read the latest result rather than summing across results."*
+ *
+ * So the rule is **the larger of the two, never the sum**. Taking the maximum
+ * has three properties worth stating, because each is a bug it forecloses:
+ *
+ *  - it cannot double-count, which adding them would do the moment a session
+ *    ends and both sources describe the same spend;
+ *  - it cannot go backwards when the live reading disappears (the agent
+ *    exited, the file went stale), because the ledger figure it falls back to
+ *    is the final one;
+ *  - it cannot under-report while a session runs, because the live figure is
+ *    monotonic within a session and the ledger holds nothing yet.
+ *
+ * `from` is carried so the UI can say which it is showing. A live figure is
+ * provisional and a ledger figure is final, and a number that cannot say which
+ * it is invites being read as the wrong one.
+ */
+export function sessionCostOf(spend: {
+  readonly sessionTotals: CostTotals
+  readonly liveSessionCostUsd: number | null
+}): SessionCost {
+  const durable = spend.sessionTotals.costUsd
+  const live = spend.liveSessionCostUsd
+  if (durable === null && live === null) return { usd: null, from: 'none' }
+  if (durable === null) return { usd: live, from: 'live' }
+  if (live === null) return { usd: durable, from: 'ledger' }
+  return live > durable ? { usd: live, from: 'live' } : { usd: durable, from: 'ledger' }
 }
 
 export const BUDGET_STATES = ['ok', 'projected-breach', 'breached', 'unbudgeted'] as const

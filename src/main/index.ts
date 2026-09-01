@@ -974,6 +974,10 @@ async function boot(): Promise<void> {
         `cost went backwards for ${model} in session ${session} (${source}); ` +
           `the transcript was replaced — earlier spend stands, nothing was corrected`
       ),
+    // The live half of the money figure (the durable half is folded from
+    // cost-state at session end). Read fresh on every call from the file the
+    // status line rewrites — the ledger stores none of it.
+    liveCost: (agent) => usageWatch?.liveCostFor(agent) ?? null,
     onCostIncomplete: (source) =>
       reportDegradation(
         'budgets',
@@ -985,9 +989,12 @@ async function boot(): Promise<void> {
   // ADR-0023: the account's usage window, observed by every agent's status
   // line and read back here. Constructed before anything can spawn, so the
   // first agent's first render already has somewhere to land.
-  const usageStatusPath = path.join(home.root, 'usage.json')
+  // One report per agent: the windows are account-wide, but the live session
+  // cost is not, and a single shared file would let the last agent to render
+  // claim every other agent's spend.
+  const usageStatusDir = path.join(home.root, 'usage')
   usageWatch = new UsageWatch({
-    path: usageStatusPath,
+    dir: usageStatusDir,
     thresholds: {
       ...DEFAULT_PACE_THRESHOLDS,
       ...(home.config.pacing?.slowAtPercent === undefined
@@ -1040,7 +1047,7 @@ async function boot(): Promise<void> {
       // hooks because it rides the same settings file and the same backup and
       // uninstall path — nothing new has to be cleaned up on the way out.
       usageShimPath: path.join(appRoot, 'shims', 'eph-usage.mjs'),
-      usageStatusPath,
+      usageStatusDir,
       settingsRegistry: db
     })
   )

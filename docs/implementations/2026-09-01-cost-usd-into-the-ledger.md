@@ -138,8 +138,9 @@ across midnight ends up with its dollars and its tokens on different dates.
 **Why `cost-state` and not the statusline's `cost.total_cost_usd`.** The
 statusline figure is a whole-session scalar; `cost-state` is per-model, which is
 the ledger's own key. It also carries `hasUnknownModelCost`, and it arrives
-through a reader that already exists. The statusline stays what the previous
-change made it: the pacing signal.
+through a reader that already exists — so it is the right source for the LEDGER.
+The statusline is now wired too, but as the *live* figure only and outside the
+ledger; §10 gives the reconciliation and why it cannot be a ledger row.
 
 **Why `totalCostUSD` is not read at all.** The per-model figures sum to it, and
 they attribute. Reading both would create two sources for one number, and the
@@ -231,11 +232,9 @@ mutation is now red.
 
 ## 8. What this does NOT do
 
-- **No live agent's dollars.** `cost-state` is written at session end, so an
-  agent that is still running shows tokens and a null cost until it stops. The
-  statusline's `cost.total_cost_usd` *is* live and could fill that gap, at the
-  cost of a second money source that would have to be reconciled with this one.
-  Not attempted; recorded as the obvious next step if the gap matters.
+- ~~No live agent's dollars.~~ **Closed — see §10.** The statusline's
+  `cost.total_cost_usd` is now wired as a second, reconciled source, so a
+  running agent shows a cost instead of null.
 - **No cost for Codex or Gemini.** Neither adapter implements `costs()`, so
   their rows keep `costUsd` null — a visible tier, not a fault.
 - **No UI change.** `AgentSpend` now carries real dollars in all three figures;
@@ -253,3 +252,125 @@ mutation is now red.
 - [ADR-0011 — The Watch: circuit-breaker ladder and a durable cost ledger](../adr/ADR-0011-watch-breaker-budgets.md)
 - [ADR-0009 — Engine adapters](../adr/ADR-0009-engine-adapters.md)
 - [docs/ENGINEERING-STANDARDS.md](../ENGINEERING-STANDARDS.md)
+
+---
+
+## 10. Addendum — the LIVE figure, from the status line
+
+§8 above recorded "no live agent's dollars" as the remaining gap: `cost-state`
+is written when a session ENDS, so a running agent showed tokens and a null
+cost. This closes it, with the second money source the Architect asked for.
+
+### 10.1 They are the same quantity — verified
+
+Wiring a second source is only safe if the two describe the same thing. Two
+independent confirmations, neither assumed:
+
+- **The engine's own docs**, in the CLI binary: `total_cost_usd` and
+  `modelUsage` are *"Cumulative … read the latest result rather than summing
+  across results."* Both are session running totals.
+- **The corpus**: across **17 of 17** sessions, a `cost-state` line's session
+  scalar `totalCostUSD` equalled the sum of its per-model `costUSD` **exactly**
+  (`diff < 1e-9`, 0 exceptions). The scalar the status line reports live and the
+  breakdown the transcript reports at the end are the same money.
+
+### 10.2 The rule: the larger of the two, never the sum
+
+`sessionCostOf(spend)` in `src/shared/cost.ts` returns `{ usd, from }` where
+`from` is `'ledger' | 'live' | 'none'`. Taking the **maximum** forecloses three
+distinct bugs, which is why it beats every alternative considered:
+
+| Alternative | What it does the moment a session ends |
+|---|---|
+| **add them** | double-counts — both sources now describe the same spend |
+| **always prefer live** | goes backwards to null when the agent exits and the reading goes stale |
+| **always prefer ledger** | shows nothing at all for the entire time a session is running |
+| **maximum** ✓ | live fills the gap, ledger takes over once final, neither can double nor regress |
+
+`from` is carried so the UI can say which it is showing: a live figure is
+provisional, a ledger figure is final, and a number that cannot say which it is
+invites being read as the wrong one.
+
+### 10.3 The live figure is NOT in the ledger, deliberately
+
+It is not folded into any row, and `todayTotals` / `cumulativeTotals` cannot see
+it. Two reasons, both load-bearing:
+
+1. **It would double-count.** The ledger's own `foldCosts` rows restate the same
+   money minutes later.
+2. **It is un-modelled.** The status line reports one session scalar with no
+   per-model breakdown, and the ledger is keyed `(agent, session, model, day)`.
+   Writing an un-attributed figure into a per-model append-only book would
+   permanently damage attribution — and append-only means it could never be
+   taken back.
+
+Instead it reaches `spendFor` through an **injected lookup**
+(`CostLedgerOptions.liveCost`), read fresh on every call from the file the
+status line rewrites. The ledger stores none of it, so ADR-0011's ban on
+in-memory cumulative figures is untouched: this is a cached read of a file,
+refreshed on a timer, exactly like the pace — not a counter a restart can zero.
+
+### 10.4 One report file per agent
+
+The pacing change wrote a single `<home>/usage.json`, which was correct while
+the only content was the account's usage **windows** — those are account-wide,
+so any agent's reading is every agent's.
+
+It stops being correct the moment the report also carries **this session's
+cost**. Several agents render status lines constantly; one shared file is
+last-writer-wins, so whichever agent rendered most recently would have every
+other agent's spend attributed to it — the mis-attribution ADR-0011 rejected
+provider-side caps for. So: `<home>/usage/<agent>.json`, one per agent.
+
+Consequences handled:
+
+- **Attribution is by the `agentId` INSIDE the report**, never by filename. The
+  filename is a sanitised convenience and two ids could in principle sanitise to
+  the same name; the payload id is what the shim was actually told it was.
+- **The filename is sanitised anyway** — the id reaches a path, and an
+  unsanitised one is a traversal waiting for the first id with a separator in
+  it. `../../x` becomes `----x.json`, inside the directory.
+- **The pace now reads the FRESHEST report across agents**, not the last writer.
+  That is a strict improvement on the previous single-file behaviour: an agent
+  that exited an hour ago can no longer out-vote one reporting now.
+- **An agent-less render** (the Architect's own `claude` in a repo where our
+  settings are installed) writes `_account.json`: its windows are still worth
+  having, its cost is nobody's to attribute.
+- **Staleness applies to the live figure too**, on the same threshold the pace
+  uses. A figure whose agent exited is not live, and the durable row is the
+  right answer from then on.
+
+### 10.5 Verification
+
+```bash
+npx vitest run test/main/cost-in-dollars.test.ts test/main/pacing-wakes.test.ts test/main/engines/claude-usage-statusline.test.ts
+```
+
+**Mutation checks: 15, all red** — reconciliation (sum instead of max; always
+live; always ledger; either source missing), attribution (a live figure from a
+different session; from a different agent; a stale one), the shim (one shared
+file again; unsanitised id; cost or session dropped; a nonsense cost let
+through), and the pace reading an arbitrary report rather than the freshest.
+
+### 10.6 A methodology failure worth recording
+
+The first run of that mutation set reported **15/15 red — and was worthless.**
+The baseline was not green: two tests were already failing (a stale assertion
+from the file-layout rename, and an assertion polluted by a file an *earlier
+mutation run* had written outside its temp directory). Every mutation "went red"
+because the suite was red before it was touched.
+
+Re-run against a genuinely green baseline, **three of the fifteen went GREEN**:
+`UsageWatch.liveCostFor` and `freshest` had **no coverage at all** — agent
+attribution, staleness, and freshest-wins were entirely untested. Seven tests
+were added and the three are now red.
+
+Two rules this earns:
+
+1. **A mutation check is only evidence if the baseline is green.** Confirm green
+   first; a red baseline makes every mutation look caught.
+2. **A mutation that deliberately breaks a path guard can write outside the
+   test's sandbox.** This one left a file in `%LOCALAPPDATA%` that then made an
+   unrelated assertion pass-then-fail across runs. The traversal test now uses a
+   target unique to each run, so no leftover can decide its outcome, and the
+   stray file was deleted.

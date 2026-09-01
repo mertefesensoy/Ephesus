@@ -7,7 +7,7 @@ import { Agora } from '../../src/main/agora'
 import { DONE_DIR, Hermes } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
-import type { Pace } from '../../src/shared/pacing'
+import { DEFAULT_PACE_THRESHOLDS, type Pace } from '../../src/shared/pacing'
 import { UsageWatch } from '../../src/main/watch/usage-watch'
 import { WakeClock } from '../../src/main/watch/wake-clock'
 
@@ -266,11 +266,11 @@ describe('UsageWatch — reading what the shim wrote', () => {
   function watchOn(contents: string | null, now: number) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-usagewatch-'))
     temps.push(dir)
-    const file = path.join(dir, 'usage.json')
+    const file = path.join(dir, 'agent.artemis.json')
     if (contents !== null) fs.writeFileSync(file, contents, 'utf8')
     const degraded: string[] = []
     const watch = new UsageWatch({
-      path: file,
+      dir,
       now: () => now,
       onDegraded: (detail) => degraded.push(detail)
     })
@@ -284,6 +284,8 @@ describe('UsageWatch — reading what the shim wrote', () => {
         schemaVersion: 1,
         observedAt: now,
         agentId: 'agent.artemis',
+        session: null,
+        sessionCostUsd: null,
         fiveHour: { usedPercent: 94, resetsAt: now + 60 * 60 * 1000 },
         sevenDay: null
       }),
@@ -316,7 +318,7 @@ describe('UsageWatch — reading what the shim wrote', () => {
     fs.writeFileSync(file, '  {"schemaVersion": 99}  ', 'utf8')
     watch.tick()
     expect(degraded).toHaveLength(1)
-    expect(degraded[0]).toContain('usage.json')
+    expect(degraded[0]).toContain('agent.artemis.json')
     expect(watch.verdict().pace).toBe('full')
   })
 
@@ -333,11 +335,11 @@ describe('UsageWatch — reading what the shim wrote', () => {
     const now = START
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-usagewatch-'))
     temps.push(dir)
-    const file = path.join(dir, 'usage.json')
+    const file = path.join(dir, 'agent.artemis.json')
     const changes: string[] = []
     let clock = now
     const watch = new UsageWatch({
-      path: file,
+      dir,
       now: () => clock,
       onPaceChange: (verdict) => changes.push(`${verdict.pace}/${verdict.because}`)
     })
@@ -352,6 +354,8 @@ describe('UsageWatch — reading what the shim wrote', () => {
         schemaVersion: 1,
         observedAt: now,
         agentId: null,
+        session: null,
+        sessionCostUsd: null,
         fiveHour: { usedPercent: 99, resetsAt: now + 10 * 60 * 1000 },
         sevenDay: null
       }),
@@ -379,6 +383,8 @@ describe('UsageWatch — reading what the shim wrote', () => {
         schemaVersion: 1,
         observedAt: now - 45 * 60 * 1000,
         agentId: null,
+        session: null,
+        sessionCostUsd: null,
         fiveHour: { usedPercent: 99, resetsAt: now + 60 * 60 * 1000 },
         sevenDay: null
       }),
@@ -437,5 +443,151 @@ describe('WakeClock — the wall-clock cap', () => {
     clock.began('agent.b')
     expect(clock.runningMs('agent.b')).not.toBeNull()
     expect(clock.runningMs('agent.other')).toBeNull()
+  })
+})
+
+describe('UsageWatch — one report per agent', () => {
+  /** Writes reports into one directory and reads them back through the Watch. */
+  function watchOverDir(now: number) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-usagedir-'))
+    temps.push(dir)
+    let clock = now
+    const watch = new UsageWatch({ dir, now: () => clock })
+    const write = (
+      name: string,
+      report: {
+        observedAt: number
+        agentId: string | null
+        session?: string | null
+        sessionCostUsd?: number | null
+        fiveHour?: { usedPercent: number; resetsAt: number } | null
+      }
+    ) => {
+      fs.writeFileSync(
+        path.join(dir, name),
+        JSON.stringify({
+          schemaVersion: 1,
+          observedAt: report.observedAt,
+          agentId: report.agentId,
+          fiveHour: report.fiveHour ?? null,
+          sevenDay: null,
+          session: report.session ?? null,
+          sessionCostUsd: report.sessionCostUsd ?? null
+        }),
+        'utf8'
+      )
+    }
+    return { watch, write, setClock: (t: number) => (clock = t) }
+  }
+
+  it('gives each agent its own live cost, and never another agent’s', () => {
+    // The reason there is a file per agent at all. One shared file would mean
+    // last-writer-wins, and whichever agent rendered most recently would have
+    // every other agent's spend attributed to it.
+    const { watch, write } = watchOverDir(START)
+    write('agent.artemis.json', {
+      observedAt: START,
+      agentId: 'agent.artemis',
+      session: 'sess-A',
+      sessionCostUsd: 0.3
+    })
+    write('agent.mason.json', {
+      observedAt: START,
+      agentId: 'agent.mason',
+      session: 'sess-M',
+      sessionCostUsd: 9.5
+    })
+    watch.tick()
+
+    expect(watch.liveCostFor('agent.artemis')).toEqual({ session: 'sess-A', usd: 0.3 })
+    expect(watch.liveCostFor('agent.mason')).toEqual({ session: 'sess-M', usd: 9.5 })
+    expect(watch.liveCostFor('agent.nobody')).toBeNull()
+  })
+
+  it('attributes by the id INSIDE the report, not by the file name', () => {
+    // The filename is a sanitised convenience and two ids could collapse onto
+    // one. The id in the payload is what the shim was actually told it was, so
+    // reading that is what makes "A's spend can never show against B" a
+    // property of the data rather than of a naming scheme.
+    const { watch, write } = watchOverDir(START)
+    write('agent.artemis.json', {
+      observedAt: START,
+      agentId: 'agent.mason',
+      session: 'sess-M',
+      sessionCostUsd: 9.5
+    })
+    watch.tick()
+
+    expect(watch.liveCostFor('agent.artemis')).toBeNull()
+    expect(watch.liveCostFor('agent.mason')).toEqual({ session: 'sess-M', usd: 9.5 })
+  })
+
+  it('stops serving a live figure once its reading goes stale', () => {
+    // The agent exited. Its last figure is no longer live, and the durable
+    // ledger row is the right answer from then on.
+    const { watch, write, setClock } = watchOverDir(START)
+    write('agent.artemis.json', {
+      observedAt: START,
+      agentId: 'agent.artemis',
+      session: 'sess-A',
+      sessionCostUsd: 0.3
+    })
+    watch.tick()
+    expect(watch.liveCostFor('agent.artemis')).not.toBeNull()
+
+    setClock(START + DEFAULT_PACE_THRESHOLDS.staleAfterMs + 1)
+    expect(watch.liveCostFor('agent.artemis')).toBeNull()
+  })
+
+  it('withholds a figure that names no session to attach it to', () => {
+    const { watch, write } = watchOverDir(START)
+    write('agent.artemis.json', {
+      observedAt: START,
+      agentId: 'agent.artemis',
+      session: null,
+      sessionCostUsd: 0.3
+    })
+    watch.tick()
+    expect(watch.liveCostFor('agent.artemis')).toBeNull()
+  })
+
+  it('paces on the FRESHEST reading across agents, not an arbitrary one', () => {
+    // The windows are account-wide, so any agent's reading describes every
+    // agent's situation — but an agent that exited an hour ago must not
+    // out-vote one reporting now.
+    const { watch, write } = watchOverDir(START)
+    write('agent.stale.json', {
+      observedAt: START - 60_000,
+      agentId: 'agent.stale',
+      fiveHour: { usedPercent: 99, resetsAt: START + 60 * 60 * 1000 }
+    })
+    write('agent.fresh.json', {
+      observedAt: START,
+      agentId: 'agent.fresh',
+      fiveHour: { usedPercent: 5, resetsAt: START + 60 * 60 * 1000 }
+    })
+    watch.tick()
+
+    expect(watch.observed()?.agentId).toBe('agent.fresh')
+    expect(watch.verdict().pace).toBe('full')
+  })
+
+  it('lets a newer reading from ANY agent lift the pace', () => {
+    const { watch, write } = watchOverDir(START)
+    write('agent.a.json', {
+      observedAt: START,
+      agentId: 'agent.a',
+      fiveHour: { usedPercent: 99, resetsAt: START + 60 * 60 * 1000 }
+    })
+    watch.tick()
+    expect(watch.verdict().pace).toBe('hold')
+
+    write('agent.b.json', {
+      observedAt: START + 1000,
+      agentId: 'agent.b',
+      fiveHour: { usedPercent: 10, resetsAt: START + 60 * 60 * 1000 }
+    })
+    watch.tick()
+    expect(watch.verdict().pace).toBe('full')
   })
 })
