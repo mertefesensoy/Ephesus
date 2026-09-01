@@ -429,3 +429,102 @@ describe('autonomy reaches the engine as its own permission mode', () => {
     expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('default')
   })
 })
+
+/**
+ * The seam, not the two halves.
+ *
+ * `test/main/settings-registry.test.ts` already proves the refcount: three
+ * agents in one working directory, only the last one out restores the file.
+ * But it hand-simulates the merged content as `'{"who":"a+b"}'`, so
+ * `mergeClaudeSettings` never runs in it and nothing there could ever notice
+ * what the merge actually produced. What it produced was every hook registered
+ * once per agent, because the merge base is re-read from disk and agent two
+ * merges into agent one's output rather than into the Architect's.
+ *
+ * That is not a cosmetic duplicate. Claude Code reads the result as a folder
+ * pre-approving a pile of permissions for itself, and answers with a blocking
+ * trust dialog whose highlighted default is "No, exit" — so on a live run all
+ * three crew agents parked on that screen and never opened a session at all.
+ */
+describe('several agents sharing one working directory (live-run regression)', () => {
+  const crew = ['agent.mason', 'agent.smith', 'agent.cooper'] as const
+
+  /** Runs the real merge once per agent, feeding each result to the next. */
+  function mergeForCrew(r: Rig, start: string | null = null): Record<string, never> {
+    let text = start
+    for (const agentId of crew) {
+      const agentDir = path.join(path.dirname(path.dirname(r.cfg.identityPath)), agentId)
+      fs.mkdirSync(agentDir, { recursive: true })
+      fs.writeFileSync(path.join(agentDir, 'identity.md'), `# ${agentId}\n`, 'utf8')
+      text = mergeClaudeSettings(
+        text,
+        {
+          prompts: new PromptStore(path.join(r.cwd, 'home-prompts'), BUNDLED_PROMPTS),
+          hookShimPath: path.join(r.cwd, '..', 'shims', 'eph-hook.mjs')
+        },
+        { ...r.cfg, agentId, identityPath: path.join(agentDir, 'identity.md') }
+      )
+    }
+    return JSON.parse(text as string) as Record<string, never>
+  }
+
+  function agentDirOf(r: Rig, agentId: string): string {
+    return path
+      .join(path.dirname(path.dirname(r.cfg.identityPath)), agentId)
+      .split(path.sep)
+      .join('/')
+  }
+
+  it('registers each hook exactly once, however many agents share the directory', () => {
+    const r = rig()
+    const settings = mergeForCrew(r)
+    const hooks = settings['hooks'] as unknown as Record<string, unknown[]>
+    for (const engineEvent of Object.keys(CLAUDE_HOOK_EVENTS)) {
+      expect(hooks[engineEvent], `${engineEvent} should be installed once`).toHaveLength(1)
+    }
+  })
+
+  it('keeps every agent its own mailbox grant, and no agent two of them', () => {
+    const r = rig()
+    const settings = mergeForCrew(r)
+    const permissions = settings['permissions'] as unknown as {
+      allow: string[]
+      additionalDirectories: string[]
+    }
+    // Seven file tools per agent, three agents, none repeated.
+    expect(permissions.allow).toHaveLength(21)
+    expect(new Set(permissions.allow).size).toBe(21)
+    expect(permissions.additionalDirectories).toHaveLength(3)
+    for (const agentId of crew) {
+      expect(permissions.additionalDirectories).toContain(agentDirOf(r, agentId))
+      expect(permissions.allow).toContain(`Read(${agentDirOf(r, agentId)}/**)`)
+    }
+  })
+
+  it('grows nothing when the same crew is installed again', () => {
+    const r = rig()
+    const once = mergeForCrew(r)
+    const twice = mergeForCrew(r, JSON.stringify(once))
+    expect(twice).toEqual(once)
+  })
+
+  it('leaves the Architect\u2019s own hooks and permissions alone', () => {
+    const r = rig()
+    const theirs = {
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: 'node ./mine.js' }] }]
+      },
+      permissions: { allow: ['Bash(git status)'], additionalDirectories: ['/their/dir'] }
+    }
+    const settings = mergeForCrew(r, JSON.stringify(theirs))
+    const hooks = settings['hooks'] as unknown as Record<string, unknown[]>
+    expect(hooks['SessionStart']).toHaveLength(2)
+    expect(JSON.stringify(hooks['SessionStart'])).toContain('./mine.js')
+    const permissions = settings['permissions'] as unknown as {
+      allow: string[]
+      additionalDirectories: string[]
+    }
+    expect(permissions.allow).toContain('Bash(git status)')
+    expect(permissions.additionalDirectories).toContain('/their/dir')
+  })
+})

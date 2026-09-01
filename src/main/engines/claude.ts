@@ -297,6 +297,29 @@ function hookSettingsBlock(deps: ClaudeAdapterDeps): Record<string, unknown> {
  * something we cannot parse and writing our own over it would look like it
  * worked; refusing to spawn until the file is fixed is the honest answer.
  */
+/**
+ * Contract: true when this hook entry is one this harness installed. Pure, and
+ * deliberately conservative — an unrecognisable entry is never ours.
+ *
+ * Claude Code's settings schema has nowhere to hang a marker of our own, so the
+ * marker is the thing itself: only our entries invoke our hook shim. Nothing an
+ * Architect writes by hand does, which is what makes stripping these before a
+ * re-install safe. An empty shim path matches nothing rather than everything —
+ * a predicate that answers "yes" to every entry would silently delete the
+ * Architect's hooks.
+ */
+function isHarnessHookEntry(entry: unknown, shimPath: string): boolean {
+  if (shimPath.length === 0) return false
+  if (typeof entry !== 'object' || entry === null) return false
+  const hooks = (entry as Record<string, unknown>)['hooks']
+  if (!Array.isArray(hooks)) return false
+  return hooks.some((hook) => {
+    if (typeof hook !== 'object' || hook === null) return false
+    const command = (hook as Record<string, unknown>)['command']
+    return typeof command === 'string' && command.includes(shimPath)
+  })
+}
+
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
@@ -331,7 +354,17 @@ export function mergeClaudeSettings(
   const merged: Record<string, unknown> = { ...existingHooks }
   for (const [engineEvent, entry] of Object.entries(hookSettingsBlock(deps))) {
     const prior = Array.isArray(existingHooks[engineEvent]) ? existingHooks[engineEvent] : []
-    merged[engineEvent] = [...prior, ...(entry as unknown[])]
+    // Drop what a previous install of ours left here before adding ours back.
+    // Without this the merge is an append: the base is re-read from disk per
+    // agent, so the second agent to enter a shared working directory merges
+    // into the first agent's output rather than into the Architect's, and every
+    // hook is registered again. Three crew agents in one repository produced
+    // nine events × three copies, and Claude Code reads that pile as a folder
+    // arming itself — which is exactly what its trust dialog then warns about.
+    // Our hook entries carry no agent id (the id travels in the environment),
+    // so all agents' copies are byte-identical and one copy serves every agent.
+    const kept = prior.filter((item) => !isHarnessHookEntry(item, deps.hookShimPath))
+    merged[engineEvent] = [...kept, ...(entry as unknown[])]
   }
 
   if (!cfg) return `${JSON.stringify({ ...base, hooks: merged }, null, 2)}\n`
@@ -350,10 +383,21 @@ export function mergeClaudeSettings(
     ? existingPermissions['additionalDirectories']
     : []
 
+  // Unlike hooks, a mailbox grant names one agent's own directory, so several
+  // agents sharing a working directory must accumulate several grants. What
+  // must not accumulate is the *same* agent's grant twice, which is what a
+  // plain append produced on every re-install.
+  const mine = new Set([
+    ...(grant['allow'] as unknown[]),
+    ...(grant['additionalDirectories'] as unknown[])
+  ])
   const permissions = {
     ...existingPermissions,
-    allow: [...priorAllow, ...(grant['allow'] as unknown[])],
-    additionalDirectories: [...priorDirs, ...(grant['additionalDirectories'] as unknown[])]
+    allow: [...priorAllow.filter((item) => !mine.has(item)), ...(grant['allow'] as unknown[])],
+    additionalDirectories: [
+      ...priorDirs.filter((item) => !mine.has(item)),
+      ...(grant['additionalDirectories'] as unknown[])
+    ]
   }
 
   return `${JSON.stringify({ ...base, hooks: merged, permissions }, null, 2)}\n`
