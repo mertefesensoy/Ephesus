@@ -173,35 +173,51 @@ Every regression was broken and confirmed red before being reverted.
 Mutation 4 initially turned only one of two tests red; the second was tightened
 to assert that nothing is mailed back at a declination, and then turned red too.
 
-### What was actually run, and what could not be
+### What was actually run
 
-This work was done in a git worktree sharing `.git` with eight siblings, and a
-whole-suite `vitest run` is not trustworthy there: ~130 tests fail, all in
-git-touching integration files, all timing out at exactly 5000 ms. The same files
-pass when run alone. `--no-file-parallelism` does not fix it, which places the
-contention **across** worktrees rather than inside the run.
-
-So the suite was verified **per file**. Every file that touches a reserved
-endpoint was run in isolation and passed:
+Per-file first, then the whole suite. Every file that touches a reserved endpoint
+was run in isolation and passed:
 
 `endpoints` · `routing` · `ledger-endpoint` (shared and main) · `incidents` ·
 `reflection` · `odeon` · `briefing` · `meeting` · `library` · `hermes` ·
 `s-bounce` · `s-closing` · `s-profile` · `s-onehour` · `s-meeting` · `s-brief` ·
 `s-memo` · `s-ledger` · `s-mode` · `s-gym` · `s-livelock` · `s-deckgate`
 
-Three failures are **pre-existing on this branch and not caused by this change**:
+**Whole suite, main checkout, HEAD `9e5e96f`** (which already contains this
+change, merged at `23d5c99`): **3131 passed, 6 skipped, 9 failed across 4 files.**
+None of the nine are this change:
 
 - `test/shared/cost.test.ts > splits one transcript across the days it spans` —
-  flagged in the brief as not mine.
-- `test/scenarios/s-profile.test.ts > asserts stricter-wins composition against a
-  laxer global ceiling` (`expected 'supervised' to be 'manual'`). Verified by
-  reverting every source and test change, moving the two new files aside, and
-  re-running: it fails identically with a pristine tree. It is autonomy-mode
-  composition, which this change does not touch.
-- The ~130 contention timeouts above.
+  known and pre-existing, flagged in the brief as not mine.
+- `test/main/agent-worktree.test.ts` (4) and `test/scenarios/s-crash.test.ts` (3)
+  — reproducible when run alone, and about the agent **spawn** path: they fail
+  with `timed out waiting for the agent to start` and `expected 'installing' to
+  be 'running'`. `agent-worktree.test.ts` does not reference a single reserved
+  endpoint. No mail is routed before an agent starts.
+- `test/scenarios/s-closing.test.ts > proceeds at the deadline with the silent
+  agent` — passes when run alone, in both checkouts. Flake under parallel load.
+  Worth noting because this file *does* exercise `agent.closing`; it was checked
+  rather than assumed.
 
-Whole-suite green should be confirmed in the main checkout before merge; it could
-not be established here.
+### Correction: the earlier timeout diagnosis was wrong
+
+An earlier draft of this section attributed a mass of failures (~130) to `.git`
+lock contention across sibling worktrees. **That was wrong**, and the correction
+matters because the wrong version would send the next reader chasing worktrees.
+
+The real cause was vitest's **default 5 s `testTimeout`**, which the integration
+tests exceed because TEST-STRATEGY §2 puts them on real fs and real git in temp
+dirs. `39aad30` ("stop deleting a directory git is still standing in") raises
+`testTimeout`/`hookTimeout` to 30 s and fixes a teardown racing git; with it, the
+same suite that showed ~130 failures shows 9. The observable conclusion at the
+time — *not caused by this change, verify per file* — held, but the mechanism did
+not, and `--no-file-parallelism` "not helping" was evidence about slowness, not
+about locking.
+
+`test/scenarios/s-profile.test.ts > asserts stricter-wins composition against a
+laxer global ceiling` was also reported here as pre-existing (verified by
+reverting every change and re-running against a pristine tree). It now passes:
+`3a50f7c` fixed it on the branch.
 
 ## Related docs
 
