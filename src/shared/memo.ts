@@ -56,7 +56,21 @@ export const memoFilingSchema = z
     /** The gate this memo answers — what was held pending it. */
     gateId: z.string().min(1).max(64),
     trigger: memoTriggerSchema,
-    title: z.string().min(1).max(200),
+    /**
+     * One line, and the constraint is load-bearing rather than cosmetic.
+     *
+     * The title is agent-authored and `renderMemoMarkdown` puts it ABOVE the
+     * machine header, while `parseMemoHeader` took the first line that matched.
+     * A title carrying newlines therefore wrote the header: an agent could name
+     * another agent's gate and have its own countersigned verdict release a hold
+     * nobody had been shown, or name a different trigger and have FR-5.5's audit
+     * trail record an authority domain the decision never touched.
+     */
+    title: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[^\r\n]+$/, 'a memo title is one line'),
     context: z.string().min(1).max(20_000),
     /** ADR-0008: at least two. One option is not a choice. */
     options: z.array(z.string().min(1).max(10_000)).min(2).max(10),
@@ -333,8 +347,21 @@ export function gateVerdictFor(verdict: MemoVerdictName): 'approved' | 'denied' 
  * writes, so it is a round-trip, not a parser for somebody else’s prose.
  */
 export function parseMemoHeader(markdown: string): MemoHeader | null {
+  // Anchored on the `- memo:` line and read only from the contiguous block that
+  // contains it, rather than from the whole document. Defence in depth behind
+  // the single-line title rule: a first-match scan over the entire markdown lets
+  // ANY agent-authored text that reaches the page above the header write the
+  // header, and the title is not the only such text a later change might admit.
+  const lines = markdown.split('\n')
+  const anchor = lines.findIndex((line) => /^- memo: /.test(line))
+  if (anchor === -1) return null
+  let start = anchor
+  while (start > 0 && /^- [a-z]+: /.test(lines[start - 1] ?? '')) start -= 1
+  let end = anchor
+  while (end + 1 < lines.length && /^- [a-z]+: /.test(lines[end + 1] ?? '')) end += 1
+  const block = lines.slice(start, end + 1).join('\n')
   const field = (name: string): string | null => {
-    const match = new RegExp(`^- ${name}: (.+)$`, 'm').exec(markdown)
+    const match = new RegExp(`^- ${name}: (.+)$`, 'm').exec(block)
     return match?.[1]?.trim() ?? null
   }
   const memoId = field('memo')
