@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { badgeFor } from '../../shared/badges'
+import { emoteFrame } from '../../shared/emotes'
+import { emotesState } from './emotes'
 import type { AgentCard } from '../../shared/agents'
 import type { AvatarUpdate } from '../../shared/ipc'
 import type { AgentSpend } from '../../shared/cost'
@@ -101,6 +103,26 @@ export function toneFor(phase: string | null): string {
   return phase === null ? 'var(--eph-ink-500)' : (PHASE_TONE[phase] ?? 'var(--eph-status-idle)')
 }
 
+/**
+ * Contract: the CSS that shows one phase's emote, or null when no pack is
+ * installed. A sprite sheet is positioned rather than sliced: the dock is HTML,
+ * and background-position is the one way to blit in it without a canvas.
+ */
+function emoteStyle(phase: string | null): Record<string, string> | null {
+  if (!EMOTES.installed || EMOTES.manifest === null || EMOTES.url === null) return null
+  const frame = phase === null ? null : emoteFrame(EMOTES.manifest, phase)
+  if (frame === null) return null
+  const scale = 1
+  return {
+    width: `${String(frame.size * scale)}px`,
+    height: `${String(frame.size * scale)}px`,
+    backgroundImage: `url(${EMOTES.url})`,
+    backgroundPosition: `-${String(frame.x * scale)}px -${String(frame.y * scale)}px`,
+    imageRendering: 'pixelated',
+    flex: '0 0 auto'
+  }
+}
+
 const dock = {
   display: 'flex',
   gap: '6px',
@@ -120,6 +142,8 @@ const card = {
   fontFamily: 'var(--eph-face-data)',
   fontSize: '11px'
 } as const
+
+const EMOTES = emotesState()
 
 export function AgentDock({
   selected,
@@ -195,7 +219,26 @@ export function AgentDock({
         >
           <div style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>{row.name}</div>
           <div style={{ color: 'var(--eph-ink-500)' }}>{row.role}</div>
-          <div style={{ marginTop: '4px', color: toneFor(row.phase) }}>■ {row.status}</div>
+          <div
+            style={{
+              marginTop: '4px',
+              color: toneFor(row.phase),
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            {/* Beside the word, never instead of it (§8 double-encoding). The
+                icon is what a reader recognises; the word is what makes it
+                unambiguous, and the 3x5 glyph proved an icon alone is not
+                enough — somebody had to ask what a ring meant. */}
+            {emoteStyle(row.phase) === null ? (
+              <span aria-hidden="true">■</span>
+            ) : (
+              <span aria-hidden="true" style={emoteStyle(row.phase) ?? undefined} />
+            )}
+            <span>{row.status}</span>
+          </div>
           {row.pendingMail > 0 && (
             <div style={{ color: 'var(--eph-status-blocked)' }}>
               {String(row.pendingMail)} waiting
