@@ -303,10 +303,10 @@ describe('install replaces a bundle rather than merging into it', () => {
     expect(exchange.install(shipped.blob).ok).toBe(true)
 
     const dir = path.join(home, 'profiles', 'skeleton-crew')
-    expect(fs.readdirSync(path.join(dir, 'hires')).length).toBe(3)
+    expect(fs.readdirSync(path.join(dir, 'hires')).length).toBe(4)
 
     // A v2 with ONE hire and no triggers. Merging would have left the other
-    // two hires and every trigger on disk — so the loader would read back a
+    // three hires and every trigger on disk — so the loader would read back a
     // profile the Architect never approved, with watchers still armed.
     const envelope = JSON.parse(shipped.blob) as {
       manifest: Record<string, unknown>

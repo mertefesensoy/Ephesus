@@ -12,6 +12,7 @@ import {
   profileNameSchema,
   requestedAutonomy,
   targetKindSchema,
+  VERIFIER_HIRE,
   type ProfileAutonomy,
   type ProfileBundle,
   type TargetKind,
@@ -332,4 +333,44 @@ export function activationPlan(
       playbooks: bundle.playbooks.map((book) => book.file)
     }
   }
+}
+
+/**
+ * Contract: the agent on `instanceId` who may verify a root cause `reportedBy`
+ * asserted, or null when nobody may. Pure and total; never throws.
+ *
+ * Lives here rather than as a closure in `src/main/index.ts` on purpose. The
+ * expression is small enough to inline and that is exactly the trap: an
+ * inlined resolver is untestable, so the assertion would have to be a COPY of
+ * it in a test file, and a copy stays green while the original rots. M7.4 shipped
+ * that failure — `index.ts` filtered `trigger.when === 'ci'` against a plan
+ * rendering `"on ci"`, every unit test passed bindings in by hand, and every CI
+ * failure on a real repository was dropped. What a test can reach, a test can
+ * hold to account.
+ *
+ * Two rules, in this order:
+ *
+ *  - **Same instance.** A verifier has to be pointed at the same checkout as the
+ *    claim, and an agent from another activation is not.
+ *  - **Not the author.** Independence is the entire product here. Returning the
+ *    claimant would produce a record that looks checked, which is worse than an
+ *    unchecked one — `IncidentEndpoint.verify` refuses it a second time, and the
+ *    belt and the braces are both deliberate.
+ *
+ * Null when the profile declares no `VERIFIER_HIRE`. That is an ordinary state,
+ * not a fault: a company that has not hired a verifier gets triaged, unverified
+ * incidents, and the endpoint writes the reason into the log rather than leaving
+ * a silence.
+ */
+export function verifierAgentFor(
+  instances: readonly { readonly instanceId: string; readonly plan: ActivationPlan }[],
+  instanceId: string,
+  reportedBy: string
+): string | null {
+  const instance = instances.find((candidate) => candidate.instanceId === instanceId)
+  if (instance === undefined) return null
+  const hire = instance.plan.hires.find(
+    (candidate) => candidate.hire === VERIFIER_HIRE && candidate.agentId !== reportedBy
+  )
+  return hire?.agentId ?? null
 }

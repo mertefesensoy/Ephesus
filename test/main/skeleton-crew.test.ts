@@ -51,7 +51,11 @@ describe('skeleton-crew ships as an ordinary ADR-0012 bundle', () => {
       name: 'skeleton-crew',
       source: 'builtin',
       valid: true,
-      version: 1,
+      // Bumped to 2 when the `verifier` hire was added. ADR-0012 makes the
+      // version a record rather than decoration ("profile versioning doubles as
+      // the performance-review changelog"), so a bundle that gains a hire and
+      // keeps its number is lying about what an Architect approved.
+      version: 2,
       knownTargets: []
     })
   })
@@ -63,10 +67,18 @@ describe('skeleton-crew ships as an ordinary ADR-0012 bundle', () => {
 
     // FR-9.2: "health-check watcher, CI babysitter …, dependency-update agent
     // …, and incident-response playbooks with severity-based escalation".
+    //
+    // `verifier` is the fourth and is NOT one FR-9.2 names. It is the profile
+    // exercising the format rather than the format growing a feature: a hire
+    // file, a budget and a brief, with no schema field and no private API — the
+    // `VERIFIER_HIRE` convention is a name the wiring looks for in an ordinary
+    // hires list. That it can be added this way is ADR-0012's dogfood claim
+    // holding; if it had needed a schema change, the claim would have been false.
     expect(bundle.hires.map((hire) => hire.name).sort()).toEqual([
       'ci-babysitter',
       'dependency-updater',
-      'health-watcher'
+      'health-watcher',
+      'verifier'
     ])
     expect(bundle.playbooks.map((playbook) => playbook.file).sort()).toEqual([
       'dependency-update.md',

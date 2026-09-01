@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "skeleton-crew",
-  "version": 1,
+  "version": 2,
   "target": {
     "kind": "repo"
   },

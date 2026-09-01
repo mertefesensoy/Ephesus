@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { IncidentEndpoint, TRIAGE_SUBJECT, type IncidentBinding } from '../../src/main/incidents'
+import {
+  IncidentEndpoint,
+  TRIAGE_SUBJECT,
+  VERDICT_SUBJECT,
+  type IncidentBinding
+} from '../../src/main/incidents'
 import { HARBOR_ENDPOINT } from '../../src/shared/reserved'
-import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
+import { composeMessage, makeMessageId, parseMessage, type Message } from '../../src/shared/message'
 import type { InboundItem } from '../../src/shared/harbor'
 
 /**
@@ -50,7 +55,12 @@ interface Rig {
   readonly escalated: string[]
 }
 
-function rig(bindings: readonly IncidentBinding[] = [BINDING]): Rig {
+function rig(
+  bindings: readonly IncidentBinding[] = [BINDING],
+  // `undefined` takes the default verifier; an explicit `null` is a floor with
+  // nobody to ask, which is a different case and has its own test.
+  options: { readonly verifier?: string | null } = {}
+): Rig {
   const delivered: Message[] = []
   const logged: Record<string, unknown>[] = []
   const unmet: string[] = []
@@ -60,11 +70,12 @@ function rig(bindings: readonly IncidentBinding[] = [BINDING]): Rig {
     bindings: () => bindings,
     orchestratorId: () => 'agent.artemis',
     deliver: (message) => delivered.push(message),
+    verifierFor: () => (options.verifier === undefined ? VERIFIER : options.verifier),
     // Stand-in for the PromptStore, which reads `prompts/harbor/incident-*.md`.
     // The words are not this module's to own (invariant §8) — the FACTS are,
     // so the fake renders them where a real template would interpolate them.
     render: (kind, vars) =>
-      kind === 'subject' ? `Incident: ${vars.repo} #${vars.ref}` : JSON.stringify(vars),
+      kind.endsWith('subject') ? `${kind}: ${vars.repo ?? vars.incident}` : JSON.stringify(vars),
     onLogEvent: (draft) => logged.push(draft),
     onUnmetObligation: (what) => unmet.push(what),
     onEscalateNow: (incident) => escalated.push(incident.key),
@@ -406,5 +417,385 @@ describe('an unreadable report is refused, never defaulted', () => {
     // escalating the same incident to the Architect a second time.
     expect(endpoint.onTriage(report)).toBeNull()
     expect(escalated).toEqual(['owner/app#ci-run:4021'])
+  })
+})
+
+/**
+ * An independent verdict on a root cause (the 2026-09-01 live run's second
+ * reconciliation gap).
+ *
+ * The run's finding, in one line: the triage was a specific technical diagnosis
+ * of a real repository, MOST of it verified, and its root cause was false in a
+ * way that took ten seconds to check. Nothing in the company could check it.
+ * These tests are about the machinery that now can — and about the four ways it
+ * declines to spend an agent turn, because a verification that fires on every
+ * report is a burn-rate problem wearing a safety hat.
+ */
+
+const ROOT_CAUSE = {
+  claim: 'ArcLinker.run() has no injectable clock and always calls live utcnow()',
+  cites: [
+    {
+      file: 'musahit/arcs/linker.py',
+      line: 122,
+      quote: 'async def run(self, run_id: str)'
+    }
+  ]
+}
+
+/** A triage report that asserts a diagnosis, in the shape the endpoint verifies. */
+const DIAGNOSED = { ...REPORT, rootCause: ROOT_CAUSE }
+
+const VERIFIER = 'agent.skeleton-crew-myapp-verifier'
+
+/** The verifier's answer, as it would arrive from an outbox. */
+function verdictMessage(query: Message, body: Record<string, unknown>, from = VERIFIER): Message {
+  return composeMessage({
+    id: makeMessageId(new Date('2026-08-31T10:20:00.000Z'), 'ver1'),
+    conversation: query.conversation,
+    in_reply_to: query.id,
+    from,
+    to: HARBOR_ENDPOINT,
+    act: 'inform',
+    subject: VERDICT_SUBJECT,
+    body: JSON.stringify(body),
+    hops: 1,
+    created_at: '2026-08-31T10:20:00.000Z'
+  })
+}
+
+const VERDICT = {
+  schemaVersion: 1,
+  kind: 'root-cause-verdict',
+  incident: 'owner/app#ci-run:4021',
+  verdict: 'refute',
+  because: 'line 122 already reads `now: datetime | None = None`, documented, and threads it on',
+  read: [
+    {
+      file: 'musahit/arcs/linker.py',
+      line: 122,
+      quote: 'async def run(self, run_id: str, now: datetime | None = None)'
+    }
+  ]
+}
+
+describe('a root cause is checked by somebody who did not write it', () => {
+  it('asks the verifier to refute it, carrying the claim and its citations', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+
+    const query = delivered.at(-1)
+    expect(query?.to).toBe(VERIFIER)
+    expect(query?.from).toBe(HARBOR_ENDPOINT)
+    // `query` obligates a reply and routes an `inform` back here. A `request`
+    // would read as "do this work"; what is wanted is an answer, and one of the
+    // legal answers is "cannot tell".
+    expect(query?.act).toBe('query')
+    const vars = JSON.parse(query?.body ?? '{}') as Record<string, string>
+    // The claim and the citations verbatim — the harness carries what the agent
+    // wrote and adds no reading of its own.
+    expect(vars.claim).toBe(ROOT_CAUSE.claim)
+    expect(vars.cites).toContain('musahit/arcs/linker.py:122')
+    expect(vars.claimedBy).toBe('agent.skeleton-crew-myapp-ci-babysitter')
+    expect(
+      logged.find((row) => row.event === 'incident-root-cause-verification-requested')
+    ).toMatchObject({ incident: 'owner/app#ci-run:4021', verifier: VERIFIER })
+  })
+
+  it('asks nobody when the report asserted no root cause', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, REPORT))
+    // Most triage has no diagnosis to offer, and "could not retrieve the run
+    // log" is a complete result. Spending an agent turn on every report would
+    // make the check the most expensive thing in the subsystem.
+    expect(delivered.some((message) => message.to === VERIFIER)).toBe(false)
+    expect(logged.some((row) => row.event === 'incident-root-cause-verification-requested')).toBe(
+      false
+    )
+  })
+
+  it('records the reason when no verifier is available, rather than falling silent', () => {
+    const { endpoint, delivered, logged } = rig([BINDING], { verifier: null })
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+
+    expect(delivered.some((message) => message.to === VERIFIER)).toBe(false)
+    // "Nobody checked this diagnosis" is a fact about the record. A company
+    // with no verifier hire gets triaged, unverified incidents and can see that
+    // it does.
+    expect(logged.find((row) => row.event === 'incident-root-cause-unverified')).toMatchObject({
+      incident: 'owner/app#ci-run:4021',
+      because: 'no independent verifier is available on this instance'
+    })
+  })
+
+  it('refuses to let the author verify their own claim', () => {
+    const oncall = 'agent.skeleton-crew-myapp-ci-babysitter'
+    const { endpoint, delivered, logged } = rig([BINDING], {
+      verifier: oncall
+    })
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+
+    // Self-verification is worse than none: it produces a record that looks
+    // checked. The resolver in `index.ts` excludes the author too; this is the
+    // rule kept where it is a rule rather than a lookup.
+    expect(delivered.some((message) => message.act === 'query')).toBe(false)
+    expect(logged.find((row) => row.event === 'incident-root-cause-unverified')).toMatchObject({
+      because: 'the only available verifier is the agent who wrote the report'
+    })
+  })
+
+  it('buys exactly one verification per incident, however often it is reported', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    const report = triage(delivered[0] as Message, DIAGNOSED)
+    endpoint.onTriage(report)
+    // A second report on the same incident — a corrected re-send, a duplicate
+    // from an agent that lost track. A verification is a whole agent turn on
+    // somebody else's budget and must not be bought twice.
+    //
+    // This is asserted against the mechanism that actually provides it: the
+    // incident stops awaiting triage on the first accepted report, so the
+    // second is refused before `verify` is reached. An explicit
+    // "already verified" guard stood here first and its regression passed with
+    // the guard deleted — a second cost control over an idempotency that was
+    // already total, and an assertion that could not fail.
+    expect(endpoint.onTriage(report)).toBeNull()
+    expect(delivered.at(-1)?.act).toBe('refuse')
+    expect(delivered.filter((message) => message.act === 'query')).toHaveLength(1)
+    expect(
+      logged.filter((row) => row.event === 'incident-root-cause-verification-requested')
+    ).toHaveLength(1)
+  })
+
+  it('never delays an escalation to wait for a verdict', () => {
+    const { endpoint, delivered, escalated, unmet, logged } = rig()
+    endpoint.raise([ciRun()])
+    const escalation = endpoint.onTriage(
+      triage(delivered[0] as Message, { ...DIAGNOSED, severity: 1 })
+    )
+    // UC-09 step 4's alarm does not wait for a second pair of eyes to open a
+    // file. The verification goes out beside the escalation, not in front of it.
+    expect(escalation?.escalateNow).toBe(true)
+    expect(escalated).toEqual(['owner/app#ci-run:4021'])
+    expect(unmet).toHaveLength(1)
+    expect(delivered.some((message) => message.to === VERIFIER)).toBe(true)
+    // …and in that order, which is the part a refactor could quietly reverse.
+    // Everything the escalation owes is on the record before the second opinion
+    // is even asked for.
+    const events = logged.map((row) => row.event)
+    expect(events.indexOf('incident-triaged')).toBeLessThan(
+      events.indexOf('incident-root-cause-verification-requested')
+    )
+    expect(events.indexOf('incident-announce-owed')).toBeLessThan(
+      events.indexOf('incident-root-cause-verification-requested')
+    )
+  })
+})
+
+describe('the verdict is recorded BESIDE the claim, never in place of it', () => {
+  it('logs both sides verbatim, and leaves the triage entry untouched', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+    const recorded = endpoint.onVerdict(verdictMessage(query, VERDICT))
+
+    expect(recorded?.verdict).toBe('refute')
+    expect(logged.find((row) => row.event === 'incident-root-cause-verdict')).toMatchObject({
+      incident: 'owner/app#ci-run:4021',
+      verdict: 'refute',
+      verifier: VERIFIER,
+      claim: ROOT_CAUSE.claim,
+      because: VERDICT.because
+    })
+    // The Architect's standing position, asserted: the triage report still
+    // stands exactly as written. The verifier is another agent reading the same
+    // repository under the same pressures, and a system that let one reading
+    // overwrite another would have swapped a confident wrong claim for a
+    // confident wrong correction.
+    expect(logged.find((row) => row.event === 'incident-triaged')).toMatchObject({
+      summary: REPORT.summary,
+      severity: 2
+    })
+  })
+
+  it('tells the claimant when their root cause is refuted, with the evidence', () => {
+    const { endpoint, delivered } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    endpoint.onVerdict(verdictMessage(delivered.at(-1) as Message, VERDICT))
+
+    const note = delivered.at(-1)
+    expect(note?.to).toBe('agent.skeleton-crew-myapp-ci-babysitter')
+    // An `inform`: the agent is not being asked to defend itself or re-report.
+    // It is being told the one thing the previous run never told anybody.
+    expect(note?.act).toBe('inform')
+    const vars = JSON.parse(note?.body ?? '{}') as Record<string, string>
+    expect(vars.verifier).toBe(VERIFIER)
+    expect(vars.because).toBe(VERDICT.because)
+    expect(vars.read).toContain('musahit/arcs/linker.py:122')
+  })
+
+  it('says nothing to the claimant when the verdict agrees', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const before = delivered.length
+    endpoint.onVerdict(
+      verdictMessage(delivered.at(-1) as Message, {
+        ...VERDICT,
+        verdict: 'agree'
+      })
+    )
+    // A confirmation is in the log for anyone who looks. Mailing it would train
+    // agents to skim the one message that matters.
+    expect(delivered).toHaveLength(before)
+    expect(logged.find((row) => row.event === 'incident-root-cause-verdict')).toMatchObject({
+      verdict: 'agree'
+    })
+  })
+
+  it('changes nothing about the escalation the on-call agent decided', () => {
+    const { endpoint, delivered, escalated } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    endpoint.onVerdict(verdictMessage(delivered.at(-1) as Message, VERDICT))
+    // The severity was the agent's call (UC-09 step 2) and a disputed diagnosis
+    // does not make an incident milder — often the reverse. A refutation reaches
+    // the Architect through the log and the standup, not by moving a rung.
+    expect(escalated).toEqual([])
+  })
+})
+
+describe('a verdict that cannot be trusted is refused, not recorded', () => {
+  it('refuses an unreadable verdict back to the verifier', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+    const broken: Record<string, unknown> = { ...VERDICT }
+    delete broken.verdict
+
+    expect(endpoint.onVerdict(verdictMessage(query, broken))).toBeNull()
+    expect(delivered.at(-1)?.act).toBe('refuse')
+    expect(delivered.at(-1)?.to).toBe(VERIFIER)
+    expect(logged.find((row) => row.event === 'incident-verdict-refused')).toBeDefined()
+  })
+
+  it('refuses a refutation that quotes nothing it read', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+
+    expect(endpoint.onVerdict(verdictMessage(query, { ...VERDICT, read: [] }))).toBeNull()
+    expect(delivered.at(-1)?.body).toContain('must quote what it read')
+    // …and nothing was written down. An unevidenced refutation must not reach
+    // the record at all, or the standup would narrate a dispute nobody can check.
+    expect(logged.some((row) => row.event === 'incident-root-cause-verdict')).toBe(false)
+  })
+
+  it('refuses a verdict from an agent nobody asked', () => {
+    const { endpoint, delivered } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+
+    // Accepting a volunteer would mean the claim's own author could file a
+    // verdict on their own claim, and the independence is worth more than the
+    // volunteer.
+    expect(
+      endpoint.onVerdict(verdictMessage(query, VERDICT, 'agent.skeleton-crew-myapp-ci-babysitter'))
+    ).toBeNull()
+    expect(delivered.at(-1)?.act).toBe('refuse')
+  })
+
+  it('refuses a verdict whose body names a different incident than the thread', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+
+    // Right thread, wrong key — a verifier holding two queries answering one
+    // with the other's incident. The disagreement means the reading may have
+    // been done against a different repository, so the thread is not trusted
+    // over the body: both must agree or neither is believed.
+    expect(
+      endpoint.onVerdict(verdictMessage(query, { ...VERDICT, incident: 'owner/app#ci-run:9999' }))
+    ).toBeNull()
+    expect(delivered.at(-1)?.act).toBe('refuse')
+    expect(delivered.at(-1)?.body).toContain('owner/app#ci-run:4021')
+    expect(logged.some((row) => row.event === 'incident-root-cause-verdict')).toBe(false)
+  })
+
+  it('refuses a verdict on a root cause nobody sent for verification', () => {
+    const { endpoint, delivered } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, REPORT))
+    const stray = composeMessage({
+      id: makeMessageId(new Date('2026-08-31T10:20:00.000Z'), 'stray'),
+      conversation: 'c-stray',
+      in_reply_to: null,
+      from: VERIFIER,
+      to: HARBOR_ENDPOINT,
+      act: 'inform',
+      subject: VERDICT_SUBJECT,
+      body: JSON.stringify(VERDICT),
+      hops: 1,
+      created_at: '2026-08-31T10:20:00.000Z'
+    })
+
+    expect(endpoint.onVerdict(stray)).toBeNull()
+    expect(delivered.at(-1)?.act).toBe('refuse')
+  })
+
+  it('does not record the same verdict twice', () => {
+    const { endpoint, delivered, logged } = rig()
+    endpoint.raise([ciRun()])
+    endpoint.onTriage(triage(delivered[0] as Message, DIAGNOSED))
+    const query = delivered.at(-1) as Message
+    const answer = verdictMessage(query, VERDICT)
+
+    expect(endpoint.onVerdict(answer)?.verdict).toBe('refute')
+    expect(endpoint.onVerdict(answer)).toBeNull()
+    expect(logged.filter((row) => row.event === 'incident-root-cause-verdict')).toHaveLength(1)
+  })
+})
+
+/**
+ * Every message this path emits must be one an agent can actually read.
+ *
+ * `deliverFromHarness` writes straight into an inbox without parsing, so a
+ * harness-composed message that violates the envelope schema is not refused
+ * here — it lands, and fails when the RECIPIENT's reply is validated, or when
+ * anything reads the file back. `Message.conversation` is capped at 64
+ * characters and an incident key is `<owner>/<repo>#ci-run:<run id>`, which a
+ * long enough repository name pushes over. That is a defect nothing else in the
+ * suite would notice, because every fixture repo in it is called `owner/app`.
+ */
+describe('the mail this path writes is legal mail', () => {
+  const LONG_REPO = 'an-organisation-with-a-long-name/a-repository-with-an-even-longer-name'
+
+  it('emits a parseable query and dispute note even for a long repository name', () => {
+    const binding: IncidentBinding = { ...BINDING, repos: [LONG_REPO] }
+    const { endpoint, delivered } = rig([binding])
+    endpoint.raise([ciRun({ repo: LONG_REPO })])
+    const incident = `${LONG_REPO}#ci-run:4021`
+    expect(incident.length).toBeGreaterThan(64)
+
+    endpoint.onTriage(triage(delivered[0] as Message, { ...DIAGNOSED, incident }))
+    const query = delivered.at(-1) as Message
+    endpoint.onVerdict(verdictMessage(query, { ...VERDICT, incident }))
+
+    // Round-tripped through the validator an agent's own mail goes through.
+    for (const message of delivered) {
+      const parsed = parseMessage(message)
+      expect(parsed.ok ? '' : `${message.subject}: ${parsed.reason}`).toBe('')
+    }
+    expect(delivered.at(-1)?.to).toBe(BINDING.agentId)
   })
 })
