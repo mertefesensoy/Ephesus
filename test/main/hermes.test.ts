@@ -616,10 +616,16 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     expect(reply?.decision).toBe('block')
     expect(reply?.reason).toContain('1')
     expect(r.hermes.blockCount('agent.b')).toBe(1)
-    // Hand-over consumption (ADR-0003, close-out audit): the mail travels in
-    // the reason and its file is archived in the same act — a second Stop with
-    // nothing new can never re-block on the same message.
-    expect(reply?.reason).toContain(message().subject)
+    // Hand-over consumption (ADR-0003, close-out audit): the reason names WHERE
+    // the mail was archived and its file is moved in the same act — a second
+    // Stop with nothing new can never re-block on the same message.
+    //
+    // A pointer, not the payload: this text is typed into the agent's terminal,
+    // and a real TUI treats a multi-line block as a paste and stops to confirm
+    // it. The archived path is what the agent needs; the content is a file it
+    // can already read.
+    expect(reply?.reason).toContain('inbox/.done/')
+    expect(reply?.reason).not.toContain('\n')
     expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
     expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
   })
@@ -710,8 +716,14 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     expect(await r.hermes.wakeCheck()).toEqual([])
     expect(nudges).toHaveLength(1)
     expect(nudges[0]?.agentId).toBe('agent.b')
-    // The nudge carries the mail, and the file is archived in the same act.
-    expect(nudges[0]?.text).toContain(message().subject)
+    // The nudge names where the mail was archived, and the file is moved in the
+    // same act. It POINTS rather than pasting: this text is typed into a real
+    // TUI, which treats a multi-line block as a paste and halts for
+    // confirmation — two freshly spawned agents died there before the hand-over
+    // became a pointer.
+    expect(nudges[0]?.text).toContain('inbox/.done/')
+    expect(nudges[0]?.text).toContain('.json')
+    expect(nudges[0]?.text).not.toContain('\n')
     expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
   })
 

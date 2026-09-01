@@ -188,7 +188,22 @@ export const DONE_DIR = '.done'
  */
 export function formatHandover(messages: readonly Message[]): string {
   if (messages.length === 0) return '(none)'
-  return messages.map((m) => JSON.stringify(m, null, 2)).join('\n')
+  // File names on ONE line, not the messages themselves.
+  //
+  // This used to hand over `JSON.stringify(m, null, 2)` — pretty-printed, ~14
+  // lines per message — and the nudge is typed into the agent's terminal. A
+  // real Claude Code TUI runs with bracketed paste enabled, sees a multi-line
+  // block arrive at once, decides it is a paste and stops for confirmation
+  // ("Enter to confirm · Esc to cancel"). Freshly spawned agents died there:
+  // two of the Skeleton Crew exited 1 within two seconds of their first wake,
+  // and the failure was invisible to every test because the fake engine reads
+  // its inbox from disk and never renders a terminal at all.
+  //
+  // So the hand-over is a POINTER now, not a payload. The harness says what
+  // arrived and where it was archived; the agent reads its own files with the
+  // tools it already has. Pushing kilobytes of JSON through a keyboard was
+  // never the sound half of this design.
+  return messages.map((m) => `inbox/.done/${m.id}.json`).join(', ')
 }
 
 export class Hermes {
