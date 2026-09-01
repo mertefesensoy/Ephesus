@@ -177,9 +177,23 @@ describe('hop-cap escalations (trip signal #3)', () => {
   })
 })
 
-describe('burn rate (trip signal #4, from M3.2)', () => {
-  it.each(['breached', 'projected-breach'] as const)('fires on %s', (budgetState) => {
-    expect(evaluateSignals(input({ budgetState })).map((h) => h.signal)).toEqual(['burn-rate'])
+describe('burn rate (trip signal #4, from M3.2; narrowed by ADR-0023)', () => {
+  it('fires on breached', () => {
+    expect(evaluateSignals(input({ budgetState: 'breached' })).map((h) => h.signal)).toEqual([
+      'burn-rate'
+    ])
+  })
+
+  it('does NOT fire on projected-breach', () => {
+    // ADR-0023 narrowed this signal to the breach itself. The projection was
+    // made against `budget.dailyTokens` — a per-agent constant — and a constant
+    // cannot forecast anything in a company with no fixed lifetime: on a real
+    // run whose ceilings had just been raised fifty-fold, all four agents
+    // reached `projected-breach` within twenty minutes and two were throttled
+    // to rung 2. Forecasting now belongs to the pacer, which projects against
+    // the account's real, resetting window; what is left here is a runaway
+    // backstop, and a backstop fires on the thing itself.
+    expect(evaluateSignals(input({ budgetState: 'projected-breach' }))).toEqual([])
   })
 
   it.each(['ok', 'unbudgeted', null] as const)('does not fire on %s', (budgetState) => {
