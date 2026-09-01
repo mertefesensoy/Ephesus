@@ -46,6 +46,12 @@ export type PinProbe =
   | { readonly pinned: false }
   | { readonly pinned: null; readonly reason: string }
 
+/** Same three-valued shape, for "does a held file block a rename over it". */
+export type RenameProbe =
+  | { readonly blocks: true }
+  | { readonly blocks: false }
+  | { readonly blocks: null; readonly reason: string }
+
 const HOLD_MS = 30_000
 
 export async function pinHolds(): Promise<PinProbe> {
@@ -113,6 +119,77 @@ export async function pinHolds(): Promise<PinProbe> {
     }
   } finally {
     proc?.kill()
+    if (home !== null) {
+      try {
+        fs.rmSync(home, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 })
+      } catch {
+        // Probe litter, not a finding.
+      }
+    }
+  }
+}
+
+/**
+ * Does THIS platform refuse to rename a file over a destination something else
+ * is holding open?
+ *
+ * Windows does: an open read handle on the destination — which is all a virus
+ * scanner or a search indexer is — makes `renameSync` fail with `EPERM`, and
+ * the destination keeps its old contents, so the write is lost. That is the
+ * whole reason `writeFileAtomic` retries. POSIX does not: a rename over an open
+ * file succeeds, the reader keeps reading the old inode, and nothing fails.
+ *
+ * So the retry cannot be provoked on CI, and a test asserting the block would
+ * FAIL there rather than merely prove nothing — the same trap as `pinHolds`.
+ *
+ * Contract: never throws, and never reports `false` for a setup that did not
+ * actually contend. The handle is confirmed open before the rename is
+ * attempted, because "the rename succeeded" is only evidence about the platform
+ * if something was really holding the destination.
+ */
+export function renameBlocks(): RenameProbe {
+  let home: string | null = null
+  let fd: number | null = null
+  try {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-renprobe-'))
+    const dest = path.join(home, 'dest')
+    const tmp = path.join(home, 'tmp')
+    fs.writeFileSync(dest, 'old', 'utf8')
+    fs.writeFileSync(tmp, 'new', 'utf8')
+
+    try {
+      fd = fs.openSync(dest, 'r')
+    } catch (err) {
+      return {
+        blocks: null,
+        reason: `could not hold the destination open: ${err instanceof Error ? err.message : String(err)}`
+      }
+    }
+
+    try {
+      fs.renameSync(tmp, dest)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? 'unknown'
+      if (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') return { blocks: true }
+      return { blocks: null, reason: `the rename failed for an unrelated reason: ${code}` }
+    }
+    // It went through while the handle was open, which is the POSIX behaviour.
+    return fs.readFileSync(dest, 'utf8') === 'new'
+      ? { blocks: false }
+      : { blocks: null, reason: 'the rename reported success but did not replace the destination' }
+  } catch (err) {
+    return {
+      blocks: null,
+      reason: `the probe could not run: ${err instanceof Error ? err.message : String(err)}`
+    }
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        // Probe litter, not a finding.
+      }
+    }
     if (home !== null) {
       try {
         fs.rmSync(home, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 })
