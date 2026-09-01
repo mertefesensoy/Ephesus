@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { floorPlan, TILE_PX, type PlanCell } from '../../src/shared/floor'
+import { floorPlan, ROOM_COLS, ROOM_ROWS, TILE_PX, type PlanCell } from '../../src/shared/floor'
 import { atlasScale, FRAME_KEYS, parseTilesetMap, resolveTileset } from '../../src/shared/tileset'
 import {
   atlasFrame,
@@ -423,5 +423,65 @@ describe('a floor can be painted from more than one pack', () => {
     // The second pack fills what the first left unmapped — it does not overpaint.
     const bench = paintCell(cell({ kind: 'station', of: 'terminal-bench' }), layers)
     expect(bench[0]).toMatchObject({ op: 'blit', sheet: 'extra.png' })
+  })
+})
+
+/**
+ * A room whose every wall is one repeated tile reads as a band, not a room —
+ * no cornice along the top, no return down the sides, no corners. The variants
+ * are derived from the cell's position rather than added to the plan, because
+ * walls ARE the room's border and the painter already knows where that is.
+ */
+describe('walls read as a room', () => {
+  const wall = (col: number, row: number) => ({
+    col,
+    row,
+    kind: 'wall' as const,
+    of: null,
+    part: null
+  })
+
+  it('names a corner before an edge, because a corner is also an edge', () => {
+    expect(frameKeysFor(wall(0, 0))[0]).toBe('wall-nw')
+    expect(frameKeysFor(wall(ROOM_COLS - 1, 0))[0]).toBe('wall-ne')
+    expect(frameKeysFor(wall(0, ROOM_ROWS - 1))[0]).toBe('wall-sw')
+    expect(frameKeysFor(wall(ROOM_COLS - 1, ROOM_ROWS - 1))[0]).toBe('wall-se')
+  })
+
+  it('names each edge', () => {
+    expect(frameKeysFor(wall(5, 0))[0]).toBe('wall-n')
+    expect(frameKeysFor(wall(5, ROOM_ROWS - 1))[0]).toBe('wall-s')
+    expect(frameKeysFor(wall(0, 5))[0]).toBe('wall-w')
+    expect(frameKeysFor(wall(ROOM_COLS - 1, 5))[0]).toBe('wall-e')
+  })
+
+  it('always falls back to plain wall, so a one-tile pack still paints', () => {
+    for (const cell of [wall(0, 0), wall(5, 0), wall(0, 5), wall(19, 11)]) {
+      expect(frameKeysFor(cell)).toContain('wall')
+    }
+  })
+})
+
+/**
+ * A desk is two tiles wide. Mapping the whole seat to one frame painted a
+ * computer on BOTH halves — twice the monitors, and nowhere to sit.
+ */
+describe('a seat is a desk and a chair, not two computers', () => {
+  const seat = (partCol: number) => ({
+    col: 4,
+    row: 4,
+    kind: 'seat' as const,
+    of: 'terrace-1',
+    part: { col: partCol, row: 0, cols: 2, rows: 1 }
+  })
+
+  it('asks for a different tile for each half', () => {
+    expect(frameKeysFor(seat(0))[0]).toBe('seat-a')
+    expect(frameKeysFor(seat(1))[0]).toBe('seat-b')
+    expect(frameKeysFor(seat(0))[0]).not.toBe(frameKeysFor(seat(1))[0])
+  })
+
+  it('falls back to a single seat frame for a pack that ships one', () => {
+    expect(frameKeysFor(seat(0))).toContain('seat')
   })
 })

@@ -1,3 +1,4 @@
+import { ROOM_COLS, ROOM_ROWS } from '../../../shared/floor'
 import { STATION_TILES, type PlanCell } from '../../../shared/floor'
 import { STATIONS, type Station } from '../../../shared/avatar'
 import {
@@ -46,7 +47,31 @@ export function atlasFrame(index: number, map: TilesetMap): AtlasFrame {
  * the procedural painter.
  */
 export function frameKeysFor(cell: PlanCell): readonly string[] {
-  return cell.kind === 'station' && cell.of ? [`station:${cell.of}`, cell.kind] : [cell.kind]
+  if (cell.kind === 'station' && cell.of) return [`station:${cell.of}`, cell.kind]
+  // Walls are the room's border, so which edge a cell is on is derivable here
+  // and needs nothing new in the plan. Corners are named first: a corner is
+  // also a top and also a side, and the most specific tile is the one that
+  // makes it read as a corner.
+  if (cell.kind === 'wall') {
+    const north = cell.row === 0
+    const south = cell.row === ROOM_ROWS - 1
+    const west = cell.col === 0
+    const east = cell.col === ROOM_COLS - 1
+    if (north && west) return ['wall-nw', 'wall-n', 'wall']
+    if (north && east) return ['wall-ne', 'wall-n', 'wall']
+    if (south && west) return ['wall-sw', 'wall-s', 'wall']
+    if (south && east) return ['wall-se', 'wall-s', 'wall']
+    if (north) return ['wall-n', 'wall']
+    if (south) return ['wall-s', 'wall']
+    if (west) return ['wall-w', 'wall']
+    if (east) return ['wall-e', 'wall']
+    return ['wall']
+  }
+  // A desk is two tiles wide; `part.col` says which half this is.
+  if (cell.kind === 'seat' && cell.part) {
+    return [cell.part.col === 0 ? 'seat-a' : 'seat-b', 'seat']
+  }
+  return [cell.kind]
 }
 
 /** Contract: the frame index for a cell, or null when the pack does not map it. */

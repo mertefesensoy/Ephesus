@@ -26,8 +26,37 @@ export const TILESET_SCHEMA_VERSION = 1
  * allowlist is the point — a typo'd key is a tile that silently never paints,
  * so it is a parse failure instead.
  */
+/**
+ * Wall variants, by which edge of the room the cell sits on.
+ *
+ * A room whose every wall is one repeated tile reads as a band, not a room:
+ * there is no cornice along the top, no return down the sides, no corner. A
+ * pack that ships a wall SET can name these; one that ships a single wall still
+ * works, because every variant falls back to plain `wall`.
+ */
+export const WALL_VARIANTS: readonly string[] = [
+  'wall-n',
+  'wall-s',
+  'wall-e',
+  'wall-w',
+  'wall-ne',
+  'wall-nw',
+  'wall-se',
+  'wall-sw'
+]
+
+/**
+ * Seat halves. A desk is two tiles wide (§5.4), and mapping the whole seat to
+ * one frame painted a computer on BOTH of them — twice the monitors and nowhere
+ * to sit. `seat-a` is the left tile, `seat-b` the right, so a workstation can be
+ * a desk and a chair instead of two of the same thing.
+ */
+export const SEAT_VARIANTS: readonly string[] = ['seat-a', 'seat-b']
+
 export const FRAME_KEYS: readonly string[] = [
   ...PLAN_KINDS,
+  ...WALL_VARIANTS,
+  ...SEAT_VARIANTS,
   ...STATIONS.map((station) => `station:${station}`)
 ]
 
