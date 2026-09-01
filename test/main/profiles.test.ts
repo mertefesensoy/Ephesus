@@ -322,3 +322,59 @@ describe('a fired schedule trigger actually wakes its agent', () => {
     expect(first.id).not.toBe(second.id)
   })
 })
+
+describe('a trigger wake survives the ids production actually mints', () => {
+  /**
+   * The wake used to build its conversation as `${instanceId}:${triggerId}`,
+   * and `activationPlan` already mints the trigger id as `<instance>/<trigger>`
+   * — so the instance appeared twice and the result was 66 characters against
+   * SDD §4.4's limit of 64. `composeMessage` threw, every schedule trigger
+   * wake failed, and the two agents those triggers wake received nothing for
+   * the whole of a live run.
+   *
+   * The earlier test passed because its fixture ids were shorter than real
+   * ones. So this case derives the ids the way the app does rather than
+   * inventing tidy ones.
+   */
+  it('builds a legal message for a real instance and trigger id', () => {
+    const instanceId = 'skeleton-crew@repo:musahit'
+    const triggerId = `${instanceId}/health-sweep`
+    const message = triggerWakeMessage(
+      {
+        instanceId,
+        triggerId,
+        agentId: 'agent.skeleton-crew-musahit-health-watcher',
+        playbook: 'health-check.md',
+        profile: 'skeleton-crew',
+        targetPath: 'C:\\repos\\musahit'
+      },
+      (kind, vars) => (kind === 'subject' ? `duty: ${vars.playbook}` : `follow ${vars.playbook}`),
+      new Date('2026-09-01T09:00:00.000Z')
+    )
+    // composeMessage validates; reaching here at all is most of the assertion.
+    expect(message.conversation.length).toBeLessThanOrEqual(64)
+    expect(message.to).toBe('agent.skeleton-crew-musahit-health-watcher')
+  })
+
+  it('stays legal for the longest ids the schema still permits', () => {
+    // A 64-char profile name and a 64-char target id are both legal, so the
+    // composed conversation must survive them rather than merely surviving the
+    // built-ins that happen to ship.
+    const instanceId = `${'p'.repeat(60)}@repo:${'t'.repeat(60)}`
+    const triggerId = `${instanceId}/${'g'.repeat(60)}`
+    expect(() =>
+      triggerWakeMessage(
+        {
+          instanceId,
+          triggerId,
+          agentId: 'agent.a',
+          playbook: 'x.md',
+          profile: 'p',
+          targetPath: '/tmp'
+        },
+        () => 'text',
+        new Date('2026-09-01T09:00:00.000Z')
+      )
+    ).not.toThrow()
+  })
+})

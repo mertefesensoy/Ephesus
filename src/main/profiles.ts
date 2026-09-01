@@ -483,7 +483,15 @@ export function triggerWakeMessage(
     // binding that sent it (NFR-13) without a random component nothing can
     // reproduce.
     id: makeMessageId(at, `trg${wake.triggerId.replace(/[^a-z0-9]/g, '').slice(0, 10) || 'x'}`),
-    conversation: `${wake.instanceId}:${wake.triggerId}`,
+    // The trigger id ALREADY carries its instance (`activationPlan` builds it
+    // as `<instance>/<trigger>`), so prefixing it again both duplicated the
+    // instance and blew SDD §4.4's 64-character conversation limit — 66 for a
+    // profile named `skeleton-crew` on a target named `musahit`. Every schedule
+    // wake threw, the health watcher and the dependency updater received
+    // nothing, and the failure surfaced only as a count on the agora health
+    // badge. The unit test passed because its fixture ids were shorter than the
+    // ones production mints.
+    conversation: wake.triggerId.slice(0, 64),
     in_reply_to: null,
     from: PROFILE_ENDPOINT,
     to: wake.agentId,
