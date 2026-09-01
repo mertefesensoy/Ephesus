@@ -4451,17 +4451,28 @@ load on both arms: **control (`3d5fbfa`) failed 3 of 3** with the exact
 assertion, **fixed (`4143464`) failed 0 of 3**. The control arm is what makes
 that evidence rather than another silent no-op.
 
-1. **`s-stoploop`'s margin is ~6×, not ~2.2×.** The thin figure compared the
-   whole FILE duration against a PER-TEST timeout. `vitest.config.mts` sets
-   `testTimeout: 30_000` and `hookTimeout: 30_000`, both per unit; the file's
-   16.55 s is five tests plus transform and import. Measured per test, the
-   slowest is **4.77 s** (`signals the breaker at rung 1`), then 4.76 s, 2.19 s,
-   1.92 s, 1.67 s — so roughly sixfold headroom on the metric that actually
-   governs. `s-livelock`'s slowest test is 1.98 s. The underlying concern still
-   stands and is not dismissed: under 3× concurrent load `s-stoploop` did time
-   out 3/3, which means real saturation can inflate a 4.8 s test past 30 s. But
-   nothing here needs a bigger number today, and if one is ever chosen it should
-   be chosen against the per-test measurement rather than the file's.
+1. **`s-stoploop`'s margin is ~3×, and getting there took three wrong answers.**
+   The figure matters because it is what any future timeout would be chosen
+   against, and it was computed wrongly twice in opposite directions:
+
+   - *Wrong denominator.* 2.2×, then 1.7–1.8×, both from the whole FILE
+     duration against a PER-TEST timeout. `vitest.config.mts` sets
+     `testTimeout: 30_000` and `hookTimeout: 30_000`, both per unit; the file's
+     ~16 s is five tests plus transform and import, and no timeout governs it.
+   - *Right denominator, one sample.* 6×, from a single run whose slowest test
+     was 4.77 s — the same single-measurement error, on the correct metric.
+   - *Right denominator, distribution.* Slowest single test over four isolated
+     runs on an idle machine: **3.03 s, 3.71 s, 3.90 s, 9.99 s**. Against the
+     30 s ceiling that is **~3× at the worst observed**.
+
+   The spread is the finding, not the margin: **3.3× variation between runs with
+   nothing else on the machine.** A margin computed from any one run is not a
+   margin, which is why all three earlier numbers disagreed. The concern stands
+   and is not dismissed — under 3× concurrent load `s-stoploop` timed out 3/3 —
+   but nothing needs a bigger number today, and any ceiling ever chosen must be
+   set against the upper tail of a distribution and recorded with it, so the
+   next reader can see what it was chosen against. `s-livelock`'s slowest test
+   is 1.98 s on the same metric, and it is claimed by nobody.
 2. **The `writeFileAtomic` retry has a reachable ceiling.** `s-deckgate` failed
    in the control arm with `EPERM … .tasks.json.tmp -> tasks.json` — the exact
    error the retry exists to absorb — with the retry live. Independently
