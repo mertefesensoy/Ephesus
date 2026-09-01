@@ -1,3 +1,4 @@
+import type { UsageSnapshot } from '../shared/ipc'
 import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
@@ -200,6 +201,8 @@ export interface IpcDeps {
   readonly secrets: SecretBroker
   /** Per-agent spend, folded from the durable ledger (ADR-0011). */
   budgets(): readonly AgentSpend[]
+  /** The company-wide pace and the window behind it (ADR-0023). */
+  usage(): UsageSnapshot
   /** The Watch's approval queue (SDD §9, UC-08). */
   readonly gates: GateManager
   /** Mail Hermes diverted to `agora/human/` (FR-3.7). */
@@ -315,6 +318,7 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.watchBudgets, (): readonly AgentSpend[] => deps.budgets())
+  ipcMain.handle(IpcChannels.watchUsage, (): UsageSnapshot => deps.usage())
 
   ipcMain.handle(IpcChannels.watchApprovals, (): readonly OpenGate[] => deps.gates.list())
 

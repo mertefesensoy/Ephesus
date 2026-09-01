@@ -349,8 +349,13 @@ export function sessionCostOf(spend: {
   readonly sessionTotals: CostTotals
   readonly liveSessionCostUsd: number | null
 }): SessionCost {
-  const durable = spend.sessionTotals.costUsd
-  const live = spend.liveSessionCostUsd
+  // Normalised at the seam rather than trusted. This is read in the RENDERER,
+  // across an IPC boundary, so a version skew or a partial payload can deliver
+  // a field the type says is always there. The dock exists to end blindness
+  // about the company; blanking it on a malformed spend row would be the
+  // richest possible irony.
+  const durable = spend.sessionTotals.costUsd ?? null
+  const live = spend.liveSessionCostUsd ?? null
   if (durable === null && live === null) return { usd: null, from: 'none' }
   if (durable === null) return { usd: live, from: 'live' }
   if (live === null) return { usd: durable, from: 'ledger' }
@@ -425,4 +430,54 @@ export function evaluateBudget(input: {
     return { state: 'projected-breach', spent, remaining, projected, because: 'projection' }
   }
   return { state: 'ok', spent, remaining, projected, because: 'under' }
+}
+
+/**
+ * Contract: pure. The money a card shows for one agent, in words.
+ *
+ * A dollar figure with no provenance is the thing this must not become. The
+ * durable figure is final and the live one is provisional, so the note says
+ * which — an Architect reading "$0.48" needs to know whether that is the bill
+ * or the running meter, and a UI that renders them identically has made them
+ * the same claim.
+ *
+ * "not reported" is a THIRD state, distinct from `$0.00`. An engine that
+ * reports no cost and an agent that genuinely spent nothing must never render
+ * alike (ADR-0011), which is the same rule the token bar already follows for
+ * `reporting: 'none'`.
+ */
+export function costNoteOf(spend: {
+  readonly sessionTotals: CostTotals
+  readonly liveSessionCostUsd: number | null
+  readonly cumulativeTotals: CostTotals
+}): { readonly text: string; readonly title: string } {
+  const session = sessionCostOf(spend)
+  if (session.usd === null) {
+    return {
+      text: 'cost not reported',
+      title: 'this engine reports no cost, or has not reported one yet'
+    }
+  }
+  const live = session.from === 'live'
+  const total = spend.cumulativeTotals.costUsd
+  return {
+    text: `${formatUsd(session.usd)}${live ? ' so far' : ''}`,
+    title:
+      (live
+        ? 'this session, live from the engine — provisional until the session ends'
+        : 'this session, folded from the engine transcript — final') +
+      (total === null ? '' : ` · ${formatUsd(total)} all time`)
+  }
+}
+
+/**
+ * Contract: pure. USD to a fixed number of places.
+ *
+ * Sub-cent figures keep four places rather than rounding to `$0.00`, which
+ * would render real spend as nothing — the same "not reported vs free"
+ * confusion in another costume.
+ */
+export function formatUsd(usd: number): string {
+  if (usd > 0 && usd < 0.01) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
 }

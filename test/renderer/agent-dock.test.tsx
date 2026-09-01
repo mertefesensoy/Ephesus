@@ -79,6 +79,7 @@ function spendRow(over: Record<string, unknown> = {}) {
     sessionTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
     todayTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
     cumulativeTotals: { inTokens: 0, outTokens: 0, costUsd: null, rows: 0 },
+    liveSessionCostUsd: null,
     dailyTokens: 20_000_000,
     budget: { state: 'ok', spent: 5_000_000, remaining: 15_000_000, projected: null, because: '' },
     ...over

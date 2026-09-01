@@ -16,6 +16,7 @@ import {
   type EphApi,
   type HooksState
 } from '../shared/ipc'
+import type { UsageSnapshot } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
 import type { BreakerState } from '../shared/breaker'
@@ -231,6 +232,7 @@ const eph: EphApi = {
   },
   watch: {
     budgets: () => ipcRenderer.invoke(IpcChannels.watchBudgets) as Promise<readonly AgentSpend[]>,
+    usage: () => ipcRenderer.invoke(IpcChannels.watchUsage) as Promise<UsageSnapshot>,
     approvals: () => ipcRenderer.invoke(IpcChannels.watchApprovals) as Promise<readonly OpenGate[]>,
     approve: (gateId, verdict) =>
       ipcRenderer.invoke(IpcChannels.watchApprove, { gateId, verdict }) as Promise<{

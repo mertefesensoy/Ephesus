@@ -10,7 +10,7 @@ import { z } from 'zod'
  * rolling usage window, which fills and then **resets**.
  *
  * Everything in this file is pure. The windows arrive as data (observed by the
- * engine's statusline and written to `<home>/usage.json` by `eph-usage.mjs`),
+ * engine's statusline and written to `<home>/usage/<agent>.json` by the shim),
  * the clock arrives as an argument, and the verdict is a function of the two.
  * That is what makes a slowdown explicable after the fact: the same windows and
  * the same instant always produce the same pace, and the log carries the
@@ -332,4 +332,82 @@ export function mayWake(input: {
   if (gap === Number.POSITIVE_INFINITY) return { allowed: false, waitMs: Number.POSITIVE_INFINITY }
   const waited = input.now - input.lastWokeAt
   return waited >= gap ? { allowed: true, waitMs: 0 } : { allowed: false, waitMs: gap - waited }
+}
+
+/**
+ * What the Architect is told about the pace, in words (UI-DESIGN §5).
+ *
+ * Pure, and separated from the component for the reason every other verdict in
+ * this codebase is: the sentence a paced company shows is the sentence that has
+ * to be right, and a rule buried in JSX is a rule nobody can test.
+ */
+export interface PaceNote {
+  /** The headline word. */
+  readonly label: string
+  /** The whole sentence, including which window and when it frees up. */
+  readonly detail: string
+  /** Whether this is worth showing at all — `full` normally is not. */
+  readonly notable: boolean
+}
+
+/**
+ * Contract: pure. `now` is passed in rather than read, so the sentence is
+ * reproducible from its inputs.
+ *
+ * The `unobserved` case says so out loud rather than showing "full speed". They
+ * are different facts — one is "the account has room", the other is "we cannot
+ * see the account" — and only the second one means the signal is broken. An
+ * Architect who cannot tell them apart cannot know the pacing is not working.
+ */
+export function paceNoteOf(verdict: PaceVerdict, now: number): PaceNote {
+  if (verdict.because === 'unobserved') {
+    return {
+      label: 'usage unseen',
+      detail: 'no usage window observed yet — running at full speed, ungoverned',
+      // Notable: this is the state where pacing is NOT protecting anything.
+      notable: true
+    }
+  }
+  if (verdict.pace === 'full') {
+    return {
+      label: 'full speed',
+      detail:
+        verdict.because === 'reset'
+          ? 'the usage window reset — full speed'
+          : windowPhrase(verdict.tightest, 'full speed'),
+      notable: false
+    }
+  }
+  const until = verdict.resetsAt === null ? null : minutesUntil(verdict.resetsAt, now)
+  const frees = until === null ? '' : `, frees up in ${until}`
+  return {
+    label: verdict.pace === 'hold' ? 'holding' : 'slowing down',
+    detail:
+      (verdict.pace === 'hold'
+        ? `holding until the window resets${frees}`
+        : `pacing wakes${frees}`) + ` — ${windowPhrase(verdict.tightest, 'no window')}`,
+    notable: true
+  }
+}
+
+function windowPhrase(pressure: WindowPressure | null, fallback: string): string {
+  if (!pressure) return fallback
+  const name = pressure.window === 'five-hour' ? '5-hour' : 'weekly'
+  const used = `${String(Math.round(pressure.usedPercent))}%`
+  // The projection is named only when it is the reason, because "on course for
+  // 160%" reads as alarming beside a window that is only a third used.
+  const projected =
+    pressure.because === 'ahead-of-pace' && pressure.projectedPercent !== null
+      ? `, on course for ${String(Math.round(pressure.projectedPercent))}%`
+      : ''
+  return `${name} window ${used} used${projected}`
+}
+
+/** Contract: pure. A rounded human duration, never a negative one. */
+export function minutesUntil(at: number, now: number): string {
+  const minutes = Math.max(0, Math.round((at - now) / 60_000))
+  if (minutes < 60) return `${String(minutes)}m`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(rest)}m`
 }

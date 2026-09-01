@@ -417,9 +417,12 @@ what this change actually rests on.
   payload noted here: it is per-model, which is what the ledger is keyed on, and
   it arrives through a reader that already exists.
 - **No reduction of the ~70k baseline context** — see §7.
-- **No UI surface.** Pace changes, deferrals and wake overruns are log events and
-  runtime-health degradations, which is how the Architect sees them today; no
-  agent card or panel was added.
+- **Partly closed.** The company PACE is now shown above the agent dock, and
+  per-agent cost on each card — see
+  [2026-09-01-cost-usd-into-the-ledger.md §11](2026-09-01-cost-usd-into-the-ledger.md).
+  Wake deferrals and wake overruns remain log events and runtime-health
+  entries only, deliberately: they are transient, and the pace strip already
+  answers the question a deferral raises.
 - **Non-Claude engines are unpaced.** Codex and Gemini install no statusline, so
   a company running them observes nothing and paces at `full`.
 - **Nothing was run against the live company.** The evidence here is a captured

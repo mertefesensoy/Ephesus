@@ -74,6 +74,11 @@ async function rig(options: RigOptions = {}): Promise<{
     secrets: {} as never,
     gates,
     budgets: () => [],
+    usage: () => ({
+      verdict: { pace: 'full', because: 'unobserved', tightest: null, resetsAt: null, windows: [] },
+      observed: null,
+      at: 0
+    }),
     humanQueue: () => [],
     dismissFromHumanQueue: () => true,
     breakerState: () => [],

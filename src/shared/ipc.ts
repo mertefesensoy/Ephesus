@@ -14,6 +14,23 @@ import type {
 } from './profile-view'
 import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
 import type { HarborView } from './harbor'
+import type { PaceVerdict, UsageReport } from './pacing'
+
+/**
+ * What the Architect is shown about the account's usage window (ADR-0023).
+ *
+ * The raw reading rides along beside the verdict so the panel can say WHEN the
+ * figure was taken, and main's clock rides with it so the renderer never has to
+ * guess how far in the future a reset is. A pace with no observation behind it
+ * cannot otherwise be told apart from a pace computed on nothing, and those are
+ * the two states an Architect most needs to distinguish.
+ */
+export interface UsageSnapshot {
+  readonly verdict: PaceVerdict
+  readonly observed: UsageReport | null
+  /** Main's clock at the moment the snapshot was taken. */
+  readonly at: number
+}
 import type { ShareExport, ShareInspection, ShareInstall } from './share-view'
 import type { ModeSet, ModeView } from './mode-view'
 import type {
@@ -160,6 +177,7 @@ export const IpcChannels = {
   secretsTest: 'secrets:test',
   secretsDelete: 'secrets:delete',
   watchBudgets: 'watch:budgets',
+  watchUsage: 'watch:usage',
   watchApprovals: 'watch:approvals',
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
@@ -496,6 +514,7 @@ export interface EphApi {
     delete: (name: string) => Promise<SecretStatus>
   }
   /** The Watch (SDD §5 `watch:`). Breaker state follows in M3.5. */
+  // (UsageSnapshot is declared above the interface — see its own comment.)
   watch: {
     /**
      * Per-agent spend, session and cumulative side by side (ADR-0011). Every
@@ -503,6 +522,14 @@ export interface EphApi {
      * in-memory counter for a restart to zero (invariant §11).
      */
     budgets: () => Promise<readonly AgentSpend[]>
+    /**
+     * The company-wide pace and the account window behind it (ADR-0023).
+     *
+     * Company-wide rather than per-agent on purpose: the usage window belongs
+     * to the account, so repeating it on every card would say the same thing N
+     * times and invite reading it as an agent-level fact.
+     */
+    usage: () => Promise<UsageSnapshot>
     /** Gates waiting on the Architect, oldest first (UC-08). */
     approvals: () => Promise<readonly OpenGate[]>
     /**
