@@ -28,8 +28,13 @@ export const githubAppConfigSchema = z
     schemaVersion: z.literal(GITHUB_APP_SCHEMA_VERSION),
     /** The App's numeric id, from its settings page. */
     appId: z.number().int().positive(),
-    /** The installation on the account or repository, from the install URL. */
-    installationId: z.number().int().positive(),
+    /**
+     * The installation on the account or repository. Optional: the id is buried
+     * in an install URL and is the easiest thing in this setup to mistype, so
+     * when it is absent the App asks GitHub which installations it has. An App
+     * installed exactly once needs no answer from a human at all.
+     */
+    installationId: z.number().int().positive().optional(),
     /**
      * The App's slug, used to derive the bot's git identity. Optional: it can
      * be read back from the API, and a config that guessed it wrongly would

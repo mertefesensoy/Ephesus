@@ -19,6 +19,11 @@ export const TOKEN_REFRESH_MS = 50 * 60 * 1000
 
 const GITHUB_API = 'https://api.github.com'
 
+/** Contract: pure. An error's first line — the part worth showing a human. */
+function firstLine(message: string): string {
+  return message.split('\n')[0] ?? message
+}
+
 function base64url(input: Buffer | string): string {
   return Buffer.from(input)
     .toString('base64')
@@ -78,6 +83,8 @@ export class GitHubAppIdentity {
   private config: GitHubAppConfig | null = null
   private configWarning: string | null = null
   private cached: { token: string; expiresAt: number } | null = null
+  /** Remembered across refreshes so the lookup happens once, not hourly. */
+  private discovered: number | undefined = undefined
   private identity: { name: string; email: string } | null = null
 
   constructor(private readonly options: GitHubAppIdentityOptions) {
@@ -164,11 +171,18 @@ export class GitHubAppIdentity {
       'X-GitHub-Api-Version': '2022-11-28',
       'User-Agent': 'ephesus'
     }
+    let installationId = config.installationId ?? this.discovered
+    if (installationId === undefined) {
+      const found = await this.discoverInstallation(headers, doFetch)
+      if (!found.ok) return found
+      installationId = found.installationId
+      this.discovered = installationId
+    }
     let token: string
     let expiresAt: string
     try {
       const response = await doFetch(
-        `${GITHUB_API}/app/installations/${String(config.installationId)}/access_tokens`,
+        `${GITHUB_API}/app/installations/${String(installationId)}/access_tokens`,
         { method: 'POST', headers }
       )
       if (!response.ok) {
@@ -195,6 +209,52 @@ export class GitHubAppIdentity {
     this.cached = { token, expiresAt: Number.isFinite(expiry) ? expiry : now + TOKEN_REFRESH_MS }
     await this.learnIdentity(config, headers, doFetch)
     return { ok: true, token, expiresAt }
+  }
+
+  /**
+   * Asks GitHub where this App is installed, when the config did not say.
+   *
+   * Refuses to choose when there is more than one: picking for the Architect
+   * would mean the company could act on a repository they never pointed it at,
+   * and the fix — naming the id in the config — is one line.
+   */
+  private async discoverInstallation(
+    headers: Record<string, string>,
+    doFetch: typeof fetch
+  ): Promise<{ ok: true; installationId: number } | { ok: false; because: string }> {
+    try {
+      const response = await doFetch(`${GITHUB_API}/app/installations`, { headers })
+      if (!response.ok) {
+        return {
+          ok: false,
+          because: `GitHub refused to list installations (${String(response.status)}); check the App id and that the key belongs to this App`
+        }
+      }
+      const body: unknown = await response.json()
+      const rows = Array.isArray(body) ? body : []
+      const ids = rows
+        .map((row) =>
+          typeof row === 'object' && row !== null ? (row as { id?: unknown }).id : undefined
+        )
+        .filter((id): id is number => typeof id === 'number')
+      if (ids.length === 0) {
+        return { ok: false, because: 'the App is not installed on any account or repository yet' }
+      }
+      if (ids.length > 1) {
+        return {
+          ok: false,
+          because: `the App has ${String(ids.length)} installations; name the one to use as installationId in github-app.json`
+        }
+      }
+      return { ok: true, installationId: ids[0] as number }
+    } catch (err) {
+      return {
+        ok: false,
+        because: `could not reach GitHub: ${
+          err instanceof Error ? firstLine(err.message) : String(err)
+        }`
+      }
+    }
   }
 
   /**
