@@ -4451,28 +4451,44 @@ load on both arms: **control (`3d5fbfa`) failed 3 of 3** with the exact
 assertion, **fixed (`4143464`) failed 0 of 3**. The control arm is what makes
 that evidence rather than another silent no-op.
 
-1. **`s-stoploop`'s margin is ~3×, and getting there took three wrong answers.**
-   The figure matters because it is what any future timeout would be chosen
-   against, and it was computed wrongly twice in opposite directions:
+1. **`s-stoploop`'s margin is ~2.4×, and the CONDITION is the whole finding.**
+   Five people-hours went into one number and produced five answers, each a
+   correct measurement of the wrong thing. The sequence is recorded because the
+   lesson is not "measure carefully":
 
-   - *Wrong denominator.* 2.2×, then 1.7–1.8×, both from the whole FILE
-     duration against a PER-TEST timeout. `vitest.config.mts` sets
-     `testTimeout: 30_000` and `hookTimeout: 30_000`, both per unit; the file's
-     ~16 s is five tests plus transform and import, and no timeout governs it.
-   - *Right denominator, one sample.* 6×, from a single run whose slowest test
-     was 4.77 s — the same single-measurement error, on the correct metric.
-   - *Right denominator, distribution.* Slowest single test over four isolated
-     runs on an idle machine: **3.03 s, 3.71 s, 3.90 s, 9.99 s**. Against the
-     30 s ceiling that is **~3× at the worst observed**.
+   | answer | what was actually measured | why it was wrong |
+   |---|---|---|
+   | 2.2×, then 1.7–1.8× | whole FILE duration | no timeout governs a file — `testTimeout`/`hookTimeout` are 30 s **per unit** |
+   | 6× | slowest test, ONE run | right metric, single sample |
+   | ~3× | slowest test, 4 isolated runs | right metric, distribution — **wrong condition** |
+   | **~2.4×** | slowest test under a full parallel suite | the condition CI actually has |
 
-   The spread is the finding, not the margin: **3.3× variation between runs with
-   nothing else on the machine.** A margin computed from any one run is not a
-   margin, which is why all three earlier numbers disagreed. The concern stands
-   and is not dismissed — under 3× concurrent load `s-stoploop` timed out 3/3 —
-   but nothing needs a bigger number today, and any ceiling ever chosen must be
-   set against the upper tail of a distribution and recorded with it, so the
-   next reader can see what it was chosen against. `s-livelock`'s slowest test
-   is 1.98 s on the same metric, and it is claimed by nobody.
+   **Cold-start was proposed and is refuted.** Six controlled isolated runs in
+   one shell — 2.96, 3.40, 3.08, 3.20, 3.07, 3.35 s — put position 1 at the
+   *fastest*, so the outliers are not a cold cache. **Load is the mechanism**,
+   demonstrated directly: the same test measured *during* a concurrent full
+   suite gave **9.37 s**, against ~3.1 s isolated on the same machine minutes
+   earlier. Under default 16-worker parallelism it reaches **12.3 s** — sixteen
+   workers contending for disk and git — which is ~2.4× under the 30 s ceiling.
+
+   So every isolated figure above, including the distribution this review
+   recorded an hour ago, flattered the margin by measuring a condition CI never
+   runs in. **`s-livelock` is not in better shape either**: its 1.98 s isolated
+   becomes **11.0 s** under the same parallel condition (~2.7×), so the two
+   files are indistinguishable and the "s-livelock has 6× headroom" line this
+   review carried is withdrawn.
+
+   **No change is needed today**, and the reason matters: the realistic
+   condition is green at 2.4×, not the ceiling being unreachable. It *is*
+   reachable — a 3× overload produced three genuine `Test timed out in 30000ms`
+   failures (plus one `agora: git init failed`, which is apparatus starvation
+   and not a timeout). Those two arguments agree now and come apart if the suite
+   grows or a runner slows, so what is recorded is: **30 s was measured against
+   12.3 s under real parallelism.**
+
+   The practical rule, which cost five wrong answers to learn: **record the
+   condition beside the figure.** Every one of those five was a correct
+   measurement, and four were caught by someone other than their author.
 2. **The `writeFileAtomic` retry has a reachable ceiling.** `s-deckgate` failed
    in the control arm with `EPERM … .tasks.json.tmp -> tasks.json` — the exact
    error the retry exists to absorb — with the retry live. Independently
