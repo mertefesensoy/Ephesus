@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { pinHolds, type PinProbe } from '../pin'
 import { removeTempDir, TEMP_REMOVE_BUDGET_MS } from '../tmpdir'
 
 /**
@@ -14,6 +15,26 @@ import { removeTempDir, TEMP_REMOVE_BUDGET_MS } from '../tmpdir'
  * child process rather than with git: the mechanism is the cwd handle and
  * nothing about git, and a plain child holds for an exact, known time instead
  * of however long a commit happens to take.
+ *
+ * ## The blind spot, stated because a green run would otherwise hide it
+ *
+ * **The pin is a Windows behaviour and CI runs on ubuntu-latest.** POSIX lets
+ * you remove a directory that is a live process's working directory — verified,
+ * not assumed: parking a shell in a directory under WSL Ubuntu and removing it
+ * around the shell succeeds. So on CI the pin cases below prove *nothing*, and
+ * as first written they did worse than that — they FAILED there, because they
+ * assert a refusal that platform never makes.
+ *
+ * They are therefore guarded on `PIN_HOLDS`, which is measured at run time
+ * rather than read off `process.platform`: the question is whether this
+ * platform actually holds the directory, and a probe answers it on an OS
+ * nobody here has thought about. Where it does not hold, those cases are
+ * skipped and `removeTempDir`'s Windows-specific behaviour is simply not
+ * covered — the retry it exists for cannot be provoked.
+ *
+ * What still runs everywhere: that an unheld directory is removed without
+ * waiting, and that the budget is large enough for a git child. Those are the
+ * only claims a non-pinning platform can make.
  */
 
 const temps: string[] = []
@@ -63,7 +84,24 @@ async function pinnedHome(holdMs: number): Promise<{ home: string; pinned: strin
   return { home, pinned }
 }
 
-describe('removing a temp directory a live process is sitting in', () => {
+const PROBE: PinProbe =
+  process.env['EPH_FORCE_NO_PIN'] === '1' ? { pinned: false } : await pinHolds()
+const PIN_HOLDS = PROBE.pinned === true
+
+/**
+ * An unanswerable probe is NOT a reason to skip. "No pin" and "never actually
+ * tried" look identical from the outside, and a probe that quietly no-ops would
+ * delete four cases from the suite while leaving it green — the exact shape
+ * that produced three false conclusions on this work already. So an `unknown`
+ * answer is a failure, and it names why.
+ */
+describe.skipIf(PROBE.pinned !== null)('the pin probe', () => {
+  it('could not determine whether this platform pins a directory', () => {
+    expect.fail(PROBE.pinned === null ? PROBE.reason : 'unreachable')
+  })
+})
+
+describe.skipIf(!PIN_HOLDS)('removing a temp directory a live process is sitting in', () => {
   it('holds the directory itself, never anything inside it', async () => {
     const { pinned } = await pinnedHome(30_000)
 
@@ -123,7 +161,10 @@ describe('removing a temp directory a live process is sitting in', () => {
 
     expect(() => removeTempDir(home)).toThrow(/EBUSY|EPERM/)
   })
+})
 
+/** The claims a platform without the pin can still make, so they are not guarded. */
+describe('removeTempDir on any platform', () => {
   it('removes an unheld directory without waiting, adding nothing to a green run', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-pin-'))
     temps.push(home)
@@ -136,6 +177,19 @@ describe('removing a temp directory a live process is sitting in', () => {
     // Well inside the budget, so nothing sleeps on the happy path. The bound is
     // loose on purpose: unlinking a tree on a loaded Windows machine is not
     // instant, and this is a test about not RETRYING, not about disk speed.
+    expect(Date.now() - startedAt).toBeLessThan(TEMP_REMOVE_BUDGET_MS / 2)
+  })
+
+  it('reports a fault that is not a lock at once, rather than waiting it out', () => {
+    const startedAt = Date.now()
+
+    // A NUL in the path is rejected by node itself, which is the point: it is
+    // an error that is NOT "something still holds this", so it must be
+    // rethrown rather than retried for the full budget. Most obvious
+    // candidates are not faults at all — `force: true` makes a missing path a
+    // success, so a first draft of this case asserted a throw that never came.
+    expect(() => removeTempDir('a-path-with-a -nul')).toThrow()
+
     expect(Date.now() - startedAt).toBeLessThan(TEMP_REMOVE_BUDGET_MS / 2)
   })
 
