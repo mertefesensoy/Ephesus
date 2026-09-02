@@ -4502,9 +4502,20 @@ that evidence rather than another silent no-op.
    grows or a runner slows, so what is recorded is: **30 s was measured against
    12.3 s under real parallelism.**
 
+   **Settled at n=12, and the figure now lives in ONE place.** Twelve full
+   parallel runs give a body of **10.2–13.4 s and a single excursion at 17.3 s**
+   not reproduced in the seven runs after it — so ~2.2× against the body, ~1.7×
+   against the excursion, and one excursion rather than a tail. That supersedes
+   every number above, including this review's own ~2.4×, which was two samples.
+   The distribution and its condition are recorded in `vitest.config.mts` beside
+   the timeout itself, and **this review deliberately stops restating it**: a
+   figure duplicated into a second document is how six of these came to disagree.
+   Read the config.
+
    The practical rule, which cost five wrong answers to learn: **record the
-   condition beside the figure.** Every one of those five was a correct
-   measurement, and four were caught by someone other than their author.
+   condition beside the figure — once.** Every one of those measurements was
+   correct, four were caught by someone other than their author, and the last two
+   were caught only by sampling past the point where the answer looked stable.
 2. **The `writeFileAtomic` retry has a reachable ceiling.** `s-deckgate` failed
    in the control arm with `EPERM … .tasks.json.tmp -> tasks.json` — the exact
    error the retry exists to absorb — with the retry live. Independently
