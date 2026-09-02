@@ -35,10 +35,10 @@ fixing the one pre-existing CI-red test inside this package.
 | `vitest.config.mts` | The `coverage` block: v8, `include` over every production file so a module no test imports appears at zero, `json-summary` for the checker. No `thresholds` — the record lives in one file with its condition. |
 | `scripts/reachability.cjs` | The import-graph walk from the three electron-vite entry points, counting value edges only; the allowlist that carries a *decision* per gap; type-only classification. |
 | `scripts/check-invariants.cjs` | Rule 5: runs the walk, so one CI command still covers every tripwire; the ok line reports reached / by-decision / type-only counts. |
-| `scripts/check-coverage.cjs` | The per-subsystem ratchet: total map, per-platform floors with condition, untested-module record, `--update`, `--emit`, `--from`. |
-| `scripts/coverage-floors.json` | **The record.** Subsystem map plus one block per measured platform. The only place a coverage figure is written down. |
-| `test/scripts/reachability.test.ts` | 15 cases: a fixture project with one file per edge kind, and the rule run over this repository with an empty allowlist so the test proves it bites on the real tree. |
-| `test/scripts/check-coverage.test.ts` | 25 cases over real files, a real summary and a real floors file in a temp directory; the committed map checked for totality against the real tree. |
+| `scripts/check-coverage.cjs` | The per-subsystem ratchet: total map, per-platform floors with condition (commit, ref, tree hash), untested-module record, `--seed` / `--update` / `--emit` / `--from`, stale-report and report-equals-tree refusals, the stale-floor rule. |
+| `scripts/coverage-floors.json` | **The record** (schema 2). Subsystem map, tolerance and ratchet lag with their reasons, one block per measured platform. The only place a coverage figure is written down. |
+| `test/scripts/reachability.test.ts` | 19 cases: a fixture project with one file per edge kind — the value barrel included — and the rule run over this repository with an empty allowlist so the test proves it bites on the real tree, plus a floor on the universe size so a classifier that hid the tree would fail. |
+| `test/scripts/check-coverage.test.ts` | 37 cases over real files, a real summary and a real floors file in a temp directory, one per bypass and weakness the refutation pass found; the committed map checked for totality against the real tree. |
 | `.github/workflows/ci.yml` | The suite runs once, under coverage; the check follows; the emitted linux measurement is uploaded as an artifact. |
 | `.gitignore` | `coverage/`. |
 | `docs/ENGINEERING-STANDARDS.md` | §6 item 7 — the seam rule, as approved. |
@@ -74,24 +74,39 @@ programs electron-vite builds: `src/main/index.ts`, `src/preload/index.ts`,
 
 Two classifications keep the answer honest rather than merely strict:
 
-- **Type-only modules** — files whose every top-level statement is erased
-  (interfaces, type aliases, ambient declarations, imports with bindings, local
-  `export { A }`) — have no module to load and are reported as *type-only,
-  nothing to reach*. Six such files exist today (`engines/types.ts` and the five
-  `*-view.ts` contracts), and the first draft of the walk reported them as
-  gaps, which they are not. A bare `import './fx'` is runtime, and a re-export
-  `from` another module is counted as runtime conservatively: misreading a type
-  barrel as runtime surfaces it and gets a decision, which is the safe direction.
-- **The allowlist carries a decision, not a name.** Two entries today: the
-  seven Herald modules (M6.9 deferred indefinitely by the Architect,
-  2026-08-30) and `src/shared/contrast.ts` (the CI token gate, in `src/shared`
-  by its own header's design). An entry that stops matching anything
-  unreachable fails the check, so the record cannot outlive the gap.
+- **Type-only modules** — files whose every top-level statement the compiler
+  provably erases (interfaces, type aliases, ambient declarations, `import
+  type`, `export type`, the empty `export {}`) — have no module to load and are
+  reported as *type-only, nothing to reach*. Six such files exist today
+  (`engines/types.ts` and the five `*-view.ts` contracts). The rule is
+  deliberately conservative: ANY import in value syntax makes a file runtime,
+  even when the binding is a type the compiler would elide. The first draft
+  inferred "bindings in a file with no other runtime statement can only be
+  types", and the refutation pass broke it with `import { x } from './x';
+  export { x }` — a value barrel under `isolatedModules` that was classified
+  type-only, hidden from the gate, and never traversed, so its target read as
+  unreachable. A file misread as runtime shows up and gets a decision; a file
+  misread as type-only vanishes. Only the first is a mistake you can see. The
+  walk now also traverses every module it reaches, type-only or not, so a
+  classification can never stop it again.
+- **The allowlist names files and carries a decision.** Eight entries today:
+  the seven Herald modules one by one (M6.9 deferred indefinitely by the
+  Architect, 2026-08-30) and `src/shared/contrast.ts` (the CI token gate, in
+  `src/shared` by its own header's design). A directory entry was refuted the
+  same day: it would have accepted the next file dropped beside the seven and
+  read as live while a single one of them stayed unreachable. An entry that
+  stops naming an unreachable file — wired, or deleted — fails the check, so
+  the record cannot outlive the gap.
+- **Could-not-establish fails.** A missing entry point, a module that cannot
+  be read, or a universe with no runtime module in it is a failure line, never
+  an empty answer.
 
-One over-approximation is stated in the header so nobody mistakes the answer:
-a value import whose bindings are used only in type positions is dropped by
-esbuild and is counted here. Reachability is the floor of wiring, not proof of
-it.
+Two things the walk cannot see are stated in its header and in its failure
+text so nobody mistakes the answer: a value import whose bindings are used only
+in type positions is dropped by esbuild and is counted here; a dynamic import
+whose specifier is not a literal (a template, `import.meta.glob`) is not
+followed, so a module loaded only that way reads as unreachable — the safe
+direction. Reachability is the floor of wiring, not proof of it.
 
 ### Coverage: a per-subsystem ratchet with its condition attached
 
@@ -105,20 +120,40 @@ SDD §1.1's "index.ts holds no logic of its own" becomes a number later packages
 move, and the Herald is its own row so its zero cannot hide inside a larger
 average.
 
-Floors are recorded **per platform**, each block stamped with the commit, node
-version, OS and command it was measured under, because `process.platform`
-branches, OS-gated tests and timing-dependent paths move the figure between
-machines — the exact property that produced six disagreeing timeout margins on
-2026-09-02. A run on a platform with no block **fails**: it cannot claim "no
-regression" with nothing to compare against. The table is still printed and the
-measurement can be `--emit`ted, which is how the linux floors are seeded from
-CI's own condition rather than guessed from Windows.
+Floors are recorded **per platform**, each block stamped with the commit, the
+CI ref, a git-free hash of the production tree, node version, OS and command
+it was measured under, because `process.platform` branches, OS-gated tests and
+timing-dependent paths move the figure between machines — the exact property
+that produced six disagreeing timeout margins on 2026-09-02. The tree hash is
+there because `.git/HEAD` cannot see a dirty working tree, and the first
+draft's record named a commit whose tree it had not measured. A run on a
+platform with no block **fails**: it cannot claim "no regression" with nothing
+to compare against. The first record on a platform is an explicit verb,
+`--seed`; `--update` refuses to start a block, because the refutation pass
+showed that deleting a block by hand and running `--update` re-recorded
+lowered floors and new untested modules with exit 0. The table is still
+printed and the measurement can be `--emit`ted, which is how the linux floors
+are seeded from CI's own condition rather than guessed from Windows.
 
-The **untested list** is the coverage-side Herald catch: a production file with
-lines to cover, none covered, and no function entered. Known cases are recorded
-per platform. `--update` removes a file the moment a test reaches it and never
-adds one; a new untested module is a failure even under `--update`, and adding
-it to the record is a hand edit — the review point.
+The record and the report are held to the tree. Every floor metric must be a
+number (a hand-deleted key had silently disabled its metric through `NaN`); a
+report older than the newest production file is refused; the report and the
+tree must be the same set of files in both directions; an emitted artifact is
+validated and must cover exactly the map's subsystems. A refused or no-op
+`--update` writes nothing and moves no stamp, so the condition beside a figure
+is always the condition that produced it. And a floor more than `ratchetLag`
+points **below** reality fails as stale: floors rise only when somebody
+ratchets them, and without this a package's gained coverage could be lost again
+with no failure anywhere.
+
+The **untested list** is the coverage-side Herald catch: a production file none
+of whose functions any test enters (or, with no functions, none of whose lines
+any test runs). The first draft asked only about lines, and a bare `import`
+marks a module's top-level lines covered — which let `src/main/config.ts`, one
+line of ten and no function ever entered, pass as tested. Known cases are
+recorded per platform. `--update` removes a file the moment a test enters it
+and never adds one; a new untested module is a failure even under `--update`,
+and adding it to the record is a hand edit — the review point.
 
 ### Why the record is a JSON file beside the checker, not vitest thresholds
 
@@ -165,9 +200,16 @@ its length. The highest rank wins; two claims at the same rank are a map error,
 reported once (the tied members all count as hit, so the duplicate is not also
 reported as "names nothing").
 
-**Untested.** untested(f) ⇔ lines.total(f) > 0 ∧ lines.covered(f) = 0 ∧
-functions.covered(f) = 0. The function clause keeps a module whose only executed
-code is a function body without line attribution from being mislabelled.
+**Stale.** A subsystem also fails when measured − floor > ratchetLag (5 points
+at the baseline, reason recorded beside it): the record has been left behind by
+more than a package's worth of coverage and must be ratcheted before anything
+else lands, or the gain is not protected.
+
+**Untested.** untested(f) ⇔ (functions.total(f) > 0 ∧ functions.covered(f) = 0)
+∨ (lines.total(f) > 0 ∧ lines.covered(f) = 0 ∧ functions.covered(f) = 0). A
+type-only module (0/0 on both) is neither. Comparisons of measured against floor
+are made on values rounded to two decimals, so a figure exactly at the tolerance
+edge is not a floating-point regression (0.28 − 0.25 is not 0.03 in binary).
 
 ## Design decisions
 
@@ -215,13 +257,15 @@ is what they mean, which a number alone does not say.
   target.** The distances vary; the file shows each. The target stays a target;
   the floor is what is measured, so a package cannot claim the target by
   quoting the floor.
-- **Twenty-three production modules are reached by no test on Windows**, most
+- **Twenty-four production modules are entered by no test on Windows**, most
   of them renderer panels the M6.1 harness never covered (thirteen), plus the
   boot files, the native-module wrappers (`db.ts`, `library-fts-sqlite.ts`,
   `pty.ts` — kept out of vitest by the M0 constraint that native modules are
-  Electron-ABI), the cipher seam, one shim and one floor-art module. Each is
-  now a named entry that a package removes by writing the test, or that stays
-  as a recorded gap.
+  Electron-ABI), the cipher seam, one shim, one floor-art module, and
+  `src/main/config.ts`, which the first draft's line-based rule had passed as
+  tested because a bare import runs its top-level lines. Each is now a named
+  entry that a package removes by writing the test, or that stays as a
+  recorded gap.
 - **The run-to-run spread was zero at n = 2** on the same tree and platform,
   which is the measurement the tolerance rests on, recorded beside it in
   `toleranceReason`.
@@ -250,6 +294,23 @@ it back):
   missing report, each to a failure line by name; `--update` is shown never to
   lower a floor and never to add an untested module.
 - The shim: the `%dp0%` case is the CI proof, on the platform where it failed.
+
+### Refuted, then fixed
+
+Before the package closed, three independent refuters were asked to make each
+gate pass when it should fail, with probes rather than opinions. The first
+draft lost on three counts and a dozen weaknesses (the full list is the
+DECISIONS-LOG entry of the same day): the value-barrel misclassification, the
+directory allowlist that accepted new files, the deleted metric key that
+disabled its metric, the deleted platform block that turned `--update` into a
+re-seed, the re-stamped condition on a refused update, the report about deleted
+files that passed, the stale report that could be recorded, the artifact from a
+different map, the tolerance's false "under one line" claim, and the import-only
+module that was not "untested". Each has a fixture case in the two test files
+that fails against the first draft, and the scripts were rewritten rather than
+patched. One finding stands and is the Architect's: `main` has no branch
+protection, PR #6 was merged over a red code job, and until required checks are
+enabled every CI gate here is advisory.
 
 The CI evidence for this branch — the first run failing by design on "no
 coverage floors are recorded for platform linux" with the measurement uploaded

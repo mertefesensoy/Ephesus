@@ -48,9 +48,12 @@ Definition of Done lives:
    `scripts/check-coverage.cjs` reading `scripts/coverage-floors.json`: a
    TOTAL map of every production file to one subsystem; per-PLATFORM floors
    recorded beside the condition they were measured in; a per-platform list of
-   production modules no test reaches. Floors rise only by re-measurement
+   production modules no test enters. Floors rise only by re-measurement
    (`--update`), fall only by a reviewed edit; `--update` never adds an untested
-   module. A platform with no recorded floor fails (could-not-establish fails).
+   module. A platform with no recorded floor fails (could-not-establish fails);
+   the first record on a platform is an explicit `--seed`, and `--update`
+   cannot start one. A floor more than a recorded margin below reality fails
+   as stale, so gained coverage cannot be lost again without a failure.
 3. **CI** runs the suite once, under coverage, then the check; the emitted
    linux measurement is kept as an artifact so linux floors are recorded from
    the CI condition rather than from a Windows machine.

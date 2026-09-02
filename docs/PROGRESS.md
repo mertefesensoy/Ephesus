@@ -4592,9 +4592,11 @@ structural rather than a habit.
       place a coverage figure is written, per platform, with its condition:
       win32 measured three times at the baseline (identical to the hundredth
       every time, once under load), linux recorded from CI's own artifact.
-      Full suite under coverage 3250 passed / 8 skipped (176 files). Tests:
-      15 (reachability) + 25 (checker), over real files in temp directories;
-      nine mutations each killed by a named test and reverted. CI: run
+      Full suite under coverage 3266 passed / 8 skipped (176 files) on the
+      hardened tree. Tests:
+      19 (reachability) + 37 (checker), over real files in temp directories;
+      twenty-one mutations in two passes (nine against the first draft, twelve
+      against the hardened one) each killed by a named test and reverted. CI: run
       `33615249038` on `57d4f51` failed BY DESIGN at the floor check ("no
       coverage floors are recorded for platform linux") with every earlier
       step green on Linux — which is also the Linux proof of the `which.ts`
@@ -4604,8 +4606,20 @@ structural rather than a habit.
       on all three jobs. What the baseline says (figures in the file): boot
       wiring is the least-covered row, four of its five files reached by no
       test; none of the four mechanisms TEST-STRATEGY names meets its ≥ 90 %
-      branch target; 23 production modules are reached by no test on either
-      platform, thirteen of them renderer panels. **Production call path:**
+      branch target; 24 production modules are entered by no test on either
+      platform, thirteen of them renderer panels — the twenty-fourth,
+      `src/main/config.ts`, surfaced only when "untested" was tightened from
+      "no line run" to "no function entered". **REFUTED, THEN HARDENED, BEFORE
+      CLOSE:** three adversarial refuters broke the first draft on three
+      counts (a value barrel classified type-only; a deleted floor metric
+      silently disabling its comparison; a deleted platform block turning
+      `--update` into a re-seed) plus a dozen weaknesses, all listed in
+      DECISIONS-LOG; both scripts were rewritten (exact-file allowlist,
+      conservative classifier, schema-2 record with `--seed`, tree hash, stale
+      report and report-equals-tree refusals, stale-floor rule) with a fixture
+      case per finding. One finding stands and is the Architect's: `main` has
+      NO branch protection and PR #6 merged over a red code job, so every CI
+      gate is advisory until required checks are enabled. **Production call path:**
       `.github/workflows/ci.yml`, steps "Invariant tripwires" and "Coverage
       floors and untested modules", and BUILD-PROMPT §4's TEST line — this
       package's product IS the gate, and those are its callers. Docs:

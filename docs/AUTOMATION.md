@@ -61,7 +61,8 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
   production module no test reaches, against `scripts/coverage-floors.json` — the one
   place a coverage figure is written, per platform, with its condition. The linux
   measurement is uploaded as an artifact on every run so linux floors are recorded from
-  the CI condition (`--update --from <artifact> --platform linux`).
+  the CI condition (`--seed --from <artifact> --platform linux` for the first record,
+  `--update --from` for every ratchet after it; `--update` cannot start a block).
 - **Commit attribution**: `scripts/check-attribution.cjs` over the full history — no
   commit is authored, committed or co-authored as Claude (ENGINEERING-STANDARDS §2).
   The backstop for the local hooks, which `--no-verify` or an unarmed clone can miss.

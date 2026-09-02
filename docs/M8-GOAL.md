@@ -186,8 +186,11 @@ handover is worse than none.
 > with its platform and condition — never copied into prose. When a package
 > raises coverage, `node scripts/check-coverage.cjs --update` ratchets the floor
 > on the platform you are on; linux floors come from the CI artifact
-> (`--update --from <artifact> --platform linux`). A NEW untested module or an
-> unreachable one is a hand edit citing a decision, never an `--update`. The package's owed tests are part of the package, not a follow-up.
+> (`--seed --from <artifact> --platform linux` the first time, `--update --from`
+> after; take it from a PUSH run). A NEW untested module or an unreachable one
+> is a hand edit citing a decision, never an `--update` — and `--update`
+> refuses to start a platform block, so a deleted block cannot be re-seeded by
+> accident. "Untested" means no function entered, not "no line run". The package's owed tests are part of the package, not a follow-up.
 > Tick the package in `docs/PROGRESS.md` with a one-line evidence note in the
 > same commit series, log minor choices in `docs/DECISIONS-LOG.md`, and write the
 > implementation doc at `docs/implementations/YYYY-MM-DD-<slug>.md`.
