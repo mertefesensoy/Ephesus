@@ -92,15 +92,20 @@ jobs:
         if: steps.scaffold.outputs.present == 'true'
         run: node scripts/check-coverage.cjs --emit coverage/measured-linux.json
       # Kept on every run, pass or fail: linux floors are recorded from THIS
-      # condition, never from a developer's machine —
-      #   node scripts/check-coverage.cjs --update --from <artifact> --platform linux
+      # condition, never from a developer's machine — the first record with
+      #   node scripts/check-coverage.cjs --seed --from <artifact> --platform linux
+      # and every ratchet after it with --update --from. Take the artifact from
+      # a PUSH run: a pull_request run measures a synthetic merge commit, and
+      # the recorded condition would name a commit that exists on no branch.
+      # A run that never reached the emit (the suite failed, or the record
+      # could not be read) has nothing to keep, and the step says so.
       - name: Keep the linux measurement
         if: always() && steps.scaffold.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-measured-linux
           path: coverage/measured-linux.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   attribution:
     name: Commit attribution

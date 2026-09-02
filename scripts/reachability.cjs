@@ -22,26 +22,49 @@
  * literal specifier. `import type` and `export type` are erased by the compiler
  * and are NOT edges — a module only ever named as a type is not loaded at run
  * time, and counting it would make the Herald "reachable" the moment something
- * borrowed one of its interfaces. The one over-approximation, stated so nobody
- * mistakes the answer for more than it is: a value import whose bindings are
- * used only in type positions is also dropped by esbuild at build time, and IS
- * counted here. Reachability is the floor of wiring, not proof of it — a module
- * the app can load may still never be called, which is what the coverage half
- * of the rule (`check-coverage.cjs`) and each package's stated call path are
- * for.
+ * borrowed one of its interfaces.
  *
- * ## Why the allowlist carries a decision, not a name
+ * Two things the walk cannot see, stated so nobody mistakes the answer for more
+ * than it is. A value import whose bindings are used only in type positions is
+ * dropped by esbuild at build time and IS counted here. A dynamic import whose
+ * specifier is not a literal (a template, `import.meta.glob`) is NOT followed,
+ * so a module loaded only that way reads as unreachable — the safe direction,
+ * and the failure text says so. Reachability is the floor of wiring, not proof
+ * of it: a module the app can load may still never be called, which is what
+ * the coverage half of the rule (`check-coverage.cjs`) and each package's
+ * stated call path are for.
  *
- * A gap this check accepts is a gap somebody chose. The entry says which
- * decision, so that when the decision changes (M6.9 lands; ADR-0024 is
- * superseded) the entry reads as stale on sight — and the check fails on a
- * stale entry too, so the record cannot quietly outlive the gap it recorded.
+ * ## Type-only modules, and why the classification is conservative
+ *
+ * A file made only of interfaces, type aliases, `import type` / `export type`
+ * and ambient declarations is erased entirely: there is no module to load, so
+ * there is nothing to reach, and it is classified TYPE-ONLY rather than
+ * unreachable. The rule is deliberately narrow. ANY import written in value
+ * syntax — `import { A } from './a'` — makes a file runtime here, even when
+ * `A` is a type the compiler would elide, because the alternative reading
+ * ("bindings in a file with no other runtime statement can only be types")
+ * was refuted on 2026-09-02: `import { x } from './x'; export { x }` is a
+ * value barrel under `isolatedModules`, and the first draft classified it
+ * type-only, hid it from the gate, and stopped the walk at it. A file misread
+ * as runtime shows up as unreachable and gets a decision; a file misread as
+ * type-only vanishes. Only the first is a mistake you can see.
+ *
+ * ## Why the allowlist names files, and carries a decision
+ *
+ * A gap this check accepts is a gap somebody chose, one file at a time. A
+ * directory entry would accept the next file dropped beside the seven it was
+ * written for, and would read as live while a single one of them stayed
+ * unreachable — so entries are exact files. Each says which decision, so that
+ * when the decision changes (M6.9 lands; ADR-0024 is superseded) the entry
+ * reads as stale on sight — and the check fails on a stale entry too, so the
+ * record cannot quietly outlive the gap it recorded.
  *
  * Contract: pure apart from reading the tree. `reachabilityFailures` returns
- * one line per fault and never throws; an entry point that does not exist is
- * itself a failure rather than an empty answer, because "nothing is
- * unreachable" from a missing root would be a check that cannot fail (the
- * probe rule: could-not-establish must FAIL, not pass).
+ * one line per fault and never throws; an entry point that does not exist, a
+ * module that cannot be read, or an empty universe is itself a failure rather
+ * than an empty answer, because "nothing is unreachable" from a missing or
+ * unreadable root would be a check that cannot fail (the probe rule:
+ * could-not-establish must FAIL, not pass).
  */
 const fs = require('node:fs')
 const path = require('node:path')
@@ -55,20 +78,25 @@ const ENTRY_POINTS = ['src/main/index.ts', 'src/preload/index.ts', 'src/renderer
 /** Where production modules live. Everything under it that is not a `.d.ts` must be reached. */
 const UNIVERSE_DIR = 'src'
 
+const HERALD_DEFERRED =
+  'M6.9 (wiring the Herald) is DEFERRED INDEFINITELY by Architect decision, 2026-08-30 — built and tested, not connected on purpose (BUILD-PROMPT build state; IMPLEMENTATION M6 amendment)'
+
 /**
- * Modules the application deliberately does not reach — a prefix (a directory
- * with its trailing slash, or one file) and the decision that made the gap
- * deliberate. Add an entry only with a decision to cite; remove it when the
- * decision is reversed, and the check will insist that you do.
+ * Modules the application deliberately does not reach — one exact file per
+ * entry and the decision that made the gap deliberate. Add an entry only with
+ * a decision to cite; remove it when the decision is reversed, and the check
+ * will insist that you do.
  */
 const UNREACHABLE_ALLOWLIST = [
+  { file: 'src/main/herald/elevenlabs.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/narration.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/openai-realtime.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/phrasebook.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/policy.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/seam.ts', reason: HERALD_DEFERRED },
+  { file: 'src/main/herald/session.ts', reason: HERALD_DEFERRED },
   {
-    prefix: 'src/main/herald/',
-    reason:
-      'M6.9 (wiring the Herald) is DEFERRED INDEFINITELY by Architect decision, 2026-08-30 — built and tested, not connected on purpose (BUILD-PROMPT build state; IMPLEMENTATION M6 amendment)'
-  },
-  {
-    prefix: 'src/shared/contrast.ts',
+    file: 'src/shared/contrast.ts',
     reason:
       'the CI token/contrast gate (UI-DESIGN §8, NFR-15) — kept in src/shared so the token test and future design tooling share one arithmetic; no runtime caller by design (its own header)'
   }
@@ -146,28 +174,28 @@ const isAmbient = (statement) =>
   (ts.getModifiers(statement) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)
 
 /**
- * Does this module do anything at run time? A file made only of interfaces,
- * type aliases, `import type` / `export type` and ambient declarations is
- * erased entirely by the compiler: there is no module to load, so there is
- * nothing to reach, and such a file is classified TYPE-ONLY rather than
- * unreachable. An import WITH bindings counts as erased here — in a file with
- * no runtime statement, its bindings can only have been used in type
- * positions — and so does a local `export { A }` without a `from`, for the
- * same reason. A bare `import './fx'` is kept by the compiler and is runtime.
- * A re-export WITH a `from` that is not marked `type` is counted as runtime,
- * conservatively: telling a value barrel from a type barrel would mean
- * resolving every name, and a type barrel misread as runtime shows up as
- * unreachable and gets a decision, which is the safe direction to be wrong in.
+ * Does this module do anything at run time? See the header: only statements
+ * the compiler provably erases count as nothing — a type-only import, a type
+ * alias, an interface, an ambient declaration, a type-only export, and the
+ * empty `export {}`. Everything else, an import in value syntax included, is
+ * runtime. Pure.
  */
 function hasRuntimeCode(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, scriptKindFor(file))
   return source.statements.some((statement) => {
-    if (ts.isImportDeclaration(statement)) return statement.importClause === undefined
+    if (ts.isImportDeclaration(statement)) return !importClauseIsTypeOnly(statement.importClause)
     if (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) return false
     if (ts.isEmptyStatement(statement)) return false
     if (isAmbient(statement)) return false
     if (ts.isExportDeclaration(statement)) {
-      return statement.moduleSpecifier !== undefined && !exportIsTypeOnly(statement)
+      if (exportIsTypeOnly(statement)) return false
+      const clause = statement.exportClause
+      const empty =
+        statement.moduleSpecifier === undefined &&
+        clause !== undefined &&
+        ts.isNamedExports(clause) &&
+        clause.elements.length === 0
+      return !empty
     }
     return true
   })
@@ -176,7 +204,7 @@ function hasRuntimeCode(file, text) {
 /**
  * Contract: the run-time module specifiers one file imports — value imports,
  * value re-exports and literal dynamic imports, in source order. Type-only
- * edges are excluded (see the header). Pure.
+ * edges are excluded; non-literal dynamic imports are not visible (header). Pure.
  */
 function valueImportSpecifiers(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false, scriptKindFor(file))
@@ -209,18 +237,31 @@ function valueImportSpecifiers(file, text) {
 }
 
 /**
- * Contract: every module under `<root>/src` the walk from `entries` reaches, as
- * root-relative `/`-separated paths; the universe it was measured against
- * (every module with run-time code); and the type-only modules, which belong
- * to neither because there is nothing to reach. Throws only when an entry
+ * Contract: every module under `<root>/src` the walk from `entries` reaches,
+ * as root-relative `/`-separated paths; the universe it was measured against
+ * (every module with run-time code); the type-only modules, which belong to
+ * neither because there is nothing to reach; and the modules that could not be
+ * read. The walk traverses every module it reaches, type-only ones included,
+ * so a classification mistake can never stop it. Throws only when an entry
  * point is missing — `reachabilityFailures` is the non-throwing form.
  */
 function reachableModules(root = ROOT, entries = ENTRY_POINTS) {
   const universe = new Set()
   const typeOnly = new Set()
+  const unreadable = new Set()
+  const known = new Set()
   for (const file of walk(path.join(root, UNIVERSE_DIR))) {
     const rel = slashed(path.relative(root, file))
-    if (hasRuntimeCode(file, fs.readFileSync(file, 'utf8'))) universe.add(rel)
+    known.add(rel)
+    let text
+    try {
+      text = fs.readFileSync(file, 'utf8')
+    } catch {
+      unreadable.add(rel)
+      universe.add(rel) // unreadable is not "nothing to reach"; it is a fault, reported below
+      continue
+    }
+    if (hasRuntimeCode(file, text)) universe.add(rel)
     else typeOnly.add(rel)
   }
   const reached = new Set()
@@ -239,6 +280,7 @@ function reachableModules(root = ROOT, entries = ENTRY_POINTS) {
     try {
       text = fs.readFileSync(file, 'utf8')
     } catch {
+      unreadable.add(rel)
       continue
     }
     for (const specifier of valueImportSpecifiers(file, text)) {
@@ -246,11 +288,11 @@ function reachableModules(root = ROOT, entries = ENTRY_POINTS) {
       if (resolved === undefined) continue // a package, a stylesheet, an asset URL
       const target = path.resolve(resolved.resolvedFileName)
       const targetRel = slashed(path.relative(root, target))
-      if (!universe.has(targetRel)) continue // node_modules, json, declarations
+      if (!known.has(targetRel)) continue // node_modules, json, declarations
       if (!reached.has(targetRel)) queue.push(target)
     }
   }
-  return { reached, universe, typeOnly }
+  return { reached, universe, typeOnly, unreadable }
 }
 
 /** Contract: the universe minus the reached set, sorted. Throws as `reachableModules` does. */
@@ -259,39 +301,49 @@ function unreachableModules(root = ROOT, entries = ENTRY_POINTS) {
   return [...universe].filter((file) => !reached.has(file)).sort()
 }
 
-const matchesPrefix = (file, prefix) =>
-  prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix
-
 /**
  * Contract: one failure line per module that is unreachable and not
  * allowlisted; one per allowlist entry that no longer names an unreachable
- * module (the gap closed and the record did not); one if the walk could not
- * run at all. Empty means the rule holds. Never throws.
+ * module (the gap closed — or the file went — and the record did not); one per
+ * module that could not be read; one if the universe is empty; one if the walk
+ * could not run at all. Empty means the rule holds. Never throws.
  */
 function reachabilityFailures(
   root = ROOT,
   allowlist = UNREACHABLE_ALLOWLIST,
   entries = ENTRY_POINTS
 ) {
-  let unreachable
+  let result
   try {
-    unreachable = unreachableModules(root, entries)
+    result = reachableModules(root, entries)
   } catch (err) {
     return [
       `reachability could not be established: ${err instanceof Error ? err.message : String(err)}`
     ]
   }
+  const { reached, universe, unreadable } = result
   const failures = []
-  for (const file of unreachable) {
-    if (allowlist.some((entry) => matchesPrefix(file, entry.prefix))) continue
+  if (universe.size === 0) {
     failures.push(
-      `${file}  unreachable from every entry point (${entries.join(', ')}) — the seam rule (ENGINEERING-STANDARDS §6.7): wire it, delete it, or allowlist it in scripts/reachability.cjs with the decision that makes the gap deliberate`
+      `reachability could not be established: no module with run-time code was found under ${UNIVERSE_DIR}/ — the walk is measuring nothing`
     )
   }
-  for (const entry of allowlist) {
-    if (unreachable.some((file) => matchesPrefix(file, entry.prefix))) continue
+  for (const file of [...unreadable].sort()) {
+    failures.push(`${file}  could not be read — reachability is unknown for everything behind it`)
+  }
+  const allowed = new Set(allowlist.map((entry) => entry.file))
+  const unreachable = [...universe].filter((file) => !reached.has(file)).sort()
+  for (const file of unreachable) {
+    if (allowed.has(file)) continue
     failures.push(
-      `scripts/reachability.cjs allowlist entry '${entry.prefix}' names nothing unreachable any more — the gap it recorded has closed; remove the entry so the record stays true`
+      `${file}  unreachable from every entry point (${entries.join(', ')}) by static value imports — template-literal dynamic imports and import.meta.glob are not followed — the seam rule (ENGINEERING-STANDARDS §6.7): wire it, delete it, or allowlist THIS FILE in scripts/reachability.cjs with the decision that makes the gap deliberate`
+    )
+  }
+  const unreachableSet = new Set(unreachable)
+  for (const entry of allowlist) {
+    if (unreachableSet.has(entry.file)) continue
+    failures.push(
+      `scripts/reachability.cjs allowlist entry '${entry.file}' names nothing unreachable any more — the gap it recorded has closed, or the file is gone; remove the entry so the record stays true`
     )
   }
   return failures
@@ -307,13 +359,11 @@ function main() {
     return 1
   }
   const { reached, universe, typeOnly } = reachableModules()
-  const allowlisted = [...universe].filter(
-    (file) =>
-      !reached.has(file) && UNREACHABLE_ALLOWLIST.some((entry) => matchesPrefix(file, entry.prefix))
-  )
+  const allowlisted = UNREACHABLE_ALLOWLIST.map((entry) => entry.file)
   console.log(
     `reachability ok (${String(reached.size)}/${String(universe.size)} src modules reached from ${String(ENTRY_POINTS.length)} entry points; ${String(allowlisted.length)} unreachable by recorded decision; ${String(typeOnly.size)} type-only, nothing to reach)`
   )
+  console.log(`  by decision: ${allowlisted.join(', ')}`)
   return 0
 }
 

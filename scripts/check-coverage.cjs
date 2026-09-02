@@ -2,7 +2,7 @@
 /**
  * The seam rule's second half (ENGINEERING-STANDARDS §6, item 7 — M8.0): no
  * subsystem falls below the coverage floor it was measured at, and no
- * production module lands that no test reaches.
+ * production module lands that no test enters.
  *
  * ## Why a per-subsystem ratchet, and never a number
  *
@@ -12,7 +12,9 @@
  * validator tests hide two hundred lines of new boot wiring nobody drove. So
  * the record here is per SUBSYSTEM, and it is a ratchet — the floor is what
  * was last measured, it rises by re-measurement (`--update`), and it falls only
- * when a human edits `coverage-floors.json` with a reason in the diff.
+ * when a human edits `coverage-floors.json` with a reason in the diff. A floor
+ * that lags reality by more than the recorded margin fails too: a ratchet
+ * nobody turns is a number, not a record.
  *
  * ## Why the condition is recorded beside the figure, once
  *
@@ -21,33 +23,42 @@
  * quoted without it. Coverage has the same property: `process.platform`
  * branches, tests gated to one OS, and timing-dependent paths all move the
  * figure between machines. So floors are recorded PER PLATFORM with the
- * commit, node version and command they were measured under, and a run on a
- * platform with no recorded floor FAILS — it cannot say "no regression" when
- * it has nothing to compare against (the probe rule: could-not-establish must
- * fail, not pass).
+ * commit, the ref, a git-free hash of the production tree, node, OS and the
+ * command they were measured under; a run on a platform with no recorded
+ * floor FAILS — it cannot say "no regression" when it has nothing to compare
+ * against (the probe rule: could-not-establish must fail, not pass); and the
+ * first record on a platform is an explicit verb, `--seed`, so that
+ * `--update` can never quietly start over.
  *
- * ## The subsystem map is total on purpose
+ * ## The map is total, and the report must be the tree
  *
- * Every file in the coverage report must belong to exactly one subsystem. A
- * new file that belongs to none fails the check, so adding a module forces a
- * decision about what it is part of; a member that no longer matches a file
- * fails too, so the map cannot describe a tree that has moved on.
+ * Every production file belongs to exactly one subsystem: a file that belongs
+ * nowhere fails, a member that names nothing fails. And the report and the
+ * tree must agree in BOTH directions — a report entry with no file behind it,
+ * or a file the report never saw, is a report about some other tree, and a
+ * report older than the newest production file is refused before it can be
+ * recorded. Nothing here can be fooled by a stale `coverage/` directory.
  *
  * ## What "untested" means here
  *
- * A production file with lines to cover, none of them covered, and no
- * function entered: no test reaches it at all. That is the coverage-side
- * shape of the M6 Herald defect (which `reachability.cjs` catches from the
- * application's side). Known cases are listed per platform; `--update` removes
- * a file the moment a test reaches it and NEVER adds one — a new untested
- * module is added by hand, which is the review point.
+ * A production file none of whose functions any test enters — or, for a file
+ * with no functions, none of whose lines any test runs. The first draft asked
+ * only about lines, and a bare `import` of a module marks its top-level lines
+ * covered, which let `src/main/config.ts` (one line of ten, no function ever
+ * entered) pass as tested. That is the coverage-side shape of the M6 Herald
+ * defect, which `reachability.cjs` catches from the application's side. Known
+ * cases are listed per platform; `--update` removes a file the moment a test
+ * enters it and NEVER adds one — a new untested module is added by hand, which
+ * is the review point.
  *
  * Contract: `run(options)` never throws on a fault it can name. It returns the
- * exit code, the failure lines, the rendered table and the measurement, so a
- * test can drive it without a process. Reads the report, the floors file and
- * `.git/HEAD`; writes only the floors file (with `--update`) and the emitted
- * measurement (with `--emit`).
+ * exit code, the failure lines, the notes, the rendered table, the measurement
+ * and the changes, so a test can drive it without a process. Reads the report,
+ * the floors file, the production tree and `.git/HEAD`; writes only the floors
+ * file (with `--update` or `--seed`, and only when something changed) and the
+ * emitted measurement (with `--emit`).
  */
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -55,14 +66,17 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..')
 const DEFAULT_SUMMARY = path.join('coverage', 'coverage-summary.json')
 const DEFAULT_FLOORS = path.join('scripts', 'coverage-floors.json')
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const METRICS = ['lines', 'branches', 'functions', 'statements']
 const COMMAND = 'npm run test:coverage'
+/** A source extension electron-vite would bundle that neither list below names. */
+const SOURCE_LIKE = /\.(js|jsx|mjs|cjs|mts|cts)$/
 
 /** Path separators differ by platform; every path this module reports uses `/`. */
 const slashed = (p) => p.split(path.sep).join('/')
 const round2 = (n) => Math.round(n * 100) / 100
 const pct = (covered, total) => (total === 0 ? 100 : round2((covered / total) * 100))
+const isPct = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100
 
 function walk(dir, keep, out = []) {
   if (!fs.existsSync(dir)) return out
@@ -78,8 +92,8 @@ function walk(dir, keep, out = []) {
  * Contract: every production file the map must account for, root-relative and
  * sorted — the same set `vitest.config.mts`'s `coverage.include` names
  * (`src/**\/*.{ts,tsx}` less declarations, `shims/**\/*.mjs`). The two lists are
- * kept in step by hand; a file in one and not the other surfaces as either an
- * unassigned report entry or an unassigned disk file, and fails.
+ * kept in step by hand; `unexpectedSources` fails on anything under `src/`
+ * that would be bundled but that neither list would ever see.
  */
 function productionFiles(root) {
   const src = walk(
@@ -88,6 +102,40 @@ function productionFiles(root) {
   )
   const shims = walk(path.join(root, 'shims'), (name) => name.endsWith('.mjs'))
   return [...src, ...shims].map((file) => slashed(path.relative(root, file))).sort()
+}
+
+/** Contract: `src/**` files with a source-like extension neither list covers. Sorted. */
+function unexpectedSources(root) {
+  return walk(path.join(root, 'src'), (name) => SOURCE_LIKE.test(name))
+    .map((file) => slashed(path.relative(root, file)))
+    .sort()
+}
+
+/**
+ * Contract: a short, git-free fingerprint of the production tree — sha256 over
+ * every production file's path and bytes, in sorted order — so a recorded
+ * condition can be checked against a checkout without trusting `.git/HEAD`,
+ * which knows nothing about a dirty working tree.
+ */
+function treeHash(root) {
+  const hash = crypto.createHash('sha256')
+  for (const rel of productionFiles(root)) {
+    hash.update(rel)
+    hash.update('\0')
+    hash.update(fs.readFileSync(path.join(root, rel)))
+    hash.update('\0')
+  }
+  return hash.digest('hex').slice(0, 12)
+}
+
+/** Contract: the newest production file's mtime and name, or null for an empty tree. */
+function newestSource(root) {
+  let newest = null
+  for (const rel of productionFiles(root)) {
+    const mtimeMs = fs.statSync(path.join(root, rel)).mtimeMs
+    if (newest === null || mtimeMs > newest.mtimeMs) newest = { rel, mtimeMs }
+  }
+  return newest
 }
 
 /**
@@ -129,10 +177,28 @@ function headCommit(root) {
 }
 
 /**
+ * Contract: the condition a measurement was taken under. `ref` is the CI ref
+ * name when there is one (a pull_request run measures a synthetic merge
+ * commit, and the record should say so) and `local` otherwise.
+ */
+function measuredCondition(root, platform) {
+  return {
+    at: new Date().toISOString(),
+    commit: headCommit(root),
+    ref: process.env.GITHUB_REF_NAME ?? 'local',
+    tree: treeHash(root),
+    platform,
+    node: process.version,
+    os: `${os.type()} ${os.release()}`,
+    command: COMMAND
+  }
+}
+
+/**
  * Contract: each file assigned to the one subsystem whose member names it — an
  * exact file beats a directory prefix, a longer prefix beats a shorter one — plus
  * a failure per file nobody claims, per file two subsystems claim at the same
- * rank, and per member that names nothing in the report. Pure.
+ * rank, and per member that names nothing. Pure.
  */
 function assignSubsystems(files, subsystems) {
   const assigned = new Map()
@@ -174,32 +240,50 @@ function assignSubsystems(files, subsystems) {
     if (count > 0) continue
     const space = key.indexOf(' ')
     failures.push(
-      `subsystem ${key.slice(0, space)}: member '${key.slice(space + 1)}' names nothing in the coverage report — moved, deleted or shadowed; fix the map so it describes the tree`
+      `subsystem ${key.slice(0, space)}: member '${key.slice(space + 1)}' names nothing in the tree or the report — moved, deleted or shadowed; fix the map so it describes the tree`
     )
   }
   return { assigned, failures }
 }
 
+/** See the header: no function entered, or (with none to enter) no line run. */
 const isUntested = (data) =>
-  data.lines.total > 0 && data.lines.covered === 0 && data.functions.covered === 0
+  (data.functions.total > 0 && data.functions.covered === 0) ||
+  (data.lines.total > 0 && data.lines.covered === 0 && data.functions.covered === 0)
 
 /**
  * Contract: the per-subsystem measurement of one coverage-summary report —
- * percentages per metric, the files no test reaches, which subsystem each file
- * belongs to, and the lowest-covered files of each subsystem (for the failure
- * message). The map is checked for totality over the report AND `diskFiles`
- * together: a type-only module produces no report entry, and it still has to
- * belong somewhere. Pure.
+ * percentages per metric, the files no test enters, which subsystem each file
+ * belongs to, the lowest-covered files of each subsystem (for the failure
+ * message), and the per-file counts (so an emitted measurement can be
+ * re-read under a later rule). The map is checked for totality over the
+ * report AND `diskFiles` together, and the two are required to be the same
+ * set. Pure.
  */
 function measure(summary, root, subsystems, diskFiles = []) {
-  const files = Object.entries(summary)
+  const reportFiles = Object.entries(summary)
     .filter(([key]) => key !== 'total')
     .map(([key, data]) => ({
       rel: slashed(path.isAbsolute(key) ? path.relative(root, key) : key),
       data
     }))
-  const everyFile = [...new Set([...files.map((f) => f.rel), ...diskFiles])].sort()
+  const reportSet = new Set(reportFiles.map((f) => f.rel))
+  const diskSet = new Set(diskFiles)
+  const everyFile = [...new Set([...reportSet, ...diskSet])].sort()
   const { assigned, failures } = assignSubsystems(everyFile, subsystems)
+  if (diskFiles.length > 0) {
+    for (const file of everyFile) {
+      if (!diskSet.has(file)) {
+        failures.push(
+          `${file}  is in the coverage report but not on disk — the report describes a tree that has moved on; run \`${COMMAND}\` again`
+        )
+      } else if (!reportSet.has(file)) {
+        failures.push(
+          `${file}  is on disk but absent from the coverage report — vitest's coverage.include and productionFiles() disagree, or the report is stale; run \`${COMMAND}\` again`
+        )
+      }
+    }
+  }
   const per = {}
   for (const name of Object.keys(subsystems)) {
     per[name] = { files: [], untested: [], covered: {}, total: {} }
@@ -208,15 +292,21 @@ function measure(summary, root, subsystems, diskFiles = []) {
       per[name].total[metric] = 0
     }
   }
-  for (const file of files) {
+  const files = {}
+  for (const file of reportFiles) {
     const name = assigned.get(file.rel)
     if (name === undefined) continue
     const slot = per[name]
     // Older istanbul summaries print 'Unknown' for 0/0; the arithmetic below never does.
     slot.files.push({ rel: file.rel, lines: pct(file.data.lines.covered, file.data.lines.total) })
+    files[file.rel] = {}
     for (const metric of METRICS) {
       slot.covered[metric] += file.data[metric].covered
       slot.total[metric] += file.data[metric].total
+      files[file.rel][metric] = {
+        covered: file.data[metric].covered,
+        total: file.data[metric].total
+      }
     }
     if (isUntested(file.data)) slot.untested.push(file.rel)
   }
@@ -251,21 +341,29 @@ function measure(summary, root, subsystems, diskFiles = []) {
     untested: untested.sort(),
     lowest,
     total,
-    subsystemOf: Object.fromEntries(assigned)
+    subsystemOf: Object.fromEntries(assigned),
+    files,
+    reportFiles: [...reportSet].sort()
   }
 }
 
 /**
  * Contract: what a measurement says against one platform's recorded floors,
- * in three lists that fail — subsystems with no floor, floors regressed past
- * the tolerance, production modules no test reaches that the record does not
- * know — and one that does not (notes: things `--update` would ratchet). Pure.
+ * in four lists that fail — subsystems or metrics with no numeric floor,
+ * floors regressed past the tolerance, floors more than the recorded margin
+ * BELOW reality (the ratchet nobody turned), production modules no test enters
+ * that the record does not know — and one that does not (notes). Comparisons
+ * are made on rounded values so a figure exactly at the edge is not a
+ * floating-point regression. Pure.
  */
-function compare(measurement, block, tolerance, platform) {
+function compare(measurement, block, doc, platform) {
   const missing = []
   const regressions = []
+  const stale = []
   const newUntested = []
   const notes = []
+  const tolerance = doc.tolerance
+  const lag = doc.ratchetLag
   for (const [name, measured] of Object.entries(measurement.floors)) {
     const floor = block.floors[name]
     if (floor === undefined) {
@@ -277,9 +375,19 @@ function compare(measurement, block, tolerance, platform) {
     for (const metric of METRICS) {
       const have = measured[metric]
       const want = floor[metric]
-      if (have < want - tolerance) {
+      if (!isPct(want)) {
+        missing.push(
+          `subsystem ${name}: no numeric ${metric} floor recorded for platform ${platform} — a missing key is not "no floor", it is a record that cannot be compared; restore it`
+        )
+        continue
+      }
+      if (round2(have) < round2(want - tolerance)) {
         regressions.push(
           `subsystem ${name}: ${metric} ${String(have)}% is below its ${platform} floor of ${String(want)}% (tolerance ${String(tolerance)}) — lowest files: ${measurement.lowest[name].join(', ')}`
+        )
+      } else if (round2(have - want) > lag) {
+        stale.push(
+          `subsystem ${name}: ${metric} ${String(have)}% is more than ${String(lag)} points above its ${platform} floor of ${String(want)}% — the record is stale; ratchet it (\`--update\`, or \`--update --from\` the CI artifact) and commit`
         )
       } else if (have > want) {
         notes.push(
@@ -292,38 +400,34 @@ function compare(measurement, block, tolerance, platform) {
   for (const file of measurement.untested) {
     if (known.has(file)) continue
     newUntested.push(
-      `${file}  no test reaches this production module (subsystem ${measurement.subsystemOf[file]}) — the seam rule (ENGINEERING-STANDARDS §6.7): write the test, or record the decision by adding it to platforms.${platform}.untested in scripts/coverage-floors.json`
+      `${file}  no test enters this production module (subsystem ${measurement.subsystemOf[file]}) — the seam rule (ENGINEERING-STANDARDS §6.7): write the test, or record the decision by adding it to platforms.${platform}.untested in scripts/coverage-floors.json`
     )
   }
   const now = new Set(measurement.untested)
+  const inReport = new Set(measurement.reportFiles)
   for (const file of block.untested) {
-    if (!now.has(file)) notes.push(`now tested: ${file} — --update removes it from the record`)
+    if (now.has(file)) continue
+    notes.push(
+      inReport.has(file)
+        ? `now tested: ${file} — --update removes it from the record`
+        : `gone from the tree: ${file} — --update removes it from the record`
+    )
   }
-  return { missing, regressions, newUntested, notes }
+  return { missing, regressions, stale, newUntested, notes }
 }
 
 /**
- * Contract: the floors document after one measurement is folded in. Floors
- * only rise; a platform with no block is seeded (floors AND untested list); an
- * existing block loses the untested entries a test now reaches and gains none.
- * Returns the changes made and the regressions it refused to hide. Pure.
+ * Contract: the floors document after one measurement is folded into an
+ * EXISTING platform block. Floors only rise; the untested list loses what a
+ * test now enters or what is gone, and gains nothing; the condition is
+ * re-stamped only when something changed, so a refused or no-op update
+ * leaves the block byte-identical. Returns the changes made and the
+ * regressions it refused to hide. Pure.
  */
 function ratchet(doc, platform, measurement, condition) {
   const changes = []
   const regressions = []
-  const next = { ...doc, platforms: { ...doc.platforms } }
   const existing = doc.platforms[platform]
-  if (existing === undefined) {
-    next.platforms[platform] = {
-      measured: condition,
-      floors: measurement.floors,
-      untested: measurement.untested
-    }
-    changes.push(
-      `seeded platform ${platform}: ${String(Object.keys(measurement.floors).length)} subsystems, ${String(measurement.untested.length)} untested modules recorded`
-    )
-    return { doc: next, changes, regressions }
-  }
   const floors = {}
   for (const [name, measured] of Object.entries(measurement.floors)) {
     const old = existing.floors[name]
@@ -333,42 +437,69 @@ function ratchet(doc, platform, measurement, condition) {
       continue
     }
     for (const metric of METRICS) {
-      if (measured[metric] > old[metric]) {
+      if (!isPct(old[metric])) {
+        changes.push(`subsystem ${name}: ${metric} floor restored (it had no numeric value)`)
+      } else if (round2(measured[metric]) > round2(old[metric])) {
         changes.push(
           `subsystem ${name}: ${metric} ${String(old[metric])}% → ${String(measured[metric])}%`
         )
-      } else if (measured[metric] < old[metric] - doc.tolerance) {
+      } else if (round2(measured[metric]) < round2(old[metric] - doc.tolerance)) {
         regressions.push(
           `subsystem ${name}: ${metric} ${String(measured[metric])}% is below its floor of ${String(old[metric])}% — --update never lowers a floor; fix the regression or edit the file with a reason`
         )
         floors[name][metric] = old[metric]
-      } else if (measured[metric] < old[metric]) {
+      } else {
         floors[name][metric] = old[metric]
       }
     }
+    if (old.files !== measured.files && regressions.length === 0) {
+      changes.push(`subsystem ${name}: ${String(old.files)} → ${String(measured.files)} files`)
+    }
   }
   const now = new Set(measurement.untested)
+  const inReport = new Set(measurement.reportFiles)
   const untested = existing.untested.filter((file) => now.has(file))
   for (const file of existing.untested) {
-    if (!now.has(file)) changes.push(`now tested: ${file}`)
+    if (now.has(file)) continue
+    changes.push(inReport.has(file) ? `now tested: ${file}` : `gone from the tree: ${file}`)
   }
-  next.platforms[platform] = { measured: condition, floors, untested }
-  return { doc: next, changes, regressions }
+  const changed = changes.length > 0
+  const next = { ...doc, platforms: { ...doc.platforms } }
+  next.platforms[platform] = {
+    measured: changed ? condition : existing.measured,
+    floors,
+    untested
+  }
+  return { doc: next, changes, regressions, changed }
 }
 
 function loadJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
 
+const isReason = (s) => typeof s === 'string' && s.trim().length >= 40
+const CONDITION_KEYS = ['at', 'commit', 'ref', 'tree', 'platform', 'node', 'os', 'command']
+
 function validateFloors(doc) {
   if (typeof doc !== 'object' || doc === null) return 'not an object'
   if (doc.schemaVersion !== SCHEMA_VERSION) {
     return `schemaVersion ${String(doc.schemaVersion)} (expected ${String(SCHEMA_VERSION)})`
   }
-  if (typeof doc.tolerance !== 'number' || doc.tolerance < 0 || doc.tolerance > 5) {
-    return 'tolerance must be a number of percentage points between 0 and 5'
+  if (typeof doc.tolerance !== 'number' || doc.tolerance < 0 || doc.tolerance > 1) {
+    return 'tolerance must be a number of percentage points between 0 and 1'
+  }
+  if (!isReason(doc.toleranceReason)) {
+    return 'toleranceReason must say how the tolerance was measured (at least 40 characters)'
+  }
+  if (typeof doc.ratchetLag !== 'number' || doc.ratchetLag < 0.5 || doc.ratchetLag > 10) {
+    return 'ratchetLag must be a number of percentage points between 0.5 and 10'
+  }
+  if (!isReason(doc.ratchetLagReason)) {
+    return 'ratchetLagReason must say why a floor may lag reality by that much (at least 40 characters)'
   }
   if (typeof doc.subsystems !== 'object' || doc.subsystems === null) return 'subsystems missing'
+  const names = Object.keys(doc.subsystems)
+  if (names.length === 0) return 'subsystems is empty'
   for (const [name, def] of Object.entries(doc.subsystems)) {
     if (!Array.isArray(def.members) || def.members.length === 0) {
       return `subsystem ${name} has no members`
@@ -381,14 +512,86 @@ function validateFloors(doc) {
   }
   if (typeof doc.platforms !== 'object' || doc.platforms === null) return 'platforms missing'
   for (const [platform, block] of Object.entries(doc.platforms)) {
-    if (typeof block.floors !== 'object' || !Array.isArray(block.untested) || !block.measured) {
-      return `platform ${platform} block is incomplete (needs measured, floors, untested)`
+    if (typeof block !== 'object' || block === null)
+      return `platform ${platform} block is not an object`
+    if (typeof block.measured !== 'object' || block.measured === null) {
+      return `platform ${platform} block has no measured condition`
+    }
+    for (const key of CONDITION_KEYS) {
+      if (typeof block.measured[key] !== 'string' || block.measured[key].length === 0) {
+        return `platform ${platform} measured condition lacks '${key}'`
+      }
+    }
+    if (typeof block.floors !== 'object' || block.floors === null) {
+      return `platform ${platform} block has no floors`
+    }
+    for (const name of names) {
+      const floor = block.floors[name]
+      if (typeof floor !== 'object' || floor === null) {
+        return `platform ${platform}: subsystem ${name} has no floor`
+      }
+      for (const metric of METRICS) {
+        if (!isPct(floor[metric])) {
+          return `platform ${platform}: subsystem ${name} lacks a numeric ${metric} floor`
+        }
+      }
+      if (!Number.isInteger(floor.files) || floor.files < 0) {
+        return `platform ${platform}: subsystem ${name} lacks an integer file count`
+      }
+    }
+    for (const name of Object.keys(block.floors)) {
+      if (!names.includes(name)) {
+        return `platform ${platform}: floor for unknown subsystem ${name}`
+      }
+    }
+    if (!Array.isArray(block.untested)) return `platform ${platform} block has no untested list`
+    for (const file of block.untested) {
+      if (typeof file !== 'string' || file.includes('\\')) {
+        return `platform ${platform}: untested entry ${JSON.stringify(file)} must be a /-separated path`
+      }
     }
   }
   return null
 }
 
-function renderTable(measurement, block, tolerance) {
+function validateEmitted(emitted, doc) {
+  if (typeof emitted !== 'object' || emitted === null) return 'not an object'
+  if (emitted.schemaVersion !== SCHEMA_VERSION) {
+    return `schemaVersion ${String(emitted.schemaVersion)} (expected ${String(SCHEMA_VERSION)})`
+  }
+  if (typeof emitted.platform !== 'string') return 'platform missing'
+  if (typeof emitted.measured !== 'object' || emitted.measured === null) return 'measured missing'
+  for (const key of CONDITION_KEYS) {
+    if (typeof emitted.measured[key] !== 'string') return `measured condition lacks '${key}'`
+  }
+  const m = emitted.measurement
+  if (typeof m !== 'object' || m === null) return 'measurement missing'
+  if (typeof m.floors !== 'object' || m.floors === null) return 'measurement.floors missing'
+  const have = Object.keys(m.floors).sort()
+  const want = Object.keys(doc.subsystems).sort()
+  if (JSON.stringify(have) !== JSON.stringify(want)) {
+    return `measurement covers subsystems [${have.join(', ')}] but the map has [${want.join(', ')}] — the artifact is from a different map; re-measure`
+  }
+  for (const name of want) {
+    for (const metric of METRICS) {
+      if (!isPct(m.floors[name][metric]))
+        return `measurement.floors.${name}.${metric} is not a percentage`
+    }
+  }
+  if (!Array.isArray(m.untested)) return 'measurement.untested missing'
+  if (!Array.isArray(m.reportFiles)) return 'measurement.reportFiles missing'
+  if (typeof m.lowest !== 'object' || m.lowest === null) return 'measurement.lowest missing'
+  if (typeof m.subsystemOf !== 'object' || m.subsystemOf === null)
+    return 'measurement.subsystemOf missing'
+  if (typeof m.total !== 'object' || m.total === null) return 'measurement.total missing'
+  for (const metric of METRICS) {
+    if (!isPct(m.total[metric])) return `measurement.total.${metric} is not a percentage`
+  }
+  if (!Array.isArray(m.failures)) return 'measurement.failures missing'
+  return null
+}
+
+function renderTable(measurement, block, doc) {
   const rows = [
     ['subsystem', 'files', 'lines', 'branch', 'funcs', 'stmts', 'untested', 'floor(lines)']
   ]
@@ -397,6 +600,16 @@ function renderTable(measurement, block, tolerance) {
     const untested = measurement.untested.filter(
       (file) => measurement.subsystemOf[file] === name
     ).length
+    let floorCell = '—'
+    if (floor !== undefined && isPct(floor.lines)) {
+      const mark =
+        round2(f.lines) < round2(floor.lines - doc.tolerance)
+          ? ' ✗'
+          : round2(f.lines - floor.lines) > doc.ratchetLag
+            ? ' ↑'
+            : ''
+      floorCell = `${String(floor.lines)}${mark}`
+    }
     rows.push([
       name,
       String(f.files),
@@ -405,9 +618,7 @@ function renderTable(measurement, block, tolerance) {
       String(f.functions),
       String(f.statements),
       String(untested),
-      floor === undefined
-        ? '—'
-        : `${String(floor.lines)}${f.lines < floor.lines - tolerance ? ' ✗' : ''}`
+      floorCell
     ])
   }
   rows.push([
@@ -431,6 +642,7 @@ function renderTable(measurement, block, tolerance) {
 function parseArgs(argv) {
   const options = {
     update: false,
+    seed: false,
     from: null,
     emit: null,
     summary: null,
@@ -440,6 +652,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--update') options.update = true
+    else if (arg === '--seed') options.seed = true
     else if (arg === '--from') options.from = argv[++i] ?? null
     else if (arg === '--emit') options.emit = argv[++i] ?? null
     else if (arg === '--summary') options.summary = argv[++i] ?? null
@@ -447,20 +660,34 @@ function parseArgs(argv) {
     else if (arg === '--platform') options.platform = argv[++i] ?? null
     else return { error: `unknown argument: ${arg}` }
   }
+  if (options.update && options.seed)
+    return { error: '--update and --seed are different verbs; pass one' }
   return options
+}
+
+function writeDoc(floorsPath, doc) {
+  fs.writeFileSync(floorsPath, `${JSON.stringify(doc, null, 2)}\n`)
 }
 
 /**
  * Contract: see the header. `options.root` defaults to the repository; every
  * path option is resolved against it. Returns `{ exitCode, failures, notes,
- * table, measurement, changes }`.
+ * table, measurement, changes, wrote }`.
  */
 function run(options = {}) {
   const root = options.root ?? ROOT
   const platform = options.platform ?? process.platform
   const floorsPath = path.resolve(root, options.floors ?? DEFAULT_FLOORS)
   const summaryPath = path.resolve(root, options.summary ?? DEFAULT_SUMMARY)
-  const out = { exitCode: 0, failures: [], notes: [], table: '', measurement: null, changes: [] }
+  const out = {
+    exitCode: 0,
+    failures: [],
+    notes: [],
+    table: '',
+    measurement: null,
+    changes: [],
+    wrote: false
+  }
   const fail = (line) => {
     out.failures.push(line)
     out.exitCode = 1
@@ -490,6 +717,8 @@ function run(options = {}) {
         `emitted measurement could not be read: ${err instanceof Error ? err.message : String(err)}`
       )
     }
+    const bad = validateEmitted(emitted, doc)
+    if (bad !== null) return fail(`emitted measurement is not usable: ${bad}`)
     if (emitted.platform !== platform) {
       return fail(
         `emitted measurement is for platform ${String(emitted.platform)}, not ${platform} — pass --platform ${String(emitted.platform)} to record it`
@@ -499,65 +728,112 @@ function run(options = {}) {
     condition = emitted.measured
   } else {
     let summary
+    let reportMtimeMs
     try {
       summary = loadJson(summaryPath)
+      reportMtimeMs = fs.statSync(summaryPath).mtimeMs
     } catch (err) {
       return fail(
         `coverage could not be established: no report at ${slashed(path.relative(root, summaryPath))} (${err instanceof Error ? err.message : String(err)}) — run \`${COMMAND}\` first`
       )
     }
-    measurement = measure(summary, root, doc.subsystems, productionFiles(root))
-    condition = {
-      at: new Date().toISOString(),
-      commit: headCommit(root),
-      platform,
-      node: process.version,
-      os: `${os.type()} ${os.release()}`,
-      command: COMMAND
+    const newest = newestSource(root)
+    if (newest !== null && newest.mtimeMs > reportMtimeMs) {
+      return fail(
+        `coverage report is stale: ${newest.rel} changed after the report was written — run \`${COMMAND}\` again before checking or recording anything`
+      )
     }
+    measurement = measure(summary, root, doc.subsystems, productionFiles(root))
+    condition = measuredCondition(root, platform)
   }
   out.measurement = measurement
   for (const failure of measurement.failures) fail(failure)
+  for (const file of unexpectedSources(root)) {
+    fail(
+      `${file}  has a source extension neither vitest's coverage.include nor productionFiles() names — it would be bundled and never measured; widen both lists together, or move it`
+    )
+  }
 
   if (options.emit !== null && options.emit !== undefined) {
     const emitPath = path.resolve(root, options.emit)
     fs.mkdirSync(path.dirname(emitPath), { recursive: true })
     fs.writeFileSync(
       emitPath,
-      `${JSON.stringify({ platform, measured: condition, measurement }, null, 2)}\n`
+      `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, platform, measured: condition, measurement }, null, 2)}\n`
     )
     out.notes.push(`measurement written to ${slashed(path.relative(root, emitPath))}`)
   }
 
   const block = doc.platforms[platform]
-  out.table = renderTable(measurement, block, doc.tolerance)
+  out.table = renderTable(measurement, block, doc)
+
+  if (options.seed) {
+    // A broken map or a report that is not the tree is not recorded over.
+    if (out.failures.length > 0) return out
+    if (block !== undefined) {
+      return fail(
+        `platform ${platform} already has floors recorded — --update ratchets them; to start over, delete the block by hand with a reason in the diff, never by re-seeding`
+      )
+    }
+    const next = { ...doc, platforms: { ...doc.platforms } }
+    next.platforms[platform] = {
+      measured: condition,
+      floors: measurement.floors,
+      untested: measurement.untested
+    }
+    writeDoc(floorsPath, next)
+    out.wrote = true
+    out.changes.push(
+      `seeded platform ${platform}: ${String(Object.keys(measurement.floors).length)} subsystems, ${String(measurement.untested.length)} untested modules recorded — REVIEW THE LIST, it is the first record and nothing checked it`
+    )
+    for (const file of measurement.untested) out.changes.push(`  untested: ${file}`)
+    return out
+  }
 
   if (options.update) {
-    // A broken map is not ratcheted over: the numbers would be about the wrong tree.
-    if (measurement.failures.length > 0) return out
-    const { doc: next, changes, regressions } = ratchet(doc, platform, measurement, condition)
-    for (const regression of regressions) fail(regression)
+    if (out.failures.length > 0) return out
+    if (block === undefined) {
+      return fail(
+        `no coverage floors are recorded for platform ${platform} — the first record on a platform is \`--seed\` (or \`--seed --from <emitted.json> --platform ${platform}\`), never --update`
+      )
+    }
+    const {
+      doc: next,
+      changes,
+      regressions,
+      changed
+    } = ratchet(doc, platform, measurement, condition)
+    if (regressions.length > 0) {
+      for (const regression of regressions) fail(regression)
+      out.notes.push('nothing written: a refused update leaves the record exactly as it was')
+      return out
+    }
     out.changes = changes
-    fs.writeFileSync(floorsPath, `${JSON.stringify(next, null, 2)}\n`)
+    if (changed) {
+      writeDoc(floorsPath, next)
+      out.wrote = true
+    } else {
+      out.notes.push('nothing to ratchet: the record is unchanged, condition included')
+    }
     // What --update never does is add an untested module to the record, so a
     // new one is still a failure here — the file was written, the gap was not hidden.
-    const after = compare(measurement, next.platforms[platform], doc.tolerance, platform)
+    const after = compare(measurement, next.platforms[platform], doc, platform)
     for (const failure of after.newUntested) fail(failure)
     return out
   }
 
   if (block === undefined) {
     return fail(
-      `no coverage floors are recorded for platform ${platform} — nothing to compare against, so this run cannot claim "no regression"; run \`node scripts/check-coverage.cjs --update\` on ${platform} (or --update --from <emitted.json> --platform ${platform}) and commit scripts/coverage-floors.json`
+      `no coverage floors are recorded for platform ${platform} — nothing to compare against, so this run cannot claim "no regression"; record the first measurement with \`node scripts/check-coverage.cjs --seed\` on ${platform} (or --seed --from <emitted.json> --platform ${platform}) and commit scripts/coverage-floors.json`
     )
   }
-  const { missing, regressions, newUntested, notes } = compare(
+  const { missing, regressions, stale, newUntested, notes } = compare(
     measurement,
     block,
-    doc.tolerance,
+    doc,
     platform
   )
-  for (const failure of [...missing, ...regressions, ...newUntested]) fail(failure)
+  for (const failure of [...missing, ...regressions, ...stale, ...newUntested]) fail(failure)
   out.notes.push(...notes)
   return out
 }
@@ -568,14 +844,18 @@ function main(argv) {
   if (options.error !== undefined) {
     console.error(options.error)
     console.error(
-      'usage: node scripts/check-coverage.cjs [--update] [--from <emitted.json>] [--emit <path>] [--summary <path>] [--floors <path>] [--platform <name>]'
+      'usage: node scripts/check-coverage.cjs [--update | --seed] [--from <emitted.json>] [--emit <path>] [--summary <path>] [--floors <path>] [--platform <name>]'
     )
     return 2
   }
   const result = run(options)
   if (result.table !== '') console.log(`${result.table}\n`)
   for (const change of result.changes) console.log(`  ratchet: ${change}`)
-  for (const note of result.notes) console.log(`  note: ${note}`)
+  const annotate = process.env.GITHUB_ACTIONS === 'true'
+  for (const note of result.notes) {
+    console.log(`  note: ${note}`)
+    if (annotate && note.includes('--update')) console.log(`::warning::${note}`)
+  }
   if (result.failures.length > 0) {
     console.error('\nCoverage floor failures (the seam rule, ENGINEERING-STANDARDS §6.7):\n')
     for (const failure of result.failures) console.error(`  ${failure}`)
@@ -583,7 +863,7 @@ function main(argv) {
     return result.exitCode
   }
   console.log(
-    `coverage floors ok (${String(Object.keys(result.measurement.floors).length)} subsystems on ${options.platform ?? process.platform}; ${String(result.measurement.untested.length)} untested modules, all recorded)`
+    `coverage floors ok (${String(Object.keys(result.measurement.floors).length)} subsystems on ${options.platform ?? process.platform}; ${String(result.measurement.untested.length)} untested modules, all recorded${result.wrote ? '; record written' : ''})`
   )
   return 0
 }
@@ -594,12 +874,18 @@ module.exports = {
   SCHEMA_VERSION,
   METRICS,
   headCommit,
+  treeHash,
+  newestSource,
   productionFiles,
+  unexpectedSources,
+  measuredCondition,
   assignSubsystems,
+  isUntested,
   measure,
   compare,
   ratchet,
   validateFloors,
+  validateEmitted,
   renderTable,
   parseArgs,
   run,
