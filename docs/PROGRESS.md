@@ -4603,7 +4603,14 @@ structural rather than a habit.
       fix, `follows an npm-style %dp0% shim` passing where it had failed on
       every prior run — and uploaded the measurement; run `33615569423` on
       `6bfdf0f`, with the linux floors recorded from that artifact, is GREEN
-      on all three jobs. What the baseline says (figures in the file): boot
+      on all three jobs. After the refutation pass the same shape repeated
+      under schema 2: run `33632864541` on `2080f98` red BY DESIGN at the
+      floor check with every earlier step green, its artifact seeded the
+      linux block (`--seed --from`), and run `33633139125` on `95dac31` is
+      GREEN on all three jobs with "coverage floors ok (17 subsystems on
+      linux; 24 untested modules, all recorded)"; the tree hash recorded on
+      linux equals the one recorded on win32, so both blocks describe the
+      same production tree. What the baseline says (figures in the file): boot
       wiring is the least-covered row, four of its five files reached by no
       test; none of the four mechanisms TEST-STRATEGY names meets its ≥ 90 %
       branch target; 24 production modules are entered by no test on either
