@@ -12,7 +12,11 @@ handover is worse than none.
 ## The prompt
 
 > Build milestone **M8 of Ephesus — "The company you can leave running"**.
-> Resume at **M8.0 (coverage baseline and the seam rule)**.
+> Resume at **M8.1 (the quit path, and the rig that hid it)**. M8.0 landed on
+> 2026-09-02: the seam rule is mechanical (`scripts/reachability.cjs` inside
+> `check-invariants`, `scripts/check-coverage.cjs` over
+> `scripts/coverage-floors.json`), GYM-006 is on the ledger, and the DoD
+> command below is the new one.
 >
 > **FIRST, follow `BUILD-PROMPT.md` §2's reading protocol in full, every
 > session.** Do not skip it and do not substitute `docs/PROGRESS.md` for it.
@@ -111,9 +115,10 @@ handover is worse than none.
 > 1. **What the shipped gate policy grants** (DD-1). Deny-all is defensible and
 >    makes the product unusable on first run; permissive makes "the Watch held
 >    every gated action" untrue by default.
-> 2. **M8.0's coverage provider is a NEW DEPENDENCY**, and BUILD-PROMPT §3
->    requires a decision memo before one lands. Recommend v8 — it ships with
->    vitest and adds no package.
+> 2. ~~M8.0's coverage provider~~ **DECIDED 2026-09-02:** `@vitest/coverage-v8`
+>    at exact `4.1.11`, dev-only. The premise this bullet used to carry — "it
+>    ships with vitest and adds no package" — was FALSE: `vitest run --coverage`
+>    fails without the package. Recorded in DECISIONS-LOG and BUILD-PROMPT §10.
 > 3. The shipped hire budgets, which measured a breach inside one working day for
 >    every hire; whether a company-wide daily ceiling exists at all; whether the
 >    block cap and pathology signal are dead code or a wrong early return (both
@@ -172,8 +177,17 @@ handover is worse than none.
 > ### Definition of done for every M8 package
 >
 > `npm run typecheck && npm run lint && node scripts/check-invariants.cjs &&
-> npm test` green before every commit. Never proceed on red; never weaken a test
-> to pass it. The package's owed tests are part of the package, not a follow-up.
+> npm run test:coverage && node scripts/check-coverage.cjs` green before every
+> commit — this is BUILD-PROMPT §4's TEST line as updated at M8.0 (the suite
+> runs once, under coverage, and the seam rule's two gates run with it); §4 is
+> canonical, this is the copy a pasted prompt needs. Never proceed on red;
+> never weaken a test to pass it.
+> A coverage figure is written in exactly ONE place, `scripts/coverage-floors.json`,
+> with its platform and condition — never copied into prose. When a package
+> raises coverage, `node scripts/check-coverage.cjs --update` ratchets the floor
+> on the platform you are on; linux floors come from the CI artifact
+> (`--update --from <artifact> --platform linux`). A NEW untested module or an
+> unreachable one is a hand edit citing a decision, never an `--update`. The package's owed tests are part of the package, not a follow-up.
 > Tick the package in `docs/PROGRESS.md` with a one-line evidence note in the
 > same commit series, log minor choices in `docs/DECISIONS-LOG.md`, and write the
 > implementation doc at `docs/implementations/YYYY-MM-DD-<slug>.md`.

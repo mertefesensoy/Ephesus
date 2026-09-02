@@ -50,9 +50,18 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 ### CI (`.github/workflows/ci.yml`)
 - **Docs integrity** (active now): every relative markdown link must resolve; accepted
   ADRs are append-only (a PR touching an existing `ADR-*.md` fails).
-- **Code checks** (self-arming): typecheck · lint · test run automatically the moment
-  `package.json` exists — the pipeline is green-by-absence before M0.1, never skipped
-  after.
+- **Code checks** (self-arming): typecheck · lint · invariant tripwires · test (one run,
+  under coverage) · coverage floors run automatically the moment `package.json` exists —
+  the pipeline is green-by-absence before M0.1, never skipped after.
+- **The seam rule** (M8.0, GYM-006; ENGINEERING-STANDARDS §6.7), two gates:
+  `scripts/check-invariants.cjs` walks the import graph from the three entry points
+  (`scripts/reachability.cjs`) and fails on any `src/**` module the app cannot load
+  unless it is allowlisted with the decision that made the gap deliberate; and
+  `scripts/check-coverage.cjs` fails on a per-subsystem coverage regression or a
+  production module no test reaches, against `scripts/coverage-floors.json` — the one
+  place a coverage figure is written, per platform, with its condition. The linux
+  measurement is uploaded as an artifact on every run so linux floors are recorded from
+  the CI condition (`--update --from <artifact> --platform linux`).
 - **Commit attribution**: `scripts/check-attribution.cjs` over the full history — no
   commit is authored, committed or co-authored as Claude (ENGINEERING-STANDARDS §2).
   The backstop for the local hooks, which `--no-verify` or an unarmed clone can miss.

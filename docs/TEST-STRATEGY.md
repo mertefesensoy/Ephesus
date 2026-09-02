@@ -32,9 +32,16 @@ effects (git, files, network) coordinated through *timing-sensitive* mechanisms
 | Live | Playwright/scripted | Real Claude Code, real voice keys (opt-in), real GitHub sandbox repo | nightly + release |
 | Evals | custom runner | Agent-behavior quality (§6) | weekly + release |
 
-Coverage targets: mechanisms (hermes/agora/odeon/watch modules) ≥ 90% branch; overall
-line coverage is *not* a gate (it incentivizes junk tests); mutation testing on the
-message-rule and gate-policy modules quarterly.
+Coverage is measured (`npm run test:coverage`, v8 provider) and gated as a
+**per-subsystem ratchet**, never as an overall number: `scripts/coverage-floors.json`
+records each subsystem's measured floor beside the condition it was measured in;
+`scripts/check-coverage.cjs` fails CI when a subsystem falls below its floor or a
+production file lands that no test reaches; floors rise by re-measurement and fall
+only by a reviewed edit with a reason. The ≥ 90 % branch target for the mechanisms
+(hermes/agora/odeon/watch) stays a target, and the floors file shows each one's
+distance from it. Overall line coverage is still *not* a gate (it incentivizes junk
+tests); mutation testing on the message-rule and gate-policy modules quarterly.
+*(Amended at M8.0, GYM-006; the rule it enforces is ENGINEERING-STANDARDS §6.7.)*
 
 ## 3. Scenario suites (the tests that matter)
 

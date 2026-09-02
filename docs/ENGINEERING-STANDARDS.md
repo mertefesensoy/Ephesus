@@ -136,6 +136,13 @@ A change is done when:
    changed, ADR/memo if policy demanded one.
 5. Degradation paths for the feature are implemented and visible (§4).
 6. No new lint-boundary violations, no schema without version, no stray hex colors.
+7. **The seam is tested, or its absence is recorded.** Every production module under
+   `src/` is reachable from an application entry point (`scripts/check-invariants.cjs`
+   walks the import graph through `scripts/reachability.cjs`; a deliberate gap is
+   allowlisted there *with the decision that made it deliberate*), and no subsystem
+   drops below its floor in `scripts/coverage-floors.json`. A wiring seam with no test
+   is a defect, not a gap: a package's evidence names its production call path — file
+   and line — or records that there is none. *(M8.0, GYM-006.)*
 
 ## 7. Agent-specific standards
 

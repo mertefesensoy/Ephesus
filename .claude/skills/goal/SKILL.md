@@ -62,7 +62,8 @@ For each unchecked package, run the `/build-package` loop
 branch. Hard rules, restated because milestone runs tempt shortcuts:
 
 - `npm run typecheck && npm run lint && node scripts/check-invariants.cjs &&
-  npm test` green before every commit. Never proceed on red; never weaken a
+  npm run test:coverage && node scripts/check-coverage.cjs` green before every
+  commit (BUILD-PROMPT §4's TEST line since M8.0). Never proceed on red; never weaken a
   test to pass it.
 - The package's owed tests (its *Tests:* line in PROGRESS.md) are part of the
   package, not a follow-up.

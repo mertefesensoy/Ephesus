@@ -13,7 +13,7 @@ description: Execute the next Ephesus work package from BUILD-PROMPT.md — resu
    BUILD-PROMPT §5 ("M2 → M7") and write it into PROGRESS.md before coding.
 3. Read only the docs BUILD-PROMPT §2 maps to this package.
 4. Execute the working loop (BUILD-PROMPT §4). Hard rules:
-   - `npm run typecheck && npm run lint && npm test` green before any commit.
+   - `npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm run test:coverage && node scripts/check-coverage.cjs` green before any commit — BUILD-PROMPT §4's TEST line (since M8.0 the suite runs once, under coverage, and the seam rule's two checks run with it).
    - Tests owed by the package (TEST-STRATEGY §2 mapping) are part of the package.
    - Evidence (command + observed result) goes in the commit description.
    - 3 failed distinct attempts on a blocker → stop, record it, report (don't hack around).

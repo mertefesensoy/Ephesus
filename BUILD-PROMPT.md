@@ -107,7 +107,10 @@ BUILD → implement; follow existing file layout from SDD §1.1 module map:
         src/main/ · src/preload/ · src/renderer/ · src/shared/ · shims/ · prompts/ ·
         profiles/ · test/
 TEST  → write the tests the package owes (TEST-STRATEGY §2 level mapping) and run:
-        npm run typecheck && npm run lint && npm test
+        npm run typecheck && npm run lint && node scripts/check-invariants.cjs &&
+        npm run test:coverage && node scripts/check-coverage.cjs
+        (since M8.0: the suite runs once, under coverage, and the seam rule's
+        two checks run with it — ENGINEERING-STANDARDS §6.7)
         Fix until all green. Never proceed on red. Never weaken a test to pass it.
 PROVE → run the real thing (npm run dev or the relevant script) and capture evidence:
         what you ran, what you observed. Evidence goes in the commit/PR description.
@@ -135,7 +138,23 @@ it is how the next session knows where to resume).
 > integration branch (identical to it), and `feature/usage-aware-pacing`, which
 > is UNMERGED on purpose and belongs to M8.9.
 >
-> **Resume at M8.0.** The plan is in `docs/PROGRESS.md` under
+> **M8.0 LANDED (2026-09-02) — the seam rule is now mechanical.**
+> `node scripts/check-invariants.cjs` walks the import graph from the three
+> entry points and fails on any `src/**` module the app cannot load unless
+> `scripts/reachability.cjs` allowlists it WITH the decision (the Herald;
+> `contrast.ts`); `npm run test:coverage && node scripts/check-coverage.cjs`
+> fails on a per-subsystem floor regression or a production module no test
+> reaches, against `scripts/coverage-floors.json` — the ONLY place a coverage
+> figure is written, per platform, with its condition. **The DoD gate is §4's
+> TEST line, updated at M8.0** — the suite runs once, under coverage, and both
+> seam checks run with it; the `/goal` and `/build-package` skills carry the
+> same line. When M8.11
+> unregisters `codex.ts`/`gemini.ts` the walk WILL fail until they are
+> allowlisted citing ADR-0024 — that is the tripwire working, not a bug. Every
+> M8 package's evidence names its production call path, file and line, or
+> records that there is none (ENGINEERING-STANDARDS §6.7, GYM-006).
+>
+> **Resume at M8.1.** The plan is in `docs/PROGRESS.md` under
 > *"M8 — The company you can leave running"*, derived from the 2026-09-02 MVP
 > register. **M8 runs BEFORE M7b**, and the ordering is the plan's first claim:
 > M7b ships signed builds of a company that today cannot survive a restart,
@@ -484,7 +503,12 @@ Next session starts at: M<x>.<n>
   boundary confines both to `src/main/herald/` (ENGINEERING-STANDARDS §1), which
   anticipated exactly this. Rationale and the `npm audit` position are in
   `docs/DECISIONS-LOG.md`.
-- Scripts to keep working at all times: `dev`, `build`, `typecheck`, `lint`, `test`.
+- Approved by Architect must-ask (2026-09-02, M8.0): **`@vitest/coverage-v8@4.1.11`**,
+  dev-only, pinned EXACT because its peer is vitest's exact version — bump the two
+  together. It is NOT bundled with vitest (`vitest run --coverage` fails without it).
+  Rationale and the audit position are in `docs/DECISIONS-LOG.md`.
+- Scripts to keep working at all times: `dev`, `build`, `typecheck`, `lint`, `test`,
+  `test:coverage`.
 
 **Working constraints learned in M0 (binding until the environment changes —
 rationale in `docs/DECISIONS-LOG.md`):**
