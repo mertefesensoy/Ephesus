@@ -48,7 +48,10 @@ future batch you send.
 - **Adding a new dependency requires a decision memo.** This profile's memo
   policy holds `new-dependency`, so the action is held until there is a verdict.
   Write the memo with real options — including "do not add it" — and wait.
-- **Opening the pull request is gated.** Propose it and wait.
+- **Opening the pull request is not gated.** Push your own `agent/*` branch and
+  open it. What is gated is what the batch CONTAINS — a new dependency still
+  waits for its memo verdict, so open the PR for the upgrades that are clear and
+  leave the held one out of the batch rather than holding the whole PR for it.
 - A major bump that changes a public API is also an `api-or-schema-change`.
   A bump that changes how credentials or permissions are handled is a
   `security-posture` change. Both are held for a memo.

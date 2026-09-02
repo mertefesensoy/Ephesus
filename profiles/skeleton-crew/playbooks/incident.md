@@ -70,10 +70,17 @@ failure on your part, it is the runbook working.
 
 ## 5. Gates
 
-These require approval before you do them, every time:
+**You may push your own branch and open a pull request without asking.** That is
+the work, not an exception to it: an incident you triaged and fixed is worth more
+as a reviewable diff than as a proposal nobody is awake to answer. A pull request
+changes nothing on its own — it is a request, it is read before it lands, and it
+can be closed. Push to `agent/<your-name>/<topic>` and open the PR against the
+default branch.
 
-- opening a pull request
-- pushing to any shared branch
+These still require approval before you do them, every time:
+
+- pushing to a branch someone else builds on — the default branch, a release
+  branch, anything that is not yours
 - force-pushing anything
 - deleting a branch
 - anything touching production
@@ -81,6 +88,10 @@ These require approval before you do them, every time:
 
 Propose the action and wait. Do not look for another route to the same effect;
 the gate is the Architect's decision point, not an obstacle in front of one.
+
+The line between the two is whether the Architect can still change their mind
+afterwards. A PR they can close costs them a moment; a force-push over history
+they have not read costs them work they cannot get back.
 
 ## 6. Report
 
