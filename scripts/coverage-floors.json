@@ -383,6 +383,165 @@
         "src/renderer/src/fonts.ts",
         "src/renderer/src/main.tsx"
       ]
+    },
+    "linux": {
+      "measured": {
+        "at": "2026-09-02T12:59:40.578Z",
+        "commit": "2080f98",
+        "ref": "feature/m8-0-coverage-seam-rule",
+        "tree": "28869d68720c",
+        "platform": "linux",
+        "node": "v20.20.2",
+        "os": "Linux 6.17.0-1022-azure",
+        "command": "npm run test:coverage"
+      },
+      "floors": {
+        "boot": {
+          "lines": 9.63,
+          "branches": 0.28,
+          "functions": 2.63,
+          "statements": 8.84,
+          "files": 5
+        },
+        "engines": {
+          "lines": 92.93,
+          "branches": 84.88,
+          "functions": 87.3,
+          "statements": 90.07,
+          "files": 20
+        },
+        "hermes": {
+          "lines": 98.45,
+          "branches": 87.31,
+          "functions": 97.56,
+          "statements": 95.73,
+          "files": 7
+        },
+        "agora": {
+          "lines": 96.1,
+          "branches": 85.98,
+          "functions": 94.64,
+          "statements": 94.16,
+          "files": 9
+        },
+        "artemis": {
+          "lines": 97.24,
+          "branches": 89.53,
+          "functions": 87.88,
+          "statements": 93.94,
+          "files": 2
+        },
+        "library": {
+          "lines": 90.22,
+          "branches": 78.75,
+          "functions": 86.4,
+          "statements": 88.42,
+          "files": 8
+        },
+        "odeon": {
+          "lines": 92.5,
+          "branches": 78.8,
+          "functions": 95.61,
+          "statements": 90.14,
+          "files": 8
+        },
+        "harbor": {
+          "lines": 89.38,
+          "branches": 75.12,
+          "functions": 89.19,
+          "statements": 87.87,
+          "files": 15
+        },
+        "watch": {
+          "lines": 95.85,
+          "branches": 86.73,
+          "functions": 89.42,
+          "statements": 94.54,
+          "files": 19
+        },
+        "terraces": {
+          "lines": 75.13,
+          "branches": 71.69,
+          "functions": 84.16,
+          "statements": 75.3,
+          "files": 22
+        },
+        "gymnasium": {
+          "lines": 95.19,
+          "branches": 78.46,
+          "functions": 95.12,
+          "statements": 92.96,
+          "files": 4
+        },
+        "stoa": {
+          "lines": 96.48,
+          "branches": 84.77,
+          "functions": 98.31,
+          "statements": 95.5,
+          "files": 5
+        },
+        "company": {
+          "lines": 96.69,
+          "branches": 91.56,
+          "functions": 92.54,
+          "statements": 95.19,
+          "files": 11
+        },
+        "home": {
+          "lines": 46.05,
+          "branches": 36.67,
+          "functions": 27.27,
+          "statements": 45.88,
+          "files": 6
+        },
+        "panels": {
+          "lines": 19.87,
+          "branches": 23.87,
+          "functions": 14.41,
+          "statements": 19.31,
+          "files": 24
+        },
+        "herald": {
+          "lines": 93.05,
+          "branches": 77.96,
+          "functions": 88,
+          "statements": 89.17,
+          "files": 7
+        },
+        "shims": {
+          "lines": 47.62,
+          "branches": 41.5,
+          "functions": 46.3,
+          "statements": 47.26,
+          "files": 5
+        }
+      },
+      "untested": [
+        "shims/eph-usage.mjs",
+        "src/main/config.ts",
+        "src/main/db.ts",
+        "src/main/index.ts",
+        "src/main/library-fts-sqlite.ts",
+        "src/main/pty.ts",
+        "src/main/watch/cipher.ts",
+        "src/preload/index.ts",
+        "src/renderer/src/ActivityPanel.tsx",
+        "src/renderer/src/App.tsx",
+        "src/renderer/src/BriefsPanel.tsx",
+        "src/renderer/src/CommandBar.tsx",
+        "src/renderer/src/DecksPanel.tsx",
+        "src/renderer/src/GymPanel.tsx",
+        "src/renderer/src/LedgerPanel.tsx",
+        "src/renderer/src/MeetingPanel.tsx",
+        "src/renderer/src/MemoryPanel.tsx",
+        "src/renderer/src/MemosPanel.tsx",
+        "src/renderer/src/OrgPanel.tsx",
+        "src/renderer/src/TerminalPanel.tsx",
+        "src/renderer/src/WatchPanel.tsx",
+        "src/renderer/src/floor/vfx-art.ts",
+        "src/renderer/src/fonts.ts",
+        "src/renderer/src/main.tsx"
+      ]
     }
   }
 }
