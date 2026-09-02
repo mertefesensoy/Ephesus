@@ -4399,9 +4399,25 @@ close-out audit was convened to catch.
       opens real work for a real failure, and the standup narrates it. Requires
       the Architect to name the repository and consent to autonomous agents
       holding `GH_TOKEN` grants running unattended against it. Nobody else's call.
-- [ ] **Wake must not depend on the avatar phase** — `isIdle` reads a rendering
-      state, so a missed terminal hook silences an agent permanently. Blocks any
-      unattended run, §6.1's included.
+- [x] **Wake must not depend on the avatar phase** — CLOSED 2026-09-02 (`8152068`).
+      `isIdle` now composes `canDeliverWake(ptyManager.has, wakeClock.runningMs)`,
+      two delivery-plane facts, both BOUNDED: `WakeClock.ended` closes on `stop`
+      OR `session-end` with no phase guard, and the cap timer force-closes an
+      overrunning wake even when every hook is lost. The phase had no such bound
+      — `avatar.ts`'s `stop` is inert unless the agent was mid-tool, so any turn
+      calling no tool stranded the agent for the life of the process.
+      *Shipped with its second half, which is not optional: the nudge went
+      through `commandQueue.submit`, which consults the same phase, and
+      `wakeCheck` archives the mail BEFORE nudging — so fixing the predicate
+      alone would have HELD the nudge on an already-archived message (silent
+      loss) or THROWN and skipped every agent after it in `knownAgents()` order.
+      Now a `wake()` path that does not consult the floor, and a failed nudge
+      recorded as `wake-undelivered` before the sweep continues.*
+      *Evidence: full suite 3192 passed / 0 failed; four mutations red (4/2/1/1);
+      the predicate is a NAMED function because the one it replaced was an inline
+      expression in the composition root, which is how it went untested —
+      `s-wake.test.ts` stubs `isIdle` and is structurally blind to it.
+      Doc: `docs/implementations/2026-09-02-wake-asks-the-delivery-plane.md`.*
 - [ ] **E-PLAYBOOK's live drill** — the recorded scorecard scores a FIXTURE
       record through the shipped scorer; the real-engine drill (TEST-STRATEGY §6)
       is owed with §6.1.
