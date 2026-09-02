@@ -4529,6 +4529,253 @@ that evidence rather than another silent no-op.
    at 1.9% and 0.55%), so the harness is contending with itself and no budget
    wins that race.
 
+## M8 — The company you can leave running (plan drafted 2026-09-02)
+
+**Sequence: M7 → M8 → M7b.** M8 is inserted BEFORE M7b, and that ordering is the
+plan's first claim: M7b ships signed builds of a company that improves itself,
+and today that company cannot survive a restart, cannot tell the Architect it
+has stopped, and runs every hire in the Architect's own working tree. Shipping
+that is worse than not shipping it. *(The numbering is inherited — M5b and M7b
+already broke strict sequence. If the Architect prefers, M7b renames to M9; the
+order is what matters, not the label.)*
+
+**Derived from** the 2026-09-02 MVP register: five independent read-only
+investigations plus direct verification against this machine's book of record.
+Item ids below (B1–B17, D1–D13, DD-1–DD-7) are that register's, kept so the
+evidence stays traceable.
+
+**The standing instruction that shapes every package, in the Architect's own
+words (2026-09-02):** *"our goal is not the plan for the smallest but the most
+reliable and testable fix… everything reliable, maintainable and testable… we
+will also work on our test coverage so we won't jump on errors and bugs on the
+fly."* So M8 does NOT take the register's "minimum set". Where the register
+offered a cheap fix and a correct one, these packages take the correct one, and
+every package owes tests at the SEAM rather than on either half.
+
+**Why this milestone is mostly wiring, not features.** Every M8 item is setup,
+wiring or disclosure. The tree is green — 173 files, 3192 tests — and that is
+precisely the problem M8 exists to fix: a suite that passes while Closing Time
+has never once run, while the standup reads the oldest 500 log entries, and
+while the dock renders the company's first 300 events after an overnight run.
+**The recurring defect of this codebase is a check that cannot fail**, and five
+separate instances of it were found in one day. M8.0 exists to make that
+structural rather than a habit.
+
+- [ ] **M8.0 Coverage baseline and the seam rule** — there is NO coverage
+      tooling in this repository today (`vitest.config.mts` has no `coverage`
+      block, no provider is installed, `npm test` is a bare `vitest run`), so
+      "improve coverage" currently has nothing to improve against. Establish the
+      baseline first, then make the rule that M8 enforces: **a wiring seam with
+      no test is a defect, not a gap.** Record the starting numbers per
+      subsystem so later packages can be held to them.
+      *ARCHITECT DECISION FIRST: a coverage provider is a NEW DEPENDENCY and
+      BUILD-PROMPT §3 requires a decision memo before one lands. Options: v8
+      (bundled with vitest, no new package), istanbul (a package, better
+      branch data), or none — measure by hand at the seams. Recommendation: v8,
+      because it needs no new dependency at all.*
+      *Docs: ENGINEERING-STANDARDS §Definition of Done, TEST-STRATEGY §1–2.
+      Tests: the gate itself — a coverage floor that fails CI when a seam
+      regresses. Risk: a coverage NUMBER is the classic check that cannot fail;
+      the floor must be per-subsystem and the rule must be about seams, or this
+      package produces a metric that rises while the wiring stays untested.*
+
+- [ ] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
+      assigned once and never nulled (`src/main/index.ts:611`), so after the
+      window closes every send throws and BOTH quit-path subsystems die:
+      Closing Time on its first log line, `AgentManager.shutdown` on its first
+      agent. Verified against this machine: the book of record holds exactly one
+      shutdown event (`closing-begin`, no ack, no complete, ever) and the roster
+      shows `agent.artemis: ghost` with all three crew still `archived` — their
+      unwind never ran. In-flight tasks stay `in_progress` on agents that no
+      longer exist and worktrees are never released.
+      *The rig is part of the package, not a follow-up (D12): the closing-time
+      scenario copies production's handler MINUS the line that throws, which is
+      why S-CLOSING is green against a protocol that has never once run. A test
+      that cannot fail is the defect here, equally with the missing null.*
+      *Docs: SDD §GYM-003, ADR-0011. Tests: a scenario that genuinely quits with
+      an agent, a gate and an activation live, driving the REAL handler; per-agent
+      failure in `shutdown` must not skip the agents after it. Risk: the fix is
+      one line and the test is the whole package — resist shipping the line alone.*
+
+- [ ] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
+      line plus a 50-entry in-memory ring surfaced only in a tooltip: it never
+      reaches `log.jsonl`, it is gone at restart, and the wake-deferral emitter
+      feeds it undeduped at a measured ~1/s so it self-evicts within a minute.
+      Every setup failure and every runtime degradation in this milestone reports
+      through it, so this package PRECEDES the rest — until it lands, a
+      first-time user cannot see why anything else failed.
+      *Docs: BUILD-PROMPT §3 (every degradation visible), invariant §7.
+      Tests: each degradation SOURCE reaches the log with its reason; the ring
+      survives a flood without evicting unrelated entries; an undelivered wake
+      reports as itself and not as a generic sweep failure. Risk: dedupe that is
+      too aggressive hides a real repeat — dedupe by cause, not by text.*
+
+- [ ] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
+      defaults to the OLDEST 500 entries and three callers use the default, so
+      the standup's cursor pins at 500 and every later brief filters to empty:
+      measured, 676 of 1177 entries invisible, with a retro on disk reporting
+      `log#1–log#499` against a highest seq of 1117. The Activity panel starts
+      its cursor at zero and never loops, so an overnight run shows the company's
+      FIRST 300 events; Hermes (282 of 1177 entries) appends directly and pushes
+      nothing; 19% of rows render blank; and the breaker case reads `signal`
+      where the emitter writes `signals`, blanking the reason on all 93 rows.
+      *Docs: SDD §4.3, UI-DESIGN §Activity. Tests: a log with more than 500
+      entries — the fixtures that hid this are all smaller than the default;
+      a Hermes append reaches the panel; every log kind the harness emits has a
+      case. Risk: none of these fail loudly, so the tests must assert on WHICH
+      entries render, never on how many.*
+
+- [ ] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
+      harness requires, creates itself, and does not document; each absence is
+      silent. `gate-policy.json` missing returns deny-all with `warning: null`,
+      which makes autonomy `manual` and every agent sit at a permission prompt —
+      unattended running is impossible out of the box, with no error anywhere.
+      `authority.json` missing leaves Artemis with zero delegated authority on
+      every install that has ever existed. A missing `github-app.json` is silent
+      while the activation preview affirmatively promises `GH_TOKEN`. Nothing
+      probes engine AUTHENTICATION, so a logged-out CLI spawns, parks at its
+      login screen, and reports `running`. The README has no setup section and
+      its status is two milestones stale.
+      *ARCHITECT DECISION (DD-1): what the shipped gate policy grants. Deny-all
+      is defensible and makes the product unusable on first run; permissive makes
+      "the Watch held every gated action" untrue by default. This one decision
+      most determines whether a stranger's first afternoon works.*
+      *Docs: README, ADR-0010, ADR-0011, SDD §2. Tests: each absent file produces
+      a VISIBLE, named degradation and not a silent default; the activation
+      preview asks the broker whether a declared grant can actually be supplied,
+      rather than asserting it. Risk: shipping example configs that drift from
+      the schemas they illustrate — generate or test them against the schema.*
+
+- [ ] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
+      carry `repos: []`; the activation plan is the only source of that list; and
+      the ingest cadence disables itself entirely when every instance has zero
+      repos. So activating the Skeleton Crew against a real repository watches
+      nothing — no CI, issue or PR ingestion, therefore no incident can ever be
+      raised. The flagship mission is inert on first use, and this machine works
+      only because `harbor.json` was hand-edited.
+      *Docs: ADR-0012, FR-10.3, SDD §7.5. Tests: activation with an empty
+      `harbor.json` still ingests from the named target; the cadence stays armed.
+      Risk: deriving the repo from the target guesses a remote — refuse and say
+      so when the target has no unambiguous remote, rather than inventing one.*
+
+- [ ] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
+      path never requests worktree isolation (verified: zero `worktree`
+      references in it), so every hire runs git operations and file edits
+      concurrently in the Architect's own checkout — **the one item in the
+      register that can destroy the Architect's uncommitted work.** The breaker's
+      state is dropped on every exit including the stop it just performed, so an
+      exhausted budget cycles instead of stopping: measured, 21 climbs to rung 1
+      and exactly one completed rung-3 stop across a 24.9M-token day. And nothing
+      respawns a crew agent — 46 respawn-scheduled rows, all Artemis, zero crew,
+      while crew logged terminal exits four, five and five times.
+      *Docs: UC-01 alternate 2a, ADR-0011, ADR-0013. Tests: concurrent hires
+      never touch the target checkout; a breaker-caused exit KEEPS its rung; a
+      crew death surfaces a respawn offer. Risk: worktree-per-hire makes the
+      orphaning in M8.1 real rather than vacuous — these two land together or the
+      second creates the leak the first cleans up.*
+
+- [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
+      inherit the Architect's personal engine install: no isolated config
+      directory, so each session starts at a measured 64.8–67.4k tokens of which
+      Ephesus owns about 5%. That is the "91.4% of the day re-reading context"
+      measurement, explained. The correctness half is worse than the cost half:
+      six Stop hooks fire per turn, five of them the Architect's own, any of
+      which can block outside the harness's own decision — uncounted by the block
+      cap, invisible to the breaker's stop-loop signal, and unaffected by pacing.
+      *Docs: ADR-0009 (adapters own engine specifics), ADR-0013, NFR-12.
+      Tests: the spawn environment carries the isolated config; a foreign Stop
+      hook cannot change the harness's continuation decision. Risk: the token
+      floor was measured on a machine with an unusually large personal config —
+      the COST claim is machine-specific, the CONTROL claim is not. Do not sell
+      this package on the cost number alone.*
+
+- [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
+      is one in-memory map with no boot replay, so a restart silently un-hires
+      the company: the Harbor stops watching, every armed trigger is gone, no
+      crew respawns, and profile autonomy stops composing into gates — with
+      nothing in the UI saying the watch stopped. Gates are in-memory while the
+      BLOCK is durable (the gate id is written into `tasks.json` and a task
+      cannot reach *done* while it holds one), so a gate opened at 3am and
+      unanswered at restart blocks its task forever, with an empty approvals
+      queue and no way back but hand-editing the file. Trigger last-fired times,
+      incident correlation, breaker rungs and capacity parks all evaporate too.
+      *Docs: NFR-5 ("on restart, restore exactly"), SRS §6.6, ADR-0012.
+      Tests: S-BLACKOUT must restart with an agent, a gate, an activation and an
+      armed trigger LIVE — today it restarts with none of them, which is why this
+      class was invisible. Risk: replay spawns fresh agents unless the session id
+      is recovered; `--resume` is a follow-on and must be stated as owed, not
+      quietly skipped.*
+
+- [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
+      `feature/usage-aware-pacing` (9d66df5), which is UNMERGED and conflicts
+      structurally with the capacity UI landed since. There is no incident
+      surface of any kind: the crew's actual work product — four CI incidents
+      triaged with severity and root cause on this machine — is unreachable from
+      the app. And a hung harness is indistinguishable from a healthy idle one:
+      the bridge check is one-shot at mount, every poll holds its last value on
+      failure, there is no heartbeat anywhere, and the pace verdict never reaches
+      the renderer at all.
+      *This package OWNS the pacing-UI merge rather than treating it as a
+      chore. The branch and the current dock both restructured the same JSX and
+      renamed a tone helper; a hand-splice was attempted on 2026-09-02 and
+      abandoned deliberately in favour of doing it here with tests.*
+      *Docs: UI-DESIGN §5, ADR-0023. Tests: renderer tests over the MERGED dock
+      (both the capacity row and the pace strip); a stale poll renders as stale
+      rather than as its last good value. Risk: the existing dock fixture was
+      cast `as never`, which hid a missing required field until it threw at
+      runtime — fixtures in this package must be typed.*
+
+- [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
+      read parses from byte zero: a synthetic overnight measured 28.4 MB and
+      306 ms per parse ON THE MAIN LOOP, with the Agora's git at 2547 loose
+      objects, no packs and no `gc` anywhere. Session ids never trim, so the
+      watchers re-read every transcript in full twice per tick — 72 ms today,
+      about a second per agent per tick by day seven. Reflection has no per-agent
+      try/catch, so one oversized memory stops reflection for everyone after it.
+      Mail to a dead agent is written and silently never read. The roster's
+      `profile` field is hard-coded null at both write sites.
+      *Docs: SDD §4.3, ADR-0006, ADR-0013. Tests: a synthetic multi-day log
+      (this class is invisible at fixture scale, which is why it was never
+      caught); reflection survives one bad agent. Risk: rotation changes the book
+      of record's shape — append-only must still mean append-only across a
+      rotation boundary, and the reconcile must handle it.*
+
+- [ ] **M8.11 Engine honesty** — DD-2, C1, C4. The highest-leverage decision in
+      the register, and it collapses five separate blockers into one small fix:
+      ADR-0009 already says Claude Code is the reference adapter and the only one
+      that may gate a release, and SRS FR-1.2 requires only the seam. **The docs
+      already hold the honest position; only the shipping surface disagrees.**
+      The README advertises five engines, two of which have no adapter at all;
+      the autonomy grant is silently dropped on codex and gemini; with no Stop
+      hook there is no continuation loop, so such an agent stops after one turn;
+      and the floor asserts a confident `idle` for it forever.
+      *ARCHITECT DECISION: claude-only, or genuinely build the other two. If
+      claude-only — refuse non-reference engines at profile load with a stated
+      reason, correct the README, rename the hook grade. Small. If not — four
+      real work packages plus conformance cases for autonomy, notification and
+      trust before any of it can be trusted.*
+      *Docs: ADR-0009, FR-1.2, README. Tests: the conformance table gains an
+      autonomy case either way — its absence is why this went unnoticed.*
+
+- [ ] **M8.12 Exit review** — the milestone closes on a run, not on a checklist:
+      SRS §6.1's action half on a real repository, performed by a developer who
+      is not the author, from a clean clone, following only the README — and
+      surviving a deliberate restart mid-run. PROGRESS and docs re-synced.
+      *This is deliberately the same shape as M7's unmet exit: a criterion that
+      can only be met by execution. M7's exit remains OPEN and M8 does not close
+      it; the two are independent, and §6.1's action half is owed to both.*
+
+**Design decisions carried into M8, all the Architect's** (register DD-1…DD-7):
+the shipped gate policy's defaults (M8.4); claude-only or three engines (M8.11);
+the shipped hire budgets, which measured a breach inside one working day for
+every hire (M8.6/M8.7); whether a company-wide daily ceiling exists at all;
+whether the block cap and pathology signal are dead code or a wrong early return
+(both currently unreachable by construction); consent on first launch, since boot
+starts an agent unconditionally and the first tick fires standup, reflection and
+retro together sixty seconds later; and whether a settings surface is in scope at
+all — its absence is *why* four separate packages are "hand-write a file you were
+never told about".
+
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
 Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +

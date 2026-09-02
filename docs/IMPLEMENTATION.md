@@ -170,6 +170,35 @@ was crossed, and the next briefing narrates the incident accurately from the log
 with zero un-gated destructive actions. S-PROFILE passes; E-PLAYBOOK's drill is
 recorded.
 
+## M8 — The company you can leave running (≈ 2 weeks) — *hardening*
+
+> **Inserted 2026-09-02, and it runs BEFORE M7b.** The order is the point: M7b
+> ships signed builds of a company that improves itself, and today that company
+> cannot survive a restart, cannot tell the Architect it has stopped, and runs
+> every hire in the Architect's own working tree. Shipping that is worse than
+> not shipping it. *(Numbering is inherited — M5b and M7b already broke strict
+> sequence. M7b may be renamed M9; the order is what matters.)*
+
+Reliability, observability, persistence and the coverage that keeps them.
+Derived from the 2026-09-02 MVP register — five independent read-only
+investigations plus direct verification against the running system's book of
+record — and shaped by the Architect's standing instruction that M8 take **the
+most reliable and testable fix rather than the smallest**.
+
+Every item is setup, wiring or disclosure; none of it is "the code doesn't
+work". The tree is green at 3,192 tests, and that is exactly the problem this
+milestone exists to fix. Closing Time has never once run in the shipped app, the
+standup reads the oldest 500 log entries, the dock shows an overnight run's
+first 300 events, and each of those passes its suite. **The recurring defect of
+this codebase is a check that cannot fail** — five distinct instances were found
+in a single day — so M8 opens by establishing a coverage baseline (there is none
+today) and the rule it enforces: a wiring seam with no test is a defect.
+
+**Exit:** SRS §6.1's action half on a real repository, performed by **a developer
+who is not the author, from a clean clone, following only the README**, and
+surviving a deliberate restart mid-run. M7's own exit remains open and
+independent; §6.1's action half is owed to both.
+
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
 
 **Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa
