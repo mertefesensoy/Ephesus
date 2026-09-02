@@ -4635,12 +4635,15 @@ structural rather than a habit.
       built: export-level dead code (the M3 `effectivePolicy` shape) is
       invisible to both halves. Branch `feature/m8-0-coverage-seam-rule`,
       pushed, UNMERGED — merging is the Architect's. FOUND BY CI, RECORDED
-      NOT FIXED: run `33629903392` (the docs-only commit) failed
+      NOT FIXED: runs `33629903392` and `33633478191` (both docs-only
+      commits — two of the branch's six runs) failed
       `pacing-wakes.test.ts › interrupts a wake that outruns the cap` by one
       millisecond — `WakeClock` fires on the monotonic timer and reports from
       `Date.now()`, and the test asserts `≥ cap` with no tolerance. Product
-      code under ADR-0023, owed to M8.9; the job was re-run. The seam-rule
-      gates did not fire — the floor check was skipped behind the red suite.*
+      code under ADR-0023, owed to M8.9 as a rate (about one ubuntu run in
+      three; never in nine win32 runs); both jobs passed on re-run. The
+      seam-rule gates did not fire either time — the floor check was skipped
+      behind the red suite.*
 
 - [ ] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
       assigned once and never nulled (`src/main/index.ts:611`), so after the
