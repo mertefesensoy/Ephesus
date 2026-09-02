@@ -4749,13 +4749,26 @@ structural rather than a habit.
       the autonomy grant is silently dropped on codex and gemini; with no Stop
       hook there is no continuation loop, so such an agent stops after one turn;
       and the floor asserts a confident `idle` for it forever.
-      *ARCHITECT DECISION: claude-only, or genuinely build the other two. If
-      claude-only — refuse non-reference engines at profile load with a stated
-      reason, correct the README, rename the hook grade. Small. If not — four
-      real work packages plus conformance cases for autonomy, notification and
-      trust before any of it can be trusted.*
-      *Docs: ADR-0009, FR-1.2, README. Tests: the conformance table gains an
-      autonomy case either way — its absence is why this went unnoticed.*
+      **DECIDED 2026-09-02 — claude-only for the MVP, recorded as ADR-0024.**
+      So this package is: refuse a non-reference engine at profile load with the
+      engine named and the reason stated; correct the README; rename the
+      `pty-heuristic` grade to `none`, which is what it is; drop the Watch
+      panel's claim that codex/gemini are merely "blind to repetition,
+      error-rate" (it implies burn-rate still protects them, and it folds
+      transcript rows those adapters never produce); and name `'claude'`
+      explicitly where Artemis is currently hired on `engines.list()[0]?.id`.
+      *REFUSE, do not degrade — a company that silently runs at one turn per
+      wake is worse than one that will not start. And this is NOT permission to
+      collapse the seam: `codex.ts` and `gemini.ts` stay in the tree,
+      unregistered, as the conformance suite's second implementation. If a change
+      makes conformance pass by special-casing Claude, ADR-0024 has been
+      misread.*
+      *Docs: ADR-0024 (normative), ADR-0009, FR-1.2, README. Tests: the refusal
+      asserted in BOTH directions (a reference engine loads; a non-reference one
+      is refused and says why), and **the conformance table gains an autonomy
+      case** — its absence is exactly why the silent drop survived two
+      milestones, so that case is the part of this package that prevents a
+      recurrence rather than merely recording one.*
 
 - [ ] **M8.12 Exit review** — the milestone closes on a run, not on a checklist:
       SRS §6.1's action half on a real repository, performed by a developer who
