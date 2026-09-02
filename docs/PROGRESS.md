@@ -4613,7 +4613,13 @@ structural rather than a habit.
       metric due 2026-09-16), the M8.0 implementation doc. Owed, recorded not
       built: export-level dead code (the M3 `effectivePolicy` shape) is
       invisible to both halves. Branch `feature/m8-0-coverage-seam-rule`,
-      pushed, UNMERGED — merging is the Architect's.*
+      pushed, UNMERGED — merging is the Architect's. FOUND BY CI, RECORDED
+      NOT FIXED: run `33629903392` (the docs-only commit) failed
+      `pacing-wakes.test.ts › interrupts a wake that outruns the cap` by one
+      millisecond — `WakeClock` fires on the monotonic timer and reports from
+      `Date.now()`, and the test asserts `≥ cap` with no tolerance. Product
+      code under ADR-0023, owed to M8.9; the job was re-run. The seam-rule
+      gates did not fire — the floor check was skipped behind the red suite.*
 
 - [ ] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
       assigned once and never nulled (`src/main/index.ts:611`), so after the
