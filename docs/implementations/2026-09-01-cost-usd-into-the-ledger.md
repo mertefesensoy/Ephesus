@@ -237,8 +237,8 @@ mutation is now red.
   running agent shows a cost instead of null.
 - **No cost for Codex or Gemini.** Neither adapter implements `costs()`, so
   their rows keep `costUsd` null — a visible tier, not a fault.
-- **No UI change.** `AgentSpend` now carries real dollars in all three figures;
-  what the renderer does with them is untouched.
+- ~~No UI change.~~ **Closed — see §11.** The dock, the card and the spend tab
+  now show the money and the pace.
 - **No backfill.** Only transcripts of sessions the Watch folds get costed;
   history from before this change is not swept.
 - **No price table.** Every figure here is the engine's own. Nothing is derived,
@@ -374,3 +374,108 @@ Two rules this earns:
    unrelated assertion pass-then-fail across runs. The traversal test now uses a
    target unique to each run, so no leftover can decide its outcome, and the
    stray file was deleted.
+
+---
+
+## 11. Addendum — surfacing pace and cost in the UI
+
+§8 and §10.6 both recorded "no UI surface" as owed: pacing and cost existed only
+as log events and runtime-health entries. That left the two questions they
+answer — *"why is my company slow"* and *"what is this costing me"* — answerable
+only by reading a log. Invariant §7 asks for every degradation to be **visible**,
+and a paced company looks exactly like a stalled one until something says
+otherwise.
+
+### 11.1 Three surfaces, each answering a different question
+
+| Surface | Question | Where |
+|---|---|---|
+| **Pace strip**, once above the dock | why is the company slow? | `paceStrip` in `AgentDock.tsx` |
+| **Cost line**, per card | what is this agent costing? | `DockRow.cost` / `costNoteOf` |
+| **Spend tab**, per agent | session vs today vs all time | `spendLines` in `AgentPanel.tsx` |
+
+The pace is shown **once for the whole dock, not per card**. The usage window
+belongs to the ACCOUNT, so repeating it on every card would state one fact N
+times and invite reading it as an agent-level one.
+
+### 11.2 The strip is silent at full speed — and loud when unobserved
+
+`full` renders nothing: a banner that is always on stops being read, and a
+company at full speed needs no explanation. Two states do show:
+
+- **paced** (`slowing down` / `holding`), naming the window, its used-percentage
+  and when it frees up, so a slow company is legibly slow rather than seemingly
+  broken. A `hold` says *"until the window resets, frees up in 1h 30m"* — the
+  bound is the point, and hiding it would make a bounded pause look like a hang.
+- **`usage unseen`** — and this one is the argument. *"Full speed because the
+  account has room"* and *"full speed because we cannot see the account"* are
+  different facts, and only the second means the pacing signal is **not
+  working**. Rendering them alike would hide precisely the failure the Architect
+  needs to know about, so the unobserved state is marked `notable` and says
+  `ungoverned` out loud.
+
+The projection is named only when the projection is the reason: *"on course for
+160%"* beside a window that is 40% used reads as an alarm about a number that is
+not alarming.
+
+### 11.3 The money says which figure it is
+
+A dollar amount with no provenance is what this had to avoid becoming. The live
+figure is provisional and the folded one is final, so the card renders
+`$0.30 so far` versus `$0.48`, and the tooltip says which and why. Two rules
+carried over from ADR-0011, now in the UI:
+
+- **"not reported" is not "$0.00".** An engine that reports no cost and an agent
+  that genuinely spent nothing must never render alike — the same rule the token
+  meter already follows for `reporting: 'none'`.
+- **Sub-cent spend is not rounded away.** `$0.004` renders as `$0.0040`, not
+  `$0.00`; money that was spent must not render as money that was not.
+
+The spend tab reports session, today and all-time **independently**. That was a
+bug I introduced and caught: a first version returned early when the session had
+no figure, which suppressed *today* and *all-time* along with it — a real state
+(an earlier session today, a fresh one now), and an existing test caught it.
+
+### 11.4 What is deliberately NOT shown
+
+Wake deferrals and wake overruns are individually transient — a card that
+flickered "deferred" every few minutes would be noise, and the pace strip
+already answers the question a deferral raises ("why is nothing happening").
+They remain log events and runtime-health entries. The same goes for the
+cost-incomplete and cost-regressed reports: they are conditions of the figure,
+and the figure's tooltip is where they would belong if they proved frequent.
+
+### 11.5 Verification
+
+```bash
+npx vitest run test/renderer/spend-surface.test.tsx test/renderer/agent-dock.test.tsx
+```
+
+35 tests. Every colour is a design token (invariant: UI values come only from
+tokens) — verified by extracting every `--eph-*` reference in `AgentDock.tsx`
+and checking each is defined. The strip is `role="status"`, not `role="alert"`:
+it changes on a five-second poll and must not interrupt a screen-reader user
+repeatedly. The glyph sits beside the word, never instead of it (§8
+double-encoding), the same rule the phase badge follows.
+
+**Mutation checks: 13, all red** — a live figure presented as final; an
+unreported cost rendered as zero; sub-cent spend rounded away; the IPC seam
+trusted rather than normalised; the strip shown at full speed; `unobserved`
+treated as ordinary full speed, and labelled as it; the reset time, the window
+and the projection each suppressed or over-reported; a past reset reporting
+negative time; the live marker and the all-time line dropped from the tab.
+
+The runner now **refuses to run unless the baseline is green**, which is the
+rule §10.6 earned — and it earned its keep immediately: the first attempt
+aborted, and the red baseline turned out to be the `spendLines` early-return
+regression described in §11.3. Under the old script that would have been
+reported as thirteen successful mutation kills.
+
+### 11.6 One hardening
+
+`sessionCostOf` now normalises a missing live figure to null rather than
+trusting it. The dock reads spend across an **IPC boundary**, so a version skew
+or a partial payload can deliver a field the type says is always present — and
+`formatUsd(undefined)` throws, which would blank the whole company panel. The
+panel exists to end blindness about the company; crashing it on one malformed
+row would be the richest possible irony. A test covers the partial payload.

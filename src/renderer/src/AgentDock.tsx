@@ -4,7 +4,9 @@ import { emoteFrame } from '../../shared/emotes'
 import { emotesState } from './emotes'
 import type { AgentCard } from '../../shared/agents'
 import type { AvatarUpdate } from '../../shared/ipc'
-import type { AgentSpend } from '../../shared/cost'
+import { costNoteOf, type AgentSpend } from '../../shared/cost'
+import { paceNoteOf, type PaceNote } from '../../shared/pacing'
+import type { UsageSnapshot } from '../../shared/ipc'
 import type { CapacityView, ParkedAgent } from '../../shared/capacity'
 
 /**
@@ -46,6 +48,17 @@ export interface DockRow {
   readonly spent: number | null
   /** The reason there is no bar, when there is none. */
   readonly spendNote: string
+  /**
+   * What this agent's current session has cost, in words (ADR-0023).
+   *
+   * Beside the token bar rather than instead of it: they answer different
+   * questions. The bar is "how much of today's allowance is gone" — a ceiling
+   * question, and since ADR-0023 the ceiling is only a runaway backstop. This
+   * is "what has this actually cost", which is the one the Architect pays.
+   */
+  readonly cost: string
+  /** Provenance: live and provisional, or folded from the transcript and final. */
+  readonly costTitle: string
   /**
    * This agent's provider-capacity park, or null when nothing is blocking.
    *
@@ -108,9 +121,43 @@ export function dockRows(
             ? 'this engine reports no usage'
             : !budgeted
               ? 'unbudgeted'
-              : `${Math.round((money.budget.spent / (money.dailyTokens as number)) * 100).toString()}% of today`
+              : `${Math.round((money.budget.spent / (money.dailyTokens as number)) * 100).toString()}% of today`,
+      cost: money === null ? 'cost not reported' : costNoteOf(money).text,
+      costTitle: money === null ? 'no spend recorded for this agent yet' : costNoteOf(money).title
     }
   })
+}
+
+/**
+ * Contract: pure. The pace strip's words and colour, or null when there is
+ * nothing worth saying.
+ *
+ * Shown once for the whole dock, not per card: the usage window belongs to the
+ * ACCOUNT, so repeating it on every card would state one fact N times and
+ * invite reading it as an agent-level one.
+ *
+ * `full` shows nothing — a banner that is always on stops being read, and a
+ * company at full speed needs no explanation. The two states that DO show are
+ * the two an Architect would otherwise misread: a paced company (which looks
+ * like a stalled one) and an unobserved window (which looks like a healthy one
+ * but means nothing is governing spend at all).
+ */
+export function paceStrip(
+  snapshot: UsageSnapshot | null
+): (PaceNote & { readonly tone: string }) | null {
+  if (snapshot === null) return null
+  const note = paceNoteOf(snapshot.verdict, snapshot.at)
+  if (!note.notable) return null
+  return {
+    ...note,
+    tone:
+      snapshot.verdict.pace === 'hold'
+        ? 'var(--eph-status-looping)'
+        : snapshot.verdict.pace === 'slow'
+          ? 'var(--eph-status-blocked)'
+          : // `unobserved` at full speed: not an alarm, but not silence either.
+            'var(--eph-ink-500)'
+  }
 }
 
 const PHASE_TONE: Readonly<Record<string, string>> = {
@@ -192,6 +239,7 @@ export function AgentDock({
     new Map()
   )
   const [spend, setSpend] = useState<ReadonlyMap<string, AgentSpend>>(new Map())
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null)
   /**
    * Who is waiting on the provider. Read on the same slow poll as spend AND on
    * the `capacity:state` push, the belt-and-braces the gate badge already uses:
@@ -228,6 +276,10 @@ export function AgentDock({
       void eph.watch.budgets().then((rows) => {
         setSpend(new Map(rows.map((row) => [row.agent, row])))
       })
+      // The pace rides the same poll: it moves over minutes, it is computed
+      // fresh in main on every call, and giving it its own timer would only
+      // add a second clock telling the same story.
+      void eph.watch.usage().then(setUsage)
     }
     const readCapacity = (): void => {
       void eph.watch
@@ -257,84 +309,122 @@ export function AgentDock({
   }, [applyAvatar])
 
   const rows = dockRows(cards, phases, spend, capacity)
+  const pace = paceStrip(usage)
 
   return (
-    <div style={dock} aria-label="The company">
-      {rows.length === 0 && (
-        <span style={{ fontFamily: 'var(--eph-face-data)', color: 'var(--eph-ink-500)' }}>
-          nobody hired yet
-        </span>
-      )}
-      {rows.map((row) => (
-        <button
-          key={row.agentId}
-          type="button"
-          onClick={() => onSelect(row.agentId)}
-          aria-label={`${row.name}: ${row.status}`}
+    <div>
+      {pace !== null && (
+        <div
+          // A status, not an alert: `role="status"` announces politely rather
+          // than interrupting, which is right for something that changes on a
+          // five-second poll.
+          role="status"
+          aria-label={`Company pace: ${pace.detail}`}
+          title={pace.detail}
           style={{
-            ...card,
-            outline: row.agentId === selected ? '2px solid var(--eph-status-working)' : 'none'
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '3px 8px',
+            borderTop: '2px solid var(--eph-ink-900)',
+            background: 'var(--eph-parchment-100)',
+            fontFamily: 'var(--eph-face-data)',
+            fontSize: '11px',
+            color: pace.tone
           }}
         >
-          <div style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>{row.name}</div>
-          <div style={{ color: 'var(--eph-ink-500)' }}>{row.role}</div>
-          <div
+          {/* Double-encoded, per §8: the glyph is what a reader recognises at a
+              glance, the word is what makes it unambiguous. */}
+          <span aria-hidden="true">◐</span>
+          <strong style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>
+            {pace.label}
+          </strong>
+          <span style={{ color: 'var(--eph-ink-500)' }}>{pace.detail}</span>
+        </div>
+      )}
+      <div style={dock} aria-label="The company">
+        {rows.length === 0 && (
+          <span style={{ fontFamily: 'var(--eph-face-data)', color: 'var(--eph-ink-500)' }}>
+            nobody hired yet
+          </span>
+        )}
+        {rows.map((row) => (
+          <button
+            key={row.agentId}
+            type="button"
+            onClick={() => onSelect(row.agentId)}
+            aria-label={`${row.name}: ${row.status}`}
             style={{
-              marginTop: '4px',
-              color: rowTone(row),
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
+              ...card,
+              outline: row.agentId === selected ? '2px solid var(--eph-status-working)' : 'none'
             }}
           >
-            {/* Beside the word, never instead of it (§8 double-encoding). The
+            <div style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>{row.name}</div>
+            <div style={{ color: 'var(--eph-ink-500)' }}>{row.role}</div>
+            <div
+              style={{
+                marginTop: '4px',
+                color: rowTone(row),
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {/* Beside the word, never instead of it (§8 double-encoding). The
                 icon is what a reader recognises; the word is what makes it
                 unambiguous, and the 3x5 glyph proved an icon alone is not
                 enough — somebody had to ask what a ring meant. */}
-            {emoteStyle(row.phase) === null ? (
-              <span aria-hidden="true">■</span>
-            ) : (
-              <span aria-hidden="true" style={emoteStyle(row.phase) ?? undefined} />
+              {emoteStyle(row.phase) === null ? (
+                <span aria-hidden="true">■</span>
+              ) : (
+                <span aria-hidden="true" style={emoteStyle(row.phase) ?? undefined} />
+              )}
+              <span>{row.status}</span>
+            </div>
+            {row.capacity !== null && (
+              <div style={{ color: 'var(--eph-status-blocked)' }} title={row.capacity.limit.detail}>
+                retry {new Date(row.capacity.retryAt).toLocaleTimeString()}
+              </div>
             )}
-            <span>{row.status}</span>
-          </div>
-          {row.capacity !== null && (
-            <div style={{ color: 'var(--eph-status-blocked)' }} title={row.capacity.limit.detail}>
-              retry {new Date(row.capacity.retryAt).toLocaleTimeString()}
-            </div>
-          )}
-          {row.pendingMail > 0 && (
-            <div style={{ color: 'var(--eph-status-blocked)' }}>
-              {String(row.pendingMail)} waiting
-            </div>
-          )}
-          <div style={{ marginTop: '4px', color: 'var(--eph-ink-500)' }} title={row.spendNote}>
-            {row.spent === null ? (
-              row.spendNote
-            ) : (
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: '100%',
-                  height: '4px',
-                  background: 'var(--eph-marble-200)',
-                  border: '1px solid var(--eph-ink-500)'
-                }}
-              >
+            {row.pendingMail > 0 && (
+              <div style={{ color: 'var(--eph-status-blocked)' }}>
+                {String(row.pendingMail)} waiting
+              </div>
+            )}
+            <div style={{ marginTop: '4px', color: 'var(--eph-ink-500)' }} title={row.spendNote}>
+              {row.spent === null ? (
+                row.spendNote
+              ) : (
                 <span
                   style={{
-                    display: 'block',
-                    height: '100%',
-                    width: `${String(Math.round(row.spent * 100))}%`,
-                    background:
-                      row.spent >= 1 ? 'var(--eph-status-looping)' : 'var(--eph-status-working)'
+                    display: 'inline-block',
+                    width: '100%',
+                    height: '4px',
+                    background: 'var(--eph-marble-200)',
+                    border: '1px solid var(--eph-ink-500)'
                   }}
-                />
-              </span>
-            )}
-          </div>
-        </button>
-      ))}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      height: '100%',
+                      width: `${String(Math.round(row.spent * 100))}%`,
+                      background:
+                        row.spent >= 1 ? 'var(--eph-status-looping)' : 'var(--eph-status-working)'
+                    }}
+                  />
+                </span>
+              )}
+            </div>
+            {/* The money, beside the allowance bar rather than instead of it: one
+              is a ceiling reading, the other is the bill. `title` carries the
+              provenance — live and provisional, or folded and final. */}
+            <div style={{ color: 'var(--eph-ink-500)' }} title={row.costTitle}>
+              {row.cost}
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

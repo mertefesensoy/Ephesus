@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import { TerminalPanel } from './TerminalPanel'
 import type { AgentCard } from '../../shared/agents'
-import type { AgentSpend } from '../../shared/cost'
+import { formatUsd, sessionCostOf, type AgentSpend } from '../../shared/cost'
 
 /**
  * Everything about ONE agent, beside the floor (UI-DESIGN §4).
@@ -35,12 +35,30 @@ export function spendLines(spend: AgentSpend | null): readonly string[] {
   ]
   // Cost is reported only when the engine reports one; Ephesus never derives
   // dollars from a guessed price table (M3 decision), and a guessed figure is
-  // worse than an honest silence.
-  lines.push(
-    spend.todayTotals.costUsd === null
-      ? 'cost: not reported by this engine'
-      : `cost today: $${spend.todayTotals.costUsd.toFixed(2)}`
-  )
+  // worse than an honest silence. What changed with ADR-0023 is only that the
+  // engine turns out to report one — nothing here is computed from a price.
+  // ADR-0011's dual figure, finally in money as well as tokens. Each window is
+  // reported INDEPENDENTLY: an agent can easily have money recorded for today
+  // and none yet for its current session — an earlier session today, a fresh
+  // one now — and a missing session figure must not suppress the others.
+  const session = sessionCostOf(spend)
+  const money: string[] = []
+  if (session.usd !== null) {
+    money.push(
+      session.from === 'live'
+        ? `cost this session: ${formatUsd(session.usd)} so far (live — the engine files the final figure when the session ends)`
+        : `cost this session: ${formatUsd(session.usd)} (final, from the engine's own transcript)`
+    )
+  }
+  if (spend.todayTotals.costUsd !== null) {
+    money.push(`cost today: ${formatUsd(spend.todayTotals.costUsd)}`)
+  }
+  if (spend.cumulativeTotals.costUsd !== null) {
+    money.push(`cost all time: ${formatUsd(spend.cumulativeTotals.costUsd)}`)
+  }
+  // Only when NOTHING is reported does the tab say so — the same "not reported
+  // is not zero" rule the token meter follows.
+  lines.push(...(money.length === 0 ? ['cost: not reported by this engine'] : money))
   return lines
 }
 

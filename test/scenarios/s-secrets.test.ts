@@ -81,6 +81,17 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       secrets,
       gates: {} as never,
       budgets: () => [],
+      usage: () => ({
+        verdict: {
+          pace: 'full',
+          because: 'unobserved',
+          tightest: null,
+          resetsAt: null,
+          windows: []
+        },
+        observed: null,
+        at: 0
+      }),
       humanQueue: () => [],
       dismissFromHumanQueue: () => true,
       capacity: () => ({ parked: [], since: null, retryAt: null }),

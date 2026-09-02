@@ -2263,6 +2263,20 @@ async function boot(): Promise<void> {
     // Exited agents are INCLUDED: their cumulative figure is precisely what the
     // durable ledger exists to preserve, and hiding it behind a liveness filter
     // would put it out of reach of the only IPC that can show it (FR-11.2).
+    // ADR-0023: the pace and the window behind it, computed fresh at call time
+    // exactly as the ledger's figures are — the renderer polls, so a snapshot
+    // held anywhere would just be a staler copy of this.
+    usage: () => ({
+      verdict: usageWatch?.verdict() ?? {
+        pace: 'full' as const,
+        because: 'unobserved' as const,
+        tightest: null,
+        resetsAt: null,
+        windows: []
+      },
+      observed: usageWatch?.observed() ?? null,
+      at: Date.now()
+    }),
     budgets: () =>
       (agentManager?.list() ?? [])
         .map((card) =>
