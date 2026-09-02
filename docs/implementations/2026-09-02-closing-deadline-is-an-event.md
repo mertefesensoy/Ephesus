@@ -110,10 +110,12 @@ The first exists to answer a specific objection: that driving the clock in the
 scenario leaves the production timer untested. It does not, and this is the check
 that proves it rather than asserting it.
 
-## The three siblings: nothing to do, and why
+## The three siblings: a different failure, left unchanged
 
 The M6 doc lists `s-livelock`, `s-stoploop` and `s-wake` beside `s-closing`. They
-were **a different failure**, and they are already fixed.
+are **a different failure**, and no code was changed for them — but the first
+version of this section reached that conclusion through arithmetic that did not
+hold, which is corrected below.
 
 Those three carry no deadline, no `setTimeout` and no timing constant — they are
 loop-shaped tests that pay a real round-trip per iteration (S-LIVELOCK's ping-pong
@@ -142,17 +144,37 @@ caught by someone other than whoever made it.
 Slowest single test, `--reporter=verbose`, same machine:
 
 ```text
-isolated, warm repeat            ~3.1 s
-isolated, cold shell             ~11 s
-FULL SUITE, default parallelism  12.3 s, 13.4 s   <- the condition that matters
+isolated, warm repeat   ~3.1 s
+isolated, cold shell    ~11 s
+FULL SUITE, default parallelism, machine quiet, n=12:
+  10.2  10.3  10.3  10.9  11.0  11.6
+  11.6  11.9  12.3  12.4  13.4  17.3   s  <- the condition that matters
 ```
 
-The real headroom is about **2.2×**. S-LIVELOCK's worst is 9.0–11.0 s — the same
-band, so the earlier claim that it was "in much better shape" was also an artifact
-of isolated measurement and is withdrawn.
+A body of 10.2–13.4 s and **one excursion at 17.3 s**, not reproduced in the
+seven runs that followed it. Headroom is 1.7× against the excursion, 2.2× against
+the body.
 
-The conclusion survives, on better grounds: the suite is green under real
-parallelism across repeated full runs, so nothing is changed for the three. But
+At n=5 the worst had risen with every increase in sample size (13.4 s at n=2,
+17.3 s at n=5) and that looked like a tail. Seven more samples did not extend it,
+so it is one excursion, not a tail — which is only knowable by sampling past the
+point where the answer looked settled.
+
+**The metric has to be restricted to these two files.** "Slowest test in the
+suite" has a ~10.3 s floor that is nothing to do with load: `tmpdir.test.ts`'s
+`still throws when nothing is going to release the directory` waits out the whole
+`TEMP_REMOVE_BUDGET_MS` by construction and measures 10.25–10.39 s whatever else
+is running. Any ~10.3 s sample taken unrestricted is that test. Ours were
+restricted and verified against the raw logs — the 17.3 s is
+`honours the hard block cap`, and the 10.3 s low is `signals the breaker at rung
+1`, coincidentally sitting on that floor without being it.
+
+S-LIVELOCK's worst is 9.0–11.0 s — the same band — so the earlier claim that it
+was "in much better shape" was also an artifact of isolated measurement, and is
+withdrawn.
+
+The conclusion survives: the suite is green under real parallelism across twelve
+full runs, nothing within 12 s of the ceiling, so nothing is changed for the three. But
 the ceiling is **reachable** — three concurrent scenario suites hit it 3/3 — so
 this is a live margin rather than an unreachable one. `vitest.config.mts` now
 records the distribution and the condition instead of a single figure, because a
