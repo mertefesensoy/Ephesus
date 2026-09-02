@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-01 · **Branch:** `feature/usage-aware-pacing` (cut from
 `fix/workspace-trust-and-remembered-targets`) · **Supersedes part of:**
-[ADR-0011](../adr/ADR-0011-watch-breaker-cost-ledger.md) via
+[ADR-0011](../adr/ADR-0011-watch-breaker-budgets.md) via
 [ADR-0023](../adr/ADR-0023-usage-aware-pacing.md)
 
 ---
