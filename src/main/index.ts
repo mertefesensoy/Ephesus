@@ -87,7 +87,7 @@ import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
 import { UsageWatch } from './watch/usage-watch'
-import { DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
+import { canDeliverWake, DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
 import { DEFAULT_PACE_THRESHOLDS } from '../shared/pacing'
 
 let secrets: SecretBroker | null = null
@@ -1696,8 +1696,34 @@ async function boot(): Promise<void> {
     // with assigned work keeps going even when its inbox is empty.
     pendingTasksFor: (agentId) => ledger?.pendingFor(agentId) ?? 0,
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
-    nudge: (agentId, text) => commandQueue.submit(agentId, text),
-    isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',
+    nudge: (agentId, text) => commandQueue.wake(agentId, text),
+    /**
+     * Whether the router may hand this agent its mail — a DELIVERY-plane fact,
+     * deliberately not a floor one.
+     *
+     * This used to read the avatar phase, and that made a drawing the gate on
+     * the company's communication. `avatar.ts`'s `stop` is inert unless the
+     * agent was `working` or `thinking`, so any turn that called no tool went
+     * `prompt-submitted → alert` and stayed there: never `idle`, never nudged
+     * again, for the rest of the process's life. For an orchestrator whose turn
+     * is "read the mail, reply" that is the common path, not an edge case, and
+     * it is the twenty-minute silence in the 2026-09-01 live run. Only a
+     * restart cured it.
+     *
+     * Both facts here are ones the delivery plane already owns, and — the
+     * reason this is a fix rather than a different guess — both are BOUNDED.
+     * `WakeClock.ended` closes on `stop` OR `session-end` with no phase guard,
+     * and its cap timer force-closes an overrunning wake after
+     * `DEFAULT_WAKE_CAP_MS` even when every hook is lost. So `runningMs`
+     * returning to null is guaranteed; a phase returning to `idle` never was.
+     *
+     * The trade is deliberate: a missed `prompt-submitted` now means a nudge
+     * arriving while the agent is mid-turn, where the engine queues it. That is
+     * strictly better than silence forever, and `nudged` still keeps it to one
+     * nudge per pending episode.
+     */
+    isIdle: (agentId) =>
+      canDeliverWake(ptyManager.has(agentId), wakeClock?.runningMs(agentId) ?? null),
     // ADR-0013's pathology signal, emitted and logged from M2 with nothing
     // reading it — the M2 carried item. It now enters the breaker's ladder at
     // rung 1 like any other signal.

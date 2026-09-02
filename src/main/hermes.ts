@@ -1144,13 +1144,35 @@ export class Hermes {
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
       const handed = await this.consumeInbox(agentId)
-      this.options.nudge?.(
-        agentId,
-        this.render('wake-nudge.md', {
-          messages: formatHandover(handed),
-          pendingMail: String(pending)
+      try {
+        this.options.nudge?.(
+          agentId,
+          this.render('wake-nudge.md', {
+            messages: formatHandover(handed),
+            pendingMail: String(pending)
+          })
+        )
+      } catch (err) {
+        // One agent's nudge failing must not cost every agent after it its
+        // mail. The sweep has a single `catch` around the whole of
+        // `sweepAndWake`, so a throw here used to unwind the loop and skip the
+        // rest of `knownAgents()` — every tick, for as long as the condition
+        // lasted. Whoever is later in iteration order is silenced by someone
+        // else's dead process, which is the worst shape this can fail in.
+        //
+        // The mail is already archived by `consumeInbox` above, so this IS a
+        // lost message. It is reported rather than swallowed: the alternative
+        // is a company that goes quiet with nothing in the book of record.
+        this.agora.appendLog({
+          kind: 'hook',
+          event: 'wake-undelivered',
+          agentId,
+          pendingMail: pending,
+          because: err instanceof Error ? err.message : String(err)
         })
-      )
+        this.options.onSweepError?.(err)
+        continue
+      }
       this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingMail: pending })
       woken.push(agentId)
     }

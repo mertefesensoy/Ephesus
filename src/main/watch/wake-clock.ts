@@ -42,6 +42,26 @@ export interface WakeClockOptions {
  */
 export const DEFAULT_WAKE_CAP_MS = 10 * 60 * 1000
 
+/**
+ * Contract: pure. Whether the router may hand an agent its mail right now.
+ *
+ * Two delivery-plane facts and nothing else: is there a process to type into,
+ * and is this agent between turns. It is a named function rather than an
+ * expression at the call site because the predicate it replaces was an inline
+ * one-liner in the composition root, which is exactly how it went untested
+ * while silencing agents — `test/scenarios/s-wake.test.ts` stubs `isIdle`
+ * outright and is structurally unable to see a fault in it.
+ *
+ * `runningMs` is null when no wake is open. That is BOUNDED: `WakeClock.ended`
+ * closes on `stop` or `session-end` with no phase guard, and the cap timer
+ * force-closes an overrunning wake even when every hook is lost. The avatar
+ * phase this replaced had no such bound — `stop` is inert unless the agent was
+ * mid-tool, so a turn that called no tool never returned to `idle` at all.
+ */
+export function canDeliverWake(hasProcess: boolean, runningMs: number | null): boolean {
+  return hasProcess && runningMs === null
+}
+
 interface OpenWake {
   readonly startedAt: number
   readonly timer: NodeJS.Timeout

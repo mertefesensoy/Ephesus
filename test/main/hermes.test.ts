@@ -1018,6 +1018,53 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
   })
 })
 
+describe('Hermes — one agent’s failed nudge must not silence the rest', () => {
+  /**
+   * The other half of the wake fix (B2 of the M7 exit gaps), and the reason the
+   * predicate change could not ship alone.
+   *
+   * `sweepAndWake` has a single `catch` around the whole of itself, so a throw
+   * from inside this loop unwound the sweep and skipped every agent after the
+   * failing one — every tick, for as long as the condition lasted. Whoever sat
+   * later in `knownAgents()` order went silent because of somebody else's dead
+   * process, which is the worst shape this can fail in: the victim has no fault
+   * and no symptom of its own.
+   */
+  it('keeps sweeping when a nudge throws, and records the mail it could not hand over', async () => {
+    const nudged: string[] = []
+    const errors: unknown[] = []
+    const r = await rig({
+      isIdle: () => true,
+      nudge: (agentId) => {
+        if (agentId === 'agent.b')
+          throw new Error('commands: cannot send to "agent.b" — agent is ghost')
+        nudged.push(agentId)
+      },
+      onSweepError: (err) => errors.push(err)
+    })
+    r.hermes.ensureMailbox('agent.c')
+    r.send('agent.a', message({ to: 'agent.b' }))
+    r.send('agent.a', message({ to: 'agent.c' }))
+    await r.hermes.sweep()
+
+    const woken = await r.hermes.wakeCheck()
+
+    // agent.c is AFTER agent.b in iteration order and used to be skipped.
+    expect(nudged).toEqual(['agent.c'])
+    expect(woken).toEqual(['agent.c'])
+    // The failure is reported rather than swallowed...
+    expect(errors).toHaveLength(1)
+    // ...and the mail agent.b lost is in the book of record, because
+    // consumeInbox already archived it. A company that goes quiet must not do
+    // so with nothing written down.
+    const undelivered = r.agora
+      .readLog()
+      .filter((row) => row.kind === 'hook' && row['event'] === 'wake-undelivered')
+    expect(undelivered).toHaveLength(1)
+    expect(undelivered[0]).toMatchObject({ agentId: 'agent.b' })
+  })
+})
+
 describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => {
   it('nudges an idle agent exactly once when mail lands', async () => {
     const nudges: { agentId: string; text: string }[] = []

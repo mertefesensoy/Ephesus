@@ -106,6 +106,30 @@ export class CommandQueue {
   }
 
   /**
+   * Delivers the harness's own wake nudge, WITHOUT consulting the avatar phase.
+   *
+   * `submit` asks the floor whether the agent looks ready, and for the
+   * Architect's text that is right: their words are a conversation, holding
+   * them is a kindness, and the held text is shown back to them (FR-1.3).
+   *
+   * A wake is not a conversation. By the time this is called the router has
+   * already decided on the DELIVERY plane that the agent is between turns —
+   * a live pty and no open wake — and it has already taken the mail out of the
+   * inbox to carry it. There is no second opinion the floor could offer that
+   * would be worth losing a message for, and it had two ways to lose one: a
+   * phase that never returned to `idle` held the nudge forever while the mail
+   * sat archived, and a `ghost`/`stopped`/`archived` phase made `submit` throw,
+   * which unwound the whole sweep and skipped every agent after it.
+   *
+   * Held text is deliberately left alone rather than flushed alongside: the
+   * Architect's queued words are still theirs to send when the agent is ready,
+   * and stapling them to a wake nudge would put words in the harness's mouth.
+   */
+  wake(agentId: string, text: string): void {
+    this.send(agentId, text)
+  }
+
+  /**
    * Interrupt clears the queue: the Architect stopping the agent did not mean
    * "and then say this anyway" (FR-1.3). The cancel key itself is written by
    * the caller, from the adapter's `KeySequence`.
