@@ -9,7 +9,7 @@ import { PromptStore } from '../../src/main/prompts'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import { DEFAULT_PACE_THRESHOLDS, type Pace } from '../../src/shared/pacing'
 import { UsageWatch } from '../../src/main/watch/usage-watch'
-import { WakeClock } from '../../src/main/watch/wake-clock'
+import { canDeliverWake, DEFAULT_WAKE_CAP_MS, WakeClock } from '../../src/main/watch/wake-clock'
 
 /**
  * Usage-aware pacing at the seam it actually runs on (ADR-0023).
@@ -589,5 +589,60 @@ describe('UsageWatch — one report per agent', () => {
     })
     watch.tick()
     expect(watch.verdict().pace).toBe('full')
+  })
+})
+
+/**
+ * The wake-delivery predicate (B1 of the M7 exit gaps).
+ *
+ * This replaced an inline expression in the composition root that read the
+ * AVATAR PHASE — a rendering state — and so made a drawing the gate on the
+ * company's mail. It is a named function now for one reason: the old one could
+ * not be tested, and `test/scenarios/s-wake.test.ts` stubs `isIdle` outright,
+ * so nothing in the suite could see it silencing agents.
+ */
+describe('canDeliverWake — the router asks the delivery plane, not the floor', () => {
+  it('delivers when there is a process and no wake is open', () => {
+    expect(canDeliverWake(true, null)).toBe(true)
+  })
+
+  it('refuses when there is no process to type into', () => {
+    expect(canDeliverWake(false, null)).toBe(false)
+  })
+
+  it('refuses while a wake is already running, however long', () => {
+    expect(canDeliverWake(true, 0)).toBe(false)
+    expect(canDeliverWake(true, 1)).toBe(false)
+    expect(canDeliverWake(true, DEFAULT_WAKE_CAP_MS * 10)).toBe(false)
+  })
+
+  /**
+   * The property the avatar phase did not have, and the whole reason for the
+   * change. `WakeClock.ended` has no phase guard and the cap force-closes an
+   * overrunning wake, so "deliverable" always comes back. A phase that never
+   * returned to `idle` never did.
+   */
+  it('comes back on its own after the cap fires, with no stop event at all', async () => {
+    const interrupted: string[] = []
+    const clock = new WakeClock({ capMs: 20, interrupt: (a) => interrupted.push(a) })
+
+    clock.began('agent.mason')
+    expect(canDeliverWake(true, clock.runningMs('agent.mason'))).toBe(false)
+
+    // No `stop`, no `session-end` — every hook after the wake is lost, which is
+    // precisely the case that stranded an agent under the old predicate.
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(interrupted).toEqual(['agent.mason'])
+    expect(canDeliverWake(true, clock.runningMs('agent.mason'))).toBe(true)
+  })
+
+  it('comes back on session-end, which the avatar phase ignores entirely', () => {
+    const clock = new WakeClock({ capMs: 10_000, interrupt: () => {} })
+    clock.began('agent.mason')
+    // An agent that exits mid-turn emits no `stop`. WakeClock.ended is called
+    // for `session-end` too, and has no phase guard.
+    clock.ended('agent.mason')
+    expect(canDeliverWake(true, clock.runningMs('agent.mason'))).toBe(true)
   })
 })

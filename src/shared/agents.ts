@@ -109,6 +109,17 @@ export interface RespawnOffer {
   readonly memorySections: number
   /** Ledger task ids this exit put back to `todo` (SDD §10). */
   readonly tasksReturned: readonly string[]
+  /**
+   * The company was parked on provider capacity when this process ended
+   * (`src/shared/capacity.ts`).
+   *
+   * A fact, and a load-bearing one: an agent that stopped because the provider
+   * refused did not crash, and a UI that says "exited" over it invites the
+   * Architect to go looking for a fault there isn't one of. The harness brings
+   * this agent back when capacity returns rather than offering a restart the
+   * human has to remember to press.
+   */
+  readonly waitingForCapacity: boolean
 }
 
 /**

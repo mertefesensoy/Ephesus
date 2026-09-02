@@ -12,6 +12,7 @@ import { PromptStore } from '../../src/main/prompts'
 import type { AgentCard } from '../../src/shared/agents'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { ProcessSpawner } from '../fakes/process-spawner'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The lifecycle half of worktree isolation (SRS UC-01 alternate 2a): a spawn
@@ -29,7 +30,7 @@ const closers: (() => Promise<void>)[] = []
 
 afterEach(async () => {
   for (const close of closers.splice(0)) await close()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {
@@ -105,7 +106,9 @@ async function startRig(): Promise<Rig> {
     spawner.killAll()
     await hookServer.stop()
   })
-  return { home, target, agents, spawner, cards, errors, logs, script }
+  const rig = { home, target, agents, spawner, cards, errors, logs, script }
+  live = rig
+  return rig
 }
 
 function request(rig: Rig, worktree: boolean): Parameters<AgentManager['spawn']>[0] {
@@ -121,13 +124,32 @@ function request(rig: Rig, worktree: boolean): Parameters<AgentManager['spawn']>
   }
 }
 
+/**
+ * The rig whose processes a timeout should describe.
+ *
+ * Module-level rather than threaded through `until`, which is called ten times
+ * in this file: passing a diagnosis to each would bury the point in mechanical
+ * edits. Safe because vitest runs the tests within one file sequentially, so
+ * exactly one rig is live, and `startRig` reassigns this on every test.
+ */
+let live: Rig | null = null
+
+/**
+ * Waits for `predicate`, and on timeout says what the processes were doing.
+ *
+ * The bare version of this message — `timed out waiting for the agent to start`
+ * — is what four tests in this file reported while a quoting bug in the version
+ * probe sent every spawn down the FR-1.6 install branch. It named nothing, and
+ * the spawner was discarding the one line that did.
+ */
 async function until(predicate: () => boolean, label: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
-  throw new Error(`worktree: timed out waiting for ${label}`)
+  const detail = live === null ? '' : `\n${live.spawner.diagnose()}`
+  throw new Error(`worktree: timed out waiting for ${label}${detail}`)
 }
 
 describe('a spawn that asks for isolation (UC-01 alternate 2a)', () => {

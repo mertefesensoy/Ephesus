@@ -224,6 +224,32 @@ export function compileFacts(input: BriefInput): readonly BriefFact[] {
       )
     )
   }
+  // A root cause one agent asserted and another REFUTED is news, and it is the
+  // only kind of verdict narrated here. An `agree` is a confirmation and a
+  // `cannot-tell` is an absence of one; both are in `log.jsonl` for anyone who
+  // looks, and neither is worth a sentence out of a 90-second budget where
+  // "blocked is never truncated" (VOICE-DESIGN §4). A contradiction inside the
+  // company's own record is different: on 2026-09-01 a false root cause stood
+  // unchallenged and the fix it implied was work already done, and the standup
+  // is where the Architect finds that out without going looking.
+  //
+  // Filtered on the recorded `verdict` field rather than on the text of
+  // `because`, for the same reason the loops above match on `event`: a reworded
+  // sentence must not be able to drop the standup's only account of a dispute.
+  for (const verdict of incidents(input.events, 'incident-root-cause-verdict')) {
+    if (verdict['verdict'] !== 'refute') continue
+    // Both sides verbatim. The brief is the E-BRIEF-FAITH surface and is read
+    // aloud: a claim or a refutation the harness rewrote would be words nobody
+    // said, attributed to two named agents at once.
+    facts.push(
+      fact(
+        'health',
+        `incident ${String(verdict['incident'] ?? '?')}: ${String(verdict['verifier'] ?? 'a verifier')} refutes the root cause "${String(verdict['claim'] ?? '?')}" — ${String(verdict['because'] ?? 'no reason given')}`,
+        [`log#${String(verdict.seq)}`]
+      )
+    )
+  }
+
   // An obligation the company owes and cannot meet is a health fact, not a
   // silence. Today this is only the severity-1 announcement the deferred
   // Herald cannot make (M6.9) — the standup is where the Architect finds out
@@ -303,7 +329,11 @@ function refsOfTasks(tasks: readonly Task[]): readonly string[] {
  */
 function incidents(
   events: readonly LogEntry[],
-  event: 'incident-raised' | 'incident-triaged' | 'incident-announce-owed'
+  event:
+    | 'incident-raised'
+    | 'incident-triaged'
+    | 'incident-announce-owed'
+    | 'incident-root-cause-verdict'
 ): readonly LogEntry[] {
   return events.filter((entry) => entry.kind === 'profile' && entry['event'] === event)
 }

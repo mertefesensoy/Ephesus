@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ENGINE_IDS, HOOK_SUPPORTS, HOOK_SUPPORT_RANK } from '../../src/shared/engines'
 import { HOOK_EVENTS } from '../../src/shared/hooks'
 import type { AgentSpawnConfig, EngineAdapter, UsageFact } from '../../src/main/engines'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The engine-adapter conformance suite (TEST-STRATEGY §5, NFR-12).
@@ -59,7 +60,7 @@ export interface ConformanceSubject {
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 export interface ConformanceRig {

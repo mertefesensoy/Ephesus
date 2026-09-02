@@ -115,8 +115,19 @@ describe('the day of SPEND, not the day of folding', () => {
 
   it('splits one transcript across the days it spans', () => {
     // An agent running across midnight bills each side to its own day.
+    //
+    // The midnight that matters is the LOCAL one. `dayKey` reads local calendar
+    // fields on purpose — a budget day is the Architect's day, not UTC's — so
+    // these two instants are built from local components and converted, rather
+    // than written as a UTC pair. Straddling UTC midnight instead only works in
+    // a zone at offset 0: at UTC+3 both `…26T23:59Z` and `…27T00:01Z` are the
+    // 27th locally, one day, and the assertion fails on correct code.
+    const beforeMidnight = new Date(2026, 7, 26, 23, 59)
+    const afterMidnight = new Date(2026, 7, 27, 0, 1)
+    expect(dayKey(beforeMidnight)).not.toBe(dayKey(afterMidnight))
+
     const folded = foldFacts(
-      [fact({ at: '2026-08-26T23:59:00.000Z' }), fact({ at: '2026-08-27T00:01:00.000Z' })],
+      [fact({ at: beforeMidnight.toISOString() }), fact({ at: afterMidnight.toISOString() })],
       { agent: 'agent.mason', source: 't.jsonl', folded: 0 },
       { fallbackDay: '2026-08-27' }
     )
@@ -179,6 +190,43 @@ describe('dayKey', () => {
     expect(dayKey(new Date(2026, 7, 27, 23, 59))).toBe('2026-08-27')
     expect(dayKey(new Date(2026, 0, 1, 0, 0))).toBe('2026-01-01')
   })
+
+  /**
+   * `dayKey` reads LOCAL calendar fields, and that is the contract: a budget day
+   * is the Architect's day, not UTC's.
+   *
+   * ## This test cannot run everywhere, and that is the point
+   *
+   * At UTC+0 local time IS UTC, so no instant can tell a local-field reading
+   * from a UTC-field reading. The contract is unobservable there — not hard to
+   * test, *unobservable* — so this asserts it only where an offset exists.
+   *
+   * Which means a CI that runs one timezone cannot pin this. Swapping `dayKey`
+   * to `getUTC*` stays green on a UTC runner and goes red only on a machine
+   * that is somewhere else. That blind spot is written down here rather than
+   * left for the next person to rediscover, because this repo has now been bitten
+   * twice by assumptions that are invisible on the machine holding them — this,
+   * and a version probe that only failed when a path contained a space.
+   */
+  it.runIf(new Date().getTimezoneOffset() !== 0)(
+    'reads local fields, not UTC ones (only provable off UTC)',
+    () => {
+      // An instant whose UTC calendar day differs from its local one, built to
+      // hold at ANY non-zero offset rather than assuming a whole-hour one —
+      // Kathmandu is +05:45 and Chatham is +12:45.
+      //
+      // Ahead of UTC, local midnight is still yesterday in UTC; behind it, the
+      // last minute of the day is already tomorrow. Either way one minute of
+      // offset is enough.
+      const acrossUtcMidnight =
+        -new Date().getTimezoneOffset() > 0
+          ? new Date(2026, 7, 27, 0, 0)
+          : new Date(2026, 7, 27, 23, 59)
+
+      expect(dayKey(acrossUtcMidnight)).toBe('2026-08-27')
+      expect(acrossUtcMidnight.toISOString().slice(0, 10)).not.toBe('2026-08-27')
+    }
+  )
 })
 
 describe('evaluateBudget — post-hoc enforcement plus the pre-flight projection', () => {

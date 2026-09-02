@@ -19,8 +19,14 @@ afterAll(async () => {
   cleanupHomes()
 })
 
-async function company(closingDeadlineMs?: number): Promise<Company> {
-  const started = await startCompany(closingDeadlineMs === undefined ? {} : { closingDeadlineMs })
+async function company(
+  closingDeadlineMs?: number,
+  over: { readonly manualClosingDeadline?: boolean } = {}
+): Promise<Company> {
+  const started = await startCompany({
+    ...(closingDeadlineMs === undefined ? {} : { closingDeadlineMs }),
+    ...over
+  })
   companies.push(started)
   return started
 }
@@ -90,7 +96,21 @@ describe('S-CLOSING — everyone packs up and the floor closes clean', () => {
 
 describe('S-CLOSING — the deadline is a hard promise, and silence is named', () => {
   it('proceeds at the deadline with the silent agent in the report and the log', async () => {
-    const eph = await company(500)
+    // The deadline is driven, not waited for.
+    //
+    // This asked for a 500 ms wall-clock deadline and then did mason's REAL
+    // work inside it — spawning a fake engine, reading an inbox, appending
+    // memory.md, writing an outbox, sweeping. On a busy machine that work does
+    // not finish in 500 ms, the deadline fires first, and `acked` comes back
+    // empty: `expected [] to deeply equal [ 'agent.mason' ]`. It was recorded
+    // as a parallel-load flake on 2026-08-29 and failed 3/3 under load while
+    // passing 202/202 drained.
+    //
+    // The test was never really about 500 ms. It is about what the report says
+    // when one agent answers and one does not, and that is an ORDERING, not a
+    // duration: let mason's ack land, THEN let the deadline pass. Raising the
+    // constant only moves the threshold and keeps the race.
+    const eph = await company(500, { manualClosingDeadline: true })
     eph.hire('agent.mason')
     eph.hire('agent.tess')
 
@@ -98,6 +118,8 @@ describe('S-CLOSING — the deadline is a hard promise, and silence is named', (
     // Only mason packs up; tess never answers.
     await eph.runTurn('agent.mason', packUp('agent.mason'))
     await eph.hermes.sweep()
+    // Mason's ack has demonstrably landed; now, and only now, time runs out.
+    expect(eph.tripClosingDeadline()).toBe(true)
 
     const report = await done
     expect(report.timedOut).toBe(true)

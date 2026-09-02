@@ -13,6 +13,8 @@ import {
   type StopReply
 } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
+import { HERMES_SENDER } from '../../src/shared/reserved'
 import { DEFAULT_HOP_CAP } from '../../src/shared/routing'
 import { PATHOLOGY_SIGNAL_AT } from '../../src/shared/autonomy'
 
@@ -28,13 +30,16 @@ const routers: Hermes[] = []
 const agoras: Agora[] = []
 
 afterEach(async () => {
-  for (const hermes of routers.splice(0)) hermes.stop()
-  // Delivery queues its commits rather than awaiting them (ADR-0004), so a
-  // teardown that does not drain them races git for the temp directory.
-  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
-  for (const dir of temps.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  // Stop, settle, then drain. Delivery queues its commits rather than awaiting
+  // them (ADR-0004), and the sweep that queues them outlives `stop()` — so a
+  // teardown that drains without settling first races git for the temp
+  // directory, which on Windows the git child is still sitting in.
+  for (const hermes of routers.splice(0)) {
+    hermes.stop()
+    await hermes.settled()
   }
+  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {
@@ -57,19 +62,28 @@ async function rig(
     onPathology?: (agentId: string, blocks: number) => void
     onSweepError?: (err: unknown) => void
     onDiverted?: (record: { from: string; conversation: string; reason: string }) => void
+    /**
+     * Opt-in, not the default: several cases below assert on the *fallback*
+     * rendering (`render()` serialises its vars when no store is wired), so
+     * handing every rig the real templates would rewrite tests that are not
+     * about prose. The cases that check what an agent is actually told wire it.
+     */
+    withPrompts?: boolean
   } = {}
 ): Promise<Rig> {
+  const { withPrompts, ...hermesOptions } = options
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-hermes-'))
   temps.push(home)
+  const prompts = new PromptStore(path.join(home, 'prompts'), BUNDLED_PROMPTS)
   const agora = new Agora({
     root: path.join(home, 'agora'),
-    prompts: new PromptStore(path.join(home, 'prompts'), BUNDLED_PROMPTS),
+    prompts,
     backoffMs: 1
   })
   await agora.ensureRepo()
   agoras.push(agora)
 
-  const hermes = new Hermes({ agora, ...options })
+  const hermes = new Hermes({ agora, ...(withPrompts ? { prompts } : {}), ...hermesOptions })
   routers.push(hermes)
   hermes.ensureMailbox('agent.a')
   hermes.ensureMailbox('agent.b')
@@ -180,6 +194,85 @@ describe('Hermes — delivery (ADR-0003, FR-3.2)', () => {
   })
 })
 
+describe('Hermes — quiescing (stop, settle, then drain)', () => {
+  /**
+   * `stop()` clears the timers; it does not stop a sweep already running. That
+   * sweep calls `agora.commitSoon()`, which starts a git child — and on Windows
+   * a git child sits IN the repository directory, so a teardown that deletes
+   * that directory while the commit is starting fails with EBUSY. Quiescing has
+   * to be stop → settle → drain, and `settled()` is the middle step.
+   */
+  it('resolves only once a sweep already in flight has finished', async () => {
+    let releaseSweep = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      releaseSweep = resolve
+    })
+    let faulted = false
+    const r = await rig({
+      faults: async (point) => {
+        // Hold the FIRST sweep open, inside the production path.
+        if (point === 'before-deliver' && !faulted) {
+          faulted = true
+          await held
+        }
+      }
+    })
+    r.send('agent.a', message())
+
+    const sweeping = r.hermes.sweep()
+    // Let the sweep reach the fault and park there.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    r.hermes.stop()
+    let settledYet = false
+    const settling = r.hermes.settled().then(() => {
+      settledYet = true
+    })
+
+    // Still in flight: `stop()` did not end it, and `settled()` must not claim
+    // it did.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settledYet).toBe(false)
+
+    releaseSweep()
+    await settling
+    await sweeping
+    expect(settledYet).toBe(true)
+    // The sweep really did complete — its delivery landed.
+    expect(r.inbox('agent.b')).toHaveLength(1)
+  })
+
+  it('starts no sweep of its own — a shutdown delivers nothing new', async () => {
+    const r = await rig()
+    r.hermes.stop()
+    // Mail written after the stop must still be sitting in the outbox: settling
+    // asks "is the running sweep finished", not "sweep once more".
+    const sent = message()
+    r.send('agent.a', sent)
+
+    await r.hermes.settled()
+
+    expect(r.outbox('agent.a')).toEqual([`${sent.id}.json`])
+    expect(r.inbox('agent.b')).toEqual([])
+  })
+
+  it('resolves rather than rejecting when the in-flight sweep failed', async () => {
+    const r = await rig({
+      faults: (point) => {
+        if (point === 'before-deliver') throw new Error('disk fell over')
+      },
+      onSweepError: () => {}
+    })
+    r.send('agent.a', message())
+    await r.hermes.sweep().catch(() => {})
+
+    // `onSweepError` already reported the failure; settling answers "is it
+    // finished", so an unhandled rejection here would take the process down at
+    // the exact moment it is trying to shut down cleanly.
+    await expect(r.hermes.settled()).resolves.toBeUndefined()
+  })
+})
+
 describe('Hermes — a message the router will not carry', () => {
   it('parks unparseable JSON instead of dropping or retrying it forever', async () => {
     const r = await rig()
@@ -201,12 +294,145 @@ describe('Hermes — a message the router will not carry', () => {
   it('rejects a forged sender — an outbox may only carry its owner mail', async () => {
     const r = await rig()
     // agent.a writes a message claiming to be from agent.b.
-    r.send('agent.a', message({ from: 'agent.b', to: 'agent.a' }))
+    const forged = message({ from: 'agent.b', to: 'agent.a' })
+    r.send('agent.a', forged)
 
     const report = await r.hermes.sweep()
 
     expect(report.rejected[0]?.reason).toContain('does not own this outbox')
+    // The forged message itself is not carried. agent.a's inbox is no longer
+    // asserted EMPTY, because the refusal now lands there — which is the point
+    // of the case below.
+    expect(r.inbox('agent.a')).not.toContain(`${forged.id}.json`)
+  })
+
+  /**
+   * The general form of the 2026-09-01 loss. Deriving `requires_reply` fixed
+   * the ONE reason that destroyed Artemis's standup brief; these cover the
+   * class — whatever the reason, the author is told, so it can learn, correct
+   * and retry instead of writing into a void.
+   */
+  it('returns the refusal to the author, with enough to fix the message', async () => {
+    const r = await rig({ withPrompts: true })
+    const file = path.join(r.agora.agentDir('agent.a'), 'outbox', 'broken.json')
+    fs.writeFileSync(file, '{ not json', 'utf8')
+
+    const report = await r.hermes.sweep()
+
+    const notice = report.rejected[0]?.notice
+    expect(notice).not.toBeNull()
+    // Addressed from the reserved router identity, never forged as someone else.
+    expect(notice?.from).toBe(HERMES_SENDER)
+    expect(notice?.act).toBe('refuse')
+    // The author is read from the PATH: a file whose bytes are not even JSON
+    // still has a knowable author, which is what makes the class closable.
+    expect(notice?.to).toBe('agent.a')
+    expect(r.inbox('agent.a')).toEqual([`${notice?.id}.json`])
+
+    // Enough to fix it: which message, why, and where the text still is.
+    expect(notice?.subject).toContain('broken.json')
+    expect(notice?.body).toContain('not valid JSON')
+    expect(notice?.body).toContain(`outbox/${REJECTED_DIR}/broken.json`)
+  })
+
+  it('tells the outbox owner, not the identity a forged file claimed', async () => {
+    const r = await rig({ withPrompts: true })
+    r.send('agent.a', message({ from: 'agent.b', to: 'agent.a' }))
+
+    const report = await r.hermes.sweep()
+
+    // agent.b did not write this and must never be told that it did. The
+    // author comes from the directory, not from the content — which is exactly
+    // why a forgery cannot misdirect the refusal.
+    expect(report.rejected[0]?.notice?.to).toBe('agent.a')
+    expect(r.inbox('agent.b')).toEqual([])
+  })
+
+  it('cannot ping-pong: the refusal obligates nothing and never enters an outbox', async () => {
+    const r = await rig({ withPrompts: true })
+    fs.writeFileSync(
+      path.join(r.agora.agentDir('agent.a'), 'outbox', 'broken.json'),
+      '{ not json',
+      'utf8'
+    )
+
+    const first = await r.hermes.sweep()
+    const notice = first.rejected[0]?.notice
+    expect(notice).not.toBeNull()
+
+    // `refuse` is not a reply-obliging act, so the notice asks for nothing back
+    // and starts no chain; hops 0 means it can never trip a hop cap either.
+    expect(notice?.requires_reply).toBe(false)
+    expect(notice?.hops).toBe(0)
+
+    // It is well-formed, so consuming it can never reject it in turn...
+    const consumed = await r.hermes.consumeInbox('agent.a')
+    expect(consumed.map((m) => m.id)).toEqual([notice?.id])
+
+    // ...and it went straight to the inbox, so the next sweep finds nothing to
+    // refuse. A refusal cannot be refused.
+    const second = await r.hermes.sweep()
+    expect(second.rejected).toEqual([])
+    expect(second.delivered).toEqual([])
+    expect(r.outbox('agent.a')).toEqual([])
+  })
+
+  it('parks a message whose author cannot be named, and invents no recipient', async () => {
+    const r = await rig({ withPrompts: true })
+    const inbox = path.join(r.agora.agentDir('agent.b'), 'inbox')
+    // An inbox names the RECIPIENT; `from` is the field that just failed to
+    // validate. Guessing an author here would send a refusal to someone who may
+    // never have written anything, so the log entry is all anyone can have.
+    //
+    // BOTH inbox failure branches, deliberately: unreadable bytes and readable
+    // JSON that is not a message. A first draft covered only the first, and a
+    // mutation that invented an author on the second passed it.
+    fs.writeFileSync(path.join(inbox, 'wrecked.json'), '{ "from": "', 'utf8')
+    fs.writeFileSync(path.join(inbox, 'shaped.json'), '{ "from": "agent.a" }', 'utf8')
+
+    expect(await r.hermes.consumeInbox('agent.b')).toEqual([])
+
+    expect(fs.existsSync(path.join(inbox, REJECTED_DIR, 'wrecked.json'))).toBe(true)
+    expect(fs.existsSync(path.join(inbox, REJECTED_DIR, 'shaped.json'))).toBe(true)
+    // Nobody is told — least of all `agent.a`, which the readable-but-invalid
+    // file names as its sender and which the router must not believe.
     expect(r.inbox('agent.a')).toEqual([])
+    expect(r.inbox('agent.b')).toEqual([])
+    // Matched on the two files by name rather than counted globally: the log is
+    // the whole rig's, and an exact count would couple this case to anything
+    // else that ever logs an error.
+    const errors = r.agora
+      .readLog()
+      .filter((e) => e['kind'] === 'error' && e['subsystem'] === 'hermes')
+    for (const name of ['wrecked.json', 'shaped.json']) {
+      const entry = errors.find((e) => String(e['file'] ?? '').endsWith(name))
+      expect(entry, `no rejection logged for ${name}`).toBeDefined()
+      expect(entry).toMatchObject({ author: null, noticeId: null })
+    }
+  })
+
+  it('still parks, and says it could not tell anyone, when the author is unaddressable', async () => {
+    const r = await rig({ withPrompts: true })
+    // A directory under agents/ whose name is not a valid agent id. `to` is
+    // schema-validated, so composing the notice throws — and it must be caught,
+    // not delivered half-formed and not allowed to take the sweep down.
+    const stray = path.join(r.agora.pathOf('agents'), 'NOT-an-agent-id', 'outbox')
+    fs.mkdirSync(stray, { recursive: true })
+    fs.writeFileSync(path.join(stray, 'broken.json'), '{ not json', 'utf8')
+
+    const report = await r.hermes.sweep()
+
+    const record = report.rejected.find((x) => x.file.includes('NOT-an-agent-id'))
+    expect(record).toBeDefined()
+    expect(record?.notice).toBeNull()
+    // Parked regardless: losing the notification must not also lose the file.
+    expect(fs.existsSync(path.join(stray, REJECTED_DIR, 'broken.json'))).toBe(true)
+    // And the failure to notify is itself visible — a silent failure to break
+    // the silence would be the same bug one level up.
+    const failed = r.agora
+      .readLog()
+      .find((e) => typeof e['reason'] === 'string' && e['reason'].includes('could not tell'))
+    expect(failed).toBeDefined()
   })
 
   /**
@@ -514,6 +740,83 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     expect(r.agora.readLog().some((e) => e['kind'] === 'bounce')).toBe(true)
   })
 
+  /**
+   * An ASIDE: an act a harness endpoint admits but its handler does not act on
+   * (`accepts` minus `handles`, src/shared/endpoints.ts).
+   *
+   * The Odeon sends six reply-obliging asks — five `request`s and the meeting
+   * floor as a `query` — so an agent answering `done` is doing exactly what
+   * PROTOCOL.md tells it to ("When you finish, say so with a reference to the
+   * result"). Until the accept-set was widened that answer bounced; the trap on
+   * the other side of widening is handing it to a handler that knows one body
+   * shape, which answers a plain sentence with a JSON parse error.
+   */
+  it('records an aside to an endpoint and answers nothing', async () => {
+    const r = await rig()
+    r.send(
+      'agent.a',
+      message({ to: 'agent.odeon', act: 'done', body: 'Filed as commit 4f1a2b; nothing owed.' })
+    )
+
+    await r.hermes.sweep()
+
+    // Not dropped (FR-3.4): it is in the book of record, marked as an aside,
+    // with the agent's own words.
+    const entry = r.agora
+      .readLog()
+      .find((e) => e['kind'] === 'delivery' && e['to'] === 'agent.odeon')
+    expect(entry).toBeDefined()
+    expect(entry?.['aside']).toBe(true)
+    expect(entry?.['act']).toBe('done')
+    expect(String(entry?.['summary'])).toContain('4f1a2b')
+
+    // And nothing came back. A terminal act obliges no reply, and the endpoint
+    // has nothing to add — least of all a complaint about JSON it never got.
+    expect(r.inbox('agent.a')).toEqual([])
+    // The outbox is still drained, so the sweep cannot re-read it forever.
+    expect(r.outbox('agent.a')).toEqual([])
+  })
+
+  it('still hands a filing to the endpoint, which answers it', async () => {
+    // The other side of the same branch: a `propose` IS in the Odeon's
+    // `handles`, so it reaches the handler and the sender is answered — no
+    // handler is wired in this rig, so the answer is the unavailable refusal.
+    const r = await rig()
+    r.send('agent.a', message({ to: 'agent.odeon', act: 'propose', body: '{"kind":"deck"}' }))
+
+    await r.hermes.sweep()
+
+    const inbox = r.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const answer = JSON.parse(
+      fs.readFileSync(path.join(r.agora.agentDir('agent.a'), 'inbox', inbox[0] ?? ''), 'utf8')
+    ) as Message
+    expect(answer.from).toBe('agent.odeon')
+    expect(answer.act).toBe('refuse')
+  })
+
+  /**
+   * The router is not a correspondent. A reply to a bounce used to fall through
+   * to the mailbox lookup and come back `no mailbox for "agent.hermes"` — false,
+   * and the most misleading answer available: the address is not missing, it is
+   * the router's own, with nobody behind it to answer.
+   */
+  it('tells an agent the truth about replying to the router itself', async () => {
+    const r = await rig()
+    r.send('agent.a', message({ to: 'agent.hermes', act: 'inform', body: 'understood' }))
+
+    await r.hermes.sweep()
+
+    const inbox = r.inbox('agent.a')
+    expect(inbox).toHaveLength(1)
+    const refusal = JSON.parse(
+      fs.readFileSync(path.join(r.agora.agentDir('agent.a'), 'inbox', inbox[0] ?? ''), 'utf8')
+    ) as Message
+    expect(refusal.act).toBe('refuse')
+    expect(refusal.body).not.toContain('no mailbox')
+    expect(refusal.body).toContain('reads no mail')
+  })
+
   it('fans a broadcast out to every other agent', async () => {
     const r = await rig()
     r.hermes.ensureMailbox('agent.c')
@@ -712,6 +1015,53 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     expect(stops).toHaveLength(2)
     expect(stops[0]).toMatchObject({ agentId: 'agent.b', decision: 'block', pendingMail: 1 })
     expect(stops[1]).toMatchObject({ agentId: 'agent.c', decision: 'continue' })
+  })
+})
+
+describe('Hermes — one agent’s failed nudge must not silence the rest', () => {
+  /**
+   * The other half of the wake fix (B2 of the M7 exit gaps), and the reason the
+   * predicate change could not ship alone.
+   *
+   * `sweepAndWake` has a single `catch` around the whole of itself, so a throw
+   * from inside this loop unwound the sweep and skipped every agent after the
+   * failing one — every tick, for as long as the condition lasted. Whoever sat
+   * later in `knownAgents()` order went silent because of somebody else's dead
+   * process, which is the worst shape this can fail in: the victim has no fault
+   * and no symptom of its own.
+   */
+  it('keeps sweeping when a nudge throws, and records the mail it could not hand over', async () => {
+    const nudged: string[] = []
+    const errors: unknown[] = []
+    const r = await rig({
+      isIdle: () => true,
+      nudge: (agentId) => {
+        if (agentId === 'agent.b')
+          throw new Error('commands: cannot send to "agent.b" — agent is ghost')
+        nudged.push(agentId)
+      },
+      onSweepError: (err) => errors.push(err)
+    })
+    r.hermes.ensureMailbox('agent.c')
+    r.send('agent.a', message({ to: 'agent.b' }))
+    r.send('agent.a', message({ to: 'agent.c' }))
+    await r.hermes.sweep()
+
+    const woken = await r.hermes.wakeCheck()
+
+    // agent.c is AFTER agent.b in iteration order and used to be skipped.
+    expect(nudged).toEqual(['agent.c'])
+    expect(woken).toEqual(['agent.c'])
+    // The failure is reported rather than swallowed...
+    expect(errors).toHaveLength(1)
+    // ...and the mail agent.b lost is in the book of record, because
+    // consumeInbox already archived it. A company that goes quiet must not do
+    // so with nothing written down.
+    const undelivered = r.agora
+      .readLog()
+      .filter((row) => row.kind === 'hook' && row['event'] === 'wake-undelivered')
+    expect(undelivered).toHaveLength(1)
+    expect(undelivered[0]).toMatchObject({ agentId: 'agent.b' })
   })
 })
 

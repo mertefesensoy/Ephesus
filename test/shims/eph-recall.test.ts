@@ -9,6 +9,7 @@ import { HookServer } from '../../src/main/hooks'
 import { Library } from '../../src/main/library'
 import { PromptStore } from '../../src/main/prompts'
 import { FtsIndex } from '../../src/main/library-fts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * `eph-recall` is what an agent actually runs, so it is exercised the way an
@@ -63,7 +64,7 @@ async function startRig(options: { withLibrary?: boolean } = {}): Promise<Rig> {
     library,
     async close() {
       await hookServer.stop()
-      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+      removeTempDir(home)
     }
   }
   rigs.push(rig)

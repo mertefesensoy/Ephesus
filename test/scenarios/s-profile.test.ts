@@ -91,7 +91,12 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     expect(planned.plan.hires.map((hire) => hire.hire).sort()).toEqual([
       'ci-babysitter',
       'dependency-updater',
-      'health-watcher'
+      'health-watcher',
+      // Not a component FR-9.2 names. The fourth hire is the profile format
+      // being exercised rather than extended: a hire file with its own budget,
+      // no schema field, no private API — which is ADR-0012's dogfood claim
+      // being true rather than asserted.
+      'verifier'
     ])
     // The disclosure the Architect reads before activating: what it may hold.
     expect(planned.plan.envGrants).toEqual(['GH_TOKEN'])
@@ -100,9 +105,10 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
 
   it('asserts stricter-wins composition against a laxer global ceiling', () => {
     const bundle = skeletonCrew()
-    // The global policy is the MOST permissive setting there is; the profile
-    // still gets `manual` on the irreversible classes, because composition
-    // takes the stricter side and the bundle asked for the stricter side.
+    // The global policy is the MOST permissive setting there is, so any row
+    // that comes back below `autonomous` came from the bundle asking for it and
+    // winning: composition takes the stricter side, and the bundle asked for
+    // the stricter side.
     const planned = activationPlan(
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
@@ -110,11 +116,17 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     const byKind = Object.fromEntries(planned.plan.autonomy.map((row) => [row.kind, row.effective]))
-    expect(byKind.destructive).toBe('manual')
-    expect(byKind['prod-facing']).toBe('manual')
+    // The value moved on 2026-09-01 (skeleton-crew's irreversible classes went
+    // manual -> supervised); what this case proves did not. A laxer global does
+    // not widen the profile: `autonomous` above `supervised` still yields
+    // `supervised`, which is the direction stricter-wins exists to hold.
+    expect(byKind.destructive).toBe('supervised')
+    expect(byKind['prod-facing']).toBe('supervised')
 
     // And the other direction, which is the one a bug would take: a STRICTER
-    // global clamps the profile's own `supervised` default down to `manual`.
+    // global clamps every kind down to `manual`, the profile's own `autonomous`
+    // default included — the widest thing the bundle now asks for, and so the
+    // row that would fail loudest if composition ever widened.
     const clamped = activationPlan(bundle, { kind: 'repo', id: 'myapp', path: REPO_ROOT }, 'manual')
     if (!clamped.ok) throw new Error(clamped.reasons.join('; '))
     for (const row of clamped.plan.autonomy) {

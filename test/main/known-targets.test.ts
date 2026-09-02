@@ -4,10 +4,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { KNOWN_TARGETS_REL, KnownTargets } from '../../src/main/known-targets'
 import type { ActivationRequest } from '../../src/shared/profile-activation'
+import { removeTempDir } from '../tmpdir'
 
 const temps: string[] = []
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function home(): string {

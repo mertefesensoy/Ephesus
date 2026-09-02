@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseHookEnvelope } from '../../src/shared/hooks'
 import { startHookStubServer, tempEndpoint, type HookStubServer } from './hook-stub-server'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Script-driven smoke for the fake engine (TEST-STRATEGY §1.2). The fake is the
@@ -40,7 +41,7 @@ function tempDir(): string {
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.close()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 async function stubServer(): Promise<HookStubServer> {

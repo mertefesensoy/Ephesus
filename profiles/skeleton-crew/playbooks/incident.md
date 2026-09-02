@@ -70,10 +70,17 @@ failure on your part, it is the runbook working.
 
 ## 5. Gates
 
-These require approval before you do them, every time:
+**You may push your own branch and open a pull request without asking.** That is
+the work, not an exception to it: an incident you triaged and fixed is worth more
+as a reviewable diff than as a proposal nobody is awake to answer. A pull request
+changes nothing on its own — it is a request, it is read before it lands, and it
+can be closed. Push to `agent/<your-name>/<topic>` and open the PR against the
+default branch.
 
-- opening a pull request
-- pushing to any shared branch
+These still require approval before you do them, every time:
+
+- pushing to a branch someone else builds on — the default branch, a release
+  branch, anything that is not yours
 - force-pushing anything
 - deleting a branch
 - anything touching production
@@ -81,6 +88,10 @@ These require approval before you do them, every time:
 
 Propose the action and wait. Do not look for another route to the same effect;
 the gate is the Architect's decision point, not an obstacle in front of one.
+
+The line between the two is whether the Architect can still change their mind
+afterwards. A PR they can close costs them a moment; a force-push over history
+they have not read costs them work they cannot get back.
 
 ## 6. Report
 
@@ -93,7 +104,17 @@ Reply to `agent.harbor` with the subject `INCIDENT-TRIAGE` and this JSON body:
       "severity": 1,
       "resolved": false,
       "summary": "one line: what broke, and what you did",
-      "refs": ["<task id, if you are claiming one>"]
+      "refs": ["<task id, if you are claiming one>"],
+      "rootCause": {
+        "claim": "what you believe is actually causing this",
+        "cites": [
+          {
+            "file": "path/as/you/opened/it.py",
+            "line": 122,
+            "quote": "the text on that line, verbatim"
+          }
+        ]
+      }
     }
 
 - `severity` — what you assigned in step 2
@@ -104,6 +125,23 @@ Reply to `agent.harbor` with the subject `INCIDENT-TRIAGE` and this JSON body:
   says a task was opened or assigned, you MUST name that task's id here. The
   harness checks it against the ledger and refuses a report that claims a task
   nobody can find, with the reason, so you can correct it and send again.
+- `rootCause` — optional, and only if you have one. "Could not retrieve the run
+  log" is a complete triage; a diagnosis you invented to fill the field is not.
+  If your summary uses the words "root cause", this block is required and the
+  report is refused without it.
+
+  Every citation is a file, a LINE, and the TEXT you actually read on that line.
+  Not the text you expect to be there, and not a line you inferred from a
+  function's name — the quote is the whole point, because it is the one part of
+  a diagnosis a second reader can hold against the file and watch fail. Cite the
+  lines your claim actually rests on, not every file you opened.
+
+  A root cause you give is sent to another agent, who opens those exact lines
+  and tries to REFUTE it. Their verdict is recorded beside yours, not instead of
+  it — neither of you overrules the other, and the Architect reads both with the
+  lines you each quoted. If they refute it you will be told, with what they
+  read. That is not a mark against you; it is the check working, and it is
+  cheaper than a day spent on a fix your diagnosis implied.
 
 Then, if it is resolved, `inform` Artemis so it lands in the next standup. If it
 is not, escalate with everything you learned in steps 1 and 3 — an escalation

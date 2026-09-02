@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The attribution tripwire (ENGINEERING-STANDARDS §2, ADR-0020, ADR-0022).
@@ -45,7 +46,7 @@ const ARCHITECT = { name: 'MERT EFE SENSOY', email: 'sensoymertefe@gmail.com' }
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Repo {

@@ -15,6 +15,7 @@ import { Agora } from '../../src/main/agora'
 import { Hermes } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { GateManager } from '../../src/main/watch/gates'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The `watch:` read/write surface (SDD §5) the approvals post is a projection
@@ -35,7 +36,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

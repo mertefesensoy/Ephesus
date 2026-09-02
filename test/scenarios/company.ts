@@ -24,6 +24,7 @@ import { wireOdeonEndpoint } from '../../src/main/odeon-endpoint'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 import { Breaker } from '../../src/main/watch/breaker'
 import { SteerNotes } from '../../src/main/watch/steer-notes'
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
@@ -75,6 +76,17 @@ export interface CompanyOptions {
   readonly hookGrade?: string
   /** Closing time's hard deadline (GYM-003). Scenarios keep it short. */
   readonly closingDeadlineMs?: number
+  /**
+   * Drives closing time's deadline by hand instead of by wall clock.
+   *
+   * A scenario that wants "this agent acknowledged, that one did not" has to
+   * let the acknowledging agent's REAL work finish — a spawned engine, an
+   * inbox read, a memory append, an outbox write, a sweep — and only then let
+   * the deadline pass. On a wall clock those two are in a race, and S-CLOSING
+   * lost it on any busy machine. With this set, `Company.tripClosingDeadline`
+   * fires it exactly when the scenario says so.
+   */
+  readonly manualClosingDeadline?: boolean
 }
 
 export interface Company {
@@ -109,6 +121,13 @@ export interface Company {
   readonly breakerActs: readonly string[]
   /** Closing time (GYM-003) — the SHIPPED protocol, wired to this company. */
   readonly closing: ClosingTime
+  /**
+   * Fires closing time's deadline now. Requires `manualClosingDeadline`.
+   *
+   * Returns false when no deadline is armed, so a scenario cannot silently
+   * assert against a deadline that never existed.
+   */
+  tripClosingDeadline(): boolean
   /** The incident endpoint (FR-9.2, UC-09) — the SHIPPED one. */
   readonly incidents: IncidentEndpoint
   /** Mutable ci-event bindings, so a scenario can put a crew on call. */
@@ -166,9 +185,7 @@ const openHomes: string[] = []
 
 /** Removes every temp home created this run. Call after closing the companies. */
 export function cleanupHomes(): void {
-  for (const home of openHomes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-  }
+  for (const home of openHomes.splice(0)) removeTempDir(home)
 }
 
 let seq = 0
@@ -305,6 +322,8 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   // below exactly as `index.ts` hands them. Constructed first because Hermes's
   // options close over it.
   let closingRef: ClosingTime | null = null
+  /** Set while a manually-driven closing deadline is armed (see options). */
+  let armedDeadline: (() => void) | null = null
   let incidentsRef: IncidentEndpoint | null = null
 
   // The Odeon and its neighbours, wired the way `index.ts` wires them so the
@@ -474,7 +493,17 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       agora.appendLog(draft)
       agora.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
     },
-    ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs })
+    ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs }),
+    ...(options.manualClosingDeadline === true
+      ? {
+          schedule: (fire: () => void) => {
+            armedDeadline = fire
+            return () => {
+              armedDeadline = null
+            }
+          }
+        }
+      : {})
   })
   closingRef = closing
 
@@ -571,6 +600,13 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     breaker,
     breakerActs,
     closing,
+    tripClosingDeadline: () => {
+      const fire = armedDeadline
+      if (fire === null) return false
+      armedDeadline = null
+      fire()
+      return true
+    },
     incidents,
     incidentBindings,
     unmetObligations,
@@ -683,6 +719,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       budgets.stop()
       hermes.stop()
       await hookServer.stop()
+      // Stop, SETTLE, then drain. `stop()` only clears the timers; a sweep
+      // already running keeps going and calls `agora.commitSoon()`, so draining
+      // first drains a queue that is about to be added to — and the git child
+      // that commit starts is still alive when `cleanupHomes` deletes the
+      // directory it is running in.
+      await hermes.settled()
       await agora.drained().catch(() => {})
     }
   }

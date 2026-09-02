@@ -13,6 +13,7 @@ import { Hermes } from '../../src/main/hermes'
 import { LedgerEndpoint } from '../../src/main/ledger'
 import { Odeon } from '../../src/main/odeon'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The Odeon archive (ADR-0008, FR-7.2, UC-05), through the SHIPPED path: the
@@ -29,7 +30,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
   for (const home of homes.splice(0)) {
-    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    removeTempDir(home)
   }
 })
 

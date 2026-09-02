@@ -9,6 +9,7 @@ import { FtsIndex, MemoryFtsStore } from '../../src/main/library-fts'
 import { MemPalaceIndex } from '../../src/main/library-mempalace'
 import { PromptStore } from '../../src/main/prompts'
 import { RECALL_RUNGS, type RecallRung } from '../../src/shared/recall'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * **The recall smoke test** (ADR-0006's "conformance suite includes a retrieval
@@ -32,7 +33,7 @@ const MEMPALACE = process.env['EPH_MEMPALACE'] ?? ''
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 /**

@@ -127,6 +127,40 @@ Within a milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
+> **Build state (updated 2026-09-02):** **M7's seven packages are DONE and
+> MERGED; M7's EXIT IS STILL OPEN; the current milestone is M8.** `main` and
+> `origin/main` are level at `d427d28`, the tree is clean, and the suite is
+> **3192 passed / 0 failed** across 173 files with typecheck, lint, invariants
+> and attribution all green. Branches are down from 54 to 3: `main`, the
+> integration branch (identical to it), and `feature/usage-aware-pacing`, which
+> is UNMERGED on purpose and belongs to M8.9.
+>
+> **Resume at M8.0.** The plan is in `docs/PROGRESS.md` under
+> *"M8 — The company you can leave running"*, derived from the 2026-09-02 MVP
+> register. **M8 runs BEFORE M7b**, and the ordering is the plan's first claim:
+> M7b ships signed builds of a company that today cannot survive a restart,
+> cannot say it has stopped, and runs every hire in the Architect's own working
+> tree.
+>
+> **Two Architect decisions are SETTLED — do not re-litigate them.** The crew
+> may open pull requests unattended (2026-09-02, implemented in `610eb0a`), and
+> the MVP ships **Claude only**, recorded as [ADR-0024](docs/adr/ADR-0024-claude-only-for-the-mvp.md)
+> — refuse a non-reference engine at load, do NOT degrade it, and do NOT take
+> that as licence to collapse the adapter seam. **One decision is still OPEN and
+> M8.4 needs it:** what the shipped gate policy grants (register DD-1).
+>
+> **What M8 is really about, and it is not features.** Every M8 item is setup,
+> wiring or disclosure — none of it is "the code doesn't work". The suite has
+> been green this whole time while Closing Time has never once run in the
+> shipped app, the standup reads the OLDEST 500 log entries, and the dock shows
+> an overnight run's FIRST 300 events. Each of those passes its tests. **The
+> recurring defect of this codebase is a check that cannot fail**, and five
+> distinct instances were found in a single day: a scenario rig that copies
+> production minus the line that throws; a probe whose children had all exited
+> before it measured; a mutation that only dies off UTC; a margin measured
+> against the wrong denominator; and a test asserting a refusal its platform
+> never makes. M8.0 exists to make catching that structural rather than lucky.
+>
 > **Build state (updated 2026-08-29, M6 close-out audit):** M0–M5b are COMPLETE
 > and AUDITED. **M6 is REOPENED.** Its art half is done and conforms; its Herald
 > half is built, clean, and **not connected to the application** — so M6's exit

@@ -10,6 +10,7 @@ import {
   AVATARS_STATE_CHANNEL,
   COMMANDS_STATE_CHANNEL,
   GATE_OPEN_CHANNEL,
+  CAPACITY_STATE_CHANNEL,
   LOG_APPEND_CHANNEL,
   ODEON_QUEUE_CHANNEL,
   TASKS_STATE_CHANNEL,
@@ -31,10 +32,10 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { targetRef } from '../shared/profile-activation'
+import { targetRef, verifierAgentFor } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
-import { IncidentEndpoint } from './incidents'
+import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
 import { HireExchange } from './harbor/hires'
 import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
@@ -79,18 +80,20 @@ import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { Breaker } from './watch/breaker'
 import { BudgetWatcher } from './watch/budgets'
+import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
 import { UsageWatch } from './watch/usage-watch'
-import { DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
+import { canDeliverWake, DEFAULT_WAKE_CAP_MS, WakeClock } from './watch/wake-clock'
 import { DEFAULT_PACE_THRESHOLDS } from '../shared/pacing'
 
 let secrets: SecretBroker | null = null
 let costLedger: CostLedger | null = null
 let budgetWatcher: BudgetWatcher | null = null
+let capacityWatch: CapacityWatch | null = null
 let usageWatch: UsageWatch | null = null
 let wakeClock: WakeClock | null = null
 let gates: GateManager | null = null
@@ -1451,6 +1454,15 @@ async function boot(): Promise<void> {
     // that does not exist. Undefined when no ledger is up: an unverifiable
     // claim is let through rather than refused by a check that could not run.
     taskIds: () => (ledger?.tasks().tasks ?? []).map((row) => row.id),
+    // Who reads a root cause back against the repository it describes.
+    //
+    // The rule itself is `verifierAgentFor` — a pure function over the same
+    // activation plan the Architect approved, so it is reachable by a test
+    // rather than copied into one. Picking "some other live agent" here was the
+    // alternative and would have made the second opinion arrive from whoever
+    // happened to be idle, which is availability, not independence.
+    verifierFor: ({ incident, reportedBy }) =>
+      verifierAgentFor(activations?.instances() ?? [], incident.instanceId, reportedBy),
     deliver: (message) => hermes?.deliverFromHarness(message),
     render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
@@ -1579,7 +1591,13 @@ async function boot(): Promise<void> {
     profiles: (message) => {
       agora?.appendLog({
         kind: 'profile',
-        event: 'sweep-reported',
+        // A sweep that was REFUSED is not a sweep that reported, and the log
+        // has to be able to tell them apart. "skipped, the workspace was
+        // locked" is the most useful thing a scheduled duty can say, and until
+        // the endpoint accepted a `refuse` at all it was the one answer that
+        // bounced — so the distinction had never had to exist.
+        event: message.act === 'refuse' ? 'sweep-refused' : 'sweep-reported',
+        act: message.act,
         agentId: message.from,
         subject: message.subject.slice(0, 200),
         summary: message.body.slice(0, 2000)
@@ -1595,6 +1613,13 @@ async function boot(): Promise<void> {
         return true
       }
       if (incidents === null) return false
+      // A verdict on a root cause is not a triage report and must not be
+      // parsed as one. The endpoint answers the sender either way; what this
+      // branch decides is WHICH conversation the message belongs to.
+      if (message.subject === VERDICT_SUBJECT) {
+        incidents.onVerdict(message)
+        return true
+      }
       incidents.onTriage(message)
       return true
     },
@@ -1671,8 +1696,34 @@ async function boot(): Promise<void> {
     // with assigned work keeps going even when its inbox is empty.
     pendingTasksFor: (agentId) => ledger?.pendingFor(agentId) ?? 0,
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
-    nudge: (agentId, text) => commandQueue.submit(agentId, text),
-    isIdle: (agentId) => avatarDirector.get(agentId)?.phase === 'idle',
+    nudge: (agentId, text) => commandQueue.wake(agentId, text),
+    /**
+     * Whether the router may hand this agent its mail — a DELIVERY-plane fact,
+     * deliberately not a floor one.
+     *
+     * This used to read the avatar phase, and that made a drawing the gate on
+     * the company's communication. `avatar.ts`'s `stop` is inert unless the
+     * agent was `working` or `thinking`, so any turn that called no tool went
+     * `prompt-submitted → alert` and stayed there: never `idle`, never nudged
+     * again, for the rest of the process's life. For an orchestrator whose turn
+     * is "read the mail, reply" that is the common path, not an edge case, and
+     * it is the twenty-minute silence in the 2026-09-01 live run. Only a
+     * restart cured it.
+     *
+     * Both facts here are ones the delivery plane already owns, and — the
+     * reason this is a fix rather than a different guess — both are BOUNDED.
+     * `WakeClock.ended` closes on `stop` OR `session-end` with no phase guard,
+     * and its cap timer force-closes an overrunning wake after
+     * `DEFAULT_WAKE_CAP_MS` even when every hook is lost. So `runningMs`
+     * returning to null is guaranteed; a phase returning to `idle` never was.
+     *
+     * The trade is deliberate: a missed `prompt-submitted` now means a nudge
+     * arriving while the agent is mid-turn, where the engine queues it. That is
+     * strictly better than silence forever, and `nudged` still keeps it to one
+     * nudge per pending episode.
+     */
+    isIdle: (agentId) =>
+      canDeliverWake(ptyManager.has(agentId), wakeClock?.runningMs(agentId) ?? null),
     // ADR-0013's pathology signal, emitted and logged from M2 with nothing
     // reading it — the M2 carried item. It now enters the breaker's ladder at
     // rung 1 like any other signal.
@@ -1696,7 +1747,18 @@ async function boot(): Promise<void> {
         'hermes',
         `sweep failed: ${err instanceof Error ? err.message : String(err)}`
       ),
-    onRejected: ({ file, reason }) => reportDegradation('hermes', `rejected ${file}: ${reason}`)
+    // The author is told directly (Hermes returns the refusal to whoever wrote
+    // the file), so the Architect-facing report exists to catch the case the
+    // author CANNOT be told about — the only path by which an agent's work can
+    // still end in silence, and therefore the one worth naming out loud
+    // (invariant §7).
+    onRejected: ({ file, reason, notice }) =>
+      reportDegradation(
+        'hermes',
+        notice
+          ? `rejected ${file}: ${reason}`
+          : `rejected ${file} with no author to tell: ${reason}`
+      )
   })
   hermes.start()
 
@@ -1719,6 +1781,10 @@ async function boot(): Promise<void> {
         'agents',
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    // A ghost that was parked did not crash. Asked rather than inferred from
+    // the exit code, because a provider refusal and a crash look identical at
+    // the pty seam — and the difference is whether a human needs to do anything.
+    capacityParked: (agentId) => capacityWatch?.parked(agentId) !== null,
     rosterBudget: (agentId) => {
       try {
         return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
@@ -1833,6 +1899,10 @@ async function boot(): Promise<void> {
           .finally(() => {
             costLedger?.clearSession(card.agentId)
             budgetWatcher?.forget(card.agentId)
+            // NOT `capacityWatch.forget` — deliberately. An exit during a park
+            // is a parked agent whose process died, and it is still owed a
+            // continuation when capacity returns (`onResume` then takes the
+            // respawn path). Forgetting here is how the agent would be lost.
           })
       }
       if (card.lifecycle === 'running' && !avatarDirector.get(card.agentId)) {
@@ -1998,6 +2068,154 @@ async function boot(): Promise<void> {
   })
   budgetWatcher.start()
 
+  // Provider capacity (`watch/capacity.ts`). Built beside the budget watcher
+  // and deliberately NOT inside it: they read the same transcripts to answer
+  // opposite questions, and this one must keep answering while a parked agent's
+  // spend has stopped changing.
+  //
+  // Nothing here kills, ghosts, or restarts on a refusal. A usage limit is a
+  // normal event in the life of a company meant to run for days — the correct
+  // response is to stop asking, say so where the Architect can see it, and come
+  // back. Every act below is one of those three.
+  /**
+   * The continuation an agent reads when capacity returns (invariant §8: the
+   * words are a file the Architect can edit, never a literal here).
+   *
+   * Returns null when the template will not read, and the caller then continues
+   * NOTHING rather than inventing a sentence. A resume prompt the harness made
+   * up is a resume prompt nobody reviewed, and this one tells an agent what to
+   * do with half-finished work.
+   */
+  const capacityResumeText = (detail: string): string | null => {
+    try {
+      return prompts.render(path.join('watch', 'capacity-resume.md'), { detail }).trim()
+    } catch (err) {
+      reportDegradation(
+        'capacity',
+        'the capacity resume prompt is unreadable, so no agent will be continued: ' +
+          `${err instanceof Error ? err.message : String(err)}`
+      )
+      return null
+    }
+  }
+
+  capacityWatch = new CapacityWatch({
+    agents: () => agentManager?.liveSpawns() ?? [],
+    alive: (agentId) => ptyManager.has(agentId),
+    onPark: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'parked',
+        agentId: row.agentId,
+        limitKind: row.limit.kind,
+        // The engine's own sentence, verbatim: "out of usage credits" and "rate
+        // limited" want different things from a human, and a harness that
+        // paraphrased them would erase that difference.
+        detail: row.limit.detail,
+        recordId: row.limit.recordId,
+        sessionId: row.limit.sessionId,
+        at: row.limit.at,
+        resetsAt: row.limit.resetsAt,
+        attempts: row.attempts,
+        retryAt: row.retryAt,
+        processAlive: row.processAlive
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity parked ${row.agentId}`)
+      // Invariant §7. A pause nobody can see is the failure mode this whole
+      // system is built against, so it goes to the degradation banner as well
+      // as to the strip.
+      reportDegradation(
+        'capacity',
+        `${row.agentId} is waiting for provider capacity — ${row.limit.detail}`
+      )
+      // Mail stops rather than piling into a session that cannot answer it. It
+      // is a pause, not a discard: the mailbox keeps everything and Hermes
+      // resumes delivering when the park clears.
+      hermes?.setPaused(row.agentId, true)
+      // FR-5.4's ladder counts crashes and ends. A refusal is not a crash, and
+      // restarting into one cannot succeed — every rung it burned would be a
+      // rung missing for the real crash later.
+      artemis?.holdForCapacity()
+    },
+    onResume: (row) => {
+      const text = capacityResumeText(row.limit.detail)
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'resuming',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        // Which of the two continuations ran. They are not equivalent and the
+        // book of record must not imply they are: one carries the live
+        // conversation, the other carries the engine session it was resumed
+        // onto (ADR-0009 `resume`).
+        via: row.processAlive ? 'live-session' : 'respawn',
+        waitedMs: Date.parse(row.retryAt) - Date.parse(row.since),
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity resume ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      if (row.processAlive) {
+        // The process never died, so there is nothing to restart: the agent is
+        // talked to, in the conversation it was already having. This is the
+        // strongest form of "continue where you left off" available — no new
+        // session, no re-injected identity, no lost context.
+        if (text === null) return
+        try {
+          commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not continue ${row.agentId}: ${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+        return
+      }
+      // The process did not survive the wait. Now — and only now — the existing
+      // resume path runs: `--resume <sessionId>` through `AgentManager.respawn`
+      // (ADR-0009 `ResumeSupport`), the same machinery crash recovery uses.
+      void (async (): Promise<void> => {
+        try {
+          await agentManager?.respawn(row.agentId)
+          // The continuation follows the respawn rather than riding it: the
+          // engine session carries what the agent was doing, and this says what
+          // to do about it. Held by the command queue until the fresh session
+          // reports idle, which is exactly when it can be read.
+          if (text !== null) commandQueue.submit(row.agentId, text)
+        } catch (err) {
+          reportDegradation(
+            'capacity',
+            `could not respawn ${row.agentId} after capacity returned: ` +
+              `${err instanceof Error ? err.message : String(err)}`
+          )
+        }
+      })()
+    },
+    onClear: (row) => {
+      agora?.appendLog({
+        kind: 'capacity',
+        event: 'cleared',
+        agentId: row.agentId,
+        attempts: row.attempts,
+        since: row.since,
+        recordId: row.limit.recordId
+      })
+      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      agora?.commitSoon(`capacity cleared ${row.agentId}`)
+      hermes?.setPaused(row.agentId, false)
+      // The ladder is only released once NOBODY is parked: releasing it while
+      // another agent is still refused would let the next exit spend a rung on
+      // the same limit this hold exists to absorb.
+      if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
+    },
+    onDegraded: (detail) => reportDegradation('capacity', detail)
+  })
+  capacityWatch.start()
+
   // FR-5.1/5.4: Artemis is hired like any other agent — this module owns her
   // lifecycle and nothing about what she decides (ADR-0005).
   artemis = new Artemis({
@@ -2036,6 +2254,7 @@ async function boot(): Promise<void> {
     gates,
     humanQueue: () => hermes?.humanQueue() ?? [],
     dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
+    capacity: () => capacityWatch?.view() ?? { parked: [], since: null, retryAt: null },
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')
@@ -2455,6 +2674,7 @@ function teardown(): void {
         companyTokenTimer = null
       }
       budgetWatcher?.stop()
+      capacityWatch?.stop()
       usageWatch?.stop()
       wakeClock?.stop()
       ptyManager.killAll()
@@ -2467,6 +2687,7 @@ function teardown(): void {
     hermes?.stop()
     scheduler.stop()
     budgetWatcher?.stop()
+    capacityWatch?.stop()
     usageWatch?.stop()
     wakeClock?.stop()
     ptyManager.killAll()

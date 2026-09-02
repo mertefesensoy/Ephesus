@@ -22,6 +22,7 @@ import {
   BRIEF_SCHEMA_VERSION,
   renderBriefMarkdown
 } from '../../src/shared/brief'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The Herald narrating RECORDS — FR-7.1, FR-8.4, VOICE-DESIGN §4–§5.
@@ -36,7 +37,7 @@ const BUNDLED = fileURLToPath(new URL('../../prompts/', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function phrasebook(): Phrasebook {

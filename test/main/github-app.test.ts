@@ -9,10 +9,11 @@ import {
   botIdentity,
   coAuthorTrailer
 } from '../../src/shared/github-app'
+import { removeTempDir } from '../tmpdir'
 
 const temps: string[] = []
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 const keys = generateKeyPairSync('rsa', {

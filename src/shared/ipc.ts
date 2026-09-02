@@ -55,6 +55,7 @@ export type MemoQueueName = 'open' | 'decided' | 'all'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
 import type { BreakerState } from './breaker'
+import type { CapacityView } from './capacity'
 import type { AgentSpend } from './cost'
 import type { GateVerdict, OpenGate } from './gates'
 import type { Message } from './message'
@@ -182,6 +183,7 @@ export const IpcChannels = {
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
   watchBreaker: 'watch:breaker-state',
+  watchCapacity: 'watch:capacity',
   watchDismiss: 'watch:dismiss'
 } as const
 
@@ -235,6 +237,16 @@ export const LOG_APPEND_CHANNEL = 'log:append'
  * never disagree with main about what is open (the renderer is a projection).
  */
 export const GATE_OPEN_CHANNEL = 'gate:open'
+
+/**
+ * Push channel signalling that the provider-capacity picture changed — an agent
+ * parked, was continued, or came back (`src/shared/capacity.ts`).
+ *
+ * A nudge, not a payload, for the same reason `gate:open` is one: the strip
+ * re-reads `watch:capacity`, so it can never hold a second copy of the park
+ * that disagrees with main.
+ */
+export const CAPACITY_STATE_CHANNEL = 'capacity:state'
 
 /** One agent's avatar snapshot, addressed. */
 export interface AvatarUpdate {
@@ -566,6 +578,17 @@ export interface EphApi {
      * which ADR-0011 requires on the agent card rather than hidden.
      */
     breakerState: () => Promise<readonly BreakerState[]>
+    /**
+     * Who is waiting on the provider, since when, and when the harness will ask
+     * again (`src/shared/capacity.ts`).
+     *
+     * On the Watch surface rather than beside the agent cards because a park is
+     * a COMPANY fact: one refusal usually stops everyone, and the Architect's
+     * question is "is the company stopped", not "what is agent 4 doing".
+     */
+    capacity: () => Promise<CapacityView>
+    /** Subscribe to "a park opened, continued, or cleared"; the view re-reads. */
+    onCapacityChange: (cb: () => void) => () => void
   }
   pty: {
     /**

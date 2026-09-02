@@ -9,6 +9,7 @@ import { createElevenLabsAdapter } from '../../src/main/herald/elevenlabs'
 import { createOpenAIRealtimeAdapter } from '../../src/main/herald/openai-realtime'
 import { HeraldSession, FAILOVER_BUDGET_MS } from '../../src/main/herald/session'
 import { VOICE_FAULTS, type VoiceAdapter } from '../../src/main/herald/seam'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * **S-FAILOVER** (TEST-STRATEGY §3, SRS 6.5):
@@ -30,7 +31,7 @@ const BUNDLED = fileURLToPath(new URL('../../prompts/', import.meta.url))
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function phrasebook(): Phrasebook {

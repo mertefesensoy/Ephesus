@@ -106,17 +106,43 @@ export interface AgentWorktrees {
 export type VersionProber = (spec: BinarySpec) => Promise<string | null>
 
 /**
+ * Quotes one word for the Windows shell. `execFile` with `shell` set joins the
+ * command and its arguments into a single *string* for `cmd.exe`, which then
+ * re-splits it on whitespace — so an absolute path like
+ * `C:\Program Files\nodejs\node.exe` runs as `C:\Program` and fails, and an
+ * argument containing a space arrives as two. Node does not quote for you when
+ * `shell` is set; that is the caller's job, and this is the caller.
+ *
+ * Applies to arguments as well as the command, because they go through the same
+ * splitter: an unquoted `hello world` reaches the child as `hello`.
+ *
+ * Only whitespace matters here. A word already carrying its own quotes is left
+ * exactly as the adapter wrote it — re-quoting would break it in the same way
+ * not quoting breaks a bare path.
+ */
+function quoteForShell(word: string): string {
+  if (!/\s/.test(word) || word.startsWith('"')) return word
+  return `"${word}"`
+}
+
+/**
  * Runs the engine's version probe. Contract: never throws — a missing binary and
  * a probe that errors are the same answer (null), because both mean "we cannot
  * confirm the engine is here", and FR-1.6 responds to that with a visible
  * install offer, not a crash.
+ *
+ * Windows needs the shell because an engine CLI is usually a `.cmd` shim, which
+ * `execFile` cannot start directly. That shell is why the command needs
+ * quoting: without it a perfectly present engine probes as absent, and FR-1.6
+ * answers by offering to install a binary that is already on disk.
  */
 export const probeVersion: VersionProber = (spec) =>
   new Promise((resolve) => {
+    const shell = process.platform === 'win32'
     execFile(
-      spec.versionProbe.command,
-      [...spec.versionProbe.args],
-      { timeout: 10_000, windowsHide: true, shell: process.platform === 'win32' },
+      shell ? quoteForShell(spec.versionProbe.command) : spec.versionProbe.command,
+      shell ? spec.versionProbe.args.map(quoteForShell) : [...spec.versionProbe.args],
+      { timeout: 10_000, windowsHide: true, shell },
       (err, stdout) => {
         if (err) {
           resolve(null)
@@ -247,6 +273,14 @@ export interface AgentManagerOptions {
    * restart would lose the declaration entirely.
    */
   rosterBudget?(agentId: string): number | null
+  /**
+   * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
+   *
+   * Optional so the lifecycle stays constructible without the Watch — and when
+   * it is absent the answer is `false`, which is the honest default: a harness
+   * that cannot see a park must not claim one.
+   */
+  capacityParked?(agentId: string): boolean
 }
 
 interface LiveAgent {
@@ -872,7 +906,12 @@ export class AgentManager {
     const offer: RespawnOffer = {
       resumable: agent.adapter.resume !== undefined && agent.sessionIds.length > 0,
       memorySections: this.options.memory?.layer(agentId).facts.totalSections ?? 0,
-      tasksReturned
+      tasksReturned,
+      // Asked, never inferred from the exit code: a provider refusal and a crash
+      // are indistinguishable at the pty seam, and the difference between them
+      // is the difference between "the harness will bring this back" and "a
+      // human needs to look at this".
+      waitingForCapacity: this.options.capacityParked?.(agentId) ?? false
     }
     this.options.onLogEvent?.({
       kind: 'ghost',
@@ -881,7 +920,8 @@ export class AgentManager {
       engine: agent.card.engine,
       resumable: offer.resumable,
       memorySections: offer.memorySections,
-      tasksReturned: [...tasksReturned]
+      tasksReturned: [...tasksReturned],
+      waitingForCapacity: offer.waitingForCapacity
     })
     return offer
   }

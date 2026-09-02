@@ -240,7 +240,12 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, stoa, shutdown, error }`. `shutdown` carries closing time (GYM-003):
+gym, stoa, shutdown, capacity, error }`. `capacity` carries the provider's usage
+limit (`src/shared/capacity.ts`): parked (with the engine's own refusal text and
+the retry it is waiting for), resuming (and by which of the two continuations),
+cleared. It is distinct from `breaker` and from `exit` on purpose — one is our
+ladder, one is a dead process, and this is a healthy agent the provider declined
+to serve. `shutdown` carries closing time (GYM-003):
 begin / ack / complete, with the shortfall named. `stoa` carries the research
 cycle (§7.7): study started, brief accepted/rejected, watchlist changes. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.

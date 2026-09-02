@@ -63,8 +63,9 @@ describe('the obligation table (ADR-0003, FR-3.3)', () => {
    * This replaces a case that asserted a REFUSAL, and the refusal is what the
    * 2026-09-01 live run showed to be wrong. Artemis wrote a complete,
    * fully-cited standup brief, set `requires_reply: false` on a `propose`, and
-   * the whole message was parked in `.rejected/` — where nothing tells the
-   * author, so she could neither learn nor retry.
+   * the whole message was parked in `.rejected/`, which at the time told the
+   * author nothing, so she could neither learn nor retry. (Rejections are
+   * returned to their author now; this case is about not rejecting it at all.)
    *
    * `PROTOCOL.md` tells agents in as many words that they "do not get to choose
    * it". A field the sender is not allowed to choose is the harness's to

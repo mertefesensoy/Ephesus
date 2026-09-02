@@ -7,6 +7,7 @@ import type { AvatarUpdate } from '../../shared/ipc'
 import { costNoteOf, type AgentSpend } from '../../shared/cost'
 import { paceNoteOf, type PaceNote } from '../../shared/pacing'
 import type { UsageSnapshot } from '../../shared/ipc'
+import type { CapacityView, ParkedAgent } from '../../shared/capacity'
 
 /**
  * The company at a glance (UI-DESIGN §5).
@@ -58,6 +59,16 @@ export interface DockRow {
   readonly cost: string
   /** Provenance: live and provisional, or folded from the transcript and final. */
   readonly costTitle: string
+  /**
+   * This agent's provider-capacity park, or null when nothing is blocking.
+   *
+   * It sits BESIDE `phase` rather than replacing it because they are different
+   * facts and the card shows both: the phase is what the process is doing
+   * (nothing — it is idle), and this is why. Collapsing them would leave a
+   * parked company reading exactly like a finished one, which is the whole
+   * failure this row exists to prevent.
+   */
+  readonly capacity: ParkedAgent | null
 }
 
 /**
@@ -71,11 +82,13 @@ export interface DockRow {
 export function dockRows(
   cards: readonly AgentCard[],
   phases: ReadonlyMap<string, { phase: string; pendingMail: number }>,
-  spend: ReadonlyMap<string, AgentSpend> = new Map()
+  spend: ReadonlyMap<string, AgentSpend> = new Map(),
+  capacity: ReadonlyMap<string, ParkedAgent> = new Map()
 ): readonly DockRow[] {
   return cards.map((card) => {
     const live = phases.get(card.agentId) ?? null
     const money = spend.get(card.agentId) ?? null
+    const parked = capacity.get(card.agentId) ?? null
     const budgeted = money !== null && money.dailyTokens !== null && money.dailyTokens > 0
     const measured = money !== null && money.reporting === 'engine'
     return {
@@ -84,7 +97,18 @@ export function dockRows(
       role: card.role,
       lifecycle: card.lifecycle,
       phase: live?.phase ?? null,
-      status: live === null ? 'no signal yet' : badgeFor(live.phase).label,
+      capacity: parked,
+      // The park OUTRANKS the phase word. An agent the provider has refused is
+      // idle in every sense the avatar can see, and "idle" is precisely the
+      // wrong thing to tell an Architect who is waiting for work to happen.
+      status:
+        parked !== null
+          ? parked.phase === 'resuming'
+            ? 'capacity back — continuing'
+            : 'waiting for provider capacity'
+          : live === null
+            ? 'no signal yet'
+            : badgeFor(live.phase).label,
       pendingMail: live?.pendingMail ?? 0,
       spent:
         budgeted && measured
@@ -151,6 +175,17 @@ export function toneFor(phase: string | null): string {
 }
 
 /**
+ * Contract: pure. The colour one row takes, park included.
+ *
+ * A parked agent borrows the `blocked` token rather than a new one: it IS
+ * blocked, on something outside the company, and §2.4 already spends that
+ * colour on "stopped, waiting for something that is not you".
+ */
+export function rowTone(row: DockRow): string {
+  return row.capacity === null ? toneFor(row.phase) : 'var(--eph-status-blocked)'
+}
+
+/**
  * Contract: the CSS that shows one phase's emote, or null when no pack is
  * installed. A sprite sheet is positioned rather than sliced: the dock is HTML,
  * and background-position is the one way to blit in it without a canvas.
@@ -205,6 +240,12 @@ export function AgentDock({
   )
   const [spend, setSpend] = useState<ReadonlyMap<string, AgentSpend>>(new Map())
   const [usage, setUsage] = useState<UsageSnapshot | null>(null)
+  /**
+   * Who is waiting on the provider. Read on the same slow poll as spend AND on
+   * the `capacity:state` push, the belt-and-braces the gate badge already uses:
+   * the push makes it prompt, the poll makes it right after a missed event.
+   */
+  const [capacity, setCapacity] = useState<ReadonlyMap<string, ParkedAgent>>(new Map())
 
   const applyAvatar = useCallback((update: AvatarUpdate) => {
     setPhases((prev) => {
@@ -240,16 +281,34 @@ export function AgentDock({
       // add a second clock telling the same story.
       void eph.watch.usage().then(setUsage)
     }
+    const readCapacity = (): void => {
+      void eph.watch
+        .capacity()
+        .then((view: CapacityView) => {
+          setCapacity(new Map(view.parked.map((row) => [row.agentId, row])))
+        })
+        .catch(() => {
+          // Left alone rather than cleared: dropping the map on one failed read
+          // would show a parked company as a working one, which is a
+          // degradation failing as GOOD news (invariant §7).
+        })
+    }
     readSpend()
-    const timer = setInterval(readSpend, 5000)
+    readCapacity()
+    const offCapacity = eph.watch.onCapacityChange(readCapacity)
+    const timer = setInterval(() => {
+      readSpend()
+      readCapacity()
+    }, 5000)
     return () => {
       offAgents()
       offAvatars()
+      offCapacity()
       clearInterval(timer)
     }
   }, [applyAvatar])
 
-  const rows = dockRows(cards, phases, spend)
+  const rows = dockRows(cards, phases, spend, capacity)
   const pace = paceStrip(usage)
 
   return (
@@ -305,7 +364,7 @@ export function AgentDock({
             <div
               style={{
                 marginTop: '4px',
-                color: toneFor(row.phase),
+                color: rowTone(row),
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px'
@@ -322,6 +381,11 @@ export function AgentDock({
               )}
               <span>{row.status}</span>
             </div>
+            {row.capacity !== null && (
+              <div style={{ color: 'var(--eph-status-blocked)' }} title={row.capacity.limit.detail}>
+                retry {new Date(row.capacity.retryAt).toLocaleTimeString()}
+              </div>
+            )}
             {row.pendingMail > 0 && (
               <div style={{ color: 'var(--eph-status-blocked)' }}>
                 {String(row.pendingMail)} waiting

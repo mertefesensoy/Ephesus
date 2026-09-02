@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { EventLog } from '../../src/main/eventlog'
 import { LOG_KINDS, formatLogLine, parseLogLine } from '../../src/shared/log'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The book of record (SDD §4.3, NFR-13, invariant §5). What these tests defend
@@ -15,7 +16,7 @@ import { LOG_KINDS, formatLogLine, parseLogLine } from '../../src/shared/log'
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function logFile(): string {
@@ -25,7 +26,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty-four documented kinds', () => {
+  it('carries the twenty-five documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -57,6 +58,11 @@ describe('log line format (SDD §4.3)', () => {
       'stoa',
       // Added by GYM-003: closing time's begin / ack / complete (SDD §4.3).
       'shutdown',
+      // Provider capacity: parked / resuming / cleared. Its own kind because a
+      // healthy agent the provider declined to serve is neither a `breaker`
+      // trip nor an `exit`, and a forensic reader who cannot tell the three
+      // apart cannot reconstruct what the company did (NFR-13).
+      'capacity',
       'error'
     ])
   })

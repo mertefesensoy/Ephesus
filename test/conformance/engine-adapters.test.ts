@@ -13,6 +13,7 @@ import { GeminiAdapter } from '../../src/main/engines/gemini'
 import { PromptStore } from '../../src/main/prompts'
 import { conformanceRig, runAdapterConformance } from './adapter-conformance'
 import { FAKE_SETTINGS_REL, makeFakeAdapter } from '../fakes/fake-adapter'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The conformance run (TEST-STRATEGY §5): the table above every adapter, plus
@@ -26,7 +27,7 @@ const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempDir(): string {

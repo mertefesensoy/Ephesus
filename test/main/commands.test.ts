@@ -198,3 +198,60 @@ describe('CommandQueue — interrupt and teardown', () => {
     expect(() => r.queue.submit('agent.mason', 'again')).toThrow(/no agent selected/)
   })
 })
+
+/**
+ * The harness's own wake path (B2 of the M7 exit gaps).
+ *
+ * `submit` is the Architect's door and consults the floor on purpose. `wake` is
+ * the router's, and must not: by the time it is called the delivery plane has
+ * already decided the agent is between turns, and the mail is already out of
+ * the inbox. Every case below is one the live run actually hit.
+ */
+describe('CommandQueue — the harness wake ignores the floor', () => {
+  it('sends to an agent stuck at a phase submit would only HOLD', () => {
+    const r = rig()
+    // `alert` is where a turn that calls no tool ends up and stays: avatar.ts's
+    // `stop` is inert unless the agent was working or thinking. This is the
+    // exact state that silenced the orchestrator for twenty minutes.
+    r.phase(reduceAvatar(initialAvatar(T0), { kind: 'prompt-submitted' }, T0))
+
+    // The Architect's text would be held, correctly, and shown back to them.
+    r.queue.submit('agent.mason', 'architect text')
+    expect(r.writes).toEqual([])
+    expect(r.queue.state('agent.mason').held).toBe('architect text')
+
+    // The wake goes anyway.
+    r.queue.wake('agent.mason', 'you have mail')
+    expect(r.writes).toEqual([{ agentId: 'agent.mason', data: 'you have mail' }])
+  })
+
+  it('sends to an agent whose phase would make submit THROW', () => {
+    const r = rig()
+    // No observed phase at all — decideCommand refuses with "no agent selected",
+    // and that throw used to unwind the entire sweep from inside wakeCheck.
+    expect(() => r.queue.submit('agent.mason', 'x')).toThrow()
+
+    expect(() => r.queue.wake('agent.mason', 'you have mail')).not.toThrow()
+    expect(r.writes).toEqual([{ agentId: 'agent.mason', data: 'you have mail' }])
+  })
+
+  it('still writes the submit key separately, like every other send', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+    expect(r.writes).toHaveLength(1)
+    r.drain()
+    expect(r.writes[1]).toEqual({ agentId: 'agent.mason', data: SUBMIT_KEY })
+  })
+
+  it('leaves the Architect\u2019s held text held, rather than stapling it to a nudge', () => {
+    const r = rig()
+    r.phase(phaseWorking())
+    r.queue.submit('agent.mason', 'architect text')
+
+    r.queue.wake('agent.mason', 'you have mail')
+
+    // The nudge went; their words are still theirs to send when the agent is ready.
+    expect(r.writes).toEqual([{ agentId: 'agent.mason', data: 'you have mail' }])
+    expect(r.queue.state('agent.mason').held).toBe('architect text')
+  })
+})

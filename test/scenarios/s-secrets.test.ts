@@ -7,6 +7,7 @@ import { attachRedactedStream, type PtyDataSource, type PtySink } from '../../sr
 import { SecretBroker } from '../../src/main/watch/secrets'
 import type { SecretCipher } from '../../src/main/watch/cipher'
 import { cleanupHomes, startCompany, type Company } from './company'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * **S-SECRETS** (TEST-STRATEGY §3): "broker write-only (no read IPC exists —
@@ -32,7 +33,7 @@ const homes: string[] = []
 afterEach(async () => {
   for (const company of companies.splice(0)) await company.close()
   cleanupHomes()
-  for (const home of homes.splice(0)) fs.rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 /** The cipher seam ADR-0010 puts `safeStorage` behind, so vitest never loads it. */
@@ -93,6 +94,7 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       }),
       humanQueue: () => [],
       dismissFromHumanQueue: () => true,
+      capacity: () => ({ parked: [], since: null, retryAt: null }),
       breakerState: () => [],
       pendingMailFor: () => 0,
       hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),

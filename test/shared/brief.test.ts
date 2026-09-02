@@ -438,3 +438,54 @@ describe('the standup folds the Stoa into the gym slice (FR-13.6, FR-14.1)', () 
     expect(facts.some((f) => f.refs.includes('gym:mode'))).toBe(false)
   })
 })
+
+/**
+ * A contradiction inside the company's own record reaches the standup.
+ *
+ * M7.7 gave the compiler its incident branch because an incident reached the
+ * Architect only sideways. This is the same gap one level in: a root cause one
+ * agent asserted and another refuted lived only in `log.jsonl`, where nobody
+ * looks unless they already suspect something.
+ */
+describe('a refuted root cause is narrated; a confirmed one is not', () => {
+  const verdictEvent = (over: Record<string, unknown> = {}): LogEntry =>
+    event({
+      kind: 'profile',
+      seq: 12,
+      event: 'incident-root-cause-verdict',
+      incident: 'owner/app#ci-run:4021',
+      verdict: 'refute',
+      verifier: 'agent.crew-myapp-verifier',
+      claim: 'ArcLinker.run() has no injectable clock',
+      because: 'line 122 already takes `now`, and threads it on',
+      ...over
+    } as Partial<LogEntry> & { kind: LogEntry['kind'] })
+
+  it('carries both sides verbatim, with a ref that resolves', () => {
+    const facts = compileFacts({ ...EMPTY, events: [verdictEvent()] })
+    const health = facts.filter((entry) => entry.section === 'health')
+    const narrated = health.map((entry) => entry.what).join(' ')
+
+    expect(narrated).toContain('ArcLinker.run() has no injectable clock')
+    expect(narrated).toContain('line 122 already takes `now`')
+    expect(narrated).toContain('agent.crew-myapp-verifier')
+    // S-BRIEF's rule holds for this fact like every other: a claim the Architect
+    // cannot check is not a fact.
+    expect(health.find((entry) => entry.what.includes('refutes'))?.refs).toEqual(['log#12'])
+  })
+
+  it('says nothing about an agreement or an inconclusive reading', () => {
+    // Both are in `log.jsonl` for anyone who looks. Neither is worth a sentence
+    // out of a 90-second budget where blocked is never truncated
+    // (VOICE-DESIGN §4) — and a standup that narrates every confirmation is one
+    // the Architect stops hearing.
+    const facts = compileFacts({
+      ...EMPTY,
+      events: [
+        verdictEvent({ verdict: 'agree' }),
+        verdictEvent({ seq: 13, verdict: 'cannot-tell' })
+      ]
+    })
+    expect(facts.some((entry) => entry.what.includes('root cause'))).toBe(false)
+  })
+})

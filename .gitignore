@@ -14,6 +14,9 @@ out/
 src/renderer/src/assets/tileset/*
 !src/renderer/src/assets/tileset/.gitkeep
 !src/renderer/src/assets/tileset/*.tiles.json
+# Same rule, same reason: an emote table is a map from phases to frame
+# indices on somebody else's sheet — our work, not theirs.
+!src/renderer/src/assets/tileset/*.emotes.json
 src/renderer/public/fonts/*
 !src/renderer/public/fonts/README.md
 

@@ -6,6 +6,7 @@ import { HireExchange, escapingNames, factsOf } from '../../src/main/harbor/hire
 import { ProfileStore } from '../../src/main/profiles'
 import { IpcChannels } from '../../src/shared/ipc'
 import { digestOf, filesOf, inspectImport, manifestOfProfile } from '../../src/shared/share'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Export/import over real files (FR-10.4, ADR-0012 — M7.6).
@@ -24,7 +25,7 @@ const REPO_ROOT = path.join(__dirname, '..', '..')
 const homes: string[] = []
 
 afterEach(() => {
-  for (const dir of homes.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of homes.splice(0)) removeTempDir(dir)
 })
 
 function tempHome(): string {
@@ -209,7 +210,11 @@ describe('an import cannot widen a profile already installed here', () => {
     if (!loaded.ok) throw new Error('installed profile must load')
     const facts = factsOf(loaded.bundle)
     expect(facts.envGrants).toContain('GH_TOKEN')
-    expect(facts.autonomy.find((row) => row.kind === 'destructive')?.level).toBe('manual')
+    // `supervised` is the shipped bundle's OWN answer for this kind: it is
+    // neither the profile's default (`autonomous`) nor anything the caller's
+    // envelope contributed, so reading it back is evidence the facts came from
+    // the installed document.
+    expect(facts.autonomy.find((row) => row.kind === 'destructive')?.level).toBe('supervised')
   })
 })
 
@@ -303,10 +308,10 @@ describe('install replaces a bundle rather than merging into it', () => {
     expect(exchange.install(shipped.blob).ok).toBe(true)
 
     const dir = path.join(home, 'profiles', 'skeleton-crew')
-    expect(fs.readdirSync(path.join(dir, 'hires')).length).toBe(3)
+    expect(fs.readdirSync(path.join(dir, 'hires')).length).toBe(4)
 
     // A v2 with ONE hire and no triggers. Merging would have left the other
-    // two hires and every trigger on disk — so the loader would read back a
+    // three hires and every trigger on disk — so the loader would read back a
     // profile the Architect never approved, with watchers still armed.
     const envelope = JSON.parse(shipped.blob) as {
       manifest: Record<string, unknown>

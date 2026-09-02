@@ -11,6 +11,7 @@ import {
   LIBRARY_ENDPOINT,
   ODEON_ENDPOINT
 } from '../shared/reserved'
+import { endpointContract } from '../shared/endpoints'
 import { HUMAN_QUEUE, routeMessage, replyHops, type RoutingContext } from '../shared/routing'
 import { decideStop, isPathological, type StopContext, type StopDecision } from '../shared/autonomy'
 import { mayWake, type Pace } from '../shared/pacing'
@@ -72,6 +73,13 @@ export interface DeliveryRecord {
 export interface RejectionRecord {
   readonly file: string
   readonly reason: string
+  /**
+   * The refusal returned to whoever wrote the file, or `null` when there was
+   * nobody to return it to. Symmetric with `BounceRecord.refusal`, and the
+   * null case is named rather than hidden because it is the only remaining way
+   * for an agent's work to end in silence (invariant §7).
+   */
+  readonly notice: Message | null
 }
 
 export interface SweepReport {
@@ -649,6 +657,24 @@ export class Hermes {
     return this.sweeping
   }
 
+  /**
+   * Resolves once a sweep already in flight has finished. Starts none.
+   *
+   * `stop()` clears the timers, but a sweep that is already running keeps
+   * going — and a sweep calls `agora.commitSoon()`, which starts a git child.
+   * Shutting down by draining the commit queue alone therefore drains a queue
+   * the sweep is about to add to, and git can still be starting as the caller
+   * tears the directory down. Quiescing means: stop, settle, then drain.
+   *
+   * Deliberately does not sweep: a shutdown must not deliver mail nobody asked
+   * it to deliver. It absorbs the failure of the in-flight sweep because
+   * `onSweepError` already reported it — this answers "is it finished", not
+   * "did it work".
+   */
+  async settled(): Promise<void> {
+    await this.sweeping.catch(() => {})
+  }
+
   private async runSweep(): Promise<SweepReport> {
     const delivered: DeliveryRecord[] = []
     const rejected: RejectionRecord[] = []
@@ -687,21 +713,27 @@ export class Hermes {
     try {
       raw = JSON.parse(fs.readFileSync(file, 'utf8'))
     } catch (err) {
+      // `ownerId` is the directory this file was found in, so even bytes that
+      // are not JSON have an author to answer to.
       return this.reject(
         file,
-        `not valid JSON: ${err instanceof Error ? err.message : 'unreadable'}`
+        `not valid JSON: ${err instanceof Error ? err.message : 'unreadable'}`,
+        ownerId
       )
     }
 
     const parsed = parseMessage(raw)
-    if (!parsed.ok) return this.reject(file, parsed.reason)
+    if (!parsed.ok) return this.reject(file, parsed.reason, ownerId)
 
     // Single-writer-per-file (ADR-0003): a file in agent A's outbox claiming to
     // be from agent B is a forgery, whatever wrote it.
     if (parsed.message.from !== ownerId) {
+      // Answered to `ownerId`, deliberately, not to `parsed.message.from`:
+      // the claimed sender did not write this and must never be told it did.
       return this.reject(
         file,
-        `from "${parsed.message.from}" does not own this outbox ("${ownerId}")`
+        `from "${parsed.message.from}" does not own this outbox ("${ownerId}")`,
+        ownerId
       )
     }
 
@@ -718,6 +750,34 @@ export class Hermes {
     }
 
     if (route.kind === 'endpoint') {
+      // An ASIDE: an act the endpoint admits but its handler does not act on
+      // (`accepts` minus `handles` in src/shared/endpoints.ts) — an agent
+      // answering the Odeon "done" instead of filing a deck, or telling the
+      // Library it cannot condense its memory.
+      //
+      // Recorded and not answered. FR-3.4 forbids DROPPING, not answering, and
+      // a terminal act obliges nothing back; the alternative is what shipped,
+      // where every reply reached a handler that knew exactly one body shape
+      // and came back "your JSON is malformed" to an agent that had never
+      // claimed to send any.
+      const contract = endpointContract(route.endpoint)
+      if (contract !== undefined && !contract.handles.includes(parsed.message.act)) {
+        this.agora.appendLog({
+          kind: 'delivery',
+          msgId: parsed.message.id,
+          from: parsed.message.from,
+          to: route.endpoint,
+          act: parsed.message.act,
+          subject: parsed.message.subject,
+          conversation: parsed.message.conversation,
+          hops: parsed.message.hops,
+          aside: true,
+          summary: parsed.message.body.slice(0, 2000)
+        })
+        this.drainOutbox(file)
+        return { kind: 'skipped' }
+      }
+
       // Not delivered to a mailbox — handed to the harness, which validates it
       // and writes through the single committer. The sender gets an answer
       // either way: a proposal that vanished silently would leave Artemis
@@ -823,9 +883,37 @@ export class Hermes {
     return anyHeld && records.length === 0 ? { kind: 'skipped' } : { kind: 'delivered', records }
   }
 
-  private reject(file: string, reason: string): { kind: 'rejected'; record: RejectionRecord } {
-    // Parked, not deleted: the Architect can read what an agent got wrong, and
-    // it will not be re-processed forever (FR-3.4's spirit — never drop silently).
+  /**
+   * Parks a file the router will not carry, and returns the refusal to whoever
+   * wrote it.
+   *
+   * Parked, not deleted: the Architect can read what an agent got wrong, and it
+   * will not be re-processed forever. Parking is load-bearing now rather than
+   * merely forensic — the notice POINTS at the parked copy, so the author can
+   * recover its own text instead of rewriting from memory.
+   *
+   * `author` is supplied by the caller, because only the caller knows what its
+   * directory means:
+   *
+   *  - A file in `agents/<id>/outbox/` was written by `<id>`. That is read from
+   *    the PATH, not from the content, so even a file whose bytes are garbage
+   *    has a knowable author. Every outbox rejection is returnable.
+   *  - A file in an inbox names its RECIPIENT, and `from` is the very field
+   *    that just failed to validate. Nobody can be named without guessing:
+   *    `null`, and the log entry is all anyone can have.
+   *
+   * The silence this closes was live, not theoretical. On 2026-09-01 Artemis
+   * wrote a complete, fully-cited standup brief; one derived field was wrong;
+   * the whole message went to `.rejected/`, and the only symptom anywhere was
+   * one line in the error log. Her brief loop broke every window and nothing
+   * surfaced it. FR-3.4 says never drop silently — and a drop the author is
+   * never told about is silent to the one party that could have fixed it.
+   */
+  private reject(
+    file: string,
+    reason: string,
+    author: string | null
+  ): { kind: 'rejected'; record: RejectionRecord } {
     const parked = path.join(path.dirname(file), REJECTED_DIR, path.basename(file))
     fs.mkdirSync(path.dirname(parked), { recursive: true })
     try {
@@ -833,10 +921,99 @@ export class Hermes {
     } catch {
       fs.rmSync(file, { force: true })
     }
-    const record: RejectionRecord = { file: parked, reason }
-    this.agora.appendLog({ kind: 'error', subsystem: 'hermes', file: parked, reason })
+
+    // Parked before notified, deliberately: the notice cites the parked path,
+    // and a notice pointing at a file that is not there yet would be a lie.
+    const notice = author === null ? null : this.returnToAuthor(author, parked, reason)
+    const record: RejectionRecord = { file: parked, reason, notice }
+    this.agora.appendLog({
+      kind: 'error',
+      subsystem: 'hermes',
+      file: parked,
+      reason,
+      // Ties "this was refused" to "and this is what told its author", so the
+      // pair is reconstructible from `log.jsonl` alone (NFR-13). A null
+      // `noticeId` next to a non-null `author` is the notify-failed case.
+      //
+      // The notice's own `delivery` entry therefore lands one seq EARLIER than
+      // this one: it has to exist before it can be cited. Reading the log in
+      // order, the answer precedes the question by a millisecond.
+      author,
+      noticeId: notice?.id ?? null
+    })
     this.options.onRejected?.(record)
     return { kind: 'rejected', record }
+  }
+
+  /**
+   * Delivers the refusal for a parked file to its author. Returns the notice,
+   * or null when one could not be composed or delivered.
+   *
+   * A refusal that is itself refused would ping-pong, so loop safety rests on
+   * three independent things, none of which is a counter:
+   *
+   *  1. **The notice never enters an outbox.** `reject` fires only on files
+   *     found in an outbox sweep or an inbox consume; this goes straight into
+   *     the author's inbox, exactly as `bounce` does, because the harness has
+   *     no outbox of its own. There is no path by which a harness-written
+   *     notice re-enters `deliverOne` — the only rejecter that notifies — so a
+   *     refusal cannot be refused.
+   *  2. **It is validated before it is sent.** `composeMessage` parses against
+   *     the schema and throws, so an ill-formed notice is never written at all,
+   *     rather than being delivered to fail on the far side. Caught here: the
+   *     file stays parked and logged either way, and only the notification is
+   *     lost — visibly, which is the whole point. Not hypothetical: `to` must
+   *     match `agentIdSchema`, and a stray directory under `agents/` yields an
+   *     owner id that does not.
+   *  3. **It obligates nothing.** `refuse` is not a reply-obliging act
+   *     (`REPLY_OBLIGING_ACTS`), so `requires_reply` derives false and the
+   *     notice starts no chain. `hops: 0` for the same reason it carries no
+   *     `in_reply_to` — the harness wrote this; it is not the continuation of a
+   *     thread we were able to read.
+   */
+  private returnToAuthor(author: string, parked: string, reason: string): Message | null {
+    const name = path.basename(parked)
+    try {
+      // The refusal's words reach an LLM, so they are a prompt surface
+      // (invariant §8) — rendered from prompts/hermes/, never string literals.
+      const vars = {
+        file: name,
+        reason,
+        // Relative to the author's own directory. It can read its own outbox,
+        // and the harness home's absolute layout is not an agent's business.
+        parked: path.posix.join('outbox', REJECTED_DIR, name)
+      }
+      const notice = composeMessage({
+        id: makeMessageId(new Date(), `rej${Math.random().toString(36).slice(2, 8)}`),
+        // Its own thread, derived from the file so that re-rejecting the same
+        // name lands in the same one. Claiming the original's conversation is
+        // not an option — it is inside the part of the file we could not read.
+        conversation: `rejected-${name.replace(/\.json$/, '')}`.slice(0, 64),
+        in_reply_to: null,
+        // `agent.hermes` is reserved and no hire can take it, so the notice
+        // cannot be forged and is never attributed to someone who did not
+        // write it (`src/shared/reserved.ts`).
+        from: HERMES_SENDER,
+        to: author,
+        act: 'refuse',
+        subject: this.render('rejected-subject.md', vars).trim().slice(0, 200),
+        body: this.render('rejected-body.md', vars).trim(),
+        hops: 0,
+        created_at: new Date().toISOString()
+      })
+      this.deliverFromHarness(notice)
+      return notice
+    } catch (err) {
+      this.agora.appendLog({
+        kind: 'error',
+        subsystem: 'hermes',
+        file: parked,
+        reason: `could not tell "${author}" the message was refused: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      })
+      return null
+    }
   }
 
   /** The outbox is router-drained (SDD §2); the message now lives in the inbox. */
@@ -967,13 +1144,35 @@ export class Hermes {
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
       const handed = await this.consumeInbox(agentId)
-      this.options.nudge?.(
-        agentId,
-        this.render('wake-nudge.md', {
-          messages: formatHandover(handed),
-          pendingMail: String(pending)
+      try {
+        this.options.nudge?.(
+          agentId,
+          this.render('wake-nudge.md', {
+            messages: formatHandover(handed),
+            pendingMail: String(pending)
+          })
+        )
+      } catch (err) {
+        // One agent's nudge failing must not cost every agent after it its
+        // mail. The sweep has a single `catch` around the whole of
+        // `sweepAndWake`, so a throw here used to unwind the loop and skip the
+        // rest of `knownAgents()` — every tick, for as long as the condition
+        // lasted. Whoever is later in iteration order is silenced by someone
+        // else's dead process, which is the worst shape this can fail in.
+        //
+        // The mail is already archived by `consumeInbox` above, so this IS a
+        // lost message. It is reported rather than swallowed: the alternative
+        // is a company that goes quiet with nothing in the book of record.
+        this.agora.appendLog({
+          kind: 'hook',
+          event: 'wake-undelivered',
+          agentId,
+          pendingMail: pending,
+          because: err instanceof Error ? err.message : String(err)
         })
-      )
+        this.options.onSweepError?.(err)
+        continue
+      }
       this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingMail: pending })
       woken.push(agentId)
     }
@@ -1130,13 +1329,16 @@ export class Hermes {
       try {
         const parsed = parseMessage(JSON.parse(fs.readFileSync(file, 'utf8')))
         if (!parsed.ok) {
-          this.reject(file, `inbox: ${parsed.reason}`)
+          // An inbox names the RECIPIENT, and `from` is the field that just
+          // failed to validate — there is nobody here who can be named without
+          // guessing, so this one really does end at the log entry.
+          this.reject(file, `inbox: ${parsed.reason}`, null)
           continue
         }
         fs.renameSync(file, path.join(done, name))
         consumed.push(parsed.message)
       } catch (err) {
-        this.reject(file, `inbox: ${err instanceof Error ? err.message : 'unreadable'}`)
+        this.reject(file, `inbox: ${err instanceof Error ? err.message : 'unreadable'}`, null)
       }
     }
 

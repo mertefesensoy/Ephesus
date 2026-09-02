@@ -59,22 +59,46 @@ export interface ClosingTimeOptions {
   onLogEvent(draft: { kind: 'shutdown' } & Record<string, unknown>): void
   readonly deadlineMs?: number
   now?(): number
+  /**
+   * Arms the deadline; the returned function disarms it. Defaults to
+   * `setTimeout`/`clearTimeout`.
+   *
+   * Injected for the same reason `now` is, and for a sharper one. The deadline
+   * is the only thing in this class a caller cannot wait for honestly: a test
+   * that wants to see "mason acked, tess did not" has to let mason's real work
+   * finish FIRST, then let the deadline pass. With a wall-clock timer the two
+   * are in a race, so S-CLOSING asserted "500 ms was enough on this machine"
+   * rather than the deadline's semantics — and failed whenever the machine was
+   * busy. Raising the constant only moves the threshold; the clock has to be
+   * driveable.
+   */
+  schedule?(fire: () => void, afterMs: number): () => void
 }
 
 interface ActiveClosing {
   /** agentId → the request id its ack may reply to. */
   readonly pending: Map<string, string>
   readonly acked: string[]
-  readonly timer: NodeJS.Timeout
+  /** Disarms the deadline; whatever `schedule` handed back. */
+  readonly disarm: () => void
   readonly resolve: (report: ClosingReport) => void
 }
 
 export class ClosingTime {
   private active: ActiveClosing | null = null
   private readonly now: () => number
+  private readonly schedule: (fire: () => void, afterMs: number) => () => void
 
   constructor(private readonly options: ClosingTimeOptions) {
     this.now = options.now ?? (() => Date.now())
+    this.schedule =
+      options.schedule ??
+      ((fire, afterMs) => {
+        const timer = setTimeout(fire, afterMs)
+        // A pending closing must never be the reason the process stays alive.
+        timer.unref?.()
+        return () => clearTimeout(timer)
+      })
   }
 
   /** True while a closing is in flight — `begin` refuses reentry on it. */
@@ -114,9 +138,8 @@ export class ClosingTime {
 
     const pending = new Map<string, string>()
     return new Promise<ClosingReport>((resolve) => {
-      const timer = setTimeout(() => this.finish(true), deadlineMs)
-      timer.unref?.()
-      this.active = { pending, acked: [], timer, resolve }
+      const disarm = this.schedule(() => this.finish(true), deadlineMs)
+      this.active = { pending, acked: [], disarm, resolve }
 
       for (const agentId of agents) {
         const id = makeMessageId(new Date(this.now()), `cls${randomBytes(3).toString('hex')}`)
@@ -181,7 +204,7 @@ export class ClosingTime {
     const active = this.active
     if (!active) return
     this.active = null
-    clearTimeout(active.timer)
+    active.disarm()
     const report: ClosingReport = {
       acked: [...active.acked],
       missing: [...active.pending.keys()],

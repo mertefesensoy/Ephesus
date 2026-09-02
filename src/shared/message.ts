@@ -100,9 +100,12 @@ export type MessageParse =
  *    It used to be a refusal, and on the 2026-09-01 live run that destroyed a
  *    complete, fully-cited standup brief: Artemis wrote it, set
  *    `requires_reply: false` on a `propose`, and the whole message went to
- *    `.rejected/` — where nothing tells the author, so she could not learn or
- *    retry. Deriving is also STRONGER against the threat the refusal was
- *    written for: a sender cannot dodge an obligation that is computed.
+ *    `.rejected/` — which at the time told the author nothing, so she could
+ *    not learn or retry. Deriving is also STRONGER against the threat the
+ *    refusal was written for: a sender cannot dodge an obligation that is
+ *    computed. (A rejection now returns a `refuse` to whoever wrote the file,
+ *    so the silence itself is closed too — `Hermes.reject`. This rule stands on
+ *    its own merits regardless: the message should never have been refused.)
  *  - a message cannot be `in_reply_to` itself.
  */
 export function parseMessage(raw: unknown): MessageParse {

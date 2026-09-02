@@ -46,6 +46,28 @@ export const profileNameSchema = z
   .regex(/^[a-z0-9][a-z0-9-]*$/, 'a lowercase profile name like skeleton-crew')
 
 /**
+ * The hire a profile names when it wants root causes checked by somebody who
+ * did not write them (`src/shared/root-cause.ts`).
+ *
+ * A CONVENTION over the bundle, deliberately not a schema field. ADR-0012's
+ * rule is "playbooks are prose, policy is data", and this is data of the
+ * cheapest kind: a profile that wants an independent verifier adds a hire by
+ * this name and one gets spawned with its own brief, its own engine and its own
+ * `budget.dailyTokens` — which is also the honest answer to who pays for the
+ * second opinion, in a line the Architect reads on the activation screen before
+ * agreeing to it. A profile that does not add one gets its incidents triaged and
+ * unverified, and the incident log says so on every incident.
+ *
+ * Adding a `verifier` FIELD to `profile.json` was the alternative. It was
+ * rejected because the schema is a public contract from the day it ships
+ * (see below) and this needs no new contract: hires are already a list, already
+ * carry a budget, and are already instantiated one-agent-per-hire at activation.
+ * The name is short on purpose — it becomes part of an agent id, and the id is
+ * capped at 64 characters with the profile and target names already spent.
+ */
+export const VERIFIER_HIRE = 'verifier'
+
+/**
  * What a profile binds to. ADR-0012: "Activation instantiates the hires as
  * agents bound to a **target** (a repo/app)". The concrete target arrives at
  * activation (M7.2) — `profile.json` declares only the KIND it accepts, so a

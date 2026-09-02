@@ -1,3 +1,4 @@
+import type { CapacityLimit } from '../../shared/capacity'
 import type { EngineId, HookSupport } from '../../shared/engines'
 
 /**
@@ -250,6 +251,24 @@ export interface TranscriptReader {
    * facts, not invented ones.
    */
   read(filePath: string): Promise<readonly UsageFact[]>
+  /**
+   * Contract: pure. Classifies ONE already-parsed transcript record as a
+   * provider-capacity refusal, or returns null for everything else.
+   *
+   * OPTIONAL, and the optionality is the honest part: an engine whose
+   * transcript does not distinguish "the provider refused" from "the turn
+   * ended" cannot support parking, and the Watch says so (`CapacityWatch`
+   * reports `unwatched`) rather than pretending an agent is covered.
+   *
+   * Pure and per-record rather than per-file so the Watch owns the reading —
+   * one tail-read, one JSONL split — and the adapter owns only the shape it
+   * alone knows (NFR-12). It is the same division as `claudeUsageFact`.
+   *
+   * A classifier must be NARROW. Waiting fixes a rate limit; it does not fix a
+   * billing failure, a bad request, or an overloaded server. Matching those too
+   * would park a company on a condition that never clears.
+   */
+  limitOf?(raw: unknown): CapacityLimit | null
   /**
    * Contract: the engine's own money figures for one transcript, or none.
    *

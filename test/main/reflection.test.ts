@@ -11,6 +11,7 @@ import { composeMessage, makeMessageId, type Message } from '../../src/shared/me
 import { LIBRARY_ENDPOINT } from '../../src/shared/reserved'
 import { REFLECTION_SCHEMA_VERSION, nothingDestroyed } from '../../src/shared/reflection'
 import { parseMemorySections } from '../../src/shared/memory'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Reflection end to end (ADR-0006 layer 3, NFR-7) — the job, the endpoint, the
@@ -26,7 +27,7 @@ const AGENT = 'agent.mason'
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {

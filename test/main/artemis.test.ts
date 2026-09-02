@@ -14,6 +14,7 @@ import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { MemorySettingsRegistry } from '../../src/main/settings-registry'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Artemis's lifecycle (FR-5.1–5.5, ADR-0005), against the fake engine.
@@ -61,7 +62,7 @@ const servers: HookServer[] = []
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 interface Rig {
@@ -560,5 +561,93 @@ describe('the harness holds no orchestration rules of its own (FR-5.1)', () => {
     const r = await rig()
     expect(r.artemis.isOrchestrator(ARTEMIS_AGENT_ID)).toBe(true)
     expect(r.artemis.isOrchestrator('agent.mason')).toBe(false)
+  })
+})
+
+/**
+ * The ladder and the provider's usage limit (`src/shared/capacity.ts`).
+ *
+ * The ladder counts CRASHES and it ends, deliberately — an orchestrator that
+ * will not start is a fault a human has to see. A usage limit is not that
+ * fault: restarting into one cannot succeed, so a company that spent rungs on
+ * refusals would end its ladder and lose its orchestrator over a condition
+ * guaranteed to clear on its own. These are the tests that say so.
+ */
+describe('Artemis and the provider usage limit', () => {
+  it('spends no rung on an exit that happened while capacity was parked', async () => {
+    const r = await rig({ backoffMs: [1, 2] })
+    await r.artemis.start(ENGINE)
+    r.artemis.holdForCapacity()
+
+    // Three exits during the park. Without the hold, the two-rung ladder would
+    // be spent by the second one and the company would have no orchestrator.
+    for (let i = 0; i < 3; i += 1) {
+      await r.spawner.crash(ARTEMIS_AGENT_ID)
+      await r.settle()
+    }
+
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.degradations.join(' ')).not.toMatch(/will not be restarted again/)
+    expect(r.orchestratorId).toBe(ARTEMIS_AGENT_ID)
+    expect(r.logs.some((entry) => entry['event'] === 'respawn-deferred-for-capacity')).toBe(true)
+  })
+
+  it('brings her back when capacity returns, still on rung zero', async () => {
+    const r = await rig({ backoffMs: [1, 2] })
+    await r.artemis.start(ENGINE)
+    r.artemis.holdForCapacity()
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    expect(r.spawner.spawns).toHaveLength(1)
+
+    r.artemis.releaseForCapacity()
+    await r.settle()
+
+    // She is back...
+    expect(r.spawner.spawns).toHaveLength(2)
+    expect(r.logs.some((entry) => entry['event'] === 'respawn-after-capacity')).toBe(true)
+    // ...and the ladder is untouched, so a real crash later still gets all of
+    // it. Two more crashes exhaust two rungs, not zero.
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    expect(r.spawner.spawns).toHaveLength(4)
+    expect(r.degradations.join(' ')).not.toMatch(/will not be restarted again/)
+  })
+
+  it('does nothing on a release nobody held, and holds only once', async () => {
+    const r = await rig({ backoffMs: [1] })
+    await r.artemis.start(ENGINE)
+
+    r.artemis.releaseForCapacity()
+    await r.settle()
+    expect(r.spawner.spawns).toHaveLength(1)
+
+    r.artemis.holdForCapacity()
+    r.artemis.holdForCapacity()
+    expect(r.artemis.heldForCapacity()).toBe(true)
+    expect(r.logs.filter((entry) => entry['event'] === 'held-for-capacity')).toHaveLength(1)
+
+    // Released with no exit outstanding: she was never down, so nothing spawns.
+    r.artemis.releaseForCapacity()
+    await r.settle()
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.artemis.heldForCapacity()).toBe(false)
+  })
+
+  it('still ends the ladder for real crashes once the hold is lifted', async () => {
+    // The hold must not become a way to never give up: a genuinely broken
+    // orchestrator has to reach the Architect.
+    const r = await rig({ backoffMs: [1, 2] })
+    await r.artemis.start(ENGINE)
+    r.artemis.holdForCapacity()
+    r.artemis.releaseForCapacity()
+
+    for (let i = 0; i < 4; i += 1) {
+      await r.spawner.crash(ARTEMIS_AGENT_ID)
+      await r.settle()
+    }
+    expect(r.degradations.join(' ')).toMatch(/will not be restarted again/)
   })
 })
