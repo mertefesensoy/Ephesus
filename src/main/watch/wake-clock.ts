@@ -88,7 +88,19 @@ export class WakeClock {
     const startedAt = this.now()
     const timer = setTimeout(() => {
       this.open.delete(agentId)
-      const ranMs = this.now() - startedAt
+      // Never less than the cap, whatever the wall clock says.
+      //
+      // The timer fires on libuv's MONOTONIC clock and this measurement is
+      // taken from `Date.now()`, a wall clock with its own rounding and drift.
+      // The two disagree by a millisecond often enough to matter: a report of
+      // "ran 19 ms against a 20 ms cap" is a report that contradicts the reason
+      // it was written, and it failed CI on one ubuntu run in three (recorded
+      // 2026-09-02/03, three occurrences on the M8 branches).
+      //
+      // The timer having fired IS the evidence that the cap elapsed, so where
+      // the arithmetic contradicts that, the known fact wins. The clock stays
+      // injectable, which is what lets a test drive the deadline at all.
+      const ranMs = Math.max(this.options.capMs, this.now() - startedAt)
       this.options.onOvertime?.(agentId, ranMs, this.options.capMs)
       this.options.interrupt(agentId)
     }, this.options.capMs)
