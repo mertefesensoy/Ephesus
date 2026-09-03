@@ -4699,6 +4699,10 @@ structural rather than a habit.
       (figures live in `scripts/coverage-floors.json`, never in prose).
       **Production call path:** `src/main/index.ts` `before-quit` → `QuitSequence`;
       `createWindow` → `ui.attach(win)`; `ptyManager.attachSink(ui)` once at boot.
+      CI: run `33795362973` on `a283ee1` failed BY DESIGN on the M8.0 stale-floor
+      rule (boot past its ratchet lag on linux too) with every other step green,
+      its artifact ratcheted the linux block, and run `33795656144` on `c0b431b`
+      is GREEN on all three jobs.
       OWED, RECORDED NOT FIXED: gates and activations are in-memory, so a quit
       still loses an open gate while `tasks.json` may hold its id (B17) — carried
       as a CHARACTERIZATION case in S-CLOSING that passes today because the loss
