@@ -4645,7 +4645,7 @@ structural rather than a habit.
       seam-rule gates did not fire either time — the floor check was skipped
       behind the red suite.*
 
-- [ ] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
+- [x] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
       assigned once and never nulled (`src/main/index.ts:611`), so after the
       window closes every send throws and BOTH quit-path subsystems die:
       Closing Time on its first log line, `AgentManager.shutdown` on its first
@@ -4662,6 +4662,51 @@ structural rather than a habit.
       an agent, a gate and an activation live, driving the REAL handler; per-agent
       failure in `shutdown` must not skip the agents after it. Risk: the fix is
       one line and the test is the whole package — resist shipping the line alone.*
+      *Evidence (2026-09-03): the cause was ONE thing with three victims, read
+      rather than assumed — `mainWindow` held a DESTROYED window, not a null one,
+      so `?.` proceeded and all 43 sends threw. Closing Time died on its first log
+      event (after the log line landed, which is exactly the `closing-begin`-and-
+      nothing-else in the book of record); `AgentManager.shutdown`, an unguarded
+      `for await` loop, died on its first agent; and the PTY sink WAS the window's
+      `webContents`, so killing the terminals threw too. **Two seams, per the
+      Architect (all four M8.1 decisions taken 2026-09-03):** `src/main/ui-bridge.ts`
+      owns the window, forgets it on `closed`, checks `isDestroyed()` on both
+      objects and never throws at a caller — with `check-invariants` rule 5 failing
+      on a `webContents.send` written anywhere else (proven by a planted probe);
+      `src/main/shutdown.ts` owns the ordered, isolated, idempotent quit sequence,
+      which `index.ts` and the scenario rig now BOTH construct. **Every quit
+      gesture runs it once** (`before-quit` holds the exit): menu Quit and Cmd-Q
+      used to skip closing time entirely, and on macOS the old handler tore the
+      company down while leaving the app alive. SDD §1.1 gained both modules and
+      §612's quit row is amended with the new coverage and the phase isolation.
+      `AgentManager.shutdown` isolates per agent and returns a report naming who
+      failed. **The rig can no longer be production-minus-a-line:** its closing
+      time sends through the same bridge, and the two leaves it still substitutes
+      (`liveAgents`, a null `agents` seam — a scenario company has no
+      `AgentManager`) are named in the rig with the reason, with that class's own
+      isolation proven directly in `agents.test.ts`. Tests: 14 (bridge) + 18
+      (sequence) + 3 (agent isolation) + 4 (S-CLOSING over real fake-engine
+      processes with the window already destroyed). **Eleven mutations, each
+      killed by a named test and reverted** — the destroyed check, the closed
+      listener, the stale-close guard, the fault report, the phase order, the
+      idempotence, per-agent isolation, per-step isolation, the agent-shutdown
+      catch, the empty-floor guard and the reentry guard. Gate: typecheck, lint,
+      invariants (reachability 160/168) green; suite **3305 passed / 8 skipped**
+      across 178 files under coverage; `npm run build` green, which is what
+      exercises the rewired boot path beyond typecheck. The M8.0 stale-floor rule
+      FIRED on its own first real occasion — `boot` rose past its ratchet lag
+      because the extracted modules are tested — and the floors were ratcheted
+      (figures live in `scripts/coverage-floors.json`, never in prose).
+      **Production call path:** `src/main/index.ts` `before-quit` → `QuitSequence`;
+      `createWindow` → `ui.attach(win)`; `ptyManager.attachSink(ui)` once at boot.
+      CI: run `33795362973` on `a283ee1` failed BY DESIGN on the M8.0 stale-floor
+      rule (boot past its ratchet lag on linux too) with every other step green,
+      its artifact ratcheted the linux block, and run `33795656144` on `c0b431b`
+      is GREEN on all three jobs.
+      OWED, RECORDED NOT FIXED: gates and activations are in-memory, so a quit
+      still loses an open gate while `tasks.json` may hold its id (B17) — carried
+      as a CHARACTERIZATION case in S-CLOSING that passes today because the loss
+      is real, for M8.8 to flip. Branch `feature/m8-1-quit-path`.*
 
 - [ ] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
       line plus a 50-entry in-memory ring surfaced only in a tooltip: it never

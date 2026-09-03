@@ -12,6 +12,9 @@ import {
 import { denyAllPolicy, type GatePolicy } from '../../src/shared/gates'
 import { Agora, type FaultPoint } from '../../src/main/agora'
 import { ClosingTime } from '../../src/main/closing'
+import { QuitSequence, type QuitStep } from '../../src/main/shutdown'
+import { UiBridge } from '../../src/main/ui-bridge'
+import { LOG_APPEND_CHANNEL } from '../../src/shared/ipc'
 import { IncidentEndpoint, type IncidentBinding } from '../../src/main/incidents'
 import { LedgerEndpoint } from '../../src/main/ledger'
 import { Odeon } from '../../src/main/odeon'
@@ -87,6 +90,11 @@ export interface CompanyOptions {
    * fires it exactly when the scenario says so.
    */
   readonly manualClosingDeadline?: boolean
+  /**
+   * What the Architect answers when the quit sequence offers closing time.
+   * Default 'closing' — the path that has never run in the shipped app.
+   */
+  readonly quitAnswer?: 'closing' | 'now'
 }
 
 export interface Company {
@@ -128,6 +136,19 @@ export interface Company {
    * assert against a deadline that never existed.
    */
   tripClosingDeadline(): boolean
+  /**
+   * The renderer seam (M8.1) — the SHIPPED bridge. A scenario destroys the
+   * window through it to reproduce the state every real quit is in.
+   */
+  readonly ui: UiBridge
+  /**
+   * The SHIPPED quit sequence, wired as `index.ts` wires it. S-CLOSING drives
+   * THIS, not a copy of it: the copy is what was green for three milestones
+   * while the protocol had never once completed.
+   */
+  readonly quit: QuitSequence
+  /** The visible degradations the quit reported, in order. */
+  readonly quitDegradations: readonly { readonly source: string; readonly detail: string }[]
   /** The incident endpoint (FR-9.2, UC-09) — the SHIPPED one. */
   readonly incidents: IncidentEndpoint
   /** Mutable ci-event bindings, so a scenario can put a crew on call. */
@@ -484,13 +505,23 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   })
   const budgetedAgents: BudgetedAgent[] = []
 
+  /**
+   * The renderer seam (M8.1). Production sends through this on every log
+   * event; the rig used to leave that line out, which is exactly why a
+   * destroyed window could kill the quit path with the suite green.
+   */
+  const ui = new UiBridge()
+
   const closing = new ClosingTime({
     liveAgents: () => hermes.knownAgents(),
     deliver: (message) => hermes.deliverFromHarness(message),
     render: (kind, vars) =>
       prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
+      // The three lines index.ts runs, in its order — the middle one is the
+      // one that threw on a destroyed window and the one the rig omitted.
       agora.appendLog(draft)
+      ui.send(LOG_APPEND_CHANNEL)
       agora.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
     },
     ...(options.closingDeadlineMs === undefined ? {} : { deadlineMs: options.closingDeadlineMs }),
@@ -581,7 +612,37 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   const tokens = new Map<string, string>()
   const sessions = new Map<string, string>()
 
+  /**
+   * The SHIPPED quit sequence (M8.1), wired the way `index.ts` wires it.
+   *
+   * Two leaves are legitimately this rig's own, and are named here so the
+   * difference stays a decision rather than becoming a drift: `liveAgents`
+   * reads the mailboxes because a scenario company has no `AgentManager` (that
+   * class needs a spawner, and its own per-agent isolation is proven directly
+   * in `agents.test.ts`), so `agents` is null here. Everything else — the
+   * order, the offer, the isolation, the reporting — is the shipped object,
+   * and the closing time it drives is wired through the same bridge production
+   * sends through.
+   */
+  const quitDegradations: { source: string; detail: string }[] = []
+  const quit = new QuitSequence({
+    liveAgents: () => hermes.knownAgents(),
+    ask: () => options.quitAnswer ?? 'closing',
+    closing: () => closing,
+    agents: () => null,
+    steps: (): readonly QuitStep[] => [
+      { name: 'budgets', run: () => budgets.stop() },
+      { name: 'hermes', run: () => hermes.stop() },
+      { name: 'hooks', run: () => hookServer.stop() },
+      { name: 'agora-drain', run: () => agora.drained().catch(() => undefined) }
+    ],
+    onDegraded: (source, detail) => quitDegradations.push({ source, detail })
+  })
+
   return {
+    ui,
+    quit,
+    quitDegradations,
     home,
     agora,
     tasks,
@@ -716,9 +777,13 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     },
 
     async close() {
-      budgets.stop()
-      hermes.stop()
-      await hookServer.stop()
+      // The quit sequence runs these when a scenario drives it; running
+      // them twice would stop an already-stopped hook server.
+      if (!quit.hasFinished()) {
+        budgets.stop()
+        hermes.stop()
+        await hookServer.stop()
+      }
       // Stop, SETTLE, then drain. `stop()` only clears the timers; a sweep
       // already running keeps going and calls `agora.commitSoon()`, so draining
       // first drains a queue that is about to be added to — and the git child

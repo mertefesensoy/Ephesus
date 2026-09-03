@@ -72,7 +72,9 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
 | `home.ts` | The harness home's shape: `HOME_DIRS`, creation, `config.json` load with a visible warning on a corrupt file (SDD §2) | — |
 | `fsx.ts` | `writeFileAtomic` — temp file + rename, the one write path for anything another process reads (invariant §3) | 0003 |
-| `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, and owns shutdown. Holds no logic of its own | 0001 |
+| `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, and hands the quit to `shutdown.ts`. Holds no logic of its own | 0001 |
+| `shutdown.ts` | The quit sequence (M8.1): closing time, then the agent unwind, then the stops, each phase isolated so one failure never skips the next; idempotent, Electron-free, and driven by the scenario suite as well as by `index.ts` | 0001 |
+| `ui-bridge.ts` | The one door from main to the renderer (M8.1): owns the window, forgets it when it closes, refuses to send to a destroyed one, and is the `PtySink` the terminal stream writes to. A `webContents.send` anywhere else fails `check-invariants` | 0001, 0014 |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
 
 ---
@@ -609,7 +611,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | Voice provider down | failover §7.4; both down → text-only banner, zero feature loss outside audio (FR-8.6) |
 | Recall index corrupt | delete + rebuild from markdown (derived state, §2) |
 | Schema drift (hooks/profile) | validate, warn visibly, degrade per FR-2.3 / refuse activation with diff |
-| Orderly quit with live agents (GYM-003, `closing.ts`) | Closing time is *offered*, never forced: on accept, every live agent gets a `request` from `agent.closing` (park WIP, append state to `memory.md`, acknowledge); acks route back as an endpoint hand-off; teardown proceeds when all ack or at the hard deadline, with every silent agent named in the report and `log.jsonl` (`kind: shutdown`). "Quit now" and an empty floor skip straight to teardown — today's path, one click |
+| Orderly quit with live agents (GYM-003, `closing.ts` + `shutdown.ts`) | **Every quit gesture runs one sequence, once** (amended M8.1): `before-quit` holds the exit, `shutdown.ts` runs closing time → agent unwind → the stops, and only then does the app go. Closing time is *offered*, never forced: on accept, every live agent gets a `request` from `agent.closing` (park WIP, append state to `memory.md`, acknowledge); acks route back as an endpoint hand-off; teardown proceeds when all ack or at the hard deadline, with every silent agent named in the report and `log.jsonl` (`kind: shutdown`). "Quit now" and an empty floor skip straight to teardown. Each phase is isolated: a closing that cannot start must not stop the unwind, and an unwind that fails must not leave the PTYs running or the database open. On macOS closing the last window leaves the company running and `activate` re-attaches the bridge to the new one; elsewhere it quits, through the same sequence |
 
 ---
 

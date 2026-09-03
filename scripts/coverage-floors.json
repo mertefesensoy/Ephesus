@@ -20,10 +20,12 @@
   "ratchetLagReason": "A floor is a record of what was measured, and floors rise only when somebody runs --update; nothing in CI writes this file. So a subsystem more than 5 points ABOVE its floor means the record has been left behind by more than a package's worth of coverage, and the check fails until it is ratcheted — otherwise coverage gained after the baseline could be lost again without any failure, and the record would be a number nobody turned. Set at M8.0 as the size of one package's typical gain; revise with the same reasoning.",
   "subsystems": {
     "boot": {
-      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is",
+      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts)",
       "members": [
         "src/main/index.ts",
         "src/main/ipc.ts",
+        "src/main/shutdown.ts",
+        "src/main/ui-bridge.ts",
         "src/preload/index.ts",
         "src/renderer/src/main.tsx",
         "src/renderer/src/App.tsx"
@@ -227,10 +229,10 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-02T12:46:26.020Z",
-        "commit": "d5d114d",
+        "at": "2026-09-03T19:13:28.482Z",
+        "commit": "f396eba",
         "ref": "local",
-        "tree": "28869d68720c",
+        "tree": "85fba6df25f2",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
@@ -238,17 +240,17 @@
       },
       "floors": {
         "boot": {
-          "lines": 9.63,
-          "branches": 0.28,
-          "functions": 2.63,
-          "statements": 8.84,
-          "files": 5
+          "lines": 16.52,
+          "branches": 5.02,
+          "functions": 6.01,
+          "statements": 15.73,
+          "files": 7
         },
         "engines": {
-          "lines": 93.77,
+          "lines": 93.95,
           "branches": 86.11,
-          "functions": 89.42,
-          "statements": 90.6,
+          "functions": 90.48,
+          "statements": 90.88,
           "files": 20
         },
         "hermes": {
@@ -386,10 +388,10 @@
     },
     "linux": {
       "measured": {
-        "at": "2026-09-02T12:59:40.578Z",
-        "commit": "2080f98",
-        "ref": "feature/m8-0-coverage-seam-rule",
-        "tree": "28869d68720c",
+        "at": "2026-09-03T19:17:45.421Z",
+        "commit": "a283ee1",
+        "ref": "feature/m8-1-quit-path",
+        "tree": "85fba6df25f2",
         "platform": "linux",
         "node": "v20.20.2",
         "os": "Linux 6.17.0-1022-azure",
@@ -397,17 +399,17 @@
       },
       "floors": {
         "boot": {
-          "lines": 9.63,
-          "branches": 0.28,
-          "functions": 2.63,
-          "statements": 8.84,
-          "files": 5
+          "lines": 16.52,
+          "branches": 5.02,
+          "functions": 6.01,
+          "statements": 15.73,
+          "files": 7
         },
         "engines": {
-          "lines": 92.93,
+          "lines": 93.12,
           "branches": 84.88,
-          "functions": 87.3,
-          "statements": 90.07,
+          "functions": 88.36,
+          "statements": 90.36,
           "files": 20
         },
         "hermes": {

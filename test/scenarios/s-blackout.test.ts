@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupHomes, startCompany, scenarioMessage, sendStep, type Company } from './company'
+import { QuitSequence } from '../../src/main/shutdown'
+import { UiBridge } from '../../src/main/ui-bridge'
 
 /**
  * **S-BLACKOUT** (TEST-STRATEGY §3, SRS §6.6): "kill main mid-delivery /
@@ -62,6 +64,19 @@ async function restartOver(home: string): Promise<Company> {
 
   const company: Company = {
     home,
+    // The restarted half never opens a window and never quits: it is the
+    // company that comes BACK. An unattached bridge and a sequence over an
+    // empty floor are the honest stand-ins, and both are the shipped classes.
+    ui: new UiBridge(),
+    quit: new QuitSequence({
+      liveAgents: () => [],
+      ask: () => 'now',
+      closing: () => null,
+      agents: () => null,
+      steps: () => [],
+      onDegraded: () => undefined
+    }),
+    quitDegradations: [],
     agora,
     hermes,
     hookServer: null as never,

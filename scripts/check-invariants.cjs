@@ -15,6 +15,10 @@
  *    process environment, and no fixture anywhere carries a secret-shaped
  *    string: the M1 audit found one (`ghp_…`) and renamed it, and a tripwire is
  *    the only thing that keeps the next one out.
+ * 4. Invariant §6 / UI-DESIGN §6 — the floor's model modules own no clock; a
+ *    projection that reads the time is a second source of truth (ADR-0014).
+ * 5. Invariant §7 / M8.1 — main reaches the renderer through one object. A
+ *    destroyed window is not null, and every send on the quit path threw.
  */
 const fs = require('node:fs')
 const path = require('node:path')
@@ -123,10 +127,30 @@ function walk(dir, out = []) {
  * `FloorCanvas.tsx` is exempt: it is the component, not a model. It owns the
  * ticker, and it is where `Date.now()` legitimately enters and is passed down.
  */
+
 const FLOOR_MODEL_DIR = 'src/renderer/src/floor/'
 const RENDERER_CLOCK =
   /\bDate\.now\s*\(|\bnew Date\s*\(|\bsetInterval\s*\(|\brequestAnimationFrame\s*\(/
 const CLOCK_ALLOWLIST = new Set(['src/renderer/src/floor/FloorCanvas.tsx'])
+
+/**
+ * Invariant §7 / M8.1 — main talks to the renderer through exactly one object.
+ *
+ * `index.ts` used to hold the window in a `BrowserWindow | null` and send
+ * through it forty-three times as `mainWindow?.webContents.send(...)`. The
+ * optional chain looks like safety and is not: after the window closes the
+ * reference is not null, it is DESTROYED, and every one of those sends throws.
+ * That is why Closing Time never got past its first log line and why
+ * `AgentManager.shutdown` died on its first agent — with every test green,
+ * because the scenario rig had copied production's wiring minus that line.
+ *
+ * `src/main/ui-bridge.ts` is the one place allowed to touch `webContents.send`;
+ * it forgets a closed window, checks `isDestroyed()` on both objects, and never
+ * throws at a caller. A `webContents.send` anywhere else reopens the hole.
+ */
+const RENDERER_SEND = /\bwebContents\s*\.\s*send\s*\(/
+const RENDERER_SEND_ALLOWLIST = new Set([path.join('src', 'main', 'ui-bridge.ts')])
+
 /** Path separators differ by platform; the rules above are written with `/`. */
 const slashed = (rel) => rel.split(path.sep).join('/')
 /**
@@ -170,6 +194,11 @@ for (const dir of SEARCH_DIRS) {
         }
       }
       if (rel === SELF) return
+      if (appRules && RENDERER_SEND.test(line) && !RENDERER_SEND_ALLOWLIST.has(rel)) {
+        failures.push(
+          `${rel}:${i + 1}  webContents.send outside src/main/ui-bridge.ts — a destroyed window is not null, and every send on the quit path threw (M8.1); send through the bridge`
+        )
+      }
       if (!ENV_SECRET_ALLOWED_DIRS.some((dir) => rel.startsWith(dir + path.sep))) {
         for (const match of line.matchAll(ENV_SECRET_READ)) {
           if (SECRET_NAMED.test(match[0]) && !HARNESS_ENV.test(match[0])) {
