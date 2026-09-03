@@ -414,6 +414,28 @@ describe('WakeClock — the wall-clock cap', () => {
     expect(overtime[0]?.ranMs).toBeGreaterThanOrEqual(20)
   })
 
+  it('reports at least the cap even when the wall clock disagrees', async () => {
+    // The timer fires on the MONOTONIC clock; this measurement comes from a
+    // wall clock with its own rounding. They disagreed by a millisecond often
+    // enough to fail CI on one ubuntu run in three, reporting 19 ms against a
+    // 20 ms cap — a number that contradicts the reason it was written. The
+    // timer firing is the evidence the cap elapsed, so the report says so.
+    const overtime: number[] = []
+    let reading = 1_000
+    const clock = new WakeClock({
+      capMs: 20,
+      interrupt: () => undefined,
+      onOvertime: (_agentId, ranMs) => overtime.push(ranMs),
+      // One millisecond SHORT of the cap when the timer fires: exactly the
+      // disagreement observed on CI, made deterministic.
+      now: () => reading
+    })
+    clock.began('agent.b')
+    reading += 19
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(overtime).toEqual([20])
+  })
+
   it('leaves a wake that finished in time alone', async () => {
     const interrupted: string[] = []
     const clock = new WakeClock({ capMs: 50, interrupt: (a) => interrupted.push(a) })
