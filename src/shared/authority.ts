@@ -100,6 +100,42 @@ export const noAuthority: AuthorityTable = {
   grants: []
 }
 
+/**
+ * The delegated authority Artemis ships with (M8.4).
+ *
+ * `authority.json` has never existed on any install, and an absent table means
+ * `noAuthority` — so on every Ephesus that has ever run, the orchestrator held
+ * nothing and every routine decision queued for the Architect. FR-5.5 is not a
+ * feature that was switched off; it was a feature nobody could reach.
+ *
+ * The grants below are FR-5.5's own example, read literally:
+ *
+ * - `route` and `task` on every domain, because that IS the orchestrator's job
+ *   (FR-5.1, FR-5.2). She routes work and proposes tasks; the harness never
+ *   writes `tasks.json` itself, so withholding these leaves nobody to do it.
+ * - `memo` on `test-code` and `docs` — "may approve memos touching test code"
+ *   is the requirement's worked example, and docs sit at the same blast radius.
+ * - `gate` is NOT granted. A gate is the Watch's question to a human; an
+ *   orchestrator who could answer it would be answering on the Architect's
+ *   behalf about the classes the Watch holds precisely because they are theirs.
+ * - `spend` is NOT granted. FR-5.5 names it as the example of what Artemis may
+ *   *not* have by default, and it is the one class here that costs money.
+ *
+ * Everything she decides under these is countersigned and archived (FR-5.5), so
+ * widening the table never costs the Architect the audit trail.
+ *
+ * A value rather than a JSON file, so it cannot drift from the schema it must
+ * satisfy; `home.ts` seeds it and a test parses it.
+ */
+export const shippedAuthority: AuthorityTable = authorityTableSchema.parse({
+  schemaVersion: AUTHORITY_SCHEMA_VERSION,
+  grants: [
+    { class: 'route', domains: [ANY_DOMAIN] },
+    { class: 'task', domains: [ANY_DOMAIN] },
+    { class: 'memo', domains: ['test-code', 'docs'] }
+  ]
+})
+
 export type AuthorityParse =
   | { readonly ok: true; readonly table: AuthorityTable }
   | { readonly ok: false; readonly reason: string }

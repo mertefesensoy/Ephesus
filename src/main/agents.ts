@@ -162,6 +162,15 @@ export interface AgentManagerOptions {
   readonly agoraRoot: string
   readonly probe?: VersionProber
   /**
+   * Runs the adapter's authentication probe (M8.4). Injected for the same
+   * reason `probe` is: the lifecycle rules are testable without a CLI.
+   * Absent means no engine is asked, which is the pre-M8.4 behaviour.
+   */
+  authProbe?(command: {
+    readonly command: string
+    readonly args: readonly string[]
+  }): Promise<{ readonly stdout: string; readonly exitCode: number }>
+  /**
    * The autonomy this agent runs at — the profile's level composed against the
    * global ceiling (FR-11.1, ADR-0012), or the ceiling alone for an agent on no
    * profile. Absent means `manual`, which is the direction an unknown must
@@ -480,8 +489,48 @@ export class AgentManager {
       return this.card(request.agentId)
     }
 
+    // The engine is installed. Is it LOGGED IN? (M8.4)
+    //
+    // Nothing asked before, so a logged-out CLI spawned, printed its own login
+    // prompt, sat there for the rest of the day and reported `running` with a
+    // confidently idle avatar on the floor. The probe is the adapter's, because
+    // only the adapter knows what "logged in" means for its own CLI (ADR-0009).
+    const auth = await this.checkAuth(adapter)
+    if (auth !== null && !auth.ok) {
+      this.update(request.agentId, { lifecycle: 'needs-login', fixCommand: auth.login })
+      this.options.onExitError?.(
+        request.agentId,
+        new Error(`${request.engine} is not logged in — run: ${auth.login}`)
+      )
+      return this.card(request.agentId)
+    }
+
     await this.start(request.agentId)
     return this.card(request.agentId)
+  }
+
+  /**
+   * Contract: null when the adapter cannot answer (no probe, or the probe
+   * itself failed), which is trusted exactly as it was before this existed. A
+   * probe that could not run must never be read as "logged out": that would
+   * turn every engine without a probe into a company that will not start.
+   */
+  private async checkAuth(
+    adapter: EngineAdapter
+  ): Promise<{ readonly ok: boolean; readonly login: string } | null> {
+    const probe = adapter.binary().authProbe
+    if (probe === undefined) return null
+    try {
+      const result = await this.options.authProbe?.(probe.command)
+      if (result === undefined) return null
+      const answer = probe.authenticated(result.stdout, result.exitCode)
+      // Could-not-establish is trusted, never refused: see the contract on
+      // `authProbe.authenticated`.
+      if (answer === null) return null
+      return { ok: answer, login: probe.login }
+    } catch {
+      return null
+    }
   }
 
   /** Writes the engine's cancel key into the agent's PTY (ADR-0009). */
@@ -656,6 +705,8 @@ export class AgentManager {
       engine: adapter.id,
       hookFidelity: adapter.hooks,
       lifecycle: 'starting',
+      // Nothing to fix until a probe says otherwise (M8.4).
+      fixCommand: null,
       engineVersion: version,
       cwd: request.cwd,
       ptyId: request.agentId,

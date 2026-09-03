@@ -79,6 +79,28 @@ export interface DockRow {
  * omitting it would make a spawning company look empty, which is the exact
  * blindness this panel exists to end.
  */
+/**
+ * Why this agent cannot work yet, or null when nothing is in the way (M8.4).
+ *
+ * These lifecycles mean no process exists, so nothing on the event plane will
+ * ever describe them: the dock has to read the CARD or say nothing useful. The
+ * fix command rides along because the whole point of the state is that there is
+ * something the Architect can do about it.
+ */
+function notReady(card: { lifecycle: string; fixCommand: string | null }): string | null {
+  const fix = card.fixCommand === null ? '' : ` — run: ${card.fixCommand}`
+  switch (card.lifecycle) {
+    case 'needs-login':
+      return `engine not logged in${fix}`
+    case 'missing-binary':
+      return `engine not installed${fix}`
+    case 'installing':
+      return 'installing the engine'
+    default:
+      return null
+  }
+}
+
 export function dockRows(
   cards: readonly AgentCard[],
   phases: ReadonlyMap<string, { phase: string; pendingMail: number }>,
@@ -106,9 +128,10 @@ export function dockRows(
           ? parked.phase === 'resuming'
             ? 'capacity back — continuing'
             : 'waiting for provider capacity'
-          : live === null
-            ? 'no signal yet'
-            : badgeFor(live.phase).label,
+          : // A process that never started has no phase to report, and "no
+            // signal yet" is the wrong thing to tell an Architect whose engine
+            // is simply logged out — it reads as "any moment now" (M8.4).
+            (notReady(card) ?? (live === null ? 'no signal yet' : badgeFor(live.phase).label)),
       pendingMail: live?.pendingMail ?? 0,
       spent:
         budgeted && measured

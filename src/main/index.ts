@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { statSync } from 'node:fs'
 import { app, BrowserWindow, dialog, screen, shell } from 'electron'
@@ -215,6 +216,28 @@ const degradations = new DegradationLog({
 
 /** How much of the log's tail the boot replay reads back. */
 const DEGRADATION_REPLAY_LIMIT = 400
+
+/**
+ * Which declared grants the broker can actually supply, and which it cannot.
+ *
+ * ONE resolver, used by the spawn path and by the activation preview (M8.4).
+ * The preview used to list what a profile declares and stop there, so the
+ * screen promised `GH_TOKEN` on an install with no `github-app.json` and no
+ * such secret. A second opinion here would be a copy that drifts; asking the
+ * same function is what makes the screen and the outcome agree.
+ */
+function resolveDeclaredGrants(declared: readonly string[]): {
+  readonly env: Record<string, string>
+  readonly missing: readonly string[]
+} {
+  const fromBroker = secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] }
+  const minted = companyGitHub?.token() ?? null
+  if (minted === null || !fromBroker.missing.includes(GITHUB_TOKEN_GRANT)) return fromBroker
+  return {
+    env: { ...fromBroker.env, [GITHUB_TOKEN_GRANT]: minted },
+    missing: fromBroker.missing.filter((name) => name !== GITHUB_TOKEN_GRANT)
+  }
+}
 
 function reportDegradation(cause: DegradationCause, detail: string): void {
   degradations.report(cause, detail)
@@ -697,6 +720,16 @@ async function boot(): Promise<void> {
   // `list()`; written only by a successful activation below.
   knownTargets = new KnownTargets(path.join(home.root, KNOWN_TARGETS_REL))
   const knownTargetsWarning = knownTargets.warning()
+  // Files the harness had to create for itself, named rather than done quietly
+  // (M8.4): a config file that appears without being mentioned is one the
+  // Architect never learns they can edit.
+  for (const file of home.seeded) {
+    reportDegradation(
+      'home/seeded-config',
+      `${file} was missing and has been created with the shipped default — review it at ${home.root}`
+    )
+  }
+
   if (knownTargetsWarning !== null) reportDegradation('profiles/known-targets', knownTargetsWarning)
   const profiles = new ProfileStore(
     path.join(home.root, 'profiles'),
@@ -1858,6 +1891,25 @@ async function boot(): Promise<void> {
     autonomyFor: (agentId) =>
       activations?.autonomyFor(agentId, 'tool-permission') ??
       loadGatePolicy(gatePolicyPath).policy.autonomy,
+    /**
+     * Asks an engine whether it is logged in (M8.4). Same discipline as the
+     * version probe: a shell on Windows because engine CLIs are `.cmd` shims,
+     * a short timeout, and a failure that resolves rather than throws — the
+     * manager reads an unanswerable probe as trusted, not as logged out.
+     */
+    authProbe: (command) =>
+      new Promise((resolve) => {
+        const useShell = process.platform === 'win32'
+        execFile(
+          command.command,
+          [...command.args],
+          { timeout: 10_000, windowsHide: true, shell: useShell },
+          (err, stdout) => {
+            const code = err === null ? 0 : ((err as { code?: number }).code ?? 1)
+            resolve({ stdout: String(stdout), exitCode: code })
+          }
+        )
+      }),
     onExitError: (agentId, err) =>
       reportDegradation(
         `agents/teardown:${agentId}`,
@@ -1917,15 +1969,7 @@ async function boot(): Promise<void> {
     // The broker answers first: an Architect who stored a GH_TOKEN by hand
     // meant it, and a minted token silently overriding it would make the stored
     // one impossible to test. The App fills the gap rather than taking over.
-    resolveGrants: (declared) => {
-      const fromBroker = secrets?.grantsFor(declared) ?? { env: {}, missing: [...declared] }
-      const minted = companyGitHub?.token() ?? null
-      if (minted === null || !fromBroker.missing.includes(GITHUB_TOKEN_GRANT)) return fromBroker
-      return {
-        env: { ...fromBroker.env, [GITHUB_TOKEN_GRANT]: minted },
-        missing: fromBroker.missing.filter((name) => name !== GITHUB_TOKEN_GRANT)
-      }
-    },
+    resolveGrants: (declared) => resolveDeclaredGrants(declared),
     onGrantsMissing: (agentId, missing) =>
       reportDegradation(
         `secrets/missing-grant:${agentId}`,
@@ -2008,6 +2052,7 @@ async function boot(): Promise<void> {
   activations = new ProfileActivations({
     store: profiles,
     globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
+    missingGrants: (declared) => resolveDeclaredGrants(declared).missing,
     spawn: (request) => {
       if (agentManager === null) return Promise.reject(new Error('agents: not started'))
       return agentManager.spawn(request)

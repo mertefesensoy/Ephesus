@@ -343,13 +343,19 @@ describe('loadGatePolicy — a policy the harness cannot read never permits', ()
     return dir
   }
 
-  it('is deny-all with no warning when there is no policy file', () => {
-    // An Ephesus that has never been configured holds everything, silently —
-    // "you have not configured a policy" is not a degradation.
+  it('is deny-all and SAYS SO when there is no policy file', () => {
+    // Reversed at M8.4, deliberately. This used to assert silence, on the
+    // reasoning that "you have not configured a policy" is not a degradation.
+    // It is: the harness now seeds this file on first boot, so an absent one
+    // means it was removed — and the consequence is that autonomy is clamped
+    // to `manual` for every profile and every agent waits at a prompt nobody
+    // is there to answer. That was true on every install that ever existed and
+    // nothing anywhere said it (register item B5).
     const loaded = loadGatePolicy(path.join(tempDir(), 'gate-policy.json'))
     expect(loaded.policy.rules).toEqual([])
     expect(loaded.policy.autonomy).toBe('manual')
-    expect(loaded.warning).toBeNull()
+    expect(loaded.warning).toContain('gate-policy.json is missing')
+    expect(loaded.warning).toContain('clamped to manual')
   })
 
   it('is deny-all WITH a warning when the file is not JSON', () => {

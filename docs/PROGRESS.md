@@ -4822,7 +4822,7 @@ structural rather than a habit.
       the panel’s first read. Docs: SDD §1.1 (`agora.ts`, `eventlog.ts`).
       Branch `feature/m8-3-log-surfaces`.*
 
-- [ ] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
+- [x] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
       harness requires, creates itself, and does not document; each absence is
       silent. `gate-policy.json` missing returns deny-all with `warning: null`,
       which makes autonomy `manual` and every agent sit at a permission prompt —
@@ -4842,6 +4842,48 @@ structural rather than a habit.
       preview asks the broker whether a declared grant can actually be supplied,
       rather than asserting it. Risk: shipping example configs that drift from
       the schemas they illustrate — generate or test them against the schema.*
+      *Evidence (2026-09-04): **DD-1 DECIDED — the shipped ceiling is a real
+      ceiling.** Autonomy composes stricter-wins, so the old `manual` fallback
+      did not make the company careful, it made every profile decorative: the
+      Skeleton Crew ships `autonomous` with its irreversible classes at
+      `supervised` and ran at `manual` for everything on every install that has
+      ever existed. The shipped policy is `autonomous` with `destructive`,
+      `prod-facing`, `scope-change`, `outbound` and `spend` at `supervised` and
+      `needs-human` at `manual`; `tool-permission` is deliberately absent
+      because `evaluateGate` refuses that kind by construction. Both shipped
+      files are `schema.parse(...)` VALUES, so the package's own drift risk is
+      a module-load failure rather than an unvalidated JSON literal, and a test
+      asserts the round trip through the real loader. `home.ts` seeds them only
+      when ABSENT — `~/.ephesus/` is the Architect's copy — and reports what it
+      created through the M8.2 channel under a new `home` source. A missing
+      policy now names its CONSEQUENCE instead of falling back in silence; the
+      existing test that asserted the silence was reversed deliberately, with
+      the reason in its body. **Artemis ships with FR-5.5's own example**:
+      `route` and `task` everywhere (that is her job), `memo` on `test-code`
+      and `docs`, and NOT `gate` or `spend` — the requirement names spend as
+      what she may not have. **The activation preview asks the same resolver
+      the spawn asks** (`resolveDeclaredGrants`), so `grantsUnavailable` is on
+      the plan and the screen can no longer promise a `GH_TOKEN` the broker
+      cannot supply; the parameter is required, because a default of "assume
+      available" is the silent assertion it exists to remove. **A logged-out
+      engine gets `needs-login`** (Architect decision) with the fix command on
+      the card, is NOT started, and the dock says why instead of "no signal
+      yet". The probe is the adapter's (ADR-0009), THREE-VALUED — cannot-tell
+      is trusted, not refused — and reads the denial FIRST, because `Not logged
+      in` contains `logged in`. README gained a setup section and a status that
+      is no longer two milestones stale. Tests: 11 (setup cliff) + 6 (auth
+      lifecycle) + 5 (the adapter predicate). Gate: suite **3410 passed / 8
+      skipped** across 184 files; floors ratcheted (`home` rose past its lag).
+      **Five mutations, each killed by a named test and reverted** — and the
+      substring one SURVIVED its first pass, because the denial-first ordering
+      caught it and the pattern itself was untested; the case that makes the
+      pattern load-bearing was added and it then died. **Production call path:**
+      `ensureHarnessHome` → `boot()` reports `seeded`; `loadGatePolicy` feeds
+      the `GateManager` and `ProfileActivations.globalAutonomy`;
+      `resolveDeclaredGrants` is the AgentManager's `resolveGrants` AND the
+      activation's `missingGrants`; `AgentManager.spawn` calls `checkAuth`
+      between the version probe and `start`. Docs: SDD §1.1 (`home.ts`), §3
+      (the lifecycle), README. Branch `feature/m8-4-setup-cliff`.*
 
 - [ ] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
       carry `repos: []`; the activation plan is the only source of that list; and

@@ -33,6 +33,30 @@ export interface BinarySpec {
   /** Command whose stdout carries the version string. */
   readonly versionProbe: CommandLine
   /**
+   * Asks the CLI whether it is LOGGED IN — a different question from
+   * whether it exists (M8.4).
+   *
+   * Optional because not every engine has an answerable one; an adapter
+   * without it is trusted, which is the behaviour every adapter had before.
+   * `login` is what the Architect runs to fix it, shown on the card.
+   */
+  readonly authProbe?: {
+    readonly command: CommandLine
+    /**
+     * Contract: THREE-valued, and never throws.
+     *
+     * `true` when the output proves a session, `false` when it proves there
+     * is none, and `null` for anything else — a wording this adapter does not
+     * recognise, a CLI that changed its message, an empty answer. `null` is
+     * not `false`: reading "I could not tell" as "logged out" would refuse to
+     * start a perfectly good company the first time an engine rephrased its
+     * own status line. `test/pin.ts` is this repository's worked example of
+     * the same rule.
+     */
+    authenticated(stdout: string, exitCode: number): boolean | null
+    readonly login: string
+  }
+  /**
    * Contract: extracts a version from `versionProbe` stdout, or null when the
    * output does not match what this engine is known to print. Null is a
    * visible "version unknown" state on the agent card, never a silent guess.

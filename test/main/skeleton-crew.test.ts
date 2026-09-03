@@ -175,7 +175,7 @@ describe('skeleton-crew cannot grant itself latitude', () => {
     if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
 
     for (const global of AUTONOMY_LEVELS) {
-      const planned = activationPlan(loaded.bundle, target, global as AutonomyLevel)
+      const planned = activationPlan(loaded.bundle, target, global as AutonomyLevel, () => [])
       if (!planned.ok) throw new Error(planned.reasons.join('; '))
       for (const row of planned.plan.autonomy) {
         const rank = { manual: 0, supervised: 1, autonomous: 2 } as const

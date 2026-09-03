@@ -200,6 +200,17 @@ export interface ActivationPlan {
   readonly hires: readonly PlannedHire[]
   /** Secret NAMES the instance would hold, across all its hires (ADR-0010). */
   readonly envGrants: readonly string[]
+  /**
+   * Declared grants the broker CANNOT supply right now (M8.4).
+   *
+   * The preview used to list what a profile declares and stop there, so the
+   * activation screen promised `GH_TOKEN` on an install with no
+   * `github-app.json` and no such secret — an affirmative promise about
+   * something that would silently be missing at spawn. This is answered by
+   * the SAME resolver the spawn uses, so the screen and the outcome cannot
+   * disagree.
+   */
+  readonly grantsUnavailable: readonly string[]
   /** Per-class autonomy, after composition against the global ceiling. */
   readonly autonomy: readonly ComposedAutonomy[]
   /**
@@ -250,7 +261,13 @@ export type ActivationPlanResult =
 export function activationPlan(
   bundle: ProfileBundle,
   target: ActivationTarget,
-  globalAutonomy: AutonomyLevel
+  globalAutonomy: AutonomyLevel,
+  /**
+   * Which of these declared grants the broker cannot supply. Required rather
+   * than optional: a default of "assume they are all available" is exactly the
+   * silent assertion this parameter exists to remove.
+   */
+  missingGrants: (declared: readonly string[]) => readonly string[]
 ): ActivationPlanResult {
   const reasons: string[] = []
 
@@ -326,6 +343,7 @@ export function activationPlan(
       targetPath: target.path,
       hires,
       envGrants: declaredEnvGrants(bundle),
+      grantsUnavailable: missingGrants(declaredEnvGrants(bundle)),
       autonomy: composeAutonomyTable(globalAutonomy, bundle.document.autonomy),
       triggers,
       memoRequires: [...bundle.memoPolicy.requires],

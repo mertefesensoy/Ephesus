@@ -165,6 +165,56 @@ export const denyAllPolicy: GatePolicy = {
   rules: []
 }
 
+/**
+ * The policy Ephesus ships with (M8.4, Architect decision DD-1, 2026-09-04).
+ *
+ * ## Why a permissive CEILING is the safe choice, not the loose one
+ *
+ * Autonomy composes stricter-wins (ADR-0012): the company ceiling and the
+ * profile's own table are compared and the tighter one governs. So a ceiling of
+ * `manual` — which is what an absent `gate-policy.json` produced — does not make
+ * the company careful, it makes every profile decorative. The Skeleton Crew
+ * ships `autonomous` with its irreversible classes at `supervised`, and on every
+ * install that has ever existed it ran at `manual` for everything, so each agent
+ * sat at a permission prompt nobody was there to answer. Unattended running,
+ * which is what this whole milestone is named for, was impossible out of the box
+ * and nothing said why.
+ *
+ * This ceiling lets a profile's declaration mean what it says, and holds the
+ * classes where being wrong cannot be undone:
+ *
+ * - `destructive`, `prod-facing`, `spend`, `scope-change`, `outbound` sit at
+ *   `supervised` — attempted with a human able to see and stop it, never
+ *   silently. `outbound` is here because a posted comment has been read and
+ *   mailed to subscribers before anyone can delete it.
+ * - `needs-human` stays `manual`: it is the class whose whole meaning is that
+ *   the Architect decides.
+ * - `tool-permission` is deliberately absent. `evaluateGate` refuses that kind
+ *   by construction — it is the engine's own prompt, and the harness has no
+ *   action to permit there (M7.4).
+ *
+ * "The Watch held every gated action" stays true for every class that can hurt
+ * you. What changes is that routine work is no longer stopped for a prompt
+ * nobody will answer.
+ *
+ * Written as a value rather than as a JSON file so it cannot drift from the
+ * schema it must satisfy; `home.ts` seeds it and a test parses it.
+ */
+export const shippedGatePolicy: GatePolicy = gatePolicySchema.parse({
+  schemaVersion: GATE_SCHEMA_VERSION,
+  autonomy: 'autonomous',
+  rules: [
+    { kind: 'destructive', autonomy: 'supervised' },
+    { kind: 'prod-facing', autonomy: 'supervised' },
+    { kind: 'scope-change', autonomy: 'supervised' },
+    { kind: 'outbound', autonomy: 'supervised' },
+    // A spend ceiling has to carry a number or it permits nothing meaningful.
+    // This is the company-wide ceiling; a profile's own budget is tighter.
+    { kind: 'spend', autonomy: 'supervised', maxSpendTokens: 200_000 },
+    { kind: 'needs-human', autonomy: 'manual' }
+  ]
+})
+
 export function parseGatePolicy(
   raw: unknown
 ):

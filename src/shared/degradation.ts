@@ -50,6 +50,8 @@ export const DEGRADATION_SOURCES = [
   'harbor',
   'hermes',
   'hooks',
+  // The harness home and the config files it owns (M8.4).
+  'home',
   'incident',
   'ledger',
   'library',

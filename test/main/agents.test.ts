@@ -88,6 +88,7 @@ interface RigOptions {
   readonly resolveGrants?: AgentManagerOptions['resolveGrants']
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
   readonly onLogEvent?: AgentManagerOptions['onLogEvent']
+  readonly authProbe?: AgentManagerOptions['authProbe']
 }
 
 async function rig(
@@ -123,6 +124,7 @@ async function rig(
     ...(extra.resolveGrants ? { resolveGrants: extra.resolveGrants } : {}),
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
+    ...(extra.authProbe ? { authProbe: extra.authProbe } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -609,5 +611,61 @@ describe('AgentManager.shutdown — one agent’s failure never costs the others
     await started.manager.spawn(started.request)
     const report = await started.manager.shutdown()
     expect(report).toEqual({ unwound: ['agent.mason'], failed: [] })
+  })
+})
+
+describe('AgentManager — an engine that is installed but logged out', () => {
+  /**
+   * B8/M8.4. Nothing asked whether the CLI had a session, so a logged-out
+   * engine spawned, printed its own login prompt, sat there for the rest of the
+   * day and reported `running` with a confidently idle avatar on the floor.
+   */
+  const probeReturning =
+    (stdout: string, exitCode = 0): AgentManagerOptions['authProbe'] =>
+    async () => ({ stdout, exitCode })
+
+  it('does not start the engine, and says what to run', async () => {
+    const started = await rig(async () => '2.1.195', undefined, {
+      authProbe: probeReturning('Not logged in. Run `claude auth login`.', 1)
+    })
+    const card = await started.manager.spawn(started.request)
+
+    expect(card.lifecycle).toBe('needs-login')
+    expect(card.fixCommand).toBe('claude auth login')
+    // The point of the state: no process, so nothing can sit at a login prompt
+    // while the card claims it is working.
+    expect(started.spawner.spawns).toEqual([])
+  })
+
+  it('starts normally when the engine says it has a session', async () => {
+    const started = await rig(async () => '2.1.195', undefined, {
+      authProbe: probeReturning('Logged in as architect@example.test')
+    })
+    const card = await started.manager.spawn(started.request)
+    expect(card.lifecycle).toBe('running')
+    expect(card.fixCommand).toBeNull()
+    expect(started.spawner.spawns).toHaveLength(1)
+  })
+
+  it('TRUSTS a probe that cannot answer, rather than refusing to start', async () => {
+    // `test/pin.ts`'s rule, applied the other way round: could-not-establish is
+    // not the same as logged out, and reading it that way would refuse to start
+    // a healthy company the first time an engine rephrased its status line.
+    const started = await rig(async () => '2.1.195', undefined, {
+      authProbe: probeReturning('some wording this adapter has never seen', 3)
+    })
+    expect((await started.manager.spawn(started.request)).lifecycle).toBe('running')
+  })
+
+  it('trusts an engine whose probe throws, for the same reason', async () => {
+    const started = await rig(async () => '2.1.195', undefined, {
+      authProbe: () => Promise.reject(new Error('spawn ENOENT'))
+    })
+    expect((await started.manager.spawn(started.request)).lifecycle).toBe('running')
+  })
+
+  it('asks nothing when no probe is wired at all', async () => {
+    const started = await rig()
+    expect((await started.manager.spawn(started.request)).lifecycle).toBe('running')
   })
 })
