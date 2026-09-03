@@ -4741,13 +4741,22 @@ structural rather than a habit.
       newest — that is B3, and M8.3 inherits the tool rather than a workaround.
       Reporting cannot fail: `report` never throws, the append is best-effort,
       and rows raised before the Agora opens are buffered and flushed in order.
-      Tests: 18 (channel, including the 600-entry tail-vs-head case) + 4
-      (the line the Architect reads, typed against the IPC shape). **Eight
+      Tests: 22 (channel, including the 600-entry tail-vs-head case and the
+      overflow cases below) + 4 (the line the Architect reads, typed against
+      the IPC shape) + 2 (the Agora tail the boot replay calls). Suite **3333
+      passed / 8 skipped** across 180 files under coverage; CI run
+      `33799028254` GREEN on all three jobs, first try. **Eight
       mutations, each killed by a named test and reverted** — dedupe by text,
       no ladder, replay marked live, replay overwriting a live entry, a cleared
       condition returning at boot, the carried marker dropped, the count
       dropped, and the tail reading the head. The M8.1 suite CAUGHT this
       package's own contract change (four assertions on the old bare sources),
+      and the M8.0 FLOORS REFUSED THE PACKAGE TWICE before it landed: once
+      because a new module at 93% dragged the `agora` row under its floor —
+      the eviction path had never run, because the flood test used a limit
+      larger than the number of causes it created — and once because
+      `agora.tailLog` was a function no test called. Both were real holes;
+      neither floor was lowered.
       which is the seam rule working in the direction that matters.
       **Production call path:** `src/main/index.ts` constructs `DegradationLog`
       at module scope; `reportDegradation` delegates at 61 sites; boot calls
