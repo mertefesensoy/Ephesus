@@ -4883,7 +4883,10 @@ structural rather than a habit.
       `resolveDeclaredGrants` is the AgentManager's `resolveGrants` AND the
       activation's `missingGrants`; `AgentManager.spawn` calls `checkAuth`
       between the version probe and `start`. Docs: SDD §1.1 (`home.ts`), §3
-      (the lifecycle), README. Branch `feature/m8-4-setup-cliff`.*
+      (the lifecycle), README. CI: run `33811602043` on `104b1c5` red BY
+      DESIGN on the stale linux floor with everything else green, its artifact
+      ratcheted the block, and run `33811944369` on `8998918` is GREEN on all
+      three jobs. Branch `feature/m8-4-setup-cliff`.*
 
 - [ ] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
       carry `repos: []`; the activation plan is the only source of that list; and
