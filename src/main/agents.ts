@@ -310,6 +310,15 @@ interface LiveAgent {
   readonly targetRepo: string
 }
 
+/**
+ * What a shutdown did (M8.1). Named per agent rather than counted: "two failed"
+ * is not something the Architect can act on.
+ */
+export interface AgentShutdownReport {
+  readonly unwound: readonly string[]
+  readonly failed: readonly { readonly agentId: string; readonly error: string }[]
+}
+
 export class AgentManager {
   private readonly agents = new Map<string, LiveAgent>()
   /** Seats handed out this session; the roster is the durable copy. */
@@ -493,8 +502,39 @@ export class AgentManager {
   }
 
   /** Unwinds every live spawn — settings restored, tokens revoked. */
-  async shutdown(): Promise<void> {
-    for (const agentId of [...this.agents.keys()]) await this.unwind(agentId)
+  /**
+   * Unwinds every live agent, one failure never costing the others (M8.1).
+   *
+   * This was `for (const id of ...) await this.unwind(id)` with no `try`, and
+   * on the real quit path the first agent threw every time: `unwind` logs an
+   * `exit` event and updates its card, both of which went through callbacks
+   * that sent to a window Electron had already destroyed. So the loop died on
+   * agent one and the rest of the company was never unwound at all — settings
+   * files left in the Architect's repositories, worktrees never released,
+   * tokens never revoked. Verified on the Architect's machine: three crew
+   * still `archived` in the roster with their unwind never run.
+   *
+   * The window fault is fixed at its source (`ui-bridge.ts`), but an unwind
+   * touches four subsystems and can fail for reasons this loop cannot foresee.
+   * Isolation is what makes the guarantee "every agent is unwound" true by
+   * construction rather than by luck.
+   *
+   * Contract: never throws. Each failure is reported through `onExitError` (the
+   * visible degradation seam) and named in the returned report.
+   */
+  async shutdown(): Promise<AgentShutdownReport> {
+    const unwound: string[] = []
+    const failed: { agentId: string; error: string }[] = []
+    for (const agentId of [...this.agents.keys()]) {
+      try {
+        await this.unwind(agentId)
+        unwound.push(agentId)
+      } catch (err) {
+        failed.push({ agentId, error: err instanceof Error ? err.message : String(err) })
+        this.options.onExitError?.(agentId, err)
+      }
+    }
+    return { unwound, failed }
   }
 
   /** Mirrors a coarse lifecycle change into the roster (SDD §4.1 `status`). */

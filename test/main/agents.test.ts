@@ -87,6 +87,7 @@ interface RigOptions {
   readonly onExitError?: (agentId: string, err: unknown) => void
   readonly resolveGrants?: AgentManagerOptions['resolveGrants']
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
+  readonly onLogEvent?: AgentManagerOptions['onLogEvent']
 }
 
 async function rig(
@@ -121,6 +122,7 @@ async function rig(
     onExitError,
     ...(extra.resolveGrants ? { resolveGrants: extra.resolveGrants } : {}),
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
+    ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -534,5 +536,78 @@ describe('secret grants reach the spawn, scoped (S-SECRETS)', () => {
     expect(spawner.spawns[0]?.plan.env['GH_TOKEN']).toBeUndefined()
     expect(seen).toEqual([['GH_TOKEN']])
     expect(missing).toEqual([])
+  })
+})
+
+describe('AgentManager.shutdown — one agent’s failure never costs the others', () => {
+  /**
+   * The quit path's second defect (M8.1). `shutdown` was
+   * `for (const id of ...) await this.unwind(id)` with no `try`, and on every
+   * real quit the first agent threw: `unwind` logs an `exit` event, and that
+   * callback sent to a window Electron had already destroyed. So the loop died
+   * on agent one — settings files left in the Architect's repositories,
+   * worktrees never released, tokens never revoked, and nothing said so.
+   *
+   * The window fault is fixed at its source, so this drives the same shape
+   * through the seam that failed: a log callback that throws.
+   */
+  async function threeAgents(
+    failOnExitOf: string
+  ): Promise<{ rig: Awaited<ReturnType<typeof rig>>; exitErrors: string[] }> {
+    const exitErrors: string[] = []
+    const started = await rig(
+      async () => '2.1.195',
+      (agentId) => exitErrors.push(agentId),
+      {
+        onLogEvent: (draft) => {
+          if (draft.kind === 'exit' && draft['agentId'] === failOnExitOf) {
+            throw new Error('Object has been destroyed')
+          }
+        }
+      }
+    )
+    for (const [agentId, name] of [
+      ['agent.mason', 'Mason'],
+      ['agent.tess', 'Tess'],
+      ['agent.ada', 'Ada']
+    ]) {
+      await started.manager.spawn({ ...started.request, agentId: agentId!, name: name! })
+    }
+    return { rig: started, exitErrors }
+  }
+
+  it('unwinds every agent even when the first one throws', async () => {
+    const { rig: started, exitErrors } = await threeAgents('agent.mason')
+
+    const report = await started.manager.shutdown()
+
+    // The two after the failure are the point: the old loop never reached them.
+    expect(report.unwound).toEqual(['agent.tess', 'agent.ada'])
+    expect(report.failed).toEqual([{ agentId: 'agent.mason', error: 'Object has been destroyed' }])
+    // Their cards really did finish unwinding, rather than merely being skipped
+    // quietly — and the one that failed is left mid-unwind, which is exactly why
+    // it has to be named rather than counted.
+    const lifecycles = new Map(started.manager.list().map((card) => [card.agentId, card.lifecycle]))
+    expect(lifecycles.get('agent.tess')).toBe('exited')
+    expect(lifecycles.get('agent.ada')).toBe('exited')
+    expect(lifecycles.get('agent.mason')).not.toBe('exited')
+    // Reported through the manager's own visible seam, once, by name.
+    expect(exitErrors).toEqual(['agent.mason'])
+  })
+
+  it('never rejects, whichever agent fails', async () => {
+    const { rig: started } = await threeAgents('agent.ada')
+    // A quit path that could be rejected into is a quit path that stops early.
+    await expect(started.manager.shutdown()).resolves.toMatchObject({
+      unwound: ['agent.mason', 'agent.tess'],
+      failed: [{ agentId: 'agent.ada' }]
+    })
+  })
+
+  it('reports every agent unwound when nothing fails', async () => {
+    const started = await rig()
+    await started.manager.spawn(started.request)
+    const report = await started.manager.shutdown()
+    expect(report).toEqual({ unwound: ['agent.mason'], failed: [] })
   })
 })

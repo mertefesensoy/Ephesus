@@ -64,6 +64,8 @@ import { openFtsStore } from './library-fts-sqlite'
 import { Agora } from './agora'
 import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
+import { QuitSequence, summarizeQuit } from './shutdown'
+import { UiBridge } from './ui-bridge'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
@@ -158,9 +160,19 @@ const scheduler = new Scheduler({
 })
 let hermes: Hermes | null = null
 let closingTime: ClosingTime | null = null
-/** Set once the quit path has offered (or skipped) closing time. */
-let closingOffered = false
-let mainWindow: BrowserWindow | null = null
+/**
+ * The one door to the renderer (M8.1). Nothing else in this file may hold the
+ * window: a destroyed window is not null, which is how every send on the quit
+ * path used to throw and take Closing Time and the agent unwind down with it.
+ * `check-invariants.cjs` fails on a `webContents.send` written anywhere else.
+ */
+const ui = new UiBridge({
+  onDropped: (channel, detail) => reportDegradation('renderer', `${channel}: ${detail}`)
+})
+// The terminal stream goes to the bridge, once — not to the `webContents` of a
+// window a later window replaces (SDD §1.1 `pty.ts`: 'a window recreated
+// mid-run still receives bytes').
+ptyManager.attachSink(ui)
 /** Non-null when the hook endpoint failed to bind — a visible state, not a crash. */
 let hookFailure: string | null = null
 
@@ -193,7 +205,7 @@ function reportDegradation(source: string, detail: string): void {
  */
 const commandQueue = new CommandQueue({
   sink: { write: (agentId, data) => ptyManager.write(agentId, data) },
-  onChange: (state: CommandState) => mainWindow?.webContents.send(COMMANDS_STATE_CHANNEL, state)
+  onChange: (state: CommandState) => ui.send(COMMANDS_STATE_CHANNEL, state)
 })
 
 /**
@@ -216,7 +228,7 @@ const steerNotes = new SteerNotes({
     // The channel is part of the trip's record (invariant §7, NFR-13) — a
     // reader of `log.jsonl` must be able to tell how the sentence traveled.
     agora?.appendLog({ kind: 'breaker', action: 'steer-channel', agentId, channel })
-    mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    ui.send(LOG_APPEND_CHANNEL)
     agora?.commitSoon(`breaker steer for ${agentId}`)
   }
 })
@@ -238,7 +250,7 @@ const avatarDirector = new AvatarDirector({
   // they can never disagree about whether an agent is done (ADR-0013).
   hasPendingWork: (agentId: string) => pendingMailFor(agentId) > 0,
   onChange: (agentId: string, snapshot: AvatarSnapshot) => {
-    mainWindow?.webContents.send(AVATARS_STATE_CHANNEL, {
+    ui.send(AVATARS_STATE_CHANNEL, {
       agentId,
       snapshot,
       pendingMail: pendingMailFor(agentId)
@@ -435,7 +447,7 @@ function triageMemo(memoId: string, trigger: string, filedBy: string): void {
   if (!may.allowed) {
     // The Architect queue. The badge is the `odeon:queue` push; the memo is
     // already archived, so nothing depends on this notification arriving.
-    mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+    ui.send(ODEON_QUEUE_CHANNEL)
     agora?.appendLog({
       kind: 'memo',
       event: 'escalated',
@@ -608,8 +620,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow = win
-  ptyManager.attachSink(win.webContents)
+  ui.attach(win)
 
   const rendererUrl = process.env['ELECTRON_RENDERER_URL']
   if (rendererUrl) {
@@ -687,7 +698,7 @@ async function boot(): Promise<void> {
       // The NAME, never the value — rotation is auditable without the book of
       // record becoming the read path the broker refuses to be (SDD §4.3).
       agora?.appendLog({ kind: 'secret-rotated', name, removed: change === 'removed' })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (detail) => reportDegradation('secrets', detail)
   })
@@ -793,14 +804,14 @@ async function boot(): Promise<void> {
     profileAutonomy: (agentId, kind) => activations?.autonomyFor(agentId, kind) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
     },
     onOpen: (gate) => {
       // The id, not the gate: this channel is a nudge and the panel re-reads
       // `watch:approvals`. Sending the whole gate would make it a second copy
       // of the queue that could disagree with main.
-      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, gate.id)
+      ui.send(GATE_OPEN_CHANNEL, gate.id)
       // The avatar waves at the Watch post while a gate is open (SDD §6). The
       // transition was implemented and regression-tested in M1; this is the
       // package that finally makes it reachable in the running app.
@@ -827,7 +838,7 @@ async function boot(): Promise<void> {
       if (gate.kind === 'outbound') {
         void frontOffice?.onVerdict(gate.id, verdict === 'approved')
       }
-      mainWindow?.webContents.send(GATE_OPEN_CHANNEL, null)
+      ui.send(GATE_OPEN_CHANNEL, null)
     },
     // Invariant §8: the words a refusal shows are a prompt surface.
     refusalReason: (because) => prompts.read(path.join('watch', `refusal-${because}.md`)).trim()
@@ -870,7 +881,7 @@ async function boot(): Promise<void> {
         because: kind,
         what: message
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     }
   })
 
@@ -933,7 +944,7 @@ async function boot(): Promise<void> {
         .trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(
         `breaker ${String(draft['action'] ?? 'trip')} for ${String(draft['agentId'] ?? '')}`
       )
@@ -1020,7 +1031,7 @@ async function boot(): Promise<void> {
         projectedPercent: verdict.tightest?.projectedPercent ?? null,
         resetsAt: verdict.resetsAt
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`pace ${verdict.pace} (${verdict.because})`)
       // Anything but full speed is a degradation the Architect must be able to
       // see, or a paced company is indistinguishable from a hung one.
@@ -1074,9 +1085,9 @@ async function boot(): Promise<void> {
     knownAgents: () => hermes?.knownAgents() ?? [],
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
-    onChange: () => mainWindow?.webContents.send(TASKS_STATE_CHANNEL),
+    onChange: () => ui.send(TASKS_STATE_CHANNEL),
     onDegraded: (detail) => reportDegradation('agora', detail)
   })
 
@@ -1092,7 +1103,7 @@ async function boot(): Promise<void> {
     gate: (gateId) => gates?.get(gateId) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject)
   })
@@ -1191,7 +1202,7 @@ async function boot(): Promise<void> {
     deliver: (message) => hermes?.deliverFromHarness(message),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (detail) => reportDegradation('odeon', detail)
   })
@@ -1214,9 +1225,9 @@ async function boot(): Promise<void> {
       ),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
-    onChange: () => mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+    onChange: () => ui.send(ODEON_QUEUE_CHANNEL)
   })
 
   // The org layer (FR-11.5, UC-12). It computes and archives; it never acts.
@@ -1235,7 +1246,7 @@ async function boot(): Promise<void> {
     }),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon', detail)
@@ -1282,7 +1293,7 @@ async function boot(): Promise<void> {
     briefExists: (briefId) => stoa?.brief(briefId) !== null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon', detail)
@@ -1303,7 +1314,7 @@ async function boot(): Promise<void> {
     prompts: promptStore,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon', detail)
@@ -1350,10 +1361,10 @@ async function boot(): Promise<void> {
         })),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     recordOnLedger: (change) => gymnasium?.recordModeChange(change),
-    onChanged: () => mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+    onChanged: () => ui.send(LOG_APPEND_CHANNEL)
   })
 
   // The Stoa cadence (SDD §7.7): fires autonomously ONLY in `improving`
@@ -1424,7 +1435,7 @@ async function boot(): Promise<void> {
       prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
     }
   })
@@ -1467,7 +1478,7 @@ async function boot(): Promise<void> {
     render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`incident ${String(draft['event'] ?? 'event')}`)
     },
     // UC-09 step 4's announcement has no delivery leg: M6.9 is deferred and the
@@ -1521,7 +1532,7 @@ async function boot(): Promise<void> {
     deliver: (message) => hermes?.deliverFromHarness(message),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     }
   })
 
@@ -1545,7 +1556,7 @@ async function boot(): Promise<void> {
         ranMs: Math.round(ranMs),
         capMs
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`wake cap reached for ${agentId}`)
       reportDegradation(
         'usage',
@@ -1602,7 +1613,7 @@ async function boot(): Promise<void> {
         subject: message.subject.slice(0, 200),
         summary: message.body.slice(0, 2000)
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`sweep report from ${message.from}`)
       return true
     },
@@ -1665,7 +1676,7 @@ async function boot(): Promise<void> {
           },
         triageMemo,
         applyMemoVerdict,
-        onQueueChanged: () => mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+        onQueueChanged: () => ui.send(ODEON_QUEUE_CHANNEL)
       })(message)
     },
     library: (message) => {
@@ -1869,13 +1880,13 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       // Durability is a commit, and it is queued rather than awaited: delivery
       // latency must never wait on git (ADR-0004).
       agora?.commitSoon(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
     },
     onChange: (card: AgentCard) => {
-      mainWindow?.webContents.send(AGENTS_STATE_CHANNEL, card)
+      ui.send(AGENTS_STATE_CHANNEL, card)
       // FR-5.4: the orchestrator is brought back when it dies. Driven off the
       // same card stream the UI reads, so nothing else has to agree about who
       // is running.
@@ -1943,7 +1954,7 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`profile ${String(draft['event'] ?? 'event')}`)
     },
     onTriggerFired: (instanceId, triggerId, agentId, playbook) => {
@@ -1958,7 +1969,7 @@ async function boot(): Promise<void> {
         agentId,
         playbook
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
 
       // …and the agent is actually told. Logging the fire and stopping there
       // would leave the health watcher and the dependency updater spawned and
@@ -1992,7 +2003,7 @@ async function boot(): Promise<void> {
     onLogEvent: (draft) => {
       // FR-10.3: every inbound item lands in `log.jsonl` tagged `remote`.
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (what) => reportDegradation('harbor', what)
   })
@@ -2043,7 +2054,7 @@ async function boot(): Promise<void> {
         projected: verdict.projected,
         because: verdict.because
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`budget ${verdict.state} for ${agentId}`)
       if (verdict.state !== 'ok') {
         reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
@@ -2120,8 +2131,8 @@ async function boot(): Promise<void> {
         retryAt: row.retryAt,
         processAlive: row.processAlive
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
-      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
+      ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity parked ${row.agentId}`)
       // Invariant §7. A pause nobody can see is the failure mode this whole
       // system is built against, so it goes to the degradation banner as well
@@ -2154,8 +2165,8 @@ async function boot(): Promise<void> {
         waitedMs: Date.parse(row.retryAt) - Date.parse(row.since),
         recordId: row.limit.recordId
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
-      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
+      ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity resume ${row.agentId}`)
       hermes?.setPaused(row.agentId, false)
       if (row.processAlive) {
@@ -2203,8 +2214,8 @@ async function boot(): Promise<void> {
         since: row.since,
         recordId: row.limit.recordId
       })
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
-      mainWindow?.webContents.send(CAPACITY_STATE_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
+      ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity cleared ${row.agentId}`)
       hermes?.setPaused(row.agentId, false)
       // The ladder is only released once NOBODY is parked: releasing it while
@@ -2238,7 +2249,7 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`log ${draft.kind} ${String(draft['event'] ?? '')}`)
     },
     onDegraded: (detail) => reportDegradation('artemis', detail)
@@ -2497,7 +2508,7 @@ async function boot(): Promise<void> {
           profile: result.name,
           replaced: result.replaced
         })
-        mainWindow?.webContents.send(LOG_APPEND_CHANNEL)
+        ui.send(LOG_APPEND_CHANNEL)
       }
       return result
     },
@@ -2569,7 +2580,7 @@ async function boot(): Promise<void> {
         notes,
         decidedBy: 'architect'
       })
-      mainWindow?.webContents.send(ODEON_QUEUE_CHANNEL)
+      ui.send(ODEON_QUEUE_CHANNEL)
       return { ok: true, gateVerdict: settled.gateVerdict }
     },
     commentOnDeck: (ref, text) => {
@@ -2606,93 +2617,102 @@ async function boot(): Promise<void> {
 }
 
 /**
- * Closing time at the quit path (GYM-003) — offered, never forced. With live
- * agents on the floor the Architect chooses: let them park their work and
- * acknowledge (bounded by the protocol's hard deadline), or quit now — one
- * click, ungated, today's behavior. The dialog copy is UI chrome, not an LLM
- * prompt surface, so it may live here (invariant §8 is about LLM-facing prose).
+ * The quit sequence (M8.1, GYM-003, SDD §612).
+ *
+ * The order and the isolation live in `shutdown.ts`, where a test can drive
+ * them. What is decided here is only what belongs to Electron: how the
+ * Architect is asked, who counts as still working, and what has to stop.
  */
-async function offerClosingTime(): Promise<void> {
-  if (closingOffered) return
-  closingOffered = true
-  const closing = closingTime
-  if (!closing || closing.inProgress()) return
-  const live =
+const quit = new QuitSequence({
+  // Production's own answer to "who must pack up": the cards the lifecycle says
+  // are running. A scenario may substitute this — it is the one leaf a rig
+  // legitimately owns — but never the sequence around it.
+  liveAgents: () =>
     agentManager
       ?.list()
       .filter((card) => card.lifecycle === 'running')
-      .map((card) => card.agentId) ?? []
-  if (live.length === 0) return
-
-  const choice = dialog.showMessageBoxSync({
-    type: 'question',
-    title: 'Ephesus',
-    message: `${String(live.length)} agent(s) are still working.`,
-    detail:
-      'Closing time asks each agent to park its work and write down where it ' +
-      'stopped before the floor shuts down. Quit now skips that.',
-    buttons: ['Closing time', 'Quit now'],
-    defaultId: 0,
-    cancelId: 1
-  })
-  if (choice !== 0) return
-
-  try {
-    const report = await closing.begin()
-    if (report.missing.length > 0) {
-      reportDegradation(
-        'shutdown',
-        `closing time: no acknowledgment from ${report.missing.join(', ')} by the deadline`
-      )
-    }
-  } catch (err) {
-    reportDegradation(
-      'shutdown',
-      `closing time failed: ${err instanceof Error ? err.message : String(err)}`
-    )
-  }
-}
-
-app.on('window-all-closed', () => {
-  // Unwind spawns before the ptys die, so every settings file the harness wrote
-  // into a repo is restored (ADR-0009) rather than left behind — and, first,
-  // closing time (GYM-003): the one moment agents can still write down where
-  // they stopped is before anything below runs.
-  void offerClosingTime().then(() => teardown())
+      .map((card) => card.agentId) ?? [],
+  /**
+   * Offered, never forced (SDD §612). The dialog copy is UI chrome rather than
+   * an LLM prompt surface, so it may live in code — invariant §8 is about
+   * LLM-facing prose. Asked asynchronously so the main thread keeps painting
+   * while the Architect decides.
+   */
+  ask: async (live) => {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      title: 'Ephesus',
+      message: `${String(live.length)} agent(s) are still working.`,
+      detail:
+        'Closing time asks each agent to park its work and write down where it ' +
+        'stopped before the floor shuts down. Quit now skips that.',
+      buttons: ['Closing time', 'Quit now'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    return response === 0 ? 'closing' : 'now'
+  },
+  closing: () => closingTime,
+  agents: () => agentManager,
+  steps: () => [
+    { name: 'avatars', run: () => avatarDirector.stop() },
+    { name: 'hermes', run: () => hermes?.stop() },
+    { name: 'scheduler', run: () => scheduler.stop() },
+    {
+      name: 'company-token',
+      run: () => {
+        if (companyTokenTimer !== null) {
+          clearInterval(companyTokenTimer)
+          companyTokenTimer = null
+        }
+      }
+    },
+    { name: 'budgets', run: () => budgetWatcher?.stop() },
+    { name: 'capacity', run: () => capacityWatch?.stop() },
+    { name: 'usage', run: () => usageWatch?.stop() },
+    { name: 'wake-clock', run: () => wakeClock?.stop() },
+    // The PTYs die only after the unwind above has restored every settings file
+    // the harness wrote into somebody's repository (ADR-0009).
+    { name: 'ptys', run: () => ptyManager.killAll() },
+    { name: 'hooks', run: () => hookServer.stop() },
+    // Last, in this order: a commit still in flight is a record the book has not
+    // got yet (ADR-0004), and the database has to outlive the drain.
+    { name: 'agora-drain', run: () => agora?.drained() },
+    { name: 'db', run: () => db?.close() }
+  ],
+  onDegraded: reportDegradation
 })
 
-function teardown(): void {
-  void agentManager
-    ?.shutdown()
-    .catch((err: unknown) => console.warn(`agents: shutdown failed: ${String(err)}`))
-    .finally(() => {
-      avatarDirector.stop()
-      hermes?.stop()
-      scheduler.stop()
-      if (companyTokenTimer !== null) {
-        clearInterval(companyTokenTimer)
-        companyTokenTimer = null
-      }
-      budgetWatcher?.stop()
-      capacityWatch?.stop()
-      usageWatch?.stop()
-      wakeClock?.stop()
-      ptyManager.killAll()
-      hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
-      void agora?.drained().finally(() => db?.close())
-      if (process.platform !== 'darwin') app.quit()
+/**
+ * Every quit gesture runs the sequence, exactly once (Architect decision,
+ * 2026-09-03; SDD §612 amended with it).
+ *
+ * Before M8.1 the only handler was `window-all-closed`, so menu Quit, Cmd-Q and
+ * a taskbar close skipped closing time altogether and killed the agents
+ * mid-thought — and on macOS that handler tore the company down while leaving
+ * the app alive, so `activate` re-opened a window onto a dead company. Now the
+ * window is just a window: closing the last one quits (off macOS), quitting
+ * runs the sequence, and the sequence decides when the app may go.
+ */
+app.on('before-quit', (event) => {
+  // The quit that ENDS the sequence is the one that is allowed through.
+  if (quit.hasFinished()) return
+  event.preventDefault()
+  // A second gesture while it is running must not cut closing time short; the
+  // protocol's own deadline is what bounds the wait (GYM-003).
+  if (quit.hasStarted()) return
+  void quit
+    .run()
+    .then((report) => {
+      console.log(`quit: ${summarizeQuit(report)}`)
     })
-  if (!agentManager) {
-    avatarDirector.stop()
-    hermes?.stop()
-    scheduler.stop()
-    budgetWatcher?.stop()
-    capacityWatch?.stop()
-    usageWatch?.stop()
-    wakeClock?.stop()
-    ptyManager.killAll()
-    hookServer.stop().catch((err: unknown) => console.warn(`hooks: stop failed: ${String(err)}`))
-    db?.close()
-    if (process.platform !== 'darwin') app.quit()
-  }
-}
+    .finally(() => app.quit())
+})
+
+app.on('window-all-closed', () => {
+  // macOS keeps the company running with no window on screen, and `activate`
+  // re-attaches the bridge to the new one. Everywhere else, closing the last
+  // window means quit — which routes through `before-quit` rather than tearing
+  // anything down here.
+  if (process.platform !== 'darwin') app.quit()
+})
