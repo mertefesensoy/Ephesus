@@ -91,6 +91,15 @@ export class EventLog {
     return all.length <= limit ? all : all.slice(all.length - limit)
   }
 
+  /** Bytes on disk, for reporting what a whole-log read cost (M8.3). */
+  sizeBytes(): number {
+    try {
+      return fs.statSync(this.filePath).size
+    } catch {
+      return 0
+    }
+  }
+
   /** Every readable entry. For tests and small logs only. */
   all(): readonly LogEntry[] {
     return this.read(0, Number.MAX_SAFE_INTEGER)

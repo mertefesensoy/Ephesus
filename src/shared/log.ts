@@ -116,3 +116,161 @@ export function formatLogLine(entry: LogEntry): string {
   if (line.includes('\n')) throw new Error('log: serialised entry contains a newline')
   return `${line}\n`
 }
+
+/**
+ * Contract: the one line the Activity panel puts in front of a human for one
+ * entry, and never an empty one (M8.3).
+ *
+ * ## Why this is here and not in the panel
+ *
+ * It is a projection of the book of record, it needs no DOM, and it has to be
+ * TOTAL over `LOG_KINDS`. Putting it beside the kind list means the next person
+ * adding a kind sees the row it will render, and the switch below has no
+ * `default`: a new kind is a compile error rather than a blank line nobody
+ * notices. The panel's old version had seven cases and a `default` that reached
+ * for `agentId` or `subject`, so 19% of rows on this machine rendered empty —
+ * and the breaker's case read `signal` where every emitter writes `signals`,
+ * which blanked the reason on all 93 of them.
+ *
+ * ## Why it cannot return an empty string
+ *
+ * Per-kind wording is for readability; the fallback is for truth. If a kind's
+ * chosen fields are all absent — an entry from an older version, or an emitter
+ * that changed — the line falls back to the entry's own remaining fields rather
+ * than rendering nothing. A blank row is a lie about the book of record: the
+ * event happened, and the panel is supposed to be a pointer to it (NFR-13).
+ */
+export function logRowSummary(entry: LogEntry): string {
+  const line = kindParts(entry)
+    .filter((part) => part.length > 0)
+    .join(' · ')
+  return line.length > 0 ? line : otherFields(entry)
+}
+
+/** A string, number or boolean field, or '' when absent or of another shape. */
+function ref(entry: LogEntry, name: string): string {
+  const value = entry[name]
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+/** A list field (`signals`, `acked`, `attendees`), joined; '' when absent. */
+function list(entry: LogEntry, name: string): string {
+  const value = entry[name]
+  if (!Array.isArray(value)) return ''
+  return value
+    .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item) : ''))
+    .filter((item) => item.length > 0)
+    .join(', ')
+}
+
+/** `a → b` when both sides are present, else whichever one is. */
+function flow(entry: LogEntry): string {
+  const from = ref(entry, 'from')
+  const to = ref(entry, 'to')
+  if (from.length > 0 && to.length > 0) return `${from} → ${to}`
+  return from.length > 0 ? from : to
+}
+
+/**
+ * Everything the entry carries beyond its envelope, for the fallback. Bounded
+ * so one enormous field cannot push the whole panel sideways.
+ */
+function otherFields(entry: LogEntry): string {
+  const skip = new Set(['ts', 'seq', 'kind'])
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(entry)) {
+    if (skip.has(key)) continue
+    const rendered =
+      typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        ? String(value)
+        : Array.isArray(value)
+          ? value.join(', ')
+          : ''
+    if (rendered.length === 0) continue
+    parts.push(`${key} ${rendered.slice(0, 120)}`)
+    if (parts.length === 4) break
+  }
+  return parts.join(' · ')
+}
+
+/**
+ * The refs worth showing per kind (SDD §4.3). No `default`: the `never` check
+ * at the end makes a new kind fail the build here, where its row is decided.
+ */
+function kindParts(entry: LogEntry): readonly string[] {
+  const at = (name: string): string => ref(entry, name)
+  const acked = list(entry, 'acked')
+  const missing = list(entry, 'missing')
+  switch (entry.kind) {
+    case 'message':
+      return [flow(entry), at('act'), at('subject')]
+    case 'delivery':
+      return [flow(entry), at('act'), at('subject')]
+    case 'bounce':
+      return [flow(entry), at('reason'), at('divertedTo') && `diverted to ${at('divertedTo')}`]
+    case 'spawn':
+      return [at('agentId'), `${at('engine')} ${at('engineVersion')}`.trim(), at('role')]
+    case 'exit':
+      return [at('agentId'), at('engine'), `exit ${at('exitCode')}`]
+    case 'ghost':
+      return [at('agentId'), at('engine'), at('resumable') && `resumable ${at('resumable')}`]
+    case 'hook':
+      return [at('agentId'), at('event'), at('decision'), at('because')]
+    case 'task':
+      return [at('event'), at('taskId'), at('assignee') || at('by'), at('because')]
+    case 'gate':
+      return [at('event'), at('gateKind'), at('what') || at('gateId'), at('agentId')]
+    case 'memo':
+      return [at('event'), at('under') || at('trigger'), at('by'), at('because')]
+    case 'brief':
+      return [
+        at('event'),
+        at('briefId'),
+        at('by'),
+        at('sentences') && `${at('sentences')} sentences`
+      ]
+    case 'deck':
+      return [at('event'), at('taskId'), at('deckRef'), at('by')]
+    case 'meeting':
+      return [at('event'), at('meetingId'), list(entry, 'attendees'), at('minutesRef')]
+    case 'breaker':
+      // `signals`, plural and an array — the emitter has always written it that
+      // way, and reading `signal` blanked the reason on every breaker row.
+      return [at('agentId'), at('action'), list(entry, 'signals'), `rung ${at('rung')}`]
+    case 'budget':
+      return [at('agentId'), at('event') || at('state'), at('because'), at('spent')]
+    case 'memory':
+      return [at('agentId'), at('event'), at('because')]
+    case 'orchestrator':
+      return [at('event'), at('agentId'), at('engine'), at('because') || at('under')]
+    case 'remote':
+      return [at('event'), at('repo') || at('target'), at('by') || at('from'), at('because')]
+    case 'secret-rotated':
+      // The NAME, never the value — the broker is write-only (ADR-0010).
+      return [at('name'), at('removed') === 'true' ? 'removed' : 'set']
+    case 'profile':
+      return [at('event'), at('profile'), at('repo') || at('ref'), at('because')]
+    case 'gym':
+      return [at('event'), at('gymId'), at('title') || at('class'), at('by')]
+    case 'stoa':
+      return [at('event'), at('sourceId') || at('briefId'), at('url') || at('pin'), at('by')]
+    case 'shutdown':
+      return [at('event'), at('agentId'), acked && `acked ${acked}`, missing && `silent ${missing}`]
+    case 'capacity':
+      return [at('event'), at('agentId'), at('limitKind'), at('detail')]
+    case 'error':
+      return [at('subsystem'), at('file'), at('reason')]
+    case 'degradation':
+      return [
+        at('source'),
+        at('detail'),
+        at('count') !== '' && at('count') !== '1' ? `×${at('count')}` : '',
+        at('event') === 'cleared' ? 'cleared' : ''
+      ]
+  }
+  // A kind with no case above cannot reach here; the compiler says so.
+  const exhaustive: never = entry.kind
+  return [String(exhaustive)]
+}

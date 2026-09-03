@@ -78,6 +78,9 @@ const agoraLogSchema = z
   })
   .strict()
 
+/** The newest window of the log (SDD §5 `agora.logTail(limit)`, M8.3). */
+const agoraLogTailSchema = z.object({ limit: z.number().int().min(1).max(2000) }).strict()
+
 /** One message from the Architect's own queue (SDD §5 `watch:dismiss`). */
 const messageIdPayloadSchema = z.object({ messageId: messageIdSchema }).strict()
 
@@ -353,6 +356,10 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.agoraLog, (_ev, raw: unknown) => {
     const { afterSeq, limit } = agoraLogSchema.parse(raw)
     return agora.readLog(afterSeq, limit)
+  })
+  ipcMain.handle(IpcChannels.agoraLogTail, (_ev, raw: unknown) => {
+    const { limit } = agoraLogTailSchema.parse(raw)
+    return agora.tailLog(limit)
   })
 
   ipcMain.handle(IpcChannels.commandsList, (): readonly CommandState[] => commands.list())

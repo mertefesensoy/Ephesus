@@ -86,6 +86,7 @@ export const IpcChannels = {
   agoraTasks: 'agora:tasks',
   agoraBoard: 'agora:board',
   agoraLog: 'agora:log',
+  agoraLogTail: 'agora:logTail',
   agoraHealth: 'agora:health',
   // The Library's surface (SDD §5 `agora: memory(id)` plus the three the Memory
   // panel needs to show the ladder honestly and to fill the shelf). Documented
@@ -500,6 +501,15 @@ export interface EphApi {
     onTasks: (cb: () => void) => () => void
     /** Events after `afterSeq` — the Activity feed pages with this (SDD §4.3). */
     log: (afterSeq: number, limit: number) => Promise<readonly LogEntry[]>
+    /**
+     * The NEWEST `limit` events (M8.3).
+     *
+     * A live view of a book of record opens at the end of the book. `log`
+     * pages forward from a cursor, which is right for following along and
+     * wrong for arriving: the Activity panel opened at seq 0 and showed an
+     * overnight run's FIRST 300 events (register item B4).
+     */
+    logTail: (limit: number) => Promise<readonly LogEntry[]>
     /** Subscribe to "the log grew"; the feed then pages from its own cursor. */
     onAppend: (cb: () => void) => () => void
     /** Data-plane degradations — shown, never only logged (invariant §7). */
