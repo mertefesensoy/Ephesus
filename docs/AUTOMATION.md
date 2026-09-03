@@ -63,6 +63,16 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
   measurement is uploaded as an artifact on every run so linux floors are recorded from
   the CI condition (`--seed --from <artifact> --platform linux` for the first record,
   `--update --from` for every ratchet after it; `--update` cannot start a block).
+- **Required status checks on `main` — DECIDED 2026-09-04, NOT YET APPLIED.**
+  The Architect chose to require `Typecheck · lint · test`, `Docs integrity`
+  and `Commit attribution` before any merge to `main`. Until that setting is
+  live every gate in this file is ADVISORY:
+  `gh api repos/.../branches/main/protection` still answers 404, and PR #6 was
+  merged over a red code job on 2026-09-02. Three times during the M8 run a red
+  suite skipped the coverage and reachability gates entirely, because they run
+  after the tests. Re-check the API and drop the "not yet applied" note when it
+  is on.
+
 - **Commit attribution**: `scripts/check-attribution.cjs` over the full history — no
   commit is authored, committed or co-authored as Claude (ENGINEERING-STANDARDS §2).
   The backstop for the local hooks, which `--no-verify` or an unarmed clone can miss.
