@@ -388,10 +388,10 @@
     },
     "linux": {
       "measured": {
-        "at": "2026-09-02T12:59:40.578Z",
-        "commit": "2080f98",
-        "ref": "feature/m8-0-coverage-seam-rule",
-        "tree": "28869d68720c",
+        "at": "2026-09-03T19:17:45.421Z",
+        "commit": "a283ee1",
+        "ref": "feature/m8-1-quit-path",
+        "tree": "85fba6df25f2",
         "platform": "linux",
         "node": "v20.20.2",
         "os": "Linux 6.17.0-1022-azure",
@@ -399,17 +399,17 @@
       },
       "floors": {
         "boot": {
-          "lines": 9.63,
-          "branches": 0.28,
-          "functions": 2.63,
-          "statements": 8.84,
-          "files": 5
+          "lines": 16.52,
+          "branches": 5.02,
+          "functions": 6.01,
+          "statements": 15.73,
+          "files": 7
         },
         "engines": {
-          "lines": 92.93,
+          "lines": 93.12,
           "branches": 84.88,
-          "functions": 87.3,
-          "statements": 90.07,
+          "functions": 88.36,
+          "statements": 90.36,
           "files": 20
         },
         "hermes": {
