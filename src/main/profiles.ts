@@ -277,6 +277,13 @@ export interface ProfileActivationOptions {
   readonly store: ProfileStore
   /** The company-wide autonomy ceiling; a profile may only go lower (SDD §9). */
   globalAutonomy(): AutonomyLevel
+  /**
+   * Which of these declared grants the broker cannot supply (M8.4). Wired to
+   * the SAME resolver the spawn path uses, so the activation screen and the
+   * outcome cannot disagree; absent means nothing is checked, which is the
+   * old behaviour and is why the parameter exists.
+   */
+  missingGrants?(declared: readonly string[]): readonly string[]
   /** Spawns one hire. Rejecting unwinds the whole activation — see `activate`. */
   spawn(request: SpawnRequest): Promise<unknown>
   /** Kills one agent, on deactivation or on an unwind. */
@@ -319,7 +326,12 @@ export class ProfileActivations {
   preview(request: ActivationRequest): ActivationPlanResult {
     const loaded = this.options.store.load(request.profile)
     if (!loaded.ok) return { ok: false, reasons: loaded.reasons }
-    return activationPlan(loaded.bundle, request.target, this.options.globalAutonomy())
+    return activationPlan(
+      loaded.bundle,
+      request.target,
+      this.options.globalAutonomy(),
+      (declared) => this.options.missingGrants?.(declared) ?? []
+    )
   }
 
   /**

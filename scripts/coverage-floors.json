@@ -231,10 +231,10 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-03T19:13:28.482Z",
-        "commit": "f396eba",
+        "at": "2026-09-03T22:07:20.809Z",
+        "commit": "ce55915",
         "ref": "local",
-        "tree": "85fba6df25f2",
+        "tree": "64805f68b496",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
@@ -242,17 +242,17 @@
       },
       "floors": {
         "boot": {
-          "lines": 16.52,
+          "lines": 16.79,
           "branches": 5.02,
           "functions": 6.01,
-          "statements": 15.73,
+          "statements": 15.93,
           "files": 7
         },
         "engines": {
-          "lines": 93.95,
-          "branches": 86.11,
-          "functions": 90.48,
-          "statements": 90.88,
+          "lines": 94.08,
+          "branches": 86.3,
+          "functions": 90.58,
+          "statements": 91.1,
           "files": 20
         },
         "hermes": {
@@ -263,17 +263,17 @@
           "files": 7
         },
         "agora": {
-          "lines": 97.62,
-          "branches": 87.54,
-          "functions": 96.43,
-          "statements": 95.91,
-          "files": 9
+          "lines": 98.02,
+          "branches": 88.17,
+          "functions": 97.22,
+          "statements": 96.45,
+          "files": 11
         },
         "artemis": {
-          "lines": 97.24,
+          "lines": 97.26,
           "branches": 89.53,
           "functions": 87.88,
-          "statements": 93.94,
+          "statements": 93.98,
           "files": 2
         },
         "library": {
@@ -298,10 +298,10 @@
           "files": 15
         },
         "watch": {
-          "lines": 95.85,
+          "lines": 95.86,
           "branches": 86.73,
           "functions": 89.42,
-          "statements": 94.54,
+          "statements": 94.55,
           "files": 19
         },
         "terraces": {
@@ -326,24 +326,24 @@
           "files": 5
         },
         "company": {
-          "lines": 96.69,
-          "branches": 91.56,
-          "functions": 92.54,
-          "statements": 95.19,
+          "lines": 96.7,
+          "branches": 91.61,
+          "functions": 92.59,
+          "statements": 95.2,
           "files": 11
         },
         "home": {
-          "lines": 46.05,
-          "branches": 36.67,
-          "functions": 27.27,
-          "statements": 45.88,
+          "lines": 51.76,
+          "branches": 40.63,
+          "functions": 33.33,
+          "statements": 51.58,
           "files": 6
         },
         "panels": {
-          "lines": 19.87,
-          "branches": 23.87,
-          "functions": 14.41,
-          "statements": 19.31,
+          "lines": 23.07,
+          "branches": 26.1,
+          "functions": 17.47,
+          "statements": 22.31,
           "files": 24
         },
         "herald": {
@@ -370,7 +370,6 @@
         "src/main/pty.ts",
         "src/main/watch/cipher.ts",
         "src/preload/index.ts",
-        "src/renderer/src/ActivityPanel.tsx",
         "src/renderer/src/App.tsx",
         "src/renderer/src/BriefsPanel.tsx",
         "src/renderer/src/CommandBar.tsx",
@@ -390,10 +389,10 @@
     },
     "linux": {
       "measured": {
-        "at": "2026-09-03T19:17:45.421Z",
-        "commit": "a283ee1",
-        "ref": "feature/m8-1-quit-path",
-        "tree": "85fba6df25f2",
+        "at": "2026-09-03T22:12:13.547Z",
+        "commit": "104b1c5",
+        "ref": "feature/m8-4-setup-cliff",
+        "tree": "64805f68b496",
         "platform": "linux",
         "node": "v20.20.2",
         "os": "Linux 6.17.0-1022-azure",
@@ -401,17 +400,17 @@
       },
       "floors": {
         "boot": {
-          "lines": 16.52,
+          "lines": 16.79,
           "branches": 5.02,
           "functions": 6.01,
-          "statements": 15.73,
+          "statements": 15.93,
           "files": 7
         },
         "engines": {
-          "lines": 93.12,
-          "branches": 84.88,
-          "functions": 88.36,
-          "statements": 90.36,
+          "lines": 93.27,
+          "branches": 85.09,
+          "functions": 88.48,
+          "statements": 90.58,
           "files": 20
         },
         "hermes": {
@@ -422,17 +421,17 @@
           "files": 7
         },
         "agora": {
-          "lines": 96.1,
-          "branches": 85.98,
-          "functions": 94.64,
-          "statements": 94.16,
-          "files": 9
+          "lines": 96.86,
+          "branches": 87.1,
+          "functions": 95.83,
+          "statements": 95.12,
+          "files": 11
         },
         "artemis": {
-          "lines": 97.24,
+          "lines": 97.26,
           "branches": 89.53,
           "functions": 87.88,
-          "statements": 93.94,
+          "statements": 93.98,
           "files": 2
         },
         "library": {
@@ -457,10 +456,10 @@
           "files": 15
         },
         "watch": {
-          "lines": 95.85,
+          "lines": 95.86,
           "branches": 86.73,
           "functions": 89.42,
-          "statements": 94.54,
+          "statements": 94.55,
           "files": 19
         },
         "terraces": {
@@ -485,24 +484,24 @@
           "files": 5
         },
         "company": {
-          "lines": 96.69,
-          "branches": 91.56,
-          "functions": 92.54,
-          "statements": 95.19,
+          "lines": 96.7,
+          "branches": 91.61,
+          "functions": 92.59,
+          "statements": 95.2,
           "files": 11
         },
         "home": {
-          "lines": 46.05,
-          "branches": 36.67,
-          "functions": 27.27,
-          "statements": 45.88,
+          "lines": 51.76,
+          "branches": 40.63,
+          "functions": 33.33,
+          "statements": 51.58,
           "files": 6
         },
         "panels": {
-          "lines": 19.87,
-          "branches": 23.87,
-          "functions": 14.41,
-          "statements": 19.31,
+          "lines": 23.07,
+          "branches": 26.1,
+          "functions": 17.47,
+          "statements": 22.31,
           "files": 24
         },
         "herald": {
@@ -529,7 +528,6 @@
         "src/main/pty.ts",
         "src/main/watch/cipher.ts",
         "src/preload/index.ts",
-        "src/renderer/src/ActivityPanel.tsx",
         "src/renderer/src/App.tsx",
         "src/renderer/src/BriefsPanel.tsx",
         "src/renderer/src/CommandBar.tsx",

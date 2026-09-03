@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { defaultConfig, parseConfig, type EphConfig } from '../shared/config'
+import { shippedGatePolicy } from '../shared/gates'
+import { shippedAuthority } from '../shared/authority'
 import { writeFileAtomic } from './fsx'
 
 /**
@@ -21,7 +23,30 @@ export interface HarnessHome {
    * config with this warning surfaced in the UI (BUILD-PROMPT §3.7).
    */
   readonly configWarning: string | null
+  /**
+   * Files this run created because they were absent (M8.4).
+   *
+   * Surfaced rather than done quietly: a config file that appears without
+   * being mentioned is one the Architect never learns they can edit, and the
+   * whole setup cliff is made of files the harness requires, creates itself
+   * and never names.
+   */
+  readonly seeded: readonly string[]
 }
+
+/**
+ * Files the harness cannot run correctly without, written on first boot from
+ * values the schemas validate at module load — never from a JSON literal that
+ * could drift from the schema it illustrates.
+ *
+ * Seeded only when ABSENT. `~/.ephesus/` is the Architect's copy: an existing
+ * file is theirs, whatever it says, and overwriting one would be the harness
+ * silently reverting a decision they made.
+ */
+const SEEDED_FILES = [
+  { file: 'gate-policy.json', contents: (): unknown => shippedGatePolicy },
+  { file: 'authority.json', contents: (): unknown => shippedAuthority }
+] as const
 
 /** Creates the harness home if missing (idempotent) and loads the config. */
 export function ensureHarnessHome(root: string): HarnessHome {
@@ -44,5 +69,20 @@ export function ensureHarnessHome(root: string): HarnessHome {
     writeFileAtomic(configPath, `${JSON.stringify(defaultConfig, null, 2)}\n`)
   }
 
-  return { root, configPath, dbPath: path.join(root, 'db.sqlite'), config, configWarning }
+  const seeded: string[] = []
+  for (const { file, contents } of SEEDED_FILES) {
+    const target = path.join(root, file)
+    if (fs.existsSync(target)) continue
+    writeFileAtomic(target, `${JSON.stringify(contents(), null, 2)}\n`)
+    seeded.push(file)
+  }
+
+  return {
+    root,
+    configPath,
+    dbPath: path.join(root, 'db.sqlite'),
+    config,
+    configWarning,
+    seeded
+  }
 }

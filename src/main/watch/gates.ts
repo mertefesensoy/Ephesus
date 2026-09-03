@@ -310,7 +310,17 @@ export function loadGatePolicy(policyPath: string): {
   readonly policy: GatePolicy
   readonly warning: string | null
 } {
-  if (!fs.existsSync(policyPath)) return { policy: denyAllPolicy, warning: null }
+  if (!fs.existsSync(policyPath)) {
+    // A missing policy is a REPORTED fall back to deny-all, not a quiet one
+    // (M8.4). The harness seeds this file on first boot, so absence means it
+    // was removed — and the consequence is that every profile is clamped to
+    // `manual` and every agent waits at a prompt, which is exactly the
+    // failure that looked like nothing being wrong.
+    return {
+      policy: denyAllPolicy,
+      warning: `gate-policy.json is missing, so every gated action is held and every profile is clamped to manual — restore it or delete the harness home to have it seeded again`
+    }
+  }
   try {
     const parsed = parseGatePolicy(JSON.parse(fs.readFileSync(policyPath, 'utf8')))
     if (parsed.ok) return { policy: parsed.policy, warning: null }

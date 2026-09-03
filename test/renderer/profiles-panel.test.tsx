@@ -65,6 +65,7 @@ function plan(over: Partial<ActivationPlan> = {}): ActivationPlan {
       }
     ],
     envGrants: ['GH_TOKEN'],
+    grantsUnavailable: [],
     autonomy: AUTONOMY,
     triggers: [
       {

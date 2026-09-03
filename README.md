@@ -132,7 +132,90 @@ This repository is a complete, self-contained documentation suite. Read in this 
 5. **Everything is watchable** — avatars on the Terraces floor, live terminals, the
    activity log, budgets and the tool waterfall.
 
+## Setting it up
+
+Ephesus runs a company of real terminal-agent CLIs on your machine. It needs
+three things from you and creates the rest itself.
+
+**1. The toolchain.** Node 20 (`.nvmrc`), then:
+
+```bash
+npm install        # postinstall patches node-pty and rebuilds native modules
+npm run dev        # the app, with hot reload
+```
+
+**2. An engine you are logged into.** The MVP ships Claude only
+([ADR-0024](./docs/adr/ADR-0024-claude-only-for-the-mvp.md)): install the
+`claude` CLI and sign in.
+
+```bash
+claude auth status   # what Ephesus asks before it hires anybody
+claude auth login    # if that says you are not logged in
+```
+
+Ephesus asks this itself at every spawn. An agent whose engine has no session
+is shown as **needs-login** with the command to run, rather than started and
+left sitting at a login prompt while its card claims it is working.
+
+**3. Nothing else.** On first launch the harness creates `~/.ephesus/` and
+writes the files it needs, then tells you it did:
+
+| File | What it decides | If you delete it |
+|---|---|---|
+| `config.json` | Window bounds, company mode | Recreated with defaults |
+| `gate-policy.json` | The company-wide autonomy ceiling and which classes are held for a human | Everything is held and every profile is clamped to `manual`, reported as a degradation |
+| `authority.json` | What Artemis may decide without you (FR-5.5) | She decides nothing and every routine call queues for you |
+| `github-app.json` | The company's GitHub identity (optional, ADR-0022) | No company identity; the activation screen says which grants the broker cannot supply |
+
+`~/.ephesus/` is **yours**. Ephesus writes a file there only when it is absent
+and never edits one you already have, so anything you change stays changed.
+
+### What the shipped gate policy allows
+
+The ceiling ships at `autonomous` so a profile's own declaration governs, with
+every irreversible class held at `supervised` — attempted with you able to see
+and stop it, never silently:
+
+```
+destructive · prod-facing · scope-change · outbound · spend    supervised
+needs-human                                                    manual
+everything else                                                the profile decides
+```
+
+Autonomy composes **stricter-wins**: a profile can only ever be more cautious
+than this file, never less. Edit `gate-policy.json` to tighten the whole
+company at once.
+
+### Watching a repository
+
+A mission profile is activated against a target repository from the **Profiles**
+tab. The activation screen shows what would happen before anything does: which
+agents get hired, what they may do, which triggers get armed, and which declared
+secrets the broker cannot actually supply.
+
 ## Status
+
+**M8 in progress — the company you can leave running.** M6 and M7 landed the
+spoken company and the two outward missions; M8 is the hardening milestone that
+runs before shipping, because the suite was green while Closing Time had never
+once run in the shipped app, the standup read the oldest 500 log entries, and
+the dock showed an overnight run's first 300 events.
+
+Landed so far: a coverage baseline and the seam rule that enforces it (a wiring
+seam with no test is a defect, not a gap); a quit path that actually runs, with
+one door to the renderer and one ordered, isolated shutdown sequence; a
+degradation channel where every give-up is visible, durable and countable; the
+log-derived surfaces reading the whole book instead of its oldest 500 entries;
+and the setup cliff — the config files the harness needs are now created,
+documented and reported, and an engine with no session says so instead of
+pretending to work.
+
+M7's own exit (SRS §6.1 on a real repository) remains open and is independent
+of M8.
+
+---
+
+*The previous milestone's story:*
 
 **M5b complete — the learning company, on a licensed floor.** The Stoa is in
 the product: repositories the Architect registers by URL on the **reading

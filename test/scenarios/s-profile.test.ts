@@ -84,7 +84,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     const planned = activationPlan(
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
-      'autonomous'
+      'autonomous',
+      () => []
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
 
@@ -112,7 +113,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     const planned = activationPlan(
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
-      'autonomous'
+      'autonomous',
+      () => []
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     const byKind = Object.fromEntries(planned.plan.autonomy.map((row) => [row.kind, row.effective]))
@@ -127,7 +129,12 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
     // global clamps every kind down to `manual`, the profile's own `autonomous`
     // default included — the widest thing the bundle now asks for, and so the
     // row that would fail loudest if composition ever widened.
-    const clamped = activationPlan(bundle, { kind: 'repo', id: 'myapp', path: REPO_ROOT }, 'manual')
+    const clamped = activationPlan(
+      bundle,
+      { kind: 'repo', id: 'myapp', path: REPO_ROOT },
+      'manual',
+      () => []
+    )
     if (!clamped.ok) throw new Error(clamped.reasons.join('; '))
     for (const row of clamped.plan.autonomy) {
       expect(row.effective).toBe('manual')
@@ -141,7 +148,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
       const planned = activationPlan(
         bundle,
         { kind: 'repo', id: 'myapp', path: REPO_ROOT },
-        global as AutonomyLevel
+        global as AutonomyLevel,
+        () => []
       )
       if (!planned.ok) throw new Error(planned.reasons.join('; '))
       for (const row of planned.plan.autonomy) {

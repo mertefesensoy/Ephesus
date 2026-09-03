@@ -148,11 +148,12 @@ describe('stricter wins — in both directions, over the whole table', () => {
 describe('ids: two crews never share an agent', () => {
   it('gives one profile on two targets two disjoint agent sets', () => {
     const crew = bundle()
-    const a = activationPlan(crew, TARGET, 'supervised')
+    const a = activationPlan(crew, TARGET, 'supervised', () => [])
     const b = activationPlan(
       crew,
       { kind: 'repo', id: 'other', path: '/repos/other' },
-      'supervised'
+      'supervised',
+      () => []
     )
     if (!a.ok || !b.ok) throw new Error('expected both plans to be ok')
     const idsA = a.plan.hires.map((h) => h.agentId)
@@ -163,8 +164,8 @@ describe('ids: two crews never share an agent', () => {
   })
 
   it('gives two profiles on ONE target two disjoint agent sets (FR-9.4)', () => {
-    const a = activationPlan(bundle({ name: 'skeleton-crew' }), TARGET, 'supervised')
-    const b = activationPlan(bundle({ name: 'front-office' }), TARGET, 'supervised')
+    const a = activationPlan(bundle({ name: 'skeleton-crew' }), TARGET, 'supervised', () => [])
+    const b = activationPlan(bundle({ name: 'front-office' }), TARGET, 'supervised', () => [])
     if (!a.ok || !b.ok) throw new Error('expected both plans to be ok')
     const idsA = a.plan.hires.map((h) => h.agentId)
     const idsB = b.plan.hires.map((h) => h.agentId)
@@ -198,7 +199,7 @@ describe('ids: two crews never share an agent', () => {
 
 describe('the plan is the disclosure', () => {
   it('lists the grants, budgets, repos, memo classes and playbooks the crew would get', () => {
-    const planned = activationPlan(bundle(), TARGET, 'supervised')
+    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [])
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     const { plan } = planned
     expect(plan.envGrants).toEqual(['GH_TOKEN'])
@@ -218,7 +219,7 @@ describe('the plan is the disclosure', () => {
         hire({ name: 'deps', budget: { dailyTokens: 900 } })
       ]
     })
-    const planned = activationPlan(crew, TARGET, 'supervised')
+    const planned = activationPlan(crew, TARGET, 'supervised', () => [])
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.hires.map((h) => [h.hire, h.spawn.budget?.dailyTokens])).toEqual([
       ['oncall', 100],
@@ -229,13 +230,13 @@ describe('the plan is the disclosure', () => {
   it('leaves an unbudgeted hire unbudgeted, rather than inventing a zero', () => {
     const noBudget = hire()
     delete noBudget['budget']
-    const planned = activationPlan(bundle({ hires: [noBudget] }), TARGET, 'supervised')
+    const planned = activationPlan(bundle({ hires: [noBudget] }), TARGET, 'supervised', () => [])
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.hires[0]?.spawn.budget).toBeUndefined()
   })
 
   it('refuses a target of the wrong KIND, naming both', () => {
-    const planned = activationPlan(bundle({ targetKind: 'app' }), TARGET, 'supervised')
+    const planned = activationPlan(bundle({ targetKind: 'app' }), TARGET, 'supervised', () => [])
     expect(planned.ok).toBe(false)
     if (planned.ok) return
     expect(planned.reasons.join(' · ')).toContain('binds to a app, not a repo')
@@ -254,7 +255,7 @@ describe('the plan is the disclosure', () => {
         { id: 'ci', kind: 'event', event: 'ci', hire: 'oncall', playbook: 'incident.md' }
       ]
     })
-    const planned = activationPlan(crew, TARGET, 'supervised')
+    const planned = activationPlan(crew, TARGET, 'supervised', () => [])
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.triggers.map((t) => t.when)).toEqual(['every 15 min', 'on ci'])
     expect(
@@ -264,8 +265,8 @@ describe('the plan is the disclosure', () => {
 
   it('plans nothing into existence — calling it twice gives the same answer', () => {
     const crew = bundle()
-    const first = JSON.stringify(activationPlan(crew, TARGET, 'supervised'))
-    const second = JSON.stringify(activationPlan(crew, TARGET, 'supervised'))
+    const first = JSON.stringify(activationPlan(crew, TARGET, 'supervised', () => []))
+    const second = JSON.stringify(activationPlan(crew, TARGET, 'supervised', () => []))
     expect(first).toBe(second)
   })
 })
@@ -286,7 +287,7 @@ describe('the plan is the disclosure', () => {
 describe('a hire can be called something a person would say', () => {
   it('uses the display name for the spawn, and leaves the id alone', () => {
     const built = bundle({ hires: [hire({ displayName: 'Mason' })] })
-    const plan = activationPlan(built, TARGET, 'supervised')
+    const plan = activationPlan(built, TARGET, 'supervised', () => [])
     if (!plan.ok) throw new Error(plan.reasons.join('; '))
     const row = plan.plan.hires[0]
     expect(row?.spawn.name).toBe('Mason')
@@ -296,7 +297,7 @@ describe('a hire can be called something a person would say', () => {
   })
 
   it('falls back to the role, so an unnamed hire behaves exactly as before', () => {
-    const plan = activationPlan(bundle({ hires: [hire()] }), TARGET, 'supervised')
+    const plan = activationPlan(bundle({ hires: [hire()] }), TARGET, 'supervised', () => [])
     if (!plan.ok) throw new Error(plan.reasons.join('; '))
     expect(plan.plan.hires[0]?.spawn.name).toBe(plan.plan.hires[0]?.spawn.role)
   })

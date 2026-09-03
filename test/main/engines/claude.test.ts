@@ -531,3 +531,48 @@ describe('several agents sharing one working directory (live-run regression)', (
     expect(permissions.additionalDirectories).toContain('/their/dir')
   })
 })
+
+describe('the auth probe reads a denial as a denial (M8.4)', () => {
+  const probe = (): NonNullable<ReturnType<ClaudeAdapter['binary']>['authProbe']> => {
+    const found = new ClaudeAdapter({
+      prompts: null as never,
+      hookShimPath: 'shim'
+    }).binary().authProbe
+    if (found === undefined) throw new Error('the reference adapter must have an auth probe')
+    return found
+  }
+
+  it('does NOT read "Not logged in" as logged in', () => {
+    // `Not logged in` contains `logged in`. A bare substring test therefore
+    // sends a company to work with no session — the same shape as `reproduce`
+    // matching `prod` (M7.4) and a spoken refusal confirming a gate (M6).
+    expect(probe().authenticated('Not logged in. Run `claude auth login`.', 1)).toBe(false)
+    expect(probe().authenticated('You are not authenticated.', 1)).toBe(false)
+  })
+
+  it('does not read a negation this adapter has never seen as a session', () => {
+    // The ORDER above catches the wordings we know. This is what makes the
+    // positive PATTERN load-bearing too: no denial phrase here matches, so the
+    // only thing standing between 'Never logged in' and a company sent to work
+    // with no session is that the positive test demands 'logged in AS'.
+    expect(probe().authenticated('Never logged in on this machine', 1)).not.toBe(true)
+    expect(probe().authenticated('previously logged in; session expired', 1)).not.toBe(true)
+  })
+
+  it('reads a real session as logged in', () => {
+    expect(probe().authenticated('Logged in as architect@example.test', 0)).toBe(true)
+    expect(probe().authenticated('Account: architect@example.test', 0)).toBe(true)
+  })
+
+  it('answers null when it cannot tell, which the manager trusts', () => {
+    // Three-valued on purpose (`test/pin.ts`'s rule): a wording this adapter
+    // does not know must not refuse to start a healthy company.
+    expect(probe().authenticated('', 0)).toBeNull()
+    expect(probe().authenticated('unknown subcommand: auth', 127)).toBeNull()
+  })
+
+  it('names the command that fixes it', () => {
+    expect(probe().login).toBe('claude auth login')
+    expect(probe().command).toEqual({ command: 'claude', args: ['auth', 'status'] })
+  })
+})

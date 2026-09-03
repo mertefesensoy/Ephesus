@@ -305,7 +305,8 @@ describe('the incident binding is derived from a real plan', () => {
     const planned = activationPlan(
       loaded.bundle,
       { kind: 'repo', id: 'musahit', path: path.join(__dirname, '..', '..') },
-      'manual'
+      'manual',
+      () => []
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
 

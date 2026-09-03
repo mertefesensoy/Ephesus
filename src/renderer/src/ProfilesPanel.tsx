@@ -195,6 +195,14 @@ export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElem
       ) : (
         <p style={{ margin: '4px 0' }}>{plan.envGrants.join(', ')}</p>
       )}
+      {plan.grantsUnavailable.length > 0 && (
+        // A promise the broker cannot keep, said out loud BEFORE activation
+        // rather than discovered as a missing variable at spawn (M8.4).
+        <p style={warn}>
+          the broker cannot supply {plan.grantsUnavailable.join(', ')} — those hires will start
+          without them
+        </p>
+      )}
 
       <p style={heading}>It may act at</p>
       <ul style={{ margin: '0 0 0 16px', padding: 0 }}>

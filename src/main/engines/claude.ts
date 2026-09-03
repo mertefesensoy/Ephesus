@@ -737,6 +737,39 @@ export class ClaudeAdapter implements EngineAdapter {
       name: 'claude',
       install: { command: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
       versionProbe: { command: 'claude', args: ['--version'] },
+      /**
+       * Whether this machine is logged in (M8.4).
+       *
+       * `claude auth status` is the CLI's own answer, and it is a different
+       * question from `--version`: the binary can be present and perfectly
+       * healthy while no session exists, which is when the agent starts, prints
+       * a login prompt and does nothing until somebody notices.
+       *
+       * Read conservatively — a session is proven, never assumed. The probe is
+       * only trusted when it EXITS CLEAN and says so; anything else routes to
+       * "cannot tell", which the manager treats as trusted rather than as
+       * logged out (a probe that changes its wording must not stop the company).
+       */
+      authProbe: {
+        command: { command: 'claude', args: ['auth', 'status'] },
+        authenticated: (stdout, exitCode) => {
+          // The DENIAL is read first, and the positive patterns all carry a
+          // word that a denial cannot: `Not logged in` contains `logged in`,
+          // so a bare substring test reads a logged-out engine as ready. That
+          // is the same trap that made `reproduce` match `prod` in the M7.4
+          // scorer and made a spoken refusal confirm a gate in M6 — here it
+          // would send a company to work with no session at all.
+          if (/not logged in|not authenticated|no active session|auth login/i.test(stdout)) {
+            return false
+          }
+          if (/logged in as|authenticated as|account:/i.test(stdout)) return true
+          // A non-zero exit with nothing recognisable is still not proof of
+          // being logged out: the subcommand may not exist on this version.
+          void exitCode
+          return null
+        },
+        login: 'claude auth login'
+      },
       // `claude --version` prints e.g. "2.1.195 (Claude Code)".
       parseVersion: (stdout) => /(\d+\.\d+\.\d+[\w.+-]*)/.exec(stdout)?.[1] ?? null
     }

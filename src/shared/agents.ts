@@ -48,6 +48,16 @@ export const AGENT_LIFECYCLES = [
   'starting',
   'installing',
   'missing-binary',
+  /**
+   * The binary is there and the engine is not logged in (M8.4).
+   *
+   * Distinct from `missing-binary` because the fix is different — a login,
+   * not an install — and distinct from `running` because it is the lie this
+   * state was added to stop telling: a logged-out CLI starts, prints its own
+   * login prompt, does nothing for the rest of the day, and reported
+   * `running` the whole time with a confidently idle avatar on the floor.
+   */
+  'needs-login',
   'running',
   'exited'
 ] as const
@@ -136,6 +146,12 @@ export interface AgentCard {
   /** Declared hook fidelity of the engine, shown honestly even when degraded. */
   readonly hookFidelity: HookSupport
   readonly lifecycle: AgentLifecycle
+  /**
+   * What to run to make this engine usable, when `lifecycle` says it is not
+   * (M8.4). Shown on the card so the fix is on screen beside the problem;
+   * null whenever there is nothing to run.
+   */
+  readonly fixCommand: string | null
   /** Engine version reported by the probe; null means "could not be determined". */
   readonly engineVersion: string | null
   readonly cwd: string

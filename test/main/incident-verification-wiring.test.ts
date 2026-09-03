@@ -126,7 +126,8 @@ function crewPlan(): ActivationPlan {
   const planned = activationPlan(
     loaded.bundle,
     { kind: 'repo', id: 'myapp', path: REPO },
-    'autonomous'
+    'autonomous',
+    () => []
   )
   if (!planned.ok) throw new Error(planned.reasons.join('; '))
   return planned.plan
