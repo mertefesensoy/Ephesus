@@ -10,6 +10,29 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
     /**
+     * Coverage (M8.0, the seam rule — ENGINEERING-STANDARDS §6.7). Off unless
+     * asked for (`npm run test:coverage`); the provider is `@vitest/coverage-v8`,
+     * an Architect-approved dev dependency pinned to vitest's exact version
+     * because its peer range is exact. V8's native counters mean the suite runs
+     * the same code it runs without coverage — nothing is instrumented — so a
+     * coverage run is a test run, and CI does one run, not two.
+     *
+     * `include` lists every production file, so a module NO test imports shows
+     * up at zero rather than vanishing from the report: that absence is the M6
+     * Herald shape, and the whole point is to see it. The floors and the
+     * untested-module record live in `scripts/coverage-floors.json`, checked by
+     * `scripts/check-coverage.cjs` — deliberately not vitest's own `thresholds`,
+     * which would make this file a second record of numbers whose condition it
+     * cannot carry.
+     */
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}', 'shims/**/*.mjs'],
+      exclude: ['**/*.d.ts'],
+      reporter: ['text-summary', 'json-summary'],
+      reportsDirectory: 'coverage'
+    },
+    /**
      * Vitest's 5 s default is a performance assertion this suite never meant to
      * make. TEST-STRATEGY §2 puts the integration tests on **real fs and real
      * git in temp dirs**, so a scenario spends most of its time waiting on git

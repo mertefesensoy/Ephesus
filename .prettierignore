@@ -8,3 +8,6 @@ docs/
 LICENSE
 .claude/
 .github/
+
+# Machine-written by scripts/check-coverage.cjs --update (M8.0); its JSON.stringify layout is canonical.
+scripts/coverage-floors.json

@@ -188,10 +188,25 @@ for (const dir of SEARCH_DIRS) {
   }
 }
 
+/**
+ * 5. The seam rule, first half (ENGINEERING-STANDARDS §6.7, M8.0) — every
+ *    production module is reachable from an application entry point, or its
+ *    unreachability is a recorded decision. The walk lives in
+ *    `scripts/reachability.cjs` (it needs the compiler's module resolution,
+ *    not a regex); this file is where CI runs it, so one command still covers
+ *    every tripwire. The M6 Herald — 1,406 lines only tests could reach — is
+ *    the defect it exists to catch, and it is the first entry on its allowlist.
+ */
+const { reachabilityFailures, reachableModules } = require('./reachability.cjs')
+failures.push(...reachabilityFailures())
+
 if (failures.length > 0) {
   console.error('Invariant tripwire failures:\n')
   for (const failure of failures) console.error(`  ${failure}`)
   console.error('')
   process.exit(1)
 }
-console.log(`invariants ok (${SEARCH_DIRS.join(', ')})`)
+const { reached, universe, typeOnly } = reachableModules()
+console.log(
+  `invariants ok (${SEARCH_DIRS.join(', ')}; reachability ${String(reached.size)}/${String(universe.size)} src modules reached, ${String(universe.size - reached.size)} unreachable by recorded decision, ${String(typeOnly.size)} type-only)`
+)

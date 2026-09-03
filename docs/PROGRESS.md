@@ -4561,7 +4561,7 @@ while the dock renders the company's first 300 events after an overnight run.
 separate instances of it were found in one day. M8.0 exists to make that
 structural rather than a habit.
 
-- [ ] **M8.0 Coverage baseline and the seam rule** — there is NO coverage
+- [x] **M8.0 Coverage baseline and the seam rule** — there is NO coverage
       tooling in this repository today (`vitest.config.mts` has no `coverage`
       block, no provider is installed, `npm test` is a bare `vitest run`), so
       "improve coverage" currently has nothing to improve against. Establish the
@@ -4569,15 +4569,81 @@ structural rather than a habit.
       no test is a defect, not a gap.** Record the starting numbers per
       subsystem so later packages can be held to them.
       *ARCHITECT DECISION FIRST: a coverage provider is a NEW DEPENDENCY and
-      BUILD-PROMPT §3 requires a decision memo before one lands. Options: v8
+      BUILD-PROMPT §3 requires a decision memo before one lands. ~~Options: v8
       (bundled with vitest, no new package), istanbul (a package, better
       branch data), or none — measure by hand at the seams. Recommendation: v8,
-      because it needs no new dependency at all.*
+      because it needs no new dependency at all.~~ **DECIDED 2026-09-02:** v8,
+      as `@vitest/coverage-v8` pinned exact `4.1.11`. The struck premise was
+      FALSE — it is NOT bundled; `vitest run --coverage` fails without it — and
+      the choice was put to the Architect with that corrected first.*
       *Docs: ENGINEERING-STANDARDS §Definition of Done, TEST-STRATEGY §1–2.
       Tests: the gate itself — a coverage floor that fails CI when a seam
       regresses. Risk: a coverage NUMBER is the classic check that cannot fail;
       the floor must be per-subsystem and the rule must be about seams, or this
       package produces a metric that rises while the wiring stays untested.*
+      *Evidence (2026-09-02): the seam rule is mechanical from BOTH sides.
+      `node scripts/check-invariants.cjs` walks the import graph from the three
+      electron-vite entry points (`scripts/reachability.cjs`, value edges
+      only) → 158/166 src modules reached, 8 unreachable by recorded decision
+      (the Herald ×7, M6.9 deferred; `contrast.ts`, its own header), 6
+      type-only; the real-tree test names all seven Herald files against an
+      empty allowlist. `npm run test:coverage && node scripts/check-coverage.cjs`
+      gates 17 subsystems against `scripts/coverage-floors.json` — the ONLY
+      place a coverage figure is written, per platform, with its condition:
+      win32 measured three times at the baseline (identical to the hundredth
+      every time, once under load), linux recorded from CI's own artifact.
+      Full suite under coverage 3266 passed / 8 skipped (176 files) on the
+      hardened tree. Tests:
+      19 (reachability) + 37 (checker), over real files in temp directories;
+      twenty-one mutations in two passes (nine against the first draft, twelve
+      against the hardened one) each killed by a named test and reverted. CI: run
+      `33615249038` on `57d4f51` failed BY DESIGN at the floor check ("no
+      coverage floors are recorded for platform linux") with every earlier
+      step green on Linux — which is also the Linux proof of the `which.ts`
+      fix, `follows an npm-style %dp0% shim` passing where it had failed on
+      every prior run — and uploaded the measurement; run `33615569423` on
+      `6bfdf0f`, with the linux floors recorded from that artifact, is GREEN
+      on all three jobs. After the refutation pass the same shape repeated
+      under schema 2: run `33632864541` on `2080f98` red BY DESIGN at the
+      floor check with every earlier step green, its artifact seeded the
+      linux block (`--seed --from`), and run `33633139125` on `95dac31` is
+      GREEN on all three jobs with "coverage floors ok (17 subsystems on
+      linux; 24 untested modules, all recorded)"; the tree hash recorded on
+      linux equals the one recorded on win32, so both blocks describe the
+      same production tree. What the baseline says (figures in the file): boot
+      wiring is the least-covered row, four of its five files reached by no
+      test; none of the four mechanisms TEST-STRATEGY names meets its ≥ 90 %
+      branch target; 24 production modules are entered by no test on either
+      platform, thirteen of them renderer panels — the twenty-fourth,
+      `src/main/config.ts`, surfaced only when "untested" was tightened from
+      "no line run" to "no function entered". **REFUTED, THEN HARDENED, BEFORE
+      CLOSE:** three adversarial refuters broke the first draft on three
+      counts (a value barrel classified type-only; a deleted floor metric
+      silently disabling its comparison; a deleted platform block turning
+      `--update` into a re-seed) plus a dozen weaknesses, all listed in
+      DECISIONS-LOG; both scripts were rewritten (exact-file allowlist,
+      conservative classifier, schema-2 record with `--seed`, tree hash, stale
+      report and report-equals-tree refusals, stale-floor rule) with a fixture
+      case per finding. One finding stands and is the Architect's: `main` has
+      NO branch protection and PR #6 merged over a red code job, so every CI
+      gate is advisory until required checks are enabled. **Production call path:**
+      `.github/workflows/ci.yml`, steps "Invariant tripwires" and "Coverage
+      floors and untested modules", and BUILD-PROMPT §4's TEST line — this
+      package's product IS the gate, and those are its callers. Docs:
+      ENGINEERING-STANDARDS §6.7, TEST-STRATEGY §2, GYM-006 (ledger row,
+      metric due 2026-09-16), the M8.0 implementation doc. Owed, recorded not
+      built: export-level dead code (the M3 `effectivePolicy` shape) is
+      invisible to both halves. Branch `feature/m8-0-coverage-seam-rule`,
+      pushed, UNMERGED — merging is the Architect's. FOUND BY CI, RECORDED
+      NOT FIXED: runs `33629903392` and `33633478191` (both docs-only
+      commits — two of the branch's six runs) failed
+      `pacing-wakes.test.ts › interrupts a wake that outruns the cap` by one
+      millisecond — `WakeClock` fires on the monotonic timer and reports from
+      `Date.now()`, and the test asserts `≥ cap` with no tolerance. Product
+      code under ADR-0023, owed to M8.9 as a rate (about one ubuntu run in
+      three; never in nine win32 runs); both jobs passed on re-run. The
+      seam-rule gates did not fire either time — the floor check was skipped
+      behind the red suite.*
 
 - [ ] **M8.1 The quit path, and the rig that hid it** — B1. `mainWindow` is
       assigned once and never nulled (`src/main/index.ts:611`), so after the

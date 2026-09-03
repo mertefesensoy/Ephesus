@@ -12,6 +12,7 @@
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "postinstall": "node scripts/arm-hooks.cjs && node scripts/patch-node-pty.cjs && node scripts/sync-fonts.cjs && electron-rebuild -f"
   },
   "dependencies": {
@@ -37,6 +38,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^5.2.0",
+    "@vitest/coverage-v8": "4.1.11",
     "electron": "^37.10.3",
     "electron-vite": "^5.0.0",
     "eslint": "^10.9.1",

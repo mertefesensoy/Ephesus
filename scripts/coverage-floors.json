@@ -1,0 +1,547 @@
+{
+  "schemaVersion": 2,
+  "about": [
+    "The coverage record for the seam rule (ENGINEERING-STANDARDS §6.7, TEST-STRATEGY §2; M8.0).",
+    "Checked by scripts/check-coverage.cjs against coverage/coverage-summary.json from `npm run test:coverage`.",
+    "subsystems: a TOTAL map of every production file (src/**/*.{ts,tsx} less declarations, shims/**/*.mjs)",
+    "  to the one subsystem it belongs to. A member ending in `/` is a directory prefix; otherwise it is one file.",
+    "  An exact file beats a directory prefix; a longer prefix beats a shorter one. The report must BE the tree.",
+    "platforms.<name>: the floors measured on that platform, WITH the condition they were measured in (commit,",
+    "  ref, a git-free hash of the production tree, node, OS, command), and the production modules no test",
+    "  enters there. The first record on a platform is `--seed`; `--update` ratchets an existing block and can",
+    "  never start one. Floors only rise through --update; a fall is a hand edit with a reason in the diff.",
+    "  --update never adds an untested module; a new one is added by hand, which is the review.",
+    "tolerance: points a subsystem may sit below its floor before the check fails — see toleranceReason.",
+    "ratchetLag: points a floor may sit BELOW reality before the check fails as stale — see ratchetLagReason."
+  ],
+  "tolerance": 0.25,
+  "toleranceReason": "Measured, not assumed: three full `npm run test:coverage` runs on win32 at the M8.0 baseline (same tree, one of them under load, n = 3) agreed to the hundredth on every subsystem and metric, a spread of 0.00. 0.25 points is headroom for timing-dependent paths the runs happened to take the same way, which is the one thing n = 3 cannot exclude. What it buys varies by row: at the baseline it is between about 0.2 and 2.9 coverable lines per subsystem (home the smallest, boot the largest), so on the large rows a few lines can slip inside it — which is why the untested-module record exists beside the floors, and why --update ratchets the floor to every measurement. A failure inside this band is a false positive to RE-MEASURE (raise n, record the spread here), never a floor to lower.",
+  "ratchetLag": 5,
+  "ratchetLagReason": "A floor is a record of what was measured, and floors rise only when somebody runs --update; nothing in CI writes this file. So a subsystem more than 5 points ABOVE its floor means the record has been left behind by more than a package's worth of coverage, and the check fails until it is ratcheted — otherwise coverage gained after the baseline could be lost again without any failure, and the record would be a number nobody turned. Set at M8.0 as the size of one package's typical gain; revise with the same reasoning.",
+  "subsystems": {
+    "boot": {
+      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is",
+      "members": [
+        "src/main/index.ts",
+        "src/main/ipc.ts",
+        "src/preload/index.ts",
+        "src/renderer/src/main.tsx",
+        "src/renderer/src/App.tsx"
+      ]
+    },
+    "engines": {
+      "is": "Engine adapters and the agent process: spawn, PTY, hooks, PATH, settings hygiene, the command queue, prompts",
+      "members": [
+        "src/main/engines/",
+        "src/main/agents.ts",
+        "src/main/pty.ts",
+        "src/main/pty-stream.ts",
+        "src/main/hooks.ts",
+        "src/main/which.ts",
+        "src/main/settings-registry.ts",
+        "src/main/commands.ts",
+        "src/main/prompts.ts",
+        "src/shared/engines.ts",
+        "src/shared/hooks.ts",
+        "src/shared/pty.ts",
+        "src/shared/agents.ts",
+        "src/shared/commands.ts"
+      ]
+    },
+    "hermes": {
+      "is": "The messenger: routing, delivery, speech acts, endpoints, cursors, the Stop-hook autonomy decision",
+      "members": [
+        "src/main/hermes.ts",
+        "src/shared/message.ts",
+        "src/shared/routing.ts",
+        "src/shared/endpoints.ts",
+        "src/shared/reserved.ts",
+        "src/shared/cursor.ts",
+        "src/shared/autonomy.ts"
+      ]
+    },
+    "agora": {
+      "is": "The shared on-disk space: layout, single committer, event log, registry, task ledger, atomic writes",
+      "members": [
+        "src/main/agora.ts",
+        "src/main/eventlog.ts",
+        "src/main/git.ts",
+        "src/main/fsx.ts",
+        "src/main/ledger.ts",
+        "src/shared/log.ts",
+        "src/shared/registry.ts",
+        "src/shared/tasks.ts",
+        "src/shared/ledger.ts"
+      ]
+    },
+    "artemis": {
+      "is": "The orchestrator's lifecycle and delegated authority",
+      "members": [
+        "src/main/artemis.ts",
+        "src/shared/authority.ts"
+      ]
+    },
+    "library": {
+      "is": "Memory: memory.md, the recall ladder, FTS, MemPalace, reflection",
+      "members": [
+        "src/main/library.ts",
+        "src/main/library-fts.ts",
+        "src/main/library-fts-sqlite.ts",
+        "src/main/library-mempalace.ts",
+        "src/main/reflection.ts",
+        "src/shared/memory.ts",
+        "src/shared/recall.ts",
+        "src/shared/reflection.ts"
+      ]
+    },
+    "odeon": {
+      "is": "Accountability: briefings, decks, memos, meetings",
+      "members": [
+        "src/main/odeon.ts",
+        "src/main/odeon-endpoint.ts",
+        "src/main/briefing.ts",
+        "src/main/meeting.ts",
+        "src/shared/brief.ts",
+        "src/shared/memo.ts",
+        "src/shared/meeting.ts",
+        "src/shared/odeon.ts"
+      ]
+    },
+    "harbor": {
+      "is": "Everything in and out: GitHub ingestion, the App identity, incidents, the Front Office, sharing",
+      "members": [
+        "src/main/harbor/",
+        "src/main/frontoffice.ts",
+        "src/main/incidents.ts",
+        "src/main/known-targets.ts",
+        "src/shared/harbor.ts",
+        "src/shared/incident.ts",
+        "src/shared/known-targets.ts",
+        "src/shared/outbound.ts",
+        "src/shared/root-cause.ts",
+        "src/shared/gh-token.ts",
+        "src/shared/github-app.ts",
+        "src/shared/share.ts",
+        "src/shared/share-view.ts"
+      ]
+    },
+    "watch": {
+      "is": "Safety: gates, budgets and the durable ledger, the breaker, capacity and pacing, the secret broker, redaction",
+      "members": [
+        "src/main/watch/",
+        "src/shared/gates.ts",
+        "src/shared/breaker.ts",
+        "src/shared/cost.ts",
+        "src/shared/attribution.ts",
+        "src/shared/secrets.ts",
+        "src/shared/secret-shapes.ts",
+        "src/shared/redaction.ts",
+        "src/shared/capacity.ts",
+        "src/shared/pacing.ts"
+      ]
+    },
+    "terraces": {
+      "is": "The floor: the avatar state machine, stations, seats, the painter, citizens, envelopes",
+      "members": [
+        "src/renderer/src/floor/",
+        "src/renderer/src/emotes.ts",
+        "src/main/avatars.ts",
+        "src/shared/avatar.ts",
+        "src/shared/floor.ts",
+        "src/shared/stations.ts",
+        "src/shared/seats.ts",
+        "src/shared/vfx.ts",
+        "src/shared/emotes.ts",
+        "src/shared/characters.ts",
+        "src/shared/tileset.ts"
+      ]
+    },
+    "gymnasium": {
+      "is": "Self-improvement: proposals, the ledger, gates, metric checks",
+      "members": [
+        "src/main/gymnasium.ts",
+        "src/main/gym-cadence.ts",
+        "src/shared/gym.ts",
+        "src/shared/gym-view.ts"
+      ]
+    },
+    "stoa": {
+      "is": "Research: the watchlist, researcher plans, briefs, the cadence",
+      "members": [
+        "src/main/stoa.ts",
+        "src/main/stoa-cadence.ts",
+        "src/shared/stoa.ts",
+        "src/shared/stoa-brief.ts",
+        "src/shared/stoa-view.ts"
+      ]
+    },
+    "company": {
+      "is": "The company as an organisation: mission profiles and activation, company modes, the org layer, the scheduler, Closing Time",
+      "members": [
+        "src/main/profiles.ts",
+        "src/main/modes.ts",
+        "src/main/org.ts",
+        "src/main/scheduler.ts",
+        "src/main/closing.ts",
+        "src/shared/profile.ts",
+        "src/shared/profile-activation.ts",
+        "src/shared/profile-view.ts",
+        "src/shared/mode.ts",
+        "src/shared/mode-view.ts",
+        "src/shared/org.ts"
+      ]
+    },
+    "home": {
+      "is": "The harness home, config, app-local SQLite, window state, the IPC contract",
+      "members": [
+        "src/main/home.ts",
+        "src/main/config.ts",
+        "src/main/db.ts",
+        "src/shared/config.ts",
+        "src/shared/window-state.ts",
+        "src/shared/ipc.ts"
+      ]
+    },
+    "panels": {
+      "is": "The renderer's panels and their tokens (everything under src/renderer/src not claimed by the floor or boot)",
+      "members": [
+        "src/renderer/src/",
+        "src/shared/badges.ts",
+        "src/shared/fonts.ts",
+        "src/shared/contrast.ts"
+      ]
+    },
+    "herald": {
+      "is": "Voice — built, tested, unwired (M6.9 deferred indefinitely)",
+      "members": [
+        "src/main/herald/"
+      ]
+    },
+    "shims": {
+      "is": "The dependency-free node programs an engine runs: the hook shim, recall, the token refresh, usage",
+      "members": [
+        "shims/"
+      ]
+    }
+  },
+  "platforms": {
+    "win32": {
+      "measured": {
+        "at": "2026-09-02T12:46:26.020Z",
+        "commit": "d5d114d",
+        "ref": "local",
+        "tree": "28869d68720c",
+        "platform": "win32",
+        "node": "v20.16.0",
+        "os": "Windows_NT 10.0.26200",
+        "command": "npm run test:coverage"
+      },
+      "floors": {
+        "boot": {
+          "lines": 9.63,
+          "branches": 0.28,
+          "functions": 2.63,
+          "statements": 8.84,
+          "files": 5
+        },
+        "engines": {
+          "lines": 93.77,
+          "branches": 86.11,
+          "functions": 89.42,
+          "statements": 90.6,
+          "files": 20
+        },
+        "hermes": {
+          "lines": 98.45,
+          "branches": 87.31,
+          "functions": 97.56,
+          "statements": 95.51,
+          "files": 7
+        },
+        "agora": {
+          "lines": 97.62,
+          "branches": 87.54,
+          "functions": 96.43,
+          "statements": 95.91,
+          "files": 9
+        },
+        "artemis": {
+          "lines": 97.24,
+          "branches": 89.53,
+          "functions": 87.88,
+          "statements": 93.94,
+          "files": 2
+        },
+        "library": {
+          "lines": 90.22,
+          "branches": 78.75,
+          "functions": 86.4,
+          "statements": 88.42,
+          "files": 8
+        },
+        "odeon": {
+          "lines": 92.5,
+          "branches": 78.8,
+          "functions": 95.61,
+          "statements": 90.14,
+          "files": 8
+        },
+        "harbor": {
+          "lines": 89.38,
+          "branches": 75.12,
+          "functions": 89.19,
+          "statements": 87.87,
+          "files": 15
+        },
+        "watch": {
+          "lines": 95.85,
+          "branches": 86.73,
+          "functions": 89.42,
+          "statements": 94.54,
+          "files": 19
+        },
+        "terraces": {
+          "lines": 76.13,
+          "branches": 72.48,
+          "functions": 84.65,
+          "statements": 76.17,
+          "files": 22
+        },
+        "gymnasium": {
+          "lines": 95.19,
+          "branches": 78.46,
+          "functions": 95.12,
+          "statements": 92.96,
+          "files": 4
+        },
+        "stoa": {
+          "lines": 96.48,
+          "branches": 84.11,
+          "functions": 98.31,
+          "statements": 95.16,
+          "files": 5
+        },
+        "company": {
+          "lines": 96.69,
+          "branches": 91.56,
+          "functions": 92.54,
+          "statements": 95.19,
+          "files": 11
+        },
+        "home": {
+          "lines": 46.05,
+          "branches": 36.67,
+          "functions": 27.27,
+          "statements": 45.88,
+          "files": 6
+        },
+        "panels": {
+          "lines": 19.87,
+          "branches": 23.87,
+          "functions": 14.41,
+          "statements": 19.31,
+          "files": 24
+        },
+        "herald": {
+          "lines": 93.05,
+          "branches": 77.96,
+          "functions": 88,
+          "statements": 89.17,
+          "files": 7
+        },
+        "shims": {
+          "lines": 47.62,
+          "branches": 41.5,
+          "functions": 46.3,
+          "statements": 47.26,
+          "files": 5
+        }
+      },
+      "untested": [
+        "shims/eph-usage.mjs",
+        "src/main/config.ts",
+        "src/main/db.ts",
+        "src/main/index.ts",
+        "src/main/library-fts-sqlite.ts",
+        "src/main/pty.ts",
+        "src/main/watch/cipher.ts",
+        "src/preload/index.ts",
+        "src/renderer/src/ActivityPanel.tsx",
+        "src/renderer/src/App.tsx",
+        "src/renderer/src/BriefsPanel.tsx",
+        "src/renderer/src/CommandBar.tsx",
+        "src/renderer/src/DecksPanel.tsx",
+        "src/renderer/src/GymPanel.tsx",
+        "src/renderer/src/LedgerPanel.tsx",
+        "src/renderer/src/MeetingPanel.tsx",
+        "src/renderer/src/MemoryPanel.tsx",
+        "src/renderer/src/MemosPanel.tsx",
+        "src/renderer/src/OrgPanel.tsx",
+        "src/renderer/src/TerminalPanel.tsx",
+        "src/renderer/src/WatchPanel.tsx",
+        "src/renderer/src/floor/vfx-art.ts",
+        "src/renderer/src/fonts.ts",
+        "src/renderer/src/main.tsx"
+      ]
+    },
+    "linux": {
+      "measured": {
+        "at": "2026-09-02T12:59:40.578Z",
+        "commit": "2080f98",
+        "ref": "feature/m8-0-coverage-seam-rule",
+        "tree": "28869d68720c",
+        "platform": "linux",
+        "node": "v20.20.2",
+        "os": "Linux 6.17.0-1022-azure",
+        "command": "npm run test:coverage"
+      },
+      "floors": {
+        "boot": {
+          "lines": 9.63,
+          "branches": 0.28,
+          "functions": 2.63,
+          "statements": 8.84,
+          "files": 5
+        },
+        "engines": {
+          "lines": 92.93,
+          "branches": 84.88,
+          "functions": 87.3,
+          "statements": 90.07,
+          "files": 20
+        },
+        "hermes": {
+          "lines": 98.45,
+          "branches": 87.31,
+          "functions": 97.56,
+          "statements": 95.73,
+          "files": 7
+        },
+        "agora": {
+          "lines": 96.1,
+          "branches": 85.98,
+          "functions": 94.64,
+          "statements": 94.16,
+          "files": 9
+        },
+        "artemis": {
+          "lines": 97.24,
+          "branches": 89.53,
+          "functions": 87.88,
+          "statements": 93.94,
+          "files": 2
+        },
+        "library": {
+          "lines": 90.22,
+          "branches": 78.75,
+          "functions": 86.4,
+          "statements": 88.42,
+          "files": 8
+        },
+        "odeon": {
+          "lines": 92.5,
+          "branches": 78.8,
+          "functions": 95.61,
+          "statements": 90.14,
+          "files": 8
+        },
+        "harbor": {
+          "lines": 89.38,
+          "branches": 75.12,
+          "functions": 89.19,
+          "statements": 87.87,
+          "files": 15
+        },
+        "watch": {
+          "lines": 95.85,
+          "branches": 86.73,
+          "functions": 89.42,
+          "statements": 94.54,
+          "files": 19
+        },
+        "terraces": {
+          "lines": 75.13,
+          "branches": 71.69,
+          "functions": 84.16,
+          "statements": 75.3,
+          "files": 22
+        },
+        "gymnasium": {
+          "lines": 95.19,
+          "branches": 78.46,
+          "functions": 95.12,
+          "statements": 92.96,
+          "files": 4
+        },
+        "stoa": {
+          "lines": 96.48,
+          "branches": 84.77,
+          "functions": 98.31,
+          "statements": 95.5,
+          "files": 5
+        },
+        "company": {
+          "lines": 96.69,
+          "branches": 91.56,
+          "functions": 92.54,
+          "statements": 95.19,
+          "files": 11
+        },
+        "home": {
+          "lines": 46.05,
+          "branches": 36.67,
+          "functions": 27.27,
+          "statements": 45.88,
+          "files": 6
+        },
+        "panels": {
+          "lines": 19.87,
+          "branches": 23.87,
+          "functions": 14.41,
+          "statements": 19.31,
+          "files": 24
+        },
+        "herald": {
+          "lines": 93.05,
+          "branches": 77.96,
+          "functions": 88,
+          "statements": 89.17,
+          "files": 7
+        },
+        "shims": {
+          "lines": 47.62,
+          "branches": 41.5,
+          "functions": 46.3,
+          "statements": 47.26,
+          "files": 5
+        }
+      },
+      "untested": [
+        "shims/eph-usage.mjs",
+        "src/main/config.ts",
+        "src/main/db.ts",
+        "src/main/index.ts",
+        "src/main/library-fts-sqlite.ts",
+        "src/main/pty.ts",
+        "src/main/watch/cipher.ts",
+        "src/preload/index.ts",
+        "src/renderer/src/ActivityPanel.tsx",
+        "src/renderer/src/App.tsx",
+        "src/renderer/src/BriefsPanel.tsx",
+        "src/renderer/src/CommandBar.tsx",
+        "src/renderer/src/DecksPanel.tsx",
+        "src/renderer/src/GymPanel.tsx",
+        "src/renderer/src/LedgerPanel.tsx",
+        "src/renderer/src/MeetingPanel.tsx",
+        "src/renderer/src/MemoryPanel.tsx",
+        "src/renderer/src/MemosPanel.tsx",
+        "src/renderer/src/OrgPanel.tsx",
+        "src/renderer/src/TerminalPanel.tsx",
+        "src/renderer/src/WatchPanel.tsx",
+        "src/renderer/src/floor/vfx-art.ts",
+        "src/renderer/src/fonts.ts",
+        "src/renderer/src/main.tsx"
+      ]
+    }
+  }
+}

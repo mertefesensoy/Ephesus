@@ -82,7 +82,13 @@ export function unwrapWindowsShim(shimPath: string): string | null {
   for (const match of body.matchAll(/"([^"\r\n]*\.exe)"/gi)) {
     const raw = match[1]
     if (raw === undefined) continue
-    const expanded = raw.replace(/%~?dp0%?/gi, `${dir}${path.sep}`).replace(/[\\/]{2,}/g, path.sep)
+    // EVERY separator becomes the host's, not only doubled ones. A `.cmd` is a
+    // Windows artifact whatever host reads it, so its backslashes are path
+    // separators and never filename characters — on POSIX, where `\` IS a legal
+    // filename character, leaving them in place resolved to a file that does
+    // not exist, and the test asserting this unwrap failed on every CI run
+    // while passing on every Windows machine (M8.0).
+    const expanded = raw.replace(/%~?dp0%?/gi, `${dir}${path.sep}`).replace(/[\\/]+/g, path.sep)
     const candidate = path.isAbsolute(expanded) ? expanded : path.join(dir, expanded)
     // Never return a path that is not there: the shim would at least have run.
     if (isFile(candidate)) return candidate
