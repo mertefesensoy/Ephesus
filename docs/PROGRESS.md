@@ -4708,7 +4708,7 @@ structural rather than a habit.
       as a CHARACTERIZATION case in S-CLOSING that passes today because the loss
       is real, for M8.8 to flip. Branch `feature/m8-1-quit-path`.*
 
-- [ ] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
+- [x] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
       line plus a 50-entry in-memory ring surfaced only in a tooltip: it never
       reaches `log.jsonl`, it is gone at restart, and the wake-deferral emitter
       feeds it undeduped at a measured ~1/s so it self-evicts within a minute.
@@ -4720,6 +4720,50 @@ structural rather than a habit.
       survives a flood without evicting unrelated entries; an undelivered wake
       reports as itself and not as a generic sweep failure. Risk: dedupe that is
       too aggressive hides a real repeat — dedupe by cause, not by text.*
+      *Evidence (2026-09-03): three Architect decisions shaped it — a new
+      `degradation` LOG KIND (a condition the company runs under, not an event:
+      only a condition can be cleared or replayed, so `error` would have been a
+      bucket answering neither well); a BOUNDED LADDER into the append-only file
+      (first occurrence, then each power of ten, then the clear — an hour of a
+      once-a-second condition costs five lines instead of 3,600, with the exact
+      count always live in the UI); and a BOOT REPLAY marking a surviving
+      condition `carried`, so a morning no longer looks healthy whatever the
+      company is missing. **Dedupe is by CAUSE and the cause is a type:**
+      `<source>/<slug>` over a closed source list, so a typo is a compile error
+      and the source is derived rather than passed beside it. Assigning 61 causes
+      was the bulk of the package and its point — `library` alone had four
+      conditions a source-keyed dedupe would have collapsed, and per-agent
+      conditions carry the agent because two agents stuck is two problems. The
+      ring now holds CAUSES, so the pacing flood (D9) cannot evict anything:
+      the test asserts an unrelated entry SURVIVES 500 reports rather than
+      asserting a count. Also landed: `eventlog.tailOf` / `agora.tailLog`,
+      because `readLog` pages FORWARD from a cursor and a replay wants the
+      newest — that is B3, and M8.3 inherits the tool rather than a workaround.
+      Reporting cannot fail: `report` never throws, the append is best-effort,
+      and rows raised before the Agora opens are buffered and flushed in order.
+      Tests: 22 (channel, including the 600-entry tail-vs-head case and the
+      overflow cases below) + 4 (the line the Architect reads, typed against
+      the IPC shape) + 2 (the Agora tail the boot replay calls). Suite **3333
+      passed / 8 skipped** across 180 files under coverage; CI run
+      `33799028254` GREEN on all three jobs, first try. **Eight
+      mutations, each killed by a named test and reverted** — dedupe by text,
+      no ladder, replay marked live, replay overwriting a live entry, a cleared
+      condition returning at boot, the carried marker dropped, the count
+      dropped, and the tail reading the head. The M8.1 suite CAUGHT this
+      package's own contract change (four assertions on the old bare sources),
+      and the M8.0 FLOORS REFUSED THE PACKAGE TWICE before it landed: once
+      because a new module at 93% dragged the `agora` row under its floor —
+      the eviction path had never run, because the flood test used a limit
+      larger than the number of causes it created — and once because
+      `agora.tailLog` was a function no test called. Both were real holes;
+      neither floor was lowered.
+      which is the seam rule working in the direction that matters.
+      **Production call path:** `src/main/index.ts` constructs `DegradationLog`
+      at module scope; `reportDegradation` delegates at 61 sites; boot calls
+      `degradations.replay(agora.tailLog(...))` after `agora.reconcile()`; the
+      `agora:health` handler serves `degradations.list()` to `App.tsx`, which
+      renders each entry through `degradationLine`. Docs: SDD §4.3 (the kind and
+      its semantics) and §1.1 (the module). Branch `feature/m8-2-degradations`.*
 
 - [ ] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
       defaults to the OLDEST 500 entries and three callers use the default, so

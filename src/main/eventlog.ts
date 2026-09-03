@@ -76,6 +76,21 @@ export class EventLog {
     return out
   }
 
+  /**
+   * The LAST `limit` readable entries.
+   *
+   * `read` pages FORWARD from a cursor, which is right for a consumer that
+   * is catching up and wrong for one that wants to know what is true now.
+   * The boot replay wants the newest degradations, and asking `read` for
+   * them would hand back the oldest — register item B3, which M8.3 closes
+   * at the callers that made that mistake.
+   */
+  tailOf(limit: number): readonly LogEntry[] {
+    if (limit <= 0) return []
+    const all = this.all()
+    return all.length <= limit ? all : all.slice(all.length - limit)
+  }
+
   /** Every readable entry. For tests and small logs only. */
   all(): readonly LogEntry[] {
     return this.read(0, Number.MAX_SAFE_INTEGER)

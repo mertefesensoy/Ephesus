@@ -49,6 +49,8 @@
  * wait out the deadline again.
  */
 
+import type { DegradationCause } from '../shared/degradation'
+
 /** One thing that must be stopped, named so a failure can say which. */
 export interface QuitStep {
   readonly name: string
@@ -100,7 +102,7 @@ export interface QuitSequenceOptions {
   /** Stops, in the order they must happen. Read at run time for the same reason. */
   steps(): readonly QuitStep[]
   /** Visible degradation (invariant §7). Never throws back into the sequence. */
-  onDegraded(source: string, detail: string): void
+  onDegraded(cause: DegradationCause, detail: string): void
 }
 
 export interface StepOutcome {
@@ -164,7 +166,7 @@ export class QuitSequence {
       live = this.options.liveAgents()
     } catch (err) {
       // Asking who is live must never be the reason a quit stalls.
-      this.options.onDegraded('shutdown', `could not list live agents: ${detail(err)}`)
+      this.options.onDegraded('shutdown/live-agents', `could not list live agents: ${detail(err)}`)
       return idle
     }
     const closing = this.options.closing()
@@ -177,7 +179,7 @@ export class QuitSequence {
     try {
       choice = await this.options.ask(live)
     } catch (err) {
-      this.options.onDegraded('shutdown', `closing time was not offered: ${detail(err)}`)
+      this.options.onDegraded('shutdown/offer', `closing time was not offered: ${detail(err)}`)
       return idle
     }
     if (choice !== 'closing') return { offered: true, choice, closing: null, closingError: null }
@@ -186,14 +188,14 @@ export class QuitSequence {
       const report = await closing.begin()
       if (report.missing.length > 0) {
         this.options.onDegraded(
-          'shutdown',
+          'shutdown/closing-acks',
           `closing time: no acknowledgment from ${report.missing.join(', ')} by the deadline`
         )
       }
       return { offered: true, choice, closing: report, closingError: null }
     } catch (err) {
       const message = detail(err)
-      this.options.onDegraded('shutdown', `closing time failed: ${message}`)
+      this.options.onDegraded('shutdown/closing-time', `closing time failed: ${message}`)
       return { offered: true, choice, closing: null, closingError: message }
     }
   }
@@ -219,7 +221,7 @@ export class QuitSequence {
       // `shutdown` isolates each agent itself; reaching here means the loop as a
       // whole failed, and the stops below still have to run.
       const message = detail(err)
-      this.options.onDegraded('agents', `shutdown failed: ${message}`)
+      this.options.onDegraded('agents/shutdown', `shutdown failed: ${message}`)
       return { agentsUnwound: [], agentsFailed: [], agentsError: message }
     }
   }
@@ -230,7 +232,7 @@ export class QuitSequence {
     try {
       steps = this.options.steps()
     } catch (err) {
-      this.options.onDegraded('shutdown', `could not assemble the teardown: ${detail(err)}`)
+      this.options.onDegraded('shutdown/steps', `could not assemble the teardown: ${detail(err)}`)
       return outcomes
     }
     for (const step of steps) {
@@ -239,7 +241,7 @@ export class QuitSequence {
         outcomes.push({ name: step.name, ok: true })
       } catch (err) {
         const message = detail(err)
-        this.options.onDegraded('shutdown', `${step.name}: ${message}`)
+        this.options.onDegraded(`shutdown/stop:${step.name}`, `${step.name}: ${message}`)
         outcomes.push({ name: step.name, ok: false, error: message })
       }
     }
