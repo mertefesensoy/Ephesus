@@ -58,6 +58,23 @@ export interface AgoraOptions {
    * a handler that commits would recurse. Report it and move on.
    */
   onCommitError?(failure: CommitFailure): void
+  /**
+   * A subscriber to `onAppend` threw. Reported rather than propagated: the
+   * book of record must not depend on who is listening to it.
+   */
+  onSubscriberError?(fault: {
+    readonly seq: number
+    readonly kind: string
+    readonly reason: string
+  }): void
+  /**
+   * A whole-log read took this long or more. Reported with its size, so the
+   * cost of reading the book from byte zero is on the record (M8.10 owns
+   * making it cheap; M8.3 owns making it honest).
+   */
+  onSlowRead?(info: { readonly entries: number; readonly bytes: number; readonly ms: number }): void
+  /** Default 50 ms — a read that costs more than a frame on the main loop. */
+  readonly slowReadMs?: number
 }
 
 /**
@@ -105,7 +122,12 @@ export interface AgoraWarning {
   readonly reason: string
 }
 
+const DEFAULT_SLOW_READ_MS = 50
+
 export class Agora {
+  /** Subscribers to appended entries (M8.3). */
+  private readonly appendListeners = new Set<(entry: LogEntry) => void>()
+
   private readonly git: GitRunner
   private readonly maxAttempts: number
   private readonly backoffMs: number
@@ -135,7 +157,52 @@ export class Agora {
    * queued separately, because delivery latency must not wait on git (ADR-0004).
    */
   appendLog(draft: LogEntryDraft): LogEntry {
-    return this.log.append(draft)
+    const entry = this.log.append(draft)
+    this.publish(entry)
+    return entry
+  }
+
+  /**
+   * Subscribes to entries as they land (M8.3). Returns the unsubscribe.
+   *
+   * This is the only way anything learns that the book of record grew, and it
+   * exists because the alternative had failed silently: every appender was
+   * expected to also tell the renderer, `index.ts` did so thirty-one times, and
+   * Hermes — 282 of this machine's 1,177 entries — never did. The Activity
+   * panel therefore missed a quarter of the company's life, and nothing said
+   * so. `appendLog` is the single writer (invariant §5 keeps it that way), so
+   * publishing here covers every appender that will ever exist rather than
+   * every appender somebody remembered.
+   *
+   * Contract:
+   * - Delivered AFTER the entry is on disk, so a subscriber that re-reads the
+   *   log finds what it was told about.
+   * - In sequence order, synchronously, so ordering on screen is ordering in
+   *   the file.
+   * - One subscriber's failure never costs another its event and never fails
+   *   the append: the book of record does not depend on who is listening.
+   * - Delivery walks a snapshot, so subscribing or unsubscribing during
+   *   delivery is safe.
+   */
+  onAppend(listener: (entry: LogEntry) => void): () => void {
+    this.appendListeners.add(listener)
+    return () => {
+      this.appendListeners.delete(listener)
+    }
+  }
+
+  private publish(entry: LogEntry): void {
+    for (const listener of [...this.appendListeners]) {
+      try {
+        listener(entry)
+      } catch (err) {
+        this.options.onSubscriberError?.({
+          seq: entry.seq,
+          kind: entry.kind,
+          reason: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
   }
 
   /** Events after `afterSeq` (SDD §5 `agora.log(afterSeq, limit)`). */
@@ -146,6 +213,38 @@ export class Agora {
   /** The newest `limit` events — what is true NOW, not what happened first. */
   tailLog(limit: number): readonly LogEntry[] {
     return this.log.tailOf(limit)
+  }
+
+  /**
+   * EVERY readable entry after `afterSeq` — no window (M8.3).
+   *
+   * For the consumers that fold the whole book: the standup's facts since the
+   * last brief, the org layer's metrics, the company-mode proof gate. All three
+   * used `readLog()`'s default, which reads the OLDEST 500 and no further, so
+   * the standup filtered a 500-entry head by a cursor that had passed it and
+   * compiled every later brief from nothing, the metrics were folded from 500
+   * of 1,177 rows, and the proof gate could not see evidence older than the
+   * window. A bounded read cannot be right for these: a fact silently outside
+   * the window is worse than a slow answer.
+   *
+   * The cost is real and is reported rather than hidden — a read that takes
+   * longer than `slowReadMs` raises a degradation naming the size and the time,
+   * so M8.10 sizes its fix against measurements from real use instead of
+   * discovering the problem later.
+   */
+  readLogSince(afterSeq = 0): readonly LogEntry[] {
+    const started = Date.now()
+    const entries = this.log.read(afterSeq, Number.MAX_SAFE_INTEGER)
+    const ms = Date.now() - started
+    if (ms >= (this.options.slowReadMs ?? DEFAULT_SLOW_READ_MS)) {
+      this.options.onSlowRead?.({ entries: entries.length, bytes: this.log.sizeBytes(), ms })
+    }
+    return entries
+  }
+
+  /** Every readable entry, oldest first. See `readLogSince`. */
+  readLogAll(): readonly LogEntry[] {
+    return this.readLogSince(0)
   }
 
   /** The roster (SDD §4.1). A corrupt file yields the empty roster + a warning. */

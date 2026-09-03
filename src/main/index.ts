@@ -250,7 +250,6 @@ const steerNotes = new SteerNotes({
     // The channel is part of the trip's record (invariant §7, NFR-13) — a
     // reader of `log.jsonl` must be able to tell how the sentence traveled.
     agora?.appendLog({ kind: 'breaker', action: 'steer-channel', agentId, channel })
-    ui.send(LOG_APPEND_CHANNEL)
     agora?.commitSoon(`breaker steer for ${agentId}`)
   }
 })
@@ -723,7 +722,6 @@ async function boot(): Promise<void> {
       // The NAME, never the value — rotation is auditable without the book of
       // record becoming the read path the broker refuses to be (SDD §4.3).
       agora?.appendLog({ kind: 'secret-rotated', name, removed: change === 'removed' })
-      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (detail) => reportDegradation('secrets/broker', detail)
   })
@@ -809,6 +807,20 @@ async function boot(): Promise<void> {
       reportDegradation(
         'agora/commit',
         `gave up committing "${failure.subject}": ${failure.reason}`
+      ),
+    // A listener that throws is the listener's fault, never the book's (M8.3).
+    onSubscriberError: (fault) =>
+      reportDegradation(
+        'agora/log-subscriber',
+        `a log subscriber failed on #${String(fault.seq)} (${fault.kind}): ${fault.reason}`
+      ),
+    // What reading the book from byte zero costs, on the record rather than
+    // discovered later: M8.10 owns making it cheap, M8.3 owns making it honest.
+    onSlowRead: (info) =>
+      reportDegradation(
+        'agora/log-size',
+        `reading the whole log cost ${String(info.ms)} ms on the main loop ` +
+          `(${String(info.entries)} entries, ${String(Math.round(info.bytes / 1024))} KiB)`
       )
   })
   await agora.ensureRepo()
@@ -823,6 +835,16 @@ async function boot(): Promise<void> {
   degradations.replay(agora.tailLog(DEGRADATION_REPLAY_LIMIT))
   // And the rows reported before this file was open reach it now, in order.
   for (const row of pendingDegradationRows.splice(0)) agora.appendLog(row)
+
+  // The renderer learns that the book grew from the book itself (M8.3).
+  //
+  // This used to be thirty-one hand-written `ui.send(LOG_APPEND_CHANNEL)`
+  // calls beside thirty-one `appendLog` calls, and Hermes — which appends in
+  // thirteen places and is a quarter of everything this company records — had
+  // none of them, so the Activity panel simply never heard about a delivery.
+  // `appendLog` is the single writer, so subscribing here covers every appender
+  // there will ever be rather than every appender somebody remembered to pair.
+  agora.onAppend(() => ui.send(LOG_APPEND_CHANNEL))
 
   // The Watch's gate policy (SDD §9). Deny-by-default: an unconfigured
   // Ephesus, or one whose policy file will not parse, holds every gated action.
@@ -847,7 +869,6 @@ async function boot(): Promise<void> {
     profileAutonomy: (agentId, kind) => activations?.autonomyFor(agentId, kind) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
     },
     onOpen: (gate) => {
@@ -924,7 +945,6 @@ async function boot(): Promise<void> {
         because: kind,
         what: message
       })
-      ui.send(LOG_APPEND_CHANNEL)
     }
   })
 
@@ -993,7 +1013,6 @@ async function boot(): Promise<void> {
         .trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(
         `breaker ${String(draft['action'] ?? 'trip')} for ${String(draft['agentId'] ?? '')}`
       )
@@ -1083,7 +1102,6 @@ async function boot(): Promise<void> {
         projectedPercent: verdict.tightest?.projectedPercent ?? null,
         resetsAt: verdict.resetsAt
       })
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`pace ${verdict.pace} (${verdict.because})`)
       // Anything but full speed is a degradation the Architect must be able to
       // see, or a paced company is indistinguishable from a hung one.
@@ -1140,7 +1158,6 @@ async function boot(): Promise<void> {
     knownAgents: () => hermes?.knownAgents() ?? [],
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     onChange: () => ui.send(TASKS_STATE_CHANNEL),
     onDegraded: (detail) => reportDegradation('agora/task-ledger', detail)
@@ -1158,7 +1175,6 @@ async function boot(): Promise<void> {
     gate: (gateId) => gates?.get(gateId) ?? null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject)
   })
@@ -1227,7 +1243,7 @@ async function boot(): Promise<void> {
   briefing = new BriefingJob({
     prompts,
     gather: (sinceSeq) => ({
-      events: agora?.readLog().filter((entry) => entry.seq > sinceSeq) ?? [],
+      events: agora?.readLogSince(sinceSeq) ?? [],
       ledger: ledger?.tasks() ?? emptyTaskLedger,
       openGates: (gates?.list() ?? []).map((gate) => ({
         id: gate.id,
@@ -1260,7 +1276,6 @@ async function boot(): Promise<void> {
     deliver: (message) => hermes?.deliverFromHarness(message),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (detail) => reportDegradation('odeon/briefing', detail)
   })
@@ -1283,7 +1298,6 @@ async function boot(): Promise<void> {
       ),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     onChange: () => ui.send(ODEON_QUEUE_CHANNEL)
   })
@@ -1295,7 +1309,7 @@ async function boot(): Promise<void> {
   org = new OrgLayer({
     agoraRoot: agora.root,
     gather: () => ({
-      events: agora?.readLog() ?? [],
+      events: agora?.readLogAll() ?? [],
       agents: Object.keys(agora?.registry().agents ?? {}).sort(),
       spend: Object.keys(agora?.registry().agents ?? {}).map((agentId) => ({
         agentId,
@@ -1304,7 +1318,6 @@ async function boot(): Promise<void> {
     }),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon/org', detail)
@@ -1351,7 +1364,6 @@ async function boot(): Promise<void> {
     briefExists: (briefId) => stoa?.brief(briefId) !== null,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon/gymnasium', detail)
@@ -1372,7 +1384,6 @@ async function boot(): Promise<void> {
     prompts: promptStore,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
     onDegraded: (detail) => reportDegradation('odeon/stoa', detail)
@@ -1410,7 +1421,7 @@ async function boot(): Promise<void> {
     },
     rows: () => gymnasium?.rows() ?? [],
     gymEvents: () =>
-      (agora?.readLog() ?? [])
+      (agora?.readLogAll() ?? [])
         .filter((entry) => entry['kind'] === 'gym')
         .map((entry) => ({
           event: entry['event'],
@@ -1419,9 +1430,13 @@ async function boot(): Promise<void> {
         })),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     recordOnLedger: (change) => gymnasium?.recordModeChange(change),
+    // Kept deliberately, unlike the thirty-one pushes the append subscription
+    // replaced: a mode change writes to the Gymnasium ledger as well as the
+    // log, and this is what tells the panels to re-read THAT. It is not a
+    // duplicate of the append push — it fires for a file the subscription
+    // knows nothing about.
     onChanged: () => ui.send(LOG_APPEND_CHANNEL)
   })
 
@@ -1493,7 +1508,6 @@ async function boot(): Promise<void> {
       prompts.render(path.join('hermes', `closing-time-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`shutdown ${String(draft['event'] ?? 'event')}`)
     }
   })
@@ -1536,7 +1550,6 @@ async function boot(): Promise<void> {
     render: (kind, vars) => prompts.render(path.join('harbor', `incident-${kind}.md`), vars).trim(),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`incident ${String(draft['event'] ?? 'event')}`)
     },
     // UC-09 step 4's announcement has no delivery leg: M6.9 is deferred and the
@@ -1590,7 +1603,6 @@ async function boot(): Promise<void> {
     deliver: (message) => hermes?.deliverFromHarness(message),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     }
   })
 
@@ -1617,7 +1629,6 @@ async function boot(): Promise<void> {
         ranMs: Math.round(ranMs),
         capMs
       })
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`wake cap reached for ${agentId}`)
       reportDegradation(
         `usage/wake-cap:${agentId}`,
@@ -1674,7 +1685,6 @@ async function boot(): Promise<void> {
         subject: message.subject.slice(0, 200),
         summary: message.body.slice(0, 2000)
       })
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`sweep report from ${message.from}`)
       return true
     },
@@ -1941,7 +1951,6 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       // Durability is a commit, and it is queued rather than awaited: delivery
       // latency must never wait on git (ADR-0004).
       agora?.commitSoon(`log ${draft.kind} for ${String(draft['agentId'] ?? 'agent')}`)
@@ -2015,7 +2024,6 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`profile ${String(draft['event'] ?? 'event')}`)
     },
     onTriggerFired: (instanceId, triggerId, agentId, playbook) => {
@@ -2030,7 +2038,6 @@ async function boot(): Promise<void> {
         agentId,
         playbook
       })
-      ui.send(LOG_APPEND_CHANNEL)
 
       // …and the agent is actually told. Logging the fire and stopping there
       // would leave the health watcher and the dependency updater spawned and
@@ -2064,7 +2071,6 @@ async function boot(): Promise<void> {
     onLogEvent: (draft) => {
       // FR-10.3: every inbound item lands in `log.jsonl` tagged `remote`.
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
     },
     onDegraded: (what) => reportDegradation('harbor/ingest', what)
   })
@@ -2115,7 +2121,6 @@ async function boot(): Promise<void> {
         projected: verdict.projected,
         because: verdict.because
       })
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`budget ${verdict.state} for ${agentId}`)
       if (verdict.state !== 'ok') {
         reportDegradation(
@@ -2195,7 +2200,6 @@ async function boot(): Promise<void> {
         retryAt: row.retryAt,
         processAlive: row.processAlive
       })
-      ui.send(LOG_APPEND_CHANNEL)
       ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity parked ${row.agentId}`)
       // Invariant §7. A pause nobody can see is the failure mode this whole
@@ -2229,7 +2233,6 @@ async function boot(): Promise<void> {
         waitedMs: Date.parse(row.retryAt) - Date.parse(row.since),
         recordId: row.limit.recordId
       })
-      ui.send(LOG_APPEND_CHANNEL)
       ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity resume ${row.agentId}`)
       hermes?.setPaused(row.agentId, false)
@@ -2278,7 +2281,6 @@ async function boot(): Promise<void> {
         since: row.since,
         recordId: row.limit.recordId
       })
-      ui.send(LOG_APPEND_CHANNEL)
       ui.send(CAPACITY_STATE_CHANNEL)
       agora?.commitSoon(`capacity cleared ${row.agentId}`)
       hermes?.setPaused(row.agentId, false)
@@ -2313,7 +2315,6 @@ async function boot(): Promise<void> {
     },
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
-      ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`log ${draft.kind} ${String(draft['event'] ?? '')}`)
     },
     onDegraded: (detail) => reportDegradation('artemis/driver', detail)
@@ -2583,7 +2584,6 @@ async function boot(): Promise<void> {
           profile: result.name,
           replaced: result.replaced
         })
-        ui.send(LOG_APPEND_CHANNEL)
       }
       return result
     },

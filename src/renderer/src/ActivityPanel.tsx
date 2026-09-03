@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import type { LogEntry } from '../../shared/log'
+import { logRowSummary, type LogEntry } from '../../shared/log'
 
 /**
  * The Activity tab (UI-DESIGN §4) — a live view of `log.jsonl`, the company's
  * book of record (SDD §4.3).
  *
  * It is a **pointer to the log, never a second record**. Nothing is stored here
- * that is not already a line in that file; the panel holds a cursor and pages
- * forward from it, so what you read on screen and what a forensic reader finds
- * on disk are the same rows in the same order (NFR-13).
+ * that is not already a line in that file, so what you read on screen and what
+ * a forensic reader finds on disk are the same rows in the same order (NFR-13).
+ *
+ * It opens at the END of the book and then follows forward (M8.3). Opening at
+ * seq 0 is what register item B4 describes: after an overnight run the panel
+ * showed the company's FIRST 300 events and crawled towards the present one
+ * append at a time. The row text lives in `shared/log.ts` beside the kind list,
+ * because it has to be total over it — the version that lived here had seven
+ * cases and a fallback, and 19% of rows rendered blank.
  *
  * Appends are batched (SDD §11 "log rendering virtualized + batched"): main
  * says only "the log grew" and this panel then pulls whatever it has not seen,
@@ -20,32 +26,6 @@ const WINDOW_SIZE = 300
 /** Batching window for a burst of appends (SDD §11). */
 const BATCH_MS = 120
 
-/** The refs worth putting in front of a human, per kind (SDD §4.3). */
-function summarise(entry: LogEntry): string {
-  const ref = (name: string): string => {
-    const value = entry[name]
-    return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
-  }
-  switch (entry.kind) {
-    case 'delivery':
-      return `${ref('from')} → ${ref('to')} · ${ref('act')} · ${ref('subject')}`
-    case 'bounce':
-      return `${ref('from')} → ${ref('to')} · ${ref('reason')}`
-    case 'spawn':
-      return `${ref('agentId')} · ${ref('engine')} ${ref('engineVersion')} · ${ref('role')}`
-    case 'exit':
-      return `${ref('agentId')} · exit ${ref('exitCode')}`
-    case 'hook':
-      return `${ref('agentId')} · ${ref('event')} ${ref('decision')} ${ref('because')}`.trim()
-    case 'breaker':
-      return `${ref('agentId')} · ${ref('signal')} · rung ${ref('rung')}`
-    case 'error':
-      return `${ref('subsystem')} · ${ref('reason')}`
-    default:
-      return ref('agentId') || ref('subject') || ''
-  }
-}
-
 export function ActivityPanel(): ReactElement {
   const [entries, setEntries] = useState<readonly LogEntry[]>([])
   const cursorRef = useRef(0)
@@ -55,15 +35,23 @@ export function ActivityPanel(): ReactElement {
     const eph = window.eph
     if (!eph) return
 
-    const pull = (): void => {
-      void eph.agora.log(cursorRef.current, WINDOW_SIZE).then((batch) => {
-        if (batch.length === 0) return
-        cursorRef.current = batch[batch.length - 1]?.seq ?? cursorRef.current
-        setEntries((current) => [...current, ...batch].slice(-WINDOW_SIZE))
-      })
+    const absorb = (batch: readonly LogEntry[]): void => {
+      if (batch.length === 0) return
+      cursorRef.current = batch[batch.length - 1]?.seq ?? cursorRef.current
+      setEntries((current) => [...current, ...batch].slice(-WINDOW_SIZE))
     }
 
-    pull()
+    /** Follows the log forward from what this panel has already shown. */
+    const pull = (): void => {
+      void eph.agora.log(cursorRef.current, WINDOW_SIZE).then(absorb)
+    }
+
+    // A live view of a book of record opens at the END of the book. Paging
+    // forward from seq 0 is right for following along and wrong for arriving:
+    // it showed an overnight run's FIRST 300 events and then crawled towards
+    // the present one append at a time (register item B4). The tail read is the
+    // one M8.2 added for the degradation replay, which had the same question.
+    void eph.agora.logTail(WINDOW_SIZE).then(absorb)
     const off = eph.agora.onAppend(() => {
       // Coalesce a burst into one pull, and therefore one render (SDD §11).
       if (pendingRef.current) return
@@ -136,7 +124,7 @@ export function ActivityPanel(): ReactElement {
           >
             <span style={{ color: 'var(--eph-ink-700)', minWidth: '48px' }}>#{entry.seq}</span>
             <span style={{ color: 'var(--eph-aegean)', minWidth: '84px' }}>{entry.kind}</span>
-            <span style={{ flex: 1, wordBreak: 'break-word' }}>{summarise(entry)}</span>
+            <span style={{ flex: 1, wordBreak: 'break-word' }}>{logRowSummary(entry)}</span>
           </div>
         ))}
       </div>

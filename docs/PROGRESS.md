@@ -4765,7 +4765,7 @@ structural rather than a habit.
       renders each entry through `degradationLine`. Docs: SDD §4.3 (the kind and
       its semantics) and §1.1 (the module). Branch `feature/m8-2-degradations`.*
 
-- [ ] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
+- [x] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
       defaults to the OLDEST 500 entries and three callers use the default, so
       the standup's cursor pins at 500 and every later brief filters to empty:
       measured, 676 of 1177 entries invisible, with a retro on disk reporting
@@ -4779,6 +4779,48 @@ structural rather than a habit.
       a Hermes append reaches the panel; every log kind the harness emits has a
       case. Risk: none of these fail loudly, so the tests must assert on WHICH
       entries render, never on how many.*
+      *Evidence (2026-09-04): five defects, one package, and every case runs
+      against a log LARGER than the old window — that window IS the defect,
+      and every fixture in this repository was smaller than it, which is why
+      a green suite never saw any of this. **(1)** The renderer now learns
+      that the book grew from the book itself: `Agora.onAppend` is a
+      publish/subscribe on the single writer (the Architect asked for pub/sub
+      rather than a hook, for the flexibility and the testing chances), so
+      Hermes — 13 append sites, 282 of 1,177 entries, never pushed once — is
+      covered by construction. Thirty-one hand-written pushes collapsed into
+      one subscription; the one that survives is the company-mode `onChanged`,
+      which fires for the Gymnasium LEDGER, a different file. Contract, each
+      clause with a case: delivered after the entry is ON DISK, in order,
+      synchronously, one subscriber never costing another its event nor
+      failing the append, delivery over a snapshot. **(2)** `readLogAll` /
+      `readLogSince` read to the END with the cost reported through the M8.2
+      channel (`agora/log-size`, default 50 ms): the standup read the oldest
+      500 and THEN filtered by a cursor that had passed it, so every later
+      brief was compiled from nothing; the org metrics folded 500 of 1,177
+      rows; the §6.9 proof gate could not see older evidence. **(3)** The
+      Activity panel opens at the END of the book through `agora:logTail` —
+      the reader M8.2 added for the degradation replay, reused rather than
+      re-derived, which is the same defect B3 names. **(4)** `logRowSummary`
+      moved to `shared/log.ts` beside the kinds, total over them with no
+      `default` and a `never` check, and unable to return an empty string.
+      **(5)** The breaker row reads `signals` (plural, an array) as every
+      emitter writes it; `signal` had blanked the reason on all 93 rows while
+      the row still looked populated. Tests: 10 (whole-log reads and the
+      pub/sub) + 40 (the row, one realistic payload per kind plus the awkward
+      shapes) + 5 (the REAL panel mounted against a 1,177-entry log). Six
+      mutations, each killed by a named test and reverted. Gate: suite **3388
+      passed / 8 skipped** across 183 files under coverage; floors green, and
+      the untested-module count fell 24 → 23 because the panel is now entered
+      by a test. The floors REFUSED the package once more, on branches this
+      time: `logRowSummary`'s one-sided flow, boolean and non-list fields, the
+      fallback bound, and the exhaustive arm — the last reached with a cast
+      and documented as what it guards, an entry whose kind comes from a NEWER
+      version. **Production call path:** `index.ts`
+      `agora.onAppend(() => ui.send(LOG_APPEND_CHANNEL))` after the degradation
+      replay; `BriefingJob.gather` → `readLogSince`; `OrgLayer.gather` and
+      `CompanyModes.gymEvents` → `readLogAll`; `ipcMain.handle(agoraLogTail)` →
+      the panel’s first read. Docs: SDD §1.1 (`agora.ts`, `eventlog.ts`).
+      Branch `feature/m8-3-log-surfaces`.*
 
 - [ ] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
       harness requires, creates itself, and does not document; each absence is

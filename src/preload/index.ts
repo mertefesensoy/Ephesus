@@ -190,6 +190,8 @@ const eph: EphApi = {
     },
     log: (afterSeq, limit) =>
       ipcRenderer.invoke(IpcChannels.agoraLog, { afterSeq, limit }) as Promise<readonly LogEntry[]>,
+    logTail: (limit: number) =>
+      ipcRenderer.invoke(IpcChannels.agoraLogTail, { limit }) as Promise<readonly LogEntry[]>,
     onAppend: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(LOG_APPEND_CHANNEL, listener)
