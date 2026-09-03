@@ -63,17 +63,19 @@
       ]
     },
     "agora": {
-      "is": "The shared on-disk space: layout, single committer, event log, registry, task ledger, atomic writes",
+      "is": "The shared on-disk space: layout, single committer, event log, registry, task ledger, atomic writes, and the degradation channel that writes conditions into the same book (M8.2)",
       "members": [
         "src/main/agora.ts",
+        "src/main/degradations.ts",
         "src/main/eventlog.ts",
-        "src/main/git.ts",
         "src/main/fsx.ts",
+        "src/main/git.ts",
         "src/main/ledger.ts",
+        "src/shared/degradation.ts",
+        "src/shared/ledger.ts",
         "src/shared/log.ts",
         "src/shared/registry.ts",
-        "src/shared/tasks.ts",
-        "src/shared/ledger.ts"
+        "src/shared/tasks.ts"
       ]
     },
     "artemis": {

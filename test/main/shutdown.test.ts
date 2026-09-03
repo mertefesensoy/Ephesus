@@ -220,7 +220,7 @@ describe('the quit sequence — the offer', () => {
     expect(report.closing).toMatchObject({ acked: ['agent.mason'], missing: ['agent.tess'] })
     expect(degradations).toEqual([
       {
-        source: 'shutdown',
+        source: 'shutdown/closing-acks',
         detail: 'closing time: no acknowledgment from agent.tess by the deadline'
       }
     ])
@@ -256,7 +256,10 @@ describe('the quit sequence — one phase failing never skips the next', () => {
     expect(report.closingError).toBe('Object has been destroyed')
     expect(report.agentsUnwound).toEqual(['agent.mason'])
     expect(seen).toEqual(['ptys', 'db'])
-    expect(degradations[0]?.detail).toBe('closing time failed: Object has been destroyed')
+    expect(degradations[0]).toEqual({
+      source: 'shutdown/closing-time',
+      detail: 'closing time failed: Object has been destroyed'
+    })
   })
 
   it('stops everything even when the whole agent shutdown fails', async () => {
@@ -269,7 +272,7 @@ describe('the quit sequence — one phase failing never skips the next', () => {
     expect(report.agentsError).toBe('spawner is gone')
     expect(seen).toEqual(['ptys', 'db'])
     expect(degradations).toContainEqual({
-      source: 'agents',
+      source: 'agents/shutdown',
       detail: 'shutdown failed: spawner is gone'
     })
   })
@@ -316,7 +319,10 @@ describe('the quit sequence — one phase failing never skips the next', () => {
       { name: 'hooks', ok: true },
       { name: 'db', ok: true }
     ])
-    expect(degradations).toContainEqual({ source: 'shutdown', detail: 'ptys: kill failed' })
+    expect(degradations).toContainEqual({
+      source: 'shutdown/stop:ptys',
+      detail: 'ptys: kill failed'
+    })
   })
 
   it('tears down even when asking who is live throws', async () => {
@@ -328,7 +334,10 @@ describe('the quit sequence — one phase failing never skips the next', () => {
     const report = await quit.run()
     expect(report.offered).toBe(false)
     expect(seen).toEqual(['ptys', 'db'])
-    expect(degradations[0]?.detail).toBe('could not list live agents: roster unreadable')
+    expect(degradations[0]).toEqual({
+      source: 'shutdown/live-agents',
+      detail: 'could not list live agents: roster unreadable'
+    })
   })
 
   it('tears down even when the offer itself throws', async () => {
@@ -340,9 +349,10 @@ describe('the quit sequence — one phase failing never skips the next', () => {
     })
     await quit.run()
     expect(seen).toEqual(['ptys', 'db'])
-    expect(degradations[0]?.detail).toBe(
-      'closing time was not offered: no window to parent the dialog'
-    )
+    expect(degradations[0]).toEqual({
+      source: 'shutdown/offer',
+      detail: 'closing time was not offered: no window to parent the dialog'
+    })
   })
 })
 

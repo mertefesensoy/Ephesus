@@ -59,7 +59,17 @@ export const LOG_KINDS = [
    * cannot reconstruct what the company did (NFR-13).
    */
   'capacity',
-  'error'
+  'error',
+  /**
+   * A condition the company is running under, not an event that happened
+   * (M8.2, Architect decision 2026-09-03). Carries `source`, a stable
+   * `cause`, the latest `detail`, the `count` the row accounts for and
+   * `since`; the row with `event: 'cleared'` says it ended and for how
+   * long. Deliberately not `error`: "delivery threw" happened once, "recall
+   * is on the grep rung" is still true, and only the second can be cleared.
+   * See `src/shared/degradation.ts`.
+   */
+  'degradation'
 ] as const
 
 export const logKindSchema = z.enum(LOG_KINDS)

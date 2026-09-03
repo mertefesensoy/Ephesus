@@ -292,11 +292,27 @@ export interface AgoraHealth {
   readonly fileWarnings: readonly { readonly file: string; readonly reason: string }[]
   /** Commits the queue gave up on after exhausting its retry budget. */
   readonly commitFailures: readonly { readonly subject: string; readonly reason: string }[]
-  /** Runtime degradations reported by main since boot (bounded, newest last). */
+  /**
+   * Conditions the company is running under (M8.2), one per CAUSE rather than
+   * one per occurrence — so a check that reports every second is one row with a
+   * count, not fifty rows that push everything else out.
+   */
   readonly runtime: readonly {
+    /** Epoch ms of the most recent report; `at` for the older UI wording. */
     readonly at: number
     readonly source: string
     readonly detail: string
+    /** The stable identity, `<source>/<slug>`. */
+    readonly cause: string
+    /** Reports of this cause, this session plus whatever was replayed. */
+    readonly count: number
+    /** Epoch ms of the first report. */
+    readonly since: number
+    /**
+     * `carried` means: replayed from the log at boot, true when the company
+     * stopped, and not re-checked since. Never shown as though it were current.
+     */
+    readonly freshness: 'live' | 'carried'
   }[]
 }
 

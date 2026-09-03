@@ -66,6 +66,8 @@ import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
 import { QuitSequence, summarizeQuit } from './shutdown'
 import { UiBridge } from './ui-bridge'
+import { DegradationLog } from './degradations'
+import type { DegradationCause, DegradationRow } from '../shared/degradation'
 import { CommandQueue } from './commands'
 import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
@@ -154,7 +156,7 @@ let reflection: ReflectionJob | null = null
 const scheduler = new Scheduler({
   onError: (triggerId, err) =>
     reportDegradation(
-      'scheduler',
+      `scheduler/trigger:${triggerId}`,
       `${triggerId} failed: ${err instanceof Error ? err.message : String(err)}`
     )
 })
@@ -167,7 +169,7 @@ let closingTime: ClosingTime | null = null
  * `check-invariants.cjs` fails on a `webContents.send` written anywhere else.
  */
 const ui = new UiBridge({
-  onDropped: (channel, detail) => reportDegradation('renderer', `${channel}: ${detail}`)
+  onDropped: (channel, detail) => reportDegradation('renderer/send', `${channel}: ${detail}`)
 })
 // The terminal stream goes to the bridge, once — not to the `webContents` of a
 // window a later window replaces (SDD §1.1 `pty.ts`: 'a window recreated
@@ -190,12 +192,32 @@ const constrainedBudgets = new Set<string>()
 /** While constrained, an agent runs on this fraction of its daily budget. */
 const CONSTRAINED_BUDGET_FACTOR = 0.5
 
-const RUNTIME_HEALTH_LIMIT = 50
-const runtimeHealth: { at: number; source: string; detail: string }[] = []
-function reportDegradation(source: string, detail: string): void {
-  console.warn(`${source}: ${detail}`)
-  runtimeHealth.push({ at: Date.now(), source, detail })
-  if (runtimeHealth.length > RUNTIME_HEALTH_LIMIT) runtimeHealth.shift()
+/**
+ * Degradations reported before the Agora exists (M8.2). Boot reports through
+ * this channel from its first line, and the book of record is not open until a
+ * few lines later — so those rows wait here rather than being lost, which is
+ * precisely the window a first-run failure happens in.
+ */
+const pendingDegradationRows: DegradationRow[] = []
+
+/**
+ * The degradation channel (M8.2) — invariant §7's "every degradation is a
+ * visible UI state". Keyed by CAUSE, so the pacing check's once-a-second report
+ * is one row with a count instead of fifty rows that push everything else out.
+ */
+const degradations = new DegradationLog({
+  append: (row) => {
+    if (agora === null) pendingDegradationRows.push(row)
+    else agora.appendLog(row)
+  },
+  warn: (line) => console.warn(line)
+})
+
+/** How much of the log's tail the boot replay reads back. */
+const DEGRADATION_REPLAY_LIMIT = 400
+
+function reportDegradation(cause: DegradationCause, detail: string): void {
+  degradations.report(cause, detail)
 }
 
 /**
@@ -320,7 +342,10 @@ const hookServer = new HookServer({
       // behind a dialog the harness cannot answer — the M1 carried item is
       // about that being *visible*, not about who may allow it (invariant §7).
       if (!alreadyBlocked) {
-        reportDegradation('gates', `${envelope.agentId} is waiting on a human decision`)
+        reportDegradation(
+          `gates/awaiting-human:${envelope.agentId}`,
+          `${envelope.agentId} is waiting on a human decision`
+        )
       }
     }
 
@@ -380,7 +405,7 @@ const hookServer = new HookServer({
   },
   onEventError: (err) =>
     reportDegradation(
-      'hooks',
+      'hooks/handler',
       `event handler failed: ${err instanceof Error ? err.message : String(err)}`
     )
 })
@@ -648,7 +673,7 @@ async function boot(): Promise<void> {
   db = new AppDb(home.dbPath)
   // A stored ledger row that fails validation on read is dropped and reported,
   // never repaired — the ledger is append-only (invariant §5).
-  db.onUnreadableRow = (detail) => reportDegradation('ledger', detail)
+  db.onUnreadableRow = (detail) => reportDegradation('ledger/unreadable-row', detail)
   // Bound before any agent can spawn, so no spawn ever races its own hooks.
   // A failure here is a *visible* degraded state, never a dead app: agents still
   // run, the floor freezes, and the UI says why (SDD §10, invariant §7).
@@ -673,7 +698,7 @@ async function boot(): Promise<void> {
   // `list()`; written only by a successful activation below.
   knownTargets = new KnownTargets(path.join(home.root, KNOWN_TARGETS_REL))
   const knownTargetsWarning = knownTargets.warning()
-  if (knownTargetsWarning !== null) reportDegradation('profiles', knownTargetsWarning)
+  if (knownTargetsWarning !== null) reportDegradation('profiles/known-targets', knownTargetsWarning)
   const profiles = new ProfileStore(
     path.join(home.root, 'profiles'),
     path.join(appRoot, 'profiles'),
@@ -700,7 +725,7 @@ async function boot(): Promise<void> {
       agora?.appendLog({ kind: 'secret-rotated', name, removed: change === 'removed' })
       ui.send(LOG_APPEND_CHANNEL)
     },
-    onDegraded: (detail) => reportDegradation('secrets', detail)
+    onDegraded: (detail) => reportDegradation('secrets/broker', detail)
   })
 
   // The company's GitHub identity (ADR-0022). The signing key comes out of the
@@ -713,7 +738,7 @@ async function boot(): Promise<void> {
     privateKey: () => secrets?.grantsFor([GITHUB_APP_KEY_SECRET]).env[GITHUB_APP_KEY_SECRET] ?? null
   })
   const companyWarning = companyGitHub.warning()
-  if (companyWarning !== null) reportDegradation('secrets', companyWarning)
+  if (companyWarning !== null) reportDegradation('secrets/company-identity', companyWarning)
   if (companyGitHub.configured()) {
     const mintCompanyToken = (): void => {
       void companyGitHub?.refresh().then((minted) => {
@@ -734,13 +759,16 @@ async function boot(): Promise<void> {
           })
           if (who === null) {
             reportDegradation(
-              'secrets',
+              'secrets/bot-identity',
               'company GitHub token minted, but the bot identity could not be read — commits will not be authored as the company'
             )
           }
           return
         }
-        reportDegradation('secrets', `company GitHub identity unavailable: ${minted.because}`)
+        reportDegradation(
+          'secrets/company-token',
+          `company GitHub identity unavailable: ${minted.because}`
+        )
       })
     }
     mintCompanyToken()
@@ -760,7 +788,10 @@ async function boot(): Promise<void> {
     )
   }
   for (const failure of sweep.failed) {
-    reportDegradation('settings', `sweep could not restore ${failure.path}: ${failure.reason}`)
+    reportDegradation(
+      `settings/restore:${failure.path}`,
+      `sweep could not restore ${failure.path}: ${failure.reason}`
+    )
   }
 
   // The Agora is a git repo committed only by this process (ADR-0004). It is
@@ -775,11 +806,23 @@ async function boot(): Promise<void> {
     root: path.join(home.root, 'agora'),
     prompts,
     onCommitError: (failure) =>
-      reportDegradation('agora', `gave up committing "${failure.subject}": ${failure.reason}`)
+      reportDegradation(
+        'agora/commit',
+        `gave up committing "${failure.subject}": ${failure.reason}`
+      )
   })
   await agora.ensureRepo()
   const reconciled = await agora.reconcile()
   if (reconciled.sha) console.info(`agora reconciled at ${reconciled.sha.slice(0, 8)}`)
+
+  // What was still wrong when the company last stopped (M8.2, Architect
+  // decision 2026-09-03). Replayed entries are marked `carried`, never live:
+  // they are what the record says, not what this session has observed. Read
+  // from the TAIL — the newest events — because `readLog`'s cursor pages
+  // forward from the oldest, which is register item B3.
+  degradations.replay(agora.tailLog(DEGRADATION_REPLAY_LIMIT))
+  // And the rows reported before this file was open reach it now, in order.
+  for (const row of pendingDegradationRows.splice(0)) agora.appendLog(row)
 
   // The Watch's gate policy (SDD §9). Deny-by-default: an unconfigured
   // Ephesus, or one whose policy file will not parse, holds every gated action.
@@ -794,7 +837,7 @@ async function boot(): Promise<void> {
       // buffer, which is the opposite of invariant §7.
       if (loaded.warning !== lastPolicyWarning) {
         lastPolicyWarning = loaded.warning
-        if (loaded.warning) reportDegradation('gates', loaded.warning)
+        if (loaded.warning) reportDegradation('gates/policy-file', loaded.warning)
       }
       return loaded.policy
     },
@@ -853,7 +896,7 @@ async function boot(): Promise<void> {
     // gate this app opens is now recorded against the work it blocks, so the
     // `status → done` refusal finally guards a field something fills.
     taskOf: (agentId) => ledger?.boundTaskFor(agentId) ?? null,
-    onError: (detail) => reportDegradation('gates', detail),
+    onError: (detail) => reportDegradation('gates/driver', detail),
     // The adapter owns the engine's phrasing (NFR-12); core only learns which
     // of the two situations it was.
     notificationKind: (agentId, payload) => {
@@ -897,14 +940,17 @@ async function boot(): Promise<void> {
         try {
           agentManager?.interrupt(agentId)
         } catch (err) {
-          reportDegradation('breaker', `interrupt failed for ${agentId}: ${String(err)}`)
+          reportDegradation(
+            `breaker/interrupt:${agentId}`,
+            `interrupt failed for ${agentId}: ${String(err)}`
+          )
         }
       },
       stop: (agentId) => {
         try {
           agentManager?.kill(agentId)
         } catch (err) {
-          reportDegradation('breaker', `stop failed for ${agentId}: ${String(err)}`)
+          reportDegradation(`breaker/stop:${agentId}`, `stop failed for ${agentId}: ${String(err)}`)
         }
       },
       avatar: (agentId, event) => avatarDirector.apply(agentId, event),
@@ -914,7 +960,10 @@ async function boot(): Promise<void> {
         try {
           ledger?.stallTaskOf(agentId, report)
         } catch (err) {
-          reportDegradation('breaker', `could not stall the task of ${agentId}: ${String(err)}`)
+          reportDegradation(
+            `breaker/stall-task:${agentId}`,
+            `could not stall the task of ${agentId}: ${String(err)}`
+          )
         }
         // FR-14.5: a rung-3 stop on gym/stoa work reverts the company to
         // `directed` automatically, visibly, and on the ledger. The revert is
@@ -950,7 +999,7 @@ async function boot(): Promise<void> {
       )
       if (draft['rung'] !== 0) {
         reportDegradation(
-          'breaker',
+          `breaker/rung:${String(draft['agentId'])}`,
           `${String(draft['agentId'])} at rung ${String(draft['rung'])} (${String(draft['action'])})`
         )
       }
@@ -975,13 +1024,16 @@ async function boot(): Promise<void> {
   costLedger = new CostLedger({
     store: db,
     onFoldRestart: (source) =>
-      reportDegradation('budgets', `transcript ${source} shrank; re-folded from the start`),
+      reportDegradation(
+        'budgets/transcript-shrank',
+        `transcript ${source} shrank; re-folded from the start`
+      ),
     // Money the engine reports (ADR-0011 `cost_usd`). Both of these are ways
     // the dollar figure can be less than the whole truth, and invariant §7 says
     // a figure that is not the whole truth has to say so where it is shown.
     onCostRegressed: (source, session, model) =>
       reportDegradation(
-        'budgets',
+        'budgets/cost-regressed',
         `cost went backwards for ${model} in session ${session} (${source}); ` +
           `the transcript was replaced — earlier spend stands, nothing was corrected`
       ),
@@ -991,7 +1043,7 @@ async function boot(): Promise<void> {
     liveCost: (agent) => usageWatch?.liveCostFor(agent) ?? null,
     onCostIncomplete: (source) =>
       reportDegradation(
-        'budgets',
+        'budgets/cost-incomplete',
         `${source}: the engine could not price every model it used; ` +
           `the cost shown is an understatement, not the full bill`
       )
@@ -1015,7 +1067,7 @@ async function boot(): Promise<void> {
         ? {}
         : { holdAtPercent: home.config.pacing.holdAtPercent })
     },
-    onDegraded: (detail) => reportDegradation('usage', detail),
+    onDegraded: (detail) => reportDegradation('usage/watch', detail),
     onPaceChange: (verdict, previous) => {
       // Only transitions reach the book of record, exactly as budget states do:
       // a company held at `slow` for two hours must not turn log.jsonl into a
@@ -1035,10 +1087,13 @@ async function boot(): Promise<void> {
       agora?.commitSoon(`pace ${verdict.pace} (${verdict.because})`)
       // Anything but full speed is a degradation the Architect must be able to
       // see, or a paced company is indistinguishable from a hung one.
+      // Cleared as deliberately as it is raised: a condition that ends and
+      // says nothing leaves the Architect reading a stale warning all day.
+      if (verdict.pace === 'full') degradations.clear('usage/pacing')
       if (verdict.pace !== 'full') {
         const tight = verdict.tightest
         reportDegradation(
-          'usage',
+          'usage/pacing',
           tight
             ? `company pacing ${verdict.pace}: ${tight.window} window at ${Math.round(
                 tight.usedPercent
@@ -1072,7 +1127,7 @@ async function boot(): Promise<void> {
   const envCap = blockCapFromEnv(process.env)
   if (envCap.cap === undefined && envCap.invalid !== undefined) {
     reportDegradation(
-      'autonomy',
+      'autonomy/block-cap-env',
       `ignoring invalid ${BLOCK_CAP_ENV}="${envCap.invalid}" — default cap applies`
     )
   }
@@ -1088,7 +1143,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
     },
     onChange: () => ui.send(TASKS_STATE_CHANNEL),
-    onDegraded: (detail) => reportDegradation('agora', detail)
+    onDegraded: (detail) => reportDegradation('agora/task-ledger', detail)
   })
 
   // The Odeon (ADR-0008, FR-7.2). Agents never write `odeon/` — SDD §2 gives
@@ -1113,7 +1168,7 @@ async function boot(): Promise<void> {
   // (M4.3) above SQLite FTS above plain grep, every step down visible.
   const indexRoot = path.join(home.root, 'index')
   const fts = openFtsStore(indexRoot)
-  if (fts.store === null) reportDegradation('library', fts.because)
+  if (fts.store === null) reportDegradation('library/fts', fts.because)
   // ADR-0016: MemPalace is an OPTIONAL external. It is probed, never installed
   // from here — a missing one degrades the ladder visibly and offers its
   // install command, exactly as a missing engine binary does (FR-1.6).
@@ -1124,16 +1179,16 @@ async function boot(): Promise<void> {
     palaceRoot: indexRoot,
     agoraRoot: agora.pathOf(),
     command: home.config.mempalaceCommand ?? MEMPALACE_BINARY,
-    onDegraded: (detail) => reportDegradation('library', detail)
+    onDegraded: (detail) => reportDegradation('library/mempalace', detail)
   })
   library = new Library({
     agoraRoot: agora.pathOf(),
     prompts,
     indexes: [mempalace, new FtsIndex({ store: fts.store, because: fts.because })],
-    onDegraded: (detail) => reportDegradation('library', detail)
+    onDegraded: (detail) => reportDegradation('library/driver', detail)
   })
   const probe = await mempalace.probe()
-  if (probe.version === null) reportDegradation('library', probe.because)
+  if (probe.version === null) reportDegradation('library/mempalace-probe', probe.because)
   // Mtime-gated, so a boot with an unchanged corpus re-mines nothing (ADR-0006).
   // Not awaited: mining embeds, which takes seconds, and no boot step depends on
   // it — recall answers on whatever rung is ready when it is asked.
@@ -1141,13 +1196,16 @@ async function boot(): Promise<void> {
     .reindex()
     .catch((err: unknown) =>
       reportDegradation(
-        'library',
+        'library/reindex',
         `reindex failed: ${err instanceof Error ? err.message : String(err)}`
       )
     )
   const recallRung = library.rung()
   if (recallRung.degraded !== null) {
-    reportDegradation('library', `recall on the ${recallRung.rung} rung — ${recallRung.degraded}`)
+    reportDegradation(
+      'library/recall-rung',
+      `recall on the ${recallRung.rung} rung — ${recallRung.degraded}`
+    )
   }
 
   // ADR-0006 layer 3. The harness never summarizes: it asks the agent whose
@@ -1159,7 +1217,7 @@ async function boot(): Promise<void> {
     prompts,
     reachableAgents: () => hermes?.knownAgents() ?? [],
     deliver: (message) => hermes?.deliverFromHarness(message),
-    onDegraded: (detail) => reportDegradation('library', detail)
+    onDegraded: (detail) => reportDegradation('library/reflection', detail)
   })
   // The standup briefing (ADR-0008 §1, FR-7.1). The harness compiles facts;
   // Artemis narrates them. It never writes prose, and her narration is checked
@@ -1204,7 +1262,7 @@ async function boot(): Promise<void> {
       agora?.appendLog(draft)
       ui.send(LOG_APPEND_CHANNEL)
     },
-    onDegraded: (detail) => reportDegradation('odeon', detail)
+    onDegraded: (detail) => reportDegradation('odeon/briefing', detail)
   })
 
   // The meeting driver (ADR-0008 §4, FR-7.4). It owns who may speak, and
@@ -1249,7 +1307,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
-    onDegraded: (detail) => reportDegradation('odeon', detail)
+    onDegraded: (detail) => reportDegradation('odeon/org', detail)
   })
 
   // The Gymnasium (ADR-0015, FR-12). Its ledger seeds from the repository’s
@@ -1296,7 +1354,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
-    onDegraded: (detail) => reportDegradation('odeon', detail)
+    onDegraded: (detail) => reportDegradation('odeon/gymnasium', detail)
   })
 
   // The Stoa (ADR-0017, FR-13). Same seeding habit as the Gymnasium beside it:
@@ -1317,7 +1375,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
     },
     commitSoon: (subject) => agora?.commitSoon(subject),
-    onDegraded: (detail) => reportDegradation('odeon', detail)
+    onDegraded: (detail) => reportDegradation('odeon/stoa', detail)
   })
 
   /**
@@ -1406,7 +1464,7 @@ async function boot(): Promise<void> {
         appendLog: (draft) => agora?.appendLog(draft),
         onDue: (check) => {
           reportDegradation(
-            'odeon',
+            `odeon/gym-metric-due:${check.id}`,
             `gymnasium: ${check.id}'s metric check was due ${check.due} — ${check.metric}`
           )
         }
@@ -1484,7 +1542,7 @@ async function boot(): Promise<void> {
     // UC-09 step 4's announcement has no delivery leg: M6.9 is deferred and the
     // Herald has no production caller. The obligation surfaces as a visible
     // degradation (invariant §7) instead of being quietly dropped.
-    onUnmetObligation: (what) => reportDegradation('incident', what),
+    onUnmetObligation: (what) => reportDegradation('incident/unmet-obligation', what),
     onEscalateNow: (incident, report) => {
       // UC-09 step 4's "UC-08 escalation with an incident summary", through
       // SDD §9's `needs_human` choke point — the surface that already exists
@@ -1545,7 +1603,10 @@ async function boot(): Promise<void> {
       try {
         agentManager?.interrupt(agentId)
       } catch (err) {
-        reportDegradation('usage', `wake-cap interrupt failed for ${agentId}: ${String(err)}`)
+        reportDegradation(
+          `usage/wake-interrupt:${agentId}`,
+          `wake-cap interrupt failed for ${agentId}: ${String(err)}`
+        )
       }
     },
     onOvertime: (agentId, ranMs, capMs) => {
@@ -1559,7 +1620,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`wake cap reached for ${agentId}`)
       reportDegradation(
-        'usage',
+        `usage/wake-cap:${agentId}`,
         `${agentId} ran one wake for ${Math.round(ranMs / 1000)}s (cap ${Math.round(
           capMs / 1000
         )}s); the turn was interrupted`
@@ -1580,7 +1641,7 @@ async function boot(): Promise<void> {
       : { slowWakeGapMs: home.config.pacing.slowWakeGapMs }),
     onWakeDeferred: (agentId, detail) =>
       reportDegradation(
-        'usage',
+        `usage/wake-deferred:${agentId}`,
         `${agentId}: wake deferred (${detail.pace}), ${detail.pendingMail} message(s) still waiting${
           Number.isFinite(detail.waitMs) ? ` — ${Math.round(detail.waitMs / 1000)}s to go` : ''
         }`
@@ -1748,14 +1809,14 @@ async function boot(): Promise<void> {
         conversation: message.conversation
       }),
     onBounced: ({ original, reason }) =>
-      reportDegradation('hermes', `bounce [${original.id}] to "${original.to}": ${reason}`),
+      reportDegradation('hermes/bounce', `bounce [${original.id}] to "${original.to}": ${reason}`),
     // Trip signal #3: recurring hop-cap escalations on one conversation. A hop
     // cap is a DIVERT, not a bounce — the M3 close-out audit found the old
     // bounce-side sniff unreachable (no bounce reason mentions hops).
     onDiverted: ({ from, conversation }) => breaker?.noteHopCap(from, conversation),
     onSweepError: (err: unknown) =>
       reportDegradation(
-        'hermes',
+        'hermes/sweep',
         `sweep failed: ${err instanceof Error ? err.message : String(err)}`
       ),
     // The author is told directly (Hermes returns the refusal to whoever wrote
@@ -1765,7 +1826,7 @@ async function boot(): Promise<void> {
     // (invariant §7).
     onRejected: ({ file, reason, notice }) =>
       reportDegradation(
-        'hermes',
+        'hermes/notice',
         notice
           ? `rejected ${file}: ${reason}`
           : `rejected ${file} with no author to tell: ${reason}`
@@ -1789,7 +1850,7 @@ async function boot(): Promise<void> {
       loadGatePolicy(gatePolicyPath).policy.autonomy,
     onExitError: (agentId, err) =>
       reportDegradation(
-        'agents',
+        `agents/teardown:${agentId}`,
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
     // A ghost that was parked did not crash. Asked rather than inferred from
@@ -1857,7 +1918,7 @@ async function boot(): Promise<void> {
     },
     onGrantsMissing: (agentId, missing) =>
       reportDegradation(
-        'secrets',
+        `secrets/missing-grant:${agentId}`,
         `${agentId} spawned without declared grant(s): ${missing.join(', ')}`
       ),
     onRosterChange: (agentId, entry) => {
@@ -1873,7 +1934,7 @@ async function boot(): Promise<void> {
         // A corrupt registry refuses overwrite (evidence preservation); the
         // company keeps running and the refusal is a visible degradation.
         reportDegradation(
-          'agora',
+          `agora/roster:${agentId}`,
           `roster update for ${agentId} refused: ${err instanceof Error ? err.message : String(err)}`
         )
       }
@@ -1903,7 +1964,7 @@ async function boot(): Promise<void> {
         void finalFold
           .catch((err: unknown) =>
             reportDegradation(
-              'budgets',
+              `budgets/final-fold:${card.agentId}`,
               `final fold for ${card.agentId} failed: ${err instanceof Error ? err.message : String(err)}`
             )
           )
@@ -2005,7 +2066,7 @@ async function boot(): Promise<void> {
       agora?.appendLog(draft)
       ui.send(LOG_APPEND_CHANNEL)
     },
-    onDegraded: (what) => reportDegradation('harbor', what)
+    onDegraded: (what) => reportDegradation('harbor/ingest', what)
   })
   // The probe first (ADR-0009's subprocess discipline): until `gh` answers,
   // the Harbor reports itself unavailable rather than returning empty queues
@@ -2057,7 +2118,10 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`budget ${verdict.state} for ${agentId}`)
       if (verdict.state !== 'ok') {
-        reportDegradation('budgets', `${agentId} budget ${verdict.state} (${verdict.because})`)
+        reportDegradation(
+          `budgets/state:${agentId}`,
+          `${agentId} budget ${verdict.state} (${verdict.because})`
+        )
       }
       // Trip signal #4 (ADR-0011): the budget feeds the breaker, and the
       // breaker IS the enforcement — steer, then constrain (which halves the
@@ -2075,7 +2139,7 @@ async function boot(): Promise<void> {
       // notification.
       breaker?.evaluate(agentId)
     },
-    onDegraded: (detail) => reportDegradation('budgets', detail)
+    onDegraded: (detail) => reportDegradation('budgets/watch', detail)
   })
   budgetWatcher.start()
 
@@ -2102,7 +2166,7 @@ async function boot(): Promise<void> {
       return prompts.render(path.join('watch', 'capacity-resume.md'), { detail }).trim()
     } catch (err) {
       reportDegradation(
-        'capacity',
+        'capacity/resume-prompt',
         'the capacity resume prompt is unreadable, so no agent will be continued: ' +
           `${err instanceof Error ? err.message : String(err)}`
       )
@@ -2138,7 +2202,7 @@ async function boot(): Promise<void> {
       // system is built against, so it goes to the degradation banner as well
       // as to the strip.
       reportDegradation(
-        'capacity',
+        `capacity/parked:${row.agentId}`,
         `${row.agentId} is waiting for provider capacity — ${row.limit.detail}`
       )
       // Mail stops rather than piling into a session that cannot answer it. It
@@ -2179,7 +2243,7 @@ async function boot(): Promise<void> {
           commandQueue.submit(row.agentId, text)
         } catch (err) {
           reportDegradation(
-            'capacity',
+            `capacity/continue:${row.agentId}`,
             `could not continue ${row.agentId}: ${err instanceof Error ? err.message : String(err)}`
           )
         }
@@ -2198,7 +2262,7 @@ async function boot(): Promise<void> {
           if (text !== null) commandQueue.submit(row.agentId, text)
         } catch (err) {
           reportDegradation(
-            'capacity',
+            `capacity/respawn:${row.agentId}`,
             `could not respawn ${row.agentId} after capacity returned: ` +
               `${err instanceof Error ? err.message : String(err)}`
           )
@@ -2223,7 +2287,7 @@ async function boot(): Promise<void> {
       // the same limit this hold exists to absorb.
       if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
     },
-    onDegraded: (detail) => reportDegradation('capacity', detail)
+    onDegraded: (detail) => reportDegradation('capacity/watch', detail)
   })
   capacityWatch.start()
 
@@ -2242,7 +2306,7 @@ async function boot(): Promise<void> {
         agora?.commitSoon(`roster: orchestrator ${agentId ?? 'cleared'}`)
       } catch (err) {
         reportDegradation(
-          'agora',
+          'agora/orchestrator-id',
           `orchestrator id not recorded: ${err instanceof Error ? err.message : String(err)}`
         )
       }
@@ -2252,7 +2316,7 @@ async function boot(): Promise<void> {
       ui.send(LOG_APPEND_CHANNEL)
       agora?.commitSoon(`log ${draft.kind} ${String(draft['event'] ?? '')}`)
     },
-    onDegraded: (detail) => reportDegradation('artemis', detail)
+    onDegraded: (detail) => reportDegradation('artemis/driver', detail)
   })
 
   registerIpc({
@@ -2307,7 +2371,15 @@ async function boot(): Promise<void> {
     agoraHealth: (): AgoraHealth => ({
       fileWarnings: agora?.fileWarnings() ?? [],
       commitFailures: agora?.commitFailures() ?? [],
-      runtime: [...runtimeHealth]
+      runtime: degradations.list().map((entry) => ({
+        at: entry.lastSeen,
+        source: entry.source,
+        detail: entry.detail,
+        cause: entry.cause,
+        count: entry.count,
+        since: entry.since,
+        freshness: entry.freshness
+      }))
     }),
     // The Library's surface (ADR-0006). The renderer is a projection: it gets
     // these views and every write goes back through main (invariant §2).
@@ -2447,7 +2519,10 @@ async function boot(): Promise<void> {
             : { granted: false, because: trusted.because })
         })
         if (!trusted.ok) {
-          reportDegradation('profiles', `${adapter.id}: workspace not trusted — ${trusted.because}`)
+          reportDegradation(
+            `profiles/workspace-trust:${adapter.id}`,
+            `${adapter.id}: workspace not trusted — ${trusted.because}`
+          )
         }
       }
       const result = await (activations?.activate(request) ??
@@ -2459,7 +2534,7 @@ async function boot(): Promise<void> {
           // The activation succeeded; failing to write a convenience list must
           // not turn that into a refusal the Architect has to reason about.
           reportDegradation(
-            'profiles',
+            'profiles/known-targets-write',
             `known-targets.json not written: ${
               err instanceof Error ? err.message.split('\n')[0] : String(err)
             }`
@@ -2613,7 +2688,7 @@ async function boot(): Promise<void> {
   // adding one never leaves this line naming an engine that is not there.
   const orchestratorEngine = engines.list()[0]?.id
   if (orchestratorEngine) void artemis.start(orchestratorEngine)
-  else reportDegradation('artemis', 'no engine adapter registered; not hired')
+  else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
 }
 
 /**

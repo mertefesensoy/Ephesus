@@ -143,6 +143,11 @@ export class Agora {
     return this.log.read(afterSeq, limit)
   }
 
+  /** The newest `limit` events — what is true NOW, not what happened first. */
+  tailLog(limit: number): readonly LogEntry[] {
+    return this.log.tailOf(limit)
+  }
+
   /** The roster (SDD §4.1). A corrupt file yields the empty roster + a warning. */
   registry(): Registry {
     return this.readSchemaFile(REGISTRY_REL, emptyRegistry, (raw) => {

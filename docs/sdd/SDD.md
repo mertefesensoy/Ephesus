@@ -72,6 +72,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
 | `home.ts` | The harness home's shape: `HOME_DIRS`, creation, `config.json` load with a visible warning on a corrupt file (SDD §2) | — |
 | `fsx.ts` | `writeFileAtomic` — temp file + rename, the one write path for anything another process reads (invariant §3) | 0003 |
+| `degradations.ts` | The degradation channel (M8.2): one entry per CAUSE rather than per occurrence, the bounded ladder that decides what reaches `log.jsonl`, the clear, and the boot replay that marks a surviving condition as carried over. The model and the line the Architect reads are `shared/degradation.ts` | 0004 |
 | `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, and hands the quit to `shutdown.ts`. Holds no logic of its own | 0001 |
 | `shutdown.ts` | The quit sequence (M8.1): closing time, then the agent unwind, then the stops, each phase isolated so one failure never skips the next; idempotent, Electron-free, and driven by the scenario suite as well as by `index.ts` | 0001 |
 | `ui-bridge.ts` | The one door from main to the renderer (M8.1): owns the window, forgets it when it closes, refuses to send to a destroyed one, and is the `PtySink` the terminal stream writes to. A `webContents.send` anywhere else fails `check-invariants` | 0001, 0014 |
@@ -242,12 +243,25 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, stoa, shutdown, capacity, error }`. `capacity` carries the provider's usage
+gym, stoa, shutdown, capacity, error, degradation }`. `capacity` carries the provider's usage
 limit (`src/shared/capacity.ts`): parked (with the engine's own refusal text and
 the retry it is waiting for), resuming (and by which of the two continuations),
 cleared. It is distinct from `breaker` and from `exit` on purpose — one is our
 ladder, one is a dead process, and this is a healthy agent the provider declined
-to serve. `shutdown` carries closing time (GYM-003):
+to serve. `degradation` carries a CONDITION the company is running under rather than an
+event that happened (M8.2): `source`, a stable `cause` (`<source>/<slug>`), the
+latest `detail`, the `count` the row accounts for and `since`; the row with
+`event: 'cleared'` says it ended and `forMs` how long it lasted. It is distinct
+from `error` on purpose — "delivery threw" happened once, "recall is on the grep
+rung" is still true, and only the second can be cleared or replayed. A repeating
+cause reaches the file on a bounded ladder (the first occurrence, then each power
+of ten, then the clear), so a check that reports every second costs five lines
+rather than thousands; the exact count stays live in the UI, which reads the ring
+rather than the file. At boot the log tail is replayed, so a condition that
+outlived the last quit is shown as carried over rather than as a clean slate
+(invariant §7; the model is `src/shared/degradation.ts`).
+
+`shutdown` carries closing time (GYM-003):
 begin / ack / complete, with the shortfall named. `stoa` carries the research
 cycle (§7.7): study started, brief accepted/rejected, watchlist changes. `orchestrator` carries Artemis's lifecycle (respawn ladder, down) and
 FR-5.5's countersignatures and escalations.

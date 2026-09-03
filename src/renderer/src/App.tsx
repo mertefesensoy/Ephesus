@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { CapacityView } from '../../shared/capacity'
 import type { AgoraHealth, ConfigSnapshot, HooksState } from '../../shared/ipc'
+import { degradationLine } from '../../shared/degradation'
 import type { ModeView } from '../../shared/mode-view'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
 import { CapacityBadge, CountBadge } from './StatusBadge'
@@ -27,12 +28,20 @@ type BridgeState =
   | { kind: 'ready'; snapshot: ConfigSnapshot }
   | { kind: 'unavailable'; reason: string }
 
-/** Flattens the data-plane health into one visible line per issue. */
-function agoraIssues(health: AgoraHealth): readonly string[] {
+/**
+ * Flattens the data-plane health into one visible line per issue.
+ *
+ * A runtime line says three things the old one could not (M8.2): how many times
+ * the condition has been reported, so a one-off reads differently from
+ * something happening every second; and whether it is `carried` — replayed from
+ * the log at boot and not re-checked since — so a week-old problem is not shown
+ * as though it were observed this morning, and is not hidden either.
+ */
+export function agoraIssues(health: AgoraHealth): readonly string[] {
   return [
     ...health.fileWarnings.map((w) => `${w.file}: ${w.reason}`),
     ...health.commitFailures.map((f) => `commit "${f.subject}": ${f.reason}`),
-    ...health.runtime.map((r) => `${r.source}: ${r.detail}`)
+    ...health.runtime.map(degradationLine)
   ]
 }
 

@@ -432,3 +432,37 @@ describe('the history names why each commit happened', () => {
     expect(await agora.head()).toBe(head)
   })
 })
+
+describe('Agora.tailLog — what is true NOW, not what happened first', () => {
+  it('returns the newest entries, where readLog returns the oldest', async () => {
+    // The boot degradation replay (M8.2) asks this question, and asking
+    // `readLog` instead hands back the start of the day — register item B3.
+    const { agora } = rig()
+    await agora.ensureRepo()
+    for (let i = 0; i < 520; i += 1) agora.appendLog({ kind: 'message', n: i })
+    agora.appendLog({
+      kind: 'degradation',
+      source: 'library',
+      cause: 'library/fts',
+      detail: 'no index',
+      count: 1,
+      since: 1
+    })
+
+    const head = agora.readLog()
+    expect(head[0]?.['n']).toBe(0)
+    expect(head.some((entry) => entry.kind === 'degradation')).toBe(false)
+
+    const tail = agora.tailLog(50)
+    expect(tail).toHaveLength(50)
+    expect(tail.at(-1)?.kind).toBe('degradation')
+  })
+
+  it('returns everything when the log is shorter than the window', async () => {
+    const { agora } = rig()
+    await agora.ensureRepo()
+    agora.appendLog({ kind: 'message', n: 1 })
+    expect(agora.tailLog(400)).toHaveLength(1)
+    expect(agora.tailLog(0)).toEqual([])
+  })
+})
