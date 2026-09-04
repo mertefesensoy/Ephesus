@@ -19,6 +19,13 @@ import {
   type TriggerEvent
 } from './profile'
 import type { SpawnRequest } from './agents'
+import {
+  activationIsolationSchema,
+  composeIsolation,
+  type ActivationIsolation,
+  type ComposedIsolation
+} from './isolation'
+import { DEFAULT_EXIT_POLICY, type ExitPolicy } from './respawn'
 import type { RepoDerivation } from './repo-remote'
 
 /**
@@ -103,7 +110,18 @@ export const activationRequestSchema = z
      * be the harness deciding whose repository the company files incidents
      * against — and a refusal that the Architect cannot answer is a dead end.
      */
-    repos: z.array(repoSlugSchema).max(64).optional()
+    repos: z.array(repoSlugSchema).max(64).optional(),
+    /**
+     * The Architect's blanket isolation choice for this activation (M8.6).
+     *
+     * Optional and `as-declared` when absent, so the bundle decides and the
+     * normal path stays the one nobody has to think about. The two overrides
+     * exist because isolation is the field most likely to be wrong for a
+     * particular target — a scratch checkout wants an agent in it, a shared
+     * repository does not — and editing a versioned bundle to activate once is
+     * not a decision an Architect should have to make.
+     */
+    isolation: activationIsolationSchema.optional()
   })
   .strict()
 
@@ -214,6 +232,19 @@ export interface PlannedHire {
   /** `<name>@<version>` — the template this agent descends from (SDD §4.1). */
   readonly hireRef: string
   readonly spawn: SpawnRequest
+  /**
+   * Where this agent will actually work, and why (M8.6, `shared/isolation.ts`).
+   *
+   * On the hire rather than in a parallel array on the plan, deliberately:
+   * `spawn.worktree` is DERIVED from `isolation.effective` in one expression
+   * below, so the sentence the activation screen renders and the flag the
+   * spawn carries cannot disagree. A test asserts that equality for every
+   * planned hire — the M8.5 lesson about a screen and an outcome coming from
+   * two code paths, applied before it could cost anything.
+   */
+  readonly isolation: ComposedIsolation
+  /** What happens when this agent's process ends (SDD §10). */
+  readonly onExit: ExitPolicy
 }
 
 /**
@@ -317,7 +348,12 @@ export function activationPlan(
    */
   derivedRepo: RepoDerivation,
   /** The `owner/repo` list the Architect typed on the activation screen. */
-  chosenRepos: readonly string[] = []
+  chosenRepos: readonly string[] = [],
+  /**
+   * The Architect's blanket isolation choice (M8.6). Defaults to reading the
+   * bundle, which is what every caller written before M8.6 meant.
+   */
+  chosenIsolation: ActivationIsolation = 'as-declared'
 ): ActivationPlanResult {
   const reasons: string[] = []
 
@@ -336,10 +372,26 @@ export function activationPlan(
       )
       continue
     }
+    // Composed BEFORE the spawn is built, because the spawn's `worktree` flag
+    // is this row's `effective` value and nothing else. One computation, two
+    // consumers: the screen reads `because`, the harness reads the flag.
+    const isolation = composeIsolation({
+      hire: hire.name,
+      agentId,
+      declaredByHire: hire.isolation,
+      declaredByProfile: bundle.document.isolation,
+      choice: chosenIsolation,
+      // An `app` target is a directory, not a repository: there is nothing to
+      // make a worktree of, and saying so beats producing a spawn that git
+      // would refuse.
+      targetCanHoldWorktree: target.kind === 'repo'
+    })
     hires.push({
       agentId,
       hire: hire.name,
       hireRef: `${hire.name}@${String(hire.version)}`,
+      isolation,
+      onExit: hire.onExit ?? bundle.document.onExit ?? DEFAULT_EXIT_POLICY,
       spawn: {
         agentId,
         // The name a person reads; the role stays the role. A hire that
@@ -355,6 +407,10 @@ export function activationPlan(
         cwd: target.path,
         capabilities: [...hire.capabilities],
         envGrants: [...hire.envGrants],
+        // The one derivation. `AgentManager.spawn` reads this flag and nothing
+        // else; the screen reads `isolation.because` and nothing else; both
+        // come from the object above.
+        worktree: isolation.effective === 'worktree',
         ...(hire.budget === undefined ? {} : { budget: hire.budget })
       }
     })

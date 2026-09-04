@@ -42,6 +42,12 @@ interface BundleOptions {
   readonly envGrants?: readonly string[]
   /** What harbor.json declares. Both SHIPPED bundles carry [] — that is B7. */
   readonly repos?: readonly { id: string; remote: string }[]
+  /** The profile document's isolation default (M8.6). */
+  readonly isolation?: 'worktree' | 'target'
+  /** Per-hire isolation, by hire name (M8.6). */
+  readonly hireIsolation?: Readonly<Record<string, 'worktree' | 'target'>>
+  readonly onExit?: 'offer' | 'respawn'
+  readonly hireOnExit?: Readonly<Record<string, 'offer' | 'respawn'>>
 }
 
 function writeBundle(root: string, name: string, options: BundleOptions = {}): void {
@@ -59,7 +65,9 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
       autonomy: {
         default: options.autonomyDefault ?? 'autonomous',
         byKind: options.byKind ?? {}
-      }
+      },
+      ...(options.isolation === undefined ? {} : { isolation: options.isolation }),
+      ...(options.onExit === undefined ? {} : { onExit: options.onExit })
     })
   )
   fs.writeFileSync(
@@ -88,7 +96,11 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
         capabilities: ['triage'],
         envGrants: [...(options.envGrants ?? [])],
         brief: 'Work.',
-        budget: { dailyTokens: 1_000 * (i + 1) }
+        budget: { dailyTokens: 1_000 * (i + 1) },
+        ...(options.hireIsolation?.[hire] === undefined
+          ? {}
+          : { isolation: options.hireIsolation[hire] }),
+        ...(options.hireOnExit?.[hire] === undefined ? {} : { onExit: options.hireOnExit[hire] })
       })
     )
   }
@@ -119,6 +131,10 @@ function rig(options: RigOptions = {}) {
 
   const spawned: SpawnRequest[] = []
   const killed: string[] = []
+  const hired: { agentId: string; onExit: string }[] = []
+  const released: string[] = []
+  /** Interleaved, so a test can assert that release happens BEFORE the kill. */
+  const order: string[] = []
   const triggers = new Map<string, Trigger>()
   const logs: Record<string, unknown>[] = []
 
@@ -135,7 +151,18 @@ function rig(options: RigOptions = {}) {
       spawned.push(request)
       return Promise.resolve({})
     },
-    kill: (agentId) => killed.push(agentId),
+    kill: (agentId) => {
+      killed.push(agentId)
+      order.push(`kill:${agentId}`)
+    },
+    onHired: (hire) => {
+      hired.push({ agentId: hire.agentId, onExit: hire.onExit })
+      order.push(`hire:${hire.agentId}`)
+    },
+    onReleased: (agentId) => {
+      released.push(agentId)
+      order.push(`release:${agentId}`)
+    },
     addTrigger: (trigger) => triggers.set(trigger.id, trigger),
     removeTrigger: (id) => triggers.delete(id),
     targetExists: (p) => fs.existsSync(p) && fs.statSync(p).isDirectory(),
@@ -143,7 +170,18 @@ function rig(options: RigOptions = {}) {
     onLogEvent: (draft) => logs.push(draft)
   })
 
-  return { activations, profiles, targetDir, spawned, killed, triggers, logs }
+  return {
+    activations,
+    profiles,
+    targetDir,
+    spawned,
+    killed,
+    triggers,
+    logs,
+    hired,
+    released,
+    order
+  }
 }
 
 const target = (path_: string, id = 'myapp') => ({ kind: 'repo' as const, id, path: path_ })
@@ -841,5 +879,198 @@ describe('an instance that starts watching something says so', () => {
     const r = rig({ onWatching: (id) => said.push(id) })
     expect(r.activations.deactivate('never@repo:existed').ok).toBe(false)
     expect(said).toEqual([])
+  })
+})
+/**
+ * B10 and B12 through the whole activation path (M8.6).
+ *
+ * These assert against the SPAWN REQUEST and the plan together, not against
+ * `composeIsolation` — that is unit-tested next door. What is owed here is the
+ * wiring: that the bundle's declaration reaches a real spawn, that the screen's
+ * sentence and the spawn's flag are the same decision, and that a hire's exit
+ * policy reaches the ladder that acts on it.
+ */
+describe('every hire is isolated unless the bundle says otherwise (B10)', () => {
+  it('asks for a worktree even when nothing declares one', async () => {
+    // The state of both shipped bundles before M8.6: no isolation field
+    // anywhere, and therefore — until now — no isolation.
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall', 'deps'] })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+
+    expect(r.spawned.every((s) => s.worktree === true)).toBe(true)
+  })
+
+  it('honours a profile that opts its crew out', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'], isolation: 'target' })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+
+    expect(r.spawned[0]?.worktree).toBe(false)
+    expect(result.instance.plan.hires[0]?.isolation.declaredFrom).toBe('profile')
+  })
+
+  it('lets one hire differ from its profile', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', {
+      hires: ['oncall', 'deps'],
+      isolation: 'target',
+      hireIsolation: { deps: 'worktree' }
+    })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+
+    const byId = new Map(r.spawned.map((s) => [s.agentId, s.worktree]))
+    expect(byId.get('agent.crew-myapp-deps')).toBe(true)
+    expect(byId.get('agent.crew-myapp-oncall')).toBe(false)
+  })
+
+  it('obeys a blanket override in both directions', async () => {
+    const isolated = rig()
+    writeBundle(isolated.profiles, 'crew', {
+      hires: ['oncall'],
+      isolation: 'target'
+    })
+    const up = await isolated.activations.activate({
+      profile: 'crew',
+      target: target(isolated.targetDir),
+      isolation: 'isolate-all'
+    })
+    if (!up.ok) throw new Error(up.reasons.join(' · '))
+    expect(isolated.spawned[0]?.worktree).toBe(true)
+    expect(up.instance.plan.hires[0]?.isolation.tightened).toBe(true)
+
+    const loose = rig()
+    writeBundle(loose.profiles, 'crew', {
+      hires: ['oncall'],
+      isolation: 'worktree'
+    })
+    const down = await loose.activations.activate({
+      profile: 'crew',
+      target: target(loose.targetDir),
+      isolation: 'none'
+    })
+    if (!down.ok) throw new Error(down.reasons.join(' · '))
+    expect(loose.spawned[0]?.worktree).toBe(false)
+    expect(down.instance.plan.hires[0]?.isolation.relaxed).toBe(true)
+  })
+
+  it('shows exactly what the spawn will do — one decision, two readers', async () => {
+    // The M8.5 lesson, applied before it could cost anything: a screen and an
+    // outcome that come from two code paths eventually disagree. Here they are
+    // the same object, and this asserts it for every hire under every choice.
+    const r = rig()
+    writeBundle(r.profiles, 'crew', {
+      hires: ['a', 'b', 'c'],
+      isolation: 'target',
+      hireIsolation: { b: 'worktree' }
+    })
+    for (const choice of ['as-declared', 'isolate-all', 'none'] as const) {
+      const planned = await r.activations.preview({
+        profile: 'crew',
+        target: target(r.targetDir),
+        isolation: choice
+      })
+      if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+      for (const hire of planned.plan.hires) {
+        expect(hire.spawn.worktree).toBe(hire.isolation.effective === 'worktree')
+        expect(hire.isolation.agentId).toBe(hire.agentId)
+        expect(hire.isolation.because.length).toBeGreaterThan(10)
+      }
+    }
+  })
+})
+
+describe('what happens when a hire dies is declared, not inferred (B12)', () => {
+  it('defaults to the offer SDD §10 specifies', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(r.hired).toEqual([{ agentId: 'agent.crew-myapp-oncall', onExit: 'offer' }])
+  })
+
+  it('carries a profile-level respawn policy to every hire', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', {
+      hires: ['oncall', 'deps'],
+      onExit: 'respawn'
+    })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(r.hired.every((h) => h.onExit === 'respawn')).toBe(true)
+  })
+
+  it('lets one hire opt out of its profile', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', {
+      hires: ['oncall', 'deps'],
+      onExit: 'respawn',
+      hireOnExit: { deps: 'offer' }
+    })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(new Map(r.hired.map((h) => [h.agentId, h.onExit]))).toEqual(
+      new Map([
+        ['agent.crew-myapp-deps', 'offer'],
+        ['agent.crew-myapp-oncall', 'respawn']
+      ])
+    )
+  })
+
+  it('declares nobody when the activation failed halfway', async () => {
+    // The race this ordering exists to prevent: a ladder armed for an agent
+    // the roll-back is about to kill would faithfully bring it back, and the
+    // Architect would be told nothing was activated while an agent ran.
+    const r = rig({ failOn: ['oncall'] })
+    writeBundle(r.profiles, 'crew', {
+      hires: ['deps', 'oncall'],
+      onExit: 'respawn'
+    })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    expect(result.ok).toBe(false)
+    expect(r.hired).toEqual([])
+    expect(r.killed).toEqual(['agent.crew-myapp-deps'])
+  })
+
+  it('releases every agent BEFORE deactivation kills it', async () => {
+    // Same race at the other end: a ladder still armed reads the
+    // deactivation's own kill as a crash and undoes the deactivation.
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'], onExit: 'respawn' })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+
+    r.activations.deactivate(result.instance.instanceId)
+    expect(r.released).toEqual(['agent.crew-myapp-oncall'])
+    expect(r.order.indexOf('release:agent.crew-myapp-oncall')).toBeLessThan(
+      r.order.indexOf('kill:agent.crew-myapp-oncall')
+    )
   })
 })

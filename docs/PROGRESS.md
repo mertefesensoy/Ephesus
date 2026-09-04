@@ -4981,7 +4981,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `docs/implementations/2026-09-04-m8-5-mission-watches-repository.md`.
       Branch `feature/m8-5-mission-watches-repository`.*
 
-- [ ] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
+- [x] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
       path never requests worktree isolation (verified: zero `worktree`
       references in it), so every hire runs git operations and file edits
       concurrently in the Architect's own checkout — **the one item in the
@@ -4996,6 +4996,54 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       crew death surfaces a respawn offer. Risk: worktree-per-hire makes the
       orphaning in M8.1 real rather than vacuous — these two land together or the
       second creates the leak the first cleans up.*
+      *Evidence (2026-09-04): **four Architect decisions taken before a line was
+      written**, all recorded in DECISIONS-LOG. (1) Isolation is DECLARED in the
+      shape autonomy already uses — hire template → profile document → built-in
+      default, then the Architect's per-activation choice, then a clamp for a
+      target with no repository — and **the built-in default is `worktree`**,
+      because "declares nothing" described both shipped bundles for their entire
+      production life. `PlannedHire.spawn.worktree` is DERIVED from
+      `isolation.effective` in one expression, so the screen's sentence and the
+      spawn's flag are the same decision; asserted for every hire under every
+      choice. Both bundles now declare `isolation` and `onExit` and took a
+      version bump for it (ADR-0012 makes the version a record). (2) **A spawn
+      that cannot be isolated is REFUSED**, naming git's own reason and releasing
+      the claimed id — the old code logged and continued in the Architect's
+      checkout, calling isolation "a nicety", and that fallback IS the harm.
+      (3) **A rung-3 stop outlives the exit it caused** (`BreakerStop`, recorded
+      BEFORE the stop is performed, since `onChange` is about to call
+      `forgetSession`); `forget` became `forgetSession` / `forgetAgent` /
+      `clearStop`. Keeping the rung alone would have fixed NOTHING — spans go
+      with the process, so `nextRung(3, false)` returns 0 on the next sweep.
+      (4) The respawn offer is **rendered at last** (`RespawnOffer` had zero
+      references outside main since M3, so SDD §10's crash row had never once
+      been shown) with an `agents.respawn` IPC, AND a hire may declare
+      `onExit: "respawn"` for the ladder automatically. The ladder was EXTRACTED
+      from `artemis.ts` — one ladder, two callers — with her 653-line suite as
+      the regression net, green unchanged throughout. **Found while building,
+      not in the plan:** Artemis was exempt from her own stop; her ladder now
+      asks the same predicate, or rung 3 is a pause rather than a rung.
+      Gate: typecheck, lint, invariants (reachability 166/174) green; suite
+      **3616 passed / 8 skipped** across 190 files; coverage floors ok on win32
+      (17 subsystems, 23 untested modules) with **no floor lowered by hand** —
+      `artemis` and `engines` ROSE. The gate caught the first draft diluting
+      `boot` with untested wiring in `index.ts`, and the fix was M8.1's own
+      precedent: the decisions moved into `createCrewSurvival` /
+      `respawnBlockReason` where tests reach them. **REFUTED BEFORE CLOSE:**
+      28 mutations, **two survived the first pass and both were real** — the
+      rung-3 guard inside `AgentManager.respawn` (the path with no ladder: the
+      Architect pressing "bring it back") and `RespawnOffer.blockedBecause` were
+      each enforced only where something else already enforced them, which is a
+      check that cannot fail; four tests closed them and the second pass killed
+      28/28. **Production call path:** `activationPlan` → `ProfileActivations.activate`
+      → `AgentManager.spawn({ worktree })` → `git.ts` `Worktrees.create`;
+      `onChange` → `crew.noteCard` / `breaker.forgetSession`; `agents:respawn`
+      → `AgentManager.respawn` → `respawnBlocked`. Docs: SDD §1.1 (`respawn.ts`),
+      §3, §4.3 (the new `respawn` log kind), §9, §10 (three amended rows), the
+      M8.6 implementation doc. Owed, recorded not built: the demo half — no
+      profile has been activated on a real target repository in the shipped app
+      under these rules, which is M7's still-open exit criterion. Branch
+      `feature/m8-6-crew-isolation`.*
 
 - [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
       inherit the Architect's personal engine install: no isolated config

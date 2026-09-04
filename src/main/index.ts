@@ -22,6 +22,7 @@ import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis, ARTEMIS_AGENT_ID } from './artemis'
 import { ExecGitRunner, Worktrees, readRemotes } from './git'
+import { createCrewSurvival, respawnBlockReason, type CrewSurvival } from './respawn'
 import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
@@ -131,6 +132,11 @@ let stoa: Stoa | null = null
 // built before the AgentManager this needs, and the gate seam below reads
 // through the handle rather than capturing a value that does not exist yet.
 let activations: ProfileActivations | null = null
+/**
+ * The crew's backoff ladders (M8.6, B12). One per hire that declared
+ * `onExit: "respawn"`; nothing at all for the ones that did not.
+ */
+let crew: CrewSurvival | null = null
 // The targets already activated once (M7.9). Deliberately separate from
 // `activations`: that Map is what is RUNNING, this file is what has been TYPED,
 // and only the second is worth surviving a restart.
@@ -1921,6 +1927,10 @@ async function boot(): Promise<void> {
     // the exit code, because a provider refusal and a crash look identical at
     // the pty seam — and the difference is whether a human needs to do anything.
     capacityParked: (agentId) => capacityWatch?.parked(agentId) !== null,
+    // B11: a rung-3 stop outlives the process it stopped, and it holds against
+    // BOTH ways an agent can come back — the crew's ladder and the Architect
+    // accepting the offer on the card. Asked here so neither path can forget.
+    respawnBlocked: (agentId) => respawnBlockReason(breaker?.stopOf(agentId) ?? null),
     rosterBudget: (agentId) => {
       try {
         return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
@@ -2007,9 +2017,17 @@ async function boot(): Promise<void> {
       // same card stream the UI reads, so nothing else has to agree about who
       // is running.
       artemis?.noteCard(card)
+      // The crew's ladders read the SAME stream, so the harness has one source
+      // of truth about who is running (FR-5.4's own shape, finally applied to
+      // the agents that were dying five times a day without it).
+      crew?.noteCard(card)
       if (card.lifecycle === 'exited') {
-        // A respawn starts at rung 0 with no span history.
-        breaker?.forget(card.agentId)
+        // A respawn starts at rung 0 with no span history — but NOT with a
+        // clean record. A rung-3 stop is a decision about the agent and it
+        // outlives the process it stopped (B11): forgetting it here is what
+        // made an exhausted budget cycle instead of stopping, 21 climbs to
+        // rung 1 against exactly one completed stop in a 24.9M-token day.
+        breaker?.forgetSession(card.agentId)
         // One last fold BEFORE the session is forgotten: usage written in the
         // seconds between the final tick and the exit would otherwise never be
         // folded, and this spawn is never `running` under that session again.
@@ -2051,6 +2069,23 @@ async function boot(): Promise<void> {
   // because it spawns through it, and after the scheduler because it arms
   // triggers on it. Every judgment it makes — the plan, the composed autonomy —
   // is `activationPlan`'s and was shown to the Architect before this ran.
+  // B12. Built before the activations, because activation is what declares a
+  // hire into it. One ladder per agent, created lazily and only for a hire
+  // whose bundle asked for one — an undeclared hire keeps SDD §10's offer.
+  // The decisions live in `respawn.ts`; what is here is only the wiring.
+  crew = createCrewSurvival({
+    respawn: (agentId) =>
+      agentManager?.respawn(agentId) ?? Promise.reject(new Error('agents: not started')),
+    breakerStop: (agentId) => breaker?.stopOf(agentId) ?? null,
+    log: (draft) => {
+      agora?.appendLog(draft)
+      agora?.commitSoon(
+        `respawn ${String(draft['event'] ?? 'event')} for ${String(draft['agentId'])}`
+      )
+    },
+    degrade: (cause, detail) => reportDegradation(cause, detail)
+  })
+
   activations = new ProfileActivations({
     store: profiles,
     globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
@@ -2080,6 +2115,10 @@ async function boot(): Promise<void> {
       return agentManager.spawn(request)
     },
     kill: (agentId) => agentManager?.kill(agentId),
+    // What the bundle declared about this hire's survival, carried from the
+    // plan the Architect was shown to the ladder that acts on it (M8.6).
+    onHired: (hire) => crew?.declare(hire.agentId, hire.onExit),
+    onReleased: (agentId) => crew?.release(agentId),
     addTrigger: (trigger) => scheduler.add(trigger),
     removeTrigger: (triggerId) => scheduler.remove(triggerId),
     targetExists: (target) => {
@@ -2282,6 +2321,10 @@ async function boot(): Promise<void> {
       // restarting into one cannot succeed — every rung it burned would be a
       // rung missing for the real crash later.
       artemis?.holdForCapacity()
+      // Same reasoning per crew agent: the capacity watch owns this return,
+      // and a ladder rung spent on a provider refusal is a rung missing for
+      // the real crash later.
+      crew?.hold(row.agentId, 'capacity')
     },
     onResume: (row) => {
       const text = capacityResumeText(row.limit.detail)
@@ -2353,6 +2396,9 @@ async function boot(): Promise<void> {
       // another agent is still refused would let the next exit spend a rung on
       // the same limit this hold exists to absorb.
       if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
+      // Per agent, unlike the orchestrator's: this agent's park is cleared,
+      // and it is the only one whose ladder this clearance speaks for.
+      crew?.releaseHold(row.agentId)
     },
     onDegraded: (detail) => reportDegradation('capacity/watch', detail)
   })
@@ -2364,6 +2410,10 @@ async function boot(): Promise<void> {
     agents: agentManager,
     prompts,
     home: home.root,
+    // B11 applies to her too: a rung-3 stop her own ladder immediately undoes
+    // is the cycle this package exists to end, and FR-14.5 already treats a
+    // stop on her work as consequential enough to revert the company's mode.
+    respawnBlocked: (agentId) => respawnBlockReason(breaker?.stopOf(agentId) ?? null),
     // She runs in the Agora, because `board.md` is hers to scribe (SDD §2).
     cwd: agora.root,
     setOrchestrator: (agentId) => {
@@ -2799,6 +2849,9 @@ const quit = new QuitSequence({
     { name: 'avatars', run: () => avatarDirector.stop() },
     { name: 'hermes', run: () => hermes?.stop() },
     { name: 'scheduler', run: () => scheduler.stop() },
+    // Before the unwind, not after: a ladder still armed treats the shutdown's
+    // own kills as crashes and respawns the company it is tearing down.
+    { name: 'crew-survival', run: () => crew?.stop() },
     {
       name: 'company-token',
       run: () => {

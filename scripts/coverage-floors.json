@@ -44,7 +44,7 @@
       ]
     },
     "engines": {
-      "is": "Engine adapters and the agent process: spawn, PTY, hooks, PATH, settings hygiene, the command queue, prompts",
+      "is": "Engine adapters and the agent process: spawn, PTY, hooks, PATH, settings hygiene, the command queue, prompts, and the backoff ladder that brings a dead one back (M8.6)",
       "members": [
         "src/main/engines/",
         "src/main/agents.ts",
@@ -59,7 +59,9 @@
         "src/shared/hooks.ts",
         "src/shared/pty.ts",
         "src/shared/agents.ts",
-        "src/shared/commands.ts"
+        "src/shared/commands.ts",
+        "src/main/respawn.ts",
+        "src/shared/respawn.ts"
       ]
     },
     "hermes": {
@@ -205,7 +207,8 @@
         "src/shared/profile-view.ts",
         "src/shared/mode.ts",
         "src/shared/mode-view.ts",
-        "src/shared/org.ts"
+        "src/shared/org.ts",
+        "src/shared/isolation.ts"
       ]
     },
     "home": {

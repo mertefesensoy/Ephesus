@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "skeleton-crew",
-  "version": 2,
+  "version": 3,
   "target": {
     "kind": "repo"
   },
@@ -11,5 +11,7 @@
       "destructive": "supervised",
       "prod-facing": "supervised"
     }
-  }
+  },
+  "isolation": "worktree",
+  "onExit": "respawn"
 }

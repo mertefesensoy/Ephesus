@@ -76,6 +76,7 @@ export const IpcChannels = {
   agentsSpawn: 'agents:spawn',
   agentsCard: 'agents:card',
   agentsKill: 'agents:kill',
+  agentsRespawn: 'agents:respawn',
   agentsInterrupt: 'agents:interrupt',
   agentsSend: 'agents:send',
   avatarsList: 'avatars:list',
@@ -327,6 +328,17 @@ export interface EphApi {
     spawn: (request: SpawnRequest) => Promise<AgentCard>
     card: (agentId: string) => Promise<AgentCard>
     kill: (agentId: string) => Promise<void>
+    /**
+     * Accepts the `respawnOffer` on an exited agent's card (SDD §10, M8.6).
+     *
+     * The offer has been computed on every exit since M3 and, until this
+     * channel existed, nothing in the renderer could read it and nothing could
+     * act on it: `respawnOffer` had zero references outside main. Rejects with
+     * the reason when the agent may not come back — a rung-3 breaker stop
+     * holds against a human accepting an offer exactly as it holds against the
+     * crew's ladder.
+     */
+    respawn: (agentId: string) => Promise<AgentCard>
     /** Writes the engine's cancel key into the agent's PTY (ADR-0009). */
     interrupt: (agentId: string) => Promise<void>
     /** Sends Architect text to the agent's PTY verbatim (FR-1.3). */

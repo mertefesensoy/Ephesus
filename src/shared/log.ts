@@ -59,6 +59,19 @@ export const LOG_KINDS = [
    * cannot reconstruct what the company did (NFR-13).
    */
   'capacity',
+  /**
+   * The harness bringing an agent back (M8.6, B12): the ladder's rungs, the
+   * attempt, the refusal, the give-up.
+   *
+   * Its own kind rather than another `spawn`, because the question a reader
+   * actually asks of it is "did the company survive the night", and that query
+   * has to be answerable from the log alone. It was answerable before this
+   * kind existed only for the orchestrator, under `orchestrator` — which is
+   * how the register could say "46 respawn-scheduled rows, all Artemis, zero
+   * crew" and be sure. A crew ladder folded into `orchestrator` would have
+   * made that same question unanswerable ever again.
+   */
+  'respawn',
   'error',
   /**
    * A condition the company is running under, not an event that happened
@@ -260,6 +273,15 @@ function kindParts(entry: LogEntry): readonly string[] {
       return [at('event'), at('agentId'), acked && `acked ${acked}`, missing && `silent ${missing}`]
     case 'capacity':
       return [at('event'), at('agentId'), at('limitKind'), at('detail')]
+    case 'respawn':
+      // The rung is the fact worth reading at a glance: an agent on attempt 3
+      // of 3 is one the Architect is about to lose (M8.6).
+      return [
+        at('event'),
+        at('agentId'),
+        at('attempt') === '' ? '' : `attempt ${at('attempt')}`,
+        at('because') || at('waitMs')
+      ]
     case 'error':
       return [at('subsystem'), at('file'), at('reason')]
     case 'degradation':

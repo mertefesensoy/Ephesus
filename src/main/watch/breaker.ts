@@ -12,7 +12,8 @@ import {
   type BreakerThresholds,
   type Rung,
   type SignalHit,
-  type Span
+  type Span,
+  type TripSignal
 } from '../../shared/breaker'
 
 /**
@@ -103,8 +104,29 @@ interface AgentBreaker {
   readonly open: Map<string, Span>
 }
 
+/**
+ * A rung-3 stop, kept after the process it stopped is gone (B11).
+ *
+ * Serializable on purpose and owned by exactly one object: M8.8 has to make
+ * this survive a restart, and a shape that already round-trips through JSON is
+ * the difference between wiring a file up and redesigning the register.
+ */
+export interface BreakerStop {
+  readonly agentId: string
+  /** Epoch milliseconds the stop was decided. */
+  readonly at: number
+  readonly signals: readonly TripSignal[]
+  /** The numbers that caused it — the same detail the `breaker` log carries. */
+  readonly detail: readonly Readonly<Record<string, string | number>>[]
+}
+
 export class Breaker {
   private readonly agents = new Map<string, AgentBreaker>()
+  /**
+   * Standing rung-3 stops, keyed by agent. Outlives the process each one
+   * stopped, which is the entire point (see `forgetSession`).
+   */
+  private readonly stops = new Map<string, BreakerStop>()
   private readonly now: () => number
 
   constructor(private readonly options: BreakerOptions) {
@@ -276,6 +298,15 @@ export class Breaker {
       this.options.effects.constrainBudget(agentId, true)
     }
     if (rung === 3 && actions.stop) {
+      // The stop is recorded BEFORE it is performed. The process is about to
+      // exit, `onChange` will call `forgetSession`, and a record written after
+      // that race would be a record of a stop nobody can see (B11).
+      this.stops.set(agentId, {
+        agentId,
+        at: this.now(),
+        signals: firing.map((hit) => hit.signal),
+        detail: firing.map((hit) => hit.detail)
+      })
       // Graceful first: the engine's own cancel key, then the process.
       this.options.effects.interrupt(agentId)
       this.options.effects.stop(agentId)
@@ -286,9 +317,76 @@ export class Breaker {
     }
   }
 
-  /** Forgets an agent; a respawn starts at rung 0 with no history. */
-  forget(agentId: string): void {
+  /**
+   * The agent's PROCESS ended. Its session history goes; the ladder stays.
+   *
+   * This used to be `forget`, and it deleted everything on every exit —
+   * *including the exit the breaker had just caused at rung 3*. The measured
+   * consequence over one 24.9M-token day: 21 climbs to rung 1 and exactly one
+   * completed rung-3 stop. An exhausted budget stopped the agent, the stop
+   * erased the record of itself, the agent came back at rung 0, and the same
+   * runaway climbed the ladder again (B11).
+   *
+   * Note that keeping the RUNG alone would have fixed nothing: spans are
+   * session state and go with the process, so the next sweep would see nothing
+   * firing and `nextRung(3, false)` returns 0 in one step. The thing that has
+   * to survive is the DECISION, and that is what `stops` holds.
+   */
+  forgetSession(agentId: string): void {
     this.agents.delete(agentId)
+  }
+
+  /**
+   * Forgets an agent entirely, stop record included.
+   *
+   * For decommissioning — the agent is gone, not restarting. Deliberately NOT
+   * what an exit calls: the difference between "this process ended" and "this
+   * agent is finished" is the whole of B11.
+   */
+  forgetAgent(agentId: string): void {
+    this.agents.delete(agentId)
+    this.stops.delete(agentId)
+  }
+
+  /**
+   * Contract: the rung-3 stop standing against this agent, or null.
+   *
+   * Read by the respawn paths (`main/respawn.ts`, `AgentManager.respawn`) so a
+   * stopped agent is not quietly brought back into the runaway it was stopped
+   * for, and by the UI so the Architect can see why it will not come back.
+   */
+  stopOf(agentId: string): BreakerStop | null {
+    return this.stops.get(agentId) ?? null
+  }
+
+  /** Every standing stop, for the Watch panel and the shutdown report. */
+  stopped(): readonly BreakerStop[] {
+    return [...this.stops.values()].sort((a, b) => a.agentId.localeCompare(b.agentId))
+  }
+
+  /**
+   * The Architect lifts a stop. The agent may be respawned again.
+   *
+   * A human act on purpose: rung 3 is the only destructive rung, and ADR-0011
+   * reaches it only after two cheaper rungs failed. Something that cleared
+   * itself on a timer would make the ladder's last step temporary, which is
+   * the same as not having it.
+   *
+   * Returns false when there was no stop to clear, so a caller can tell "done"
+   * from "there was nothing there" instead of guessing.
+   */
+  clearStop(agentId: string): boolean {
+    if (!this.stops.has(agentId)) return false
+    this.stops.delete(agentId)
+    // The ladder starts over with it: a lifted stop that left the agent at
+    // rung 3 would be a stop that was not lifted.
+    const agent = this.agents.get(agentId)
+    if (agent) {
+      agent.rung = 0
+      agent.rungAt = this.now()
+    }
+    this.options.effects.avatar(agentId, { kind: 'breaker-recover' })
+    return true
   }
 
   private trim(agent: AgentBreaker): void {

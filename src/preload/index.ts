@@ -72,6 +72,8 @@ const eph: EphApi = {
     card: (agentId) =>
       ipcRenderer.invoke(IpcChannels.agentsCard, { agentId }) as Promise<AgentCard>,
     kill: (agentId) => ipcRenderer.invoke(IpcChannels.agentsKill, { agentId }) as Promise<void>,
+    respawn: (agentId) =>
+      ipcRenderer.invoke(IpcChannels.agentsRespawn, { agentId }) as Promise<AgentCard>,
     interrupt: (agentId) =>
       ipcRenderer.invoke(IpcChannels.agentsInterrupt, { agentId }) as Promise<void>,
     send: (agentId, text) =>

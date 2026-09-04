@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { isolationModeSchema } from './isolation'
+import { exitPolicySchema } from './respawn'
 import { budgetSchema } from './agents'
 import type { LogEntry } from './log'
 
@@ -206,7 +208,37 @@ export const hireTemplateSchema = z
      * which is why it costs no `schemaVersion` bump. (No hire template file
      * existed on disk when this landed; this schema had only test callers.)
      */
-    budget: budgetSchema.optional()
+    budget: budgetSchema.optional(),
+    /**
+     * Where this hire works: its own git worktree of the target, or the
+     * Architect's checkout (FR-1.5, UC-01 2a, `shared/isolation.ts`).
+     *
+     * Added at M8.6 because the profile spawn path never requested isolation
+     * at all: every hire in both shipped bundles ran git operations and file
+     * edits concurrently in the Architect's own working copy, which is the one
+     * item in the 2026-09-02 register that can destroy uncommitted work. The
+     * template is where it belongs — ADR-0012 chose declarative bundles so an
+     * Architect can read what a profile may do BEFORE activating, and "which
+     * working copy will this agent write to" is the most consequential line on
+     * that list.
+     *
+     * Optional, and omitting it does not mean "no isolation": the composition
+     * defaults to `worktree` (see `DEFAULT_ISOLATION`). Additive and optional,
+     * so every document written against the previous shape still validates,
+     * which is why it costs no `schemaVersion` bump — the same reasoning
+     * `budget` carries above.
+     */
+    isolation: isolationModeSchema.optional(),
+    /**
+     * What happens when this hire's process ends (SDD §10, `shared/respawn.ts`).
+     *
+     * Defaults to `offer` — SDD §10's own word — so an omitted field keeps the
+     * documented behaviour exactly. `respawn` is the opt-in that makes an
+     * overnight run survivable, and it is declared here rather than inferred
+     * because "this agent comes back by itself" is something the Architect
+     * should read on the activation screen rather than discover from the log.
+     */
+    onExit: exitPolicySchema.optional()
   })
   .strict()
 

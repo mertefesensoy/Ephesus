@@ -7,7 +7,8 @@ import {
   type ActivationPlan,
   type ActivationPlanResult,
   type ActivationRequest,
-  type ActivationTarget
+  type ActivationTarget,
+  type PlannedHire
 } from '../shared/profile-activation'
 import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
@@ -313,6 +314,15 @@ export interface ProfileActivationOptions {
   spawn(request: SpawnRequest): Promise<unknown>
   /** Kills one agent, on deactivation or on an unwind. */
   kill(agentId: string): void
+  /**
+   * One hire is up and the instance is live (M8.6). Carries the whole planned
+   * hire rather than an id and a policy, so a consumer that later needs the
+   * isolation row or the budget does not need a second seam — and so this one
+   * cannot drift from the plan the Architect was shown.
+   */
+  onHired?(hire: PlannedHire): void
+  /** One agent is being torn down for good; cancel anything holding it. */
+  onReleased?(agentId: string): void
   /** Arms a schedule trigger. */
   addTrigger(trigger: Trigger): void
   /** Disarms one, by id. */
@@ -365,7 +375,8 @@ export class ProfileActivations {
       this.options.globalAutonomy(),
       (declared) => this.options.missingGrants?.(declared) ?? [],
       derived,
-      request.repos ?? []
+      request.repos ?? [],
+      request.isolation ?? 'as-declared'
     )
   }
 
@@ -435,6 +446,11 @@ export class ProfileActivations {
       armed.push(trigger.id)
     }
 
+    // Survival is declared only once every hire is up (M8.6, B12). Declaring
+    // inside the loop would arm a ladder for an agent the roll-back above is
+    // about to kill, and the ladder would faithfully bring it back.
+    for (const hire of plan.hires) this.options.onHired?.(hire)
+
     const instance: ProfileInstance = {
       instanceId,
       plan,
@@ -487,6 +503,10 @@ export class ProfileActivations {
     const instance = this.live.get(instanceId)
     if (instance === undefined) return { ok: false, reason: `no active profile "${instanceId}"` }
     for (const triggerId of instance.armed) this.options.removeTrigger(triggerId)
+    // Released BEFORE the kill, for the same reason triggers are disarmed
+    // first: a hire whose ladder is still armed treats the kill that is
+    // deactivating it as a crash, and brings it straight back (M8.6).
+    for (const agentId of instance.agentIds) this.options.onReleased?.(agentId)
     for (const agentId of instance.agentIds) this.options.kill(agentId)
     this.live.delete(instanceId)
     // An instance that is gone is not an instance watching nothing (M8.5). Left

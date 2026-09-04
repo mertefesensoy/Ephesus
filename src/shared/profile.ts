@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { autonomyLevelSchema, GATE_KINDS, type AutonomyLevel } from './gates'
 import { memoTriggerSchema } from './memo'
 import { hireTemplateSchema, type HireTemplate } from './org'
+import { isolationModeSchema } from './isolation'
+import { exitPolicySchema } from './respawn'
 
 /**
  * Mission profiles (ADR-0012, FR-9.1/9.4, SDD §2 `profiles/<name>/`, §7.5).
@@ -148,7 +150,17 @@ export const profileDocumentSchema = z
      */
     version: z.number().int().min(1).max(10_000),
     target: z.object({ kind: targetKindSchema }).strict(),
-    autonomy: profileAutonomySchema
+    autonomy: profileAutonomySchema,
+    /**
+     * The bundle's default isolation, for hires that declare none (M8.6).
+     *
+     * The middle layer of `composeIsolation`: a profile whose whole point is
+     * that its agents never touch the Architect's checkout says so once, here,
+     * instead of repeating itself in every hire template.
+     */
+    isolation: isolationModeSchema.optional(),
+    /** The bundle's default exit policy, for hires that declare none (M8.6). */
+    onExit: exitPolicySchema.optional()
   })
   .strict()
 

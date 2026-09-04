@@ -226,6 +226,37 @@ export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElem
         ))}
       </ul>
 
+      {/*
+        M8.6, B10. The most consequential line on this screen: until this
+        section existed, every hire in both shipped bundles ran git operations
+        and file edits in the Architect's own checkout and nothing said so. A
+        hire that will work in the checkout is rendered as a WARNING, because
+        that is the state that can cost somebody their uncommitted work.
+      */}
+      <p style={heading}>It would work in</p>
+      <ul style={{ margin: '0 0 0 16px', padding: 0 }}>
+        {plan.hires.map((hire) => (
+          <li
+            key={hire.agentId}
+            style={hire.isolation.effective === 'worktree' ? { margin: '2px 0' } : warn}
+          >
+            {hire.agentId} — {hire.isolation.because}
+          </li>
+        ))}
+      </ul>
+
+      <p style={heading}>When one of them dies</p>
+      <ul style={{ margin: '0 0 0 16px', padding: 0 }}>
+        {plan.hires.map((hire) => (
+          <li key={hire.agentId} style={{ margin: '2px 0' }}>
+            {hire.agentId} —{' '}
+            {hire.onExit === 'respawn'
+              ? 'the harness brings it back on a backoff ladder'
+              : 'it stays down and offers to come back'}
+          </li>
+        ))}
+      </ul>
+
       <p style={heading}>It would hold these secrets</p>
       {plan.envGrants.length === 0 ? (
         <p style={note}>none</p>

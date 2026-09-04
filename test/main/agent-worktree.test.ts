@@ -44,7 +44,7 @@ interface Rig {
   readonly script: (steps: readonly unknown[]) => void
 }
 
-async function startRig(): Promise<Rig> {
+async function startRig(options: { readonly isolationConfigured?: boolean } = {}): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agent-wt-'))
   temps.push(home)
   const target = path.join(home, 'target-repo')
@@ -90,12 +90,18 @@ async function startRig(): Promise<Rig> {
     spawner,
     prompts,
     agoraRoot,
-    worktrees: {
-      pathFor: (agentId) => path.join(home, 'worktrees', agentId),
-      branchFor: (agentId) => `agent/${agentId.replace(/^agent\./, '')}`,
-      create: (plan) => worktrees.create(plan),
-      remove: (repo, worktreePath) => worktrees.remove(repo, worktreePath)
-    },
+    // Omitted entirely when the test is about a harness that cannot isolate:
+    // an optional seam left unwired is a real deployment, not a hypothetical.
+    ...(options.isolationConfigured === false
+      ? {}
+      : {
+          worktrees: {
+            pathFor: (agentId) => path.join(home, 'worktrees', agentId),
+            branchFor: (agentId) => `agent/${agentId.replace(/^agent\./, '')}`,
+            create: (plan) => worktrees.create(plan),
+            remove: (repo, worktreePath) => worktrees.remove(repo, worktreePath)
+          }
+        }),
     onChange: (card) => cards.push(card),
     onLogEvent: (draft) => logs.push(draft),
     onExitError: (agentId, err) =>
@@ -111,7 +117,11 @@ async function startRig(): Promise<Rig> {
   return rig
 }
 
-function request(rig: Rig, worktree: boolean): Parameters<AgentManager['spawn']>[0] {
+function request(
+  rig: Rig,
+  worktree: boolean,
+  over: Partial<Parameters<AgentManager['spawn']>[0]> = {}
+): Parameters<AgentManager['spawn']>[0] {
   return {
     agentId: AGENT,
     name: 'Mason',
@@ -120,7 +130,8 @@ function request(rig: Rig, worktree: boolean): Parameters<AgentManager['spawn']>
     cwd: rig.target,
     capabilities: [],
     envGrants: [],
-    ...(worktree ? { worktree: true } : {})
+    ...(worktree ? { worktree: true } : {}),
+    ...over
   }
 }
 
@@ -234,4 +245,103 @@ describe('a spawn that asks for isolation (UC-01 alternate 2a)', () => {
     expect(card.cwd).toBe(rig.target)
     expect(fs.existsSync(path.join(rig.home, 'worktrees'))).toBe(false)
   }, 30_000)
+})
+
+/**
+ * B10 (M8.6), and the Architect's decision of 2026-09-04: **a spawn that asks
+ * for isolation and cannot have it is REFUSED.**
+ *
+ * This used to log the failure and continue in the Architect's own checkout,
+ * on the reasoning that "isolation is a nicety". The fallback is the harm: an
+ * agent that asked to be kept out of somebody's working copy and was silently
+ * put into it is the one register item that can destroy uncommitted work.
+ */
+describe('isolation that cannot be provided refuses the hire', () => {
+  it('refuses when the target is not a git repository, and names why', async () => {
+    const rig = await startRig()
+    const notARepo = path.join(rig.home, 'just-a-folder')
+    fs.mkdirSync(notARepo, { recursive: true })
+    fs.writeFileSync(path.join(notARepo, 'work.md'), '# the architect was here\n', 'utf8')
+
+    await expect(rig.agents.spawn(request(rig, true, { cwd: notARepo }))).rejects.toThrow(
+      /asked for an isolated worktree and did not get one/
+    )
+    // The refusal carries git's own account of the problem rather than ours.
+    const refusal = rig.logs.find((entry) => entry['worktree'] === null)
+    expect(String(refusal?.['because'])).toContain('not a git repository')
+    // Nothing was written where the agent would have run.
+    expect(fs.readdirSync(notARepo)).toEqual(['work.md'])
+  }, 30_000)
+
+  it('releases the agent id, so the Architect can fix it and try again', async () => {
+    const rig = await startRig()
+    const notARepo = path.join(rig.home, 'folder-2')
+    fs.mkdirSync(notARepo, { recursive: true })
+    await expect(rig.agents.spawn(request(rig, true, { cwd: notARepo }))).rejects.toThrow()
+
+    // A phantom agent holding the name would make the retry fail with "already
+    // starting" and leave the Architect with nothing to do about it.
+    expect(rig.agents.list().map((card) => card.agentId)).not.toContain(AGENT)
+    const card = await rig.agents.spawn(request(rig, true))
+    expect(card.worktree).not.toBeNull()
+  }, 30_000)
+
+  it('refuses when the harness has no worktree support wired at all', async () => {
+    const rig = await startRig({ isolationConfigured: false })
+    await expect(rig.agents.spawn(request(rig, true))).rejects.toThrow(/is not configured/)
+    expect(fs.existsSync(path.join(rig.target, '.fake-engine'))).toBe(false)
+  }, 30_000)
+
+  it('refuses a respawn that cannot restore the isolation, leaving it exited', async () => {
+    const rig = await startRig()
+    const card = await rig.agents.spawn(request(rig, true))
+    const worktreePath = card.cwd
+    await until(() => rig.spawner.stdoutOf(AGENT).includes('RUNNING'), 'the agent to start')
+    rig.spawner.kill(AGENT)
+    await until(() => rig.agents.card(AGENT).lifecycle === 'exited', 'the agent to be reaped')
+    await until(() => !fs.existsSync(worktreePath), 'the worktree to be released')
+
+    // Something else now owns the path the worktree would take.
+    fs.mkdirSync(worktreePath, { recursive: true })
+    fs.writeFileSync(path.join(worktreePath, 'squatter.txt'), 'not a worktree\n', 'utf8')
+
+    await expect(rig.agents.respawn(AGENT)).rejects.toThrow(/cannot be respawned without its/)
+    // Back where it was — a respawn into the Architect's checkout is not a
+    // respawn, it is the fallback this package removed.
+    expect(rig.agents.card(AGENT).lifecycle).toBe('exited')
+    expect(rig.agents.card(AGENT).cwd).not.toBe(rig.target)
+  }, 30_000)
+})
+
+describe('concurrent hires never touch the target checkout', () => {
+  it('gives two simultaneous agents two checkouts and leaves the target clean', async () => {
+    // The B10 scenario in one test: a profile activation hires several agents
+    // at once, and until M8.6 every one of them ran git operations and file
+    // edits in the Architect's own working copy, concurrently.
+    const rig = await startRig()
+    const second = 'agent.hera'
+    const [a, b] = await Promise.all([
+      rig.agents.spawn(request(rig, true)),
+      rig.agents.spawn(request(rig, true, { agentId: second, name: 'Hera' }))
+    ])
+
+    expect(a.cwd).not.toBe(b.cwd)
+    expect(a.cwd).not.toBe(rig.target)
+    expect(b.cwd).not.toBe(rig.target)
+    expect(a.worktree?.branch).toBe('agent/mason')
+    expect(b.worktree?.branch).toBe('agent/hera')
+
+    await until(
+      () =>
+        fs.existsSync(path.join(a.cwd, '.fake-engine', 'settings.local.json')) &&
+        fs.existsSync(path.join(b.cwd, '.fake-engine', 'settings.local.json')),
+      'both agents to install their settings'
+    )
+    // The claim that matters, stated about the filesystem rather than about a
+    // flag: the Architect's checkout has nothing in it that was not there.
+    expect(fs.existsSync(path.join(rig.target, '.fake-engine'))).toBe(false)
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: rig.target, encoding: 'utf8' })
+    ).toBe('')
+  }, 40_000)
 })

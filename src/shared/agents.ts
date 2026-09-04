@@ -113,6 +113,16 @@ export const agentIdPayloadSchema = z.object({ agentId: agentIdSchema }).strict(
  * the UI.
  */
 export interface RespawnOffer {
+  /**
+   * A standing decision that refuses this offer, or null (M8.6, B11).
+   *
+   * On the OFFER rather than beside it, because an offer and the reason it
+   * cannot be accepted are one fact: a card that showed "bring it back" next
+   * to a rung-3 stop would be advertising a button that throws. Answered by
+   * the same predicate `AgentManager.respawn` refuses with, so the card and
+   * the outcome cannot disagree.
+   */
+  readonly blockedBecause: string | null
   /** The adapter has `resume` AND the event plane saw a session to resume. */
   readonly resumable: boolean
   /** Dated sections waiting in `memory.md` (ADR-0006 layer 1). */

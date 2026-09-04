@@ -154,12 +154,14 @@ it is how the next session knows where to resume).
 > M8 package's evidence names its production call path, file and line, or
 > records that there is none (ENGINEERING-STANDARDS §6.7, GYM-006).
 >
-> **Resume at M8.1.** The plan is in `docs/PROGRESS.md` under
+> **Resume at M8.7.** (M8.0–M8.6 are ticked; the tree runs every hire in its own
+> worktree as of M8.6, so the "own working tree" clause below is now the history
+> of why M8 exists rather than the current state.) The plan is in `docs/PROGRESS.md` under
 > *"M8 — The company you can leave running"*, derived from the 2026-09-02 MVP
 > register. **M8 runs BEFORE M7b**, and the ordering is the plan's first claim:
-> M7b ships signed builds of a company that today cannot survive a restart,
-> cannot say it has stopped, and runs every hire in the Architect's own working
-> tree.
+> M7b ships signed builds of a company that could not survive a restart, could
+> not say it had stopped, and ran every hire in the Architect's own working
+> tree. The last of those closed at M8.6; the restart is M8.8's.
 >
 > **Two Architect decisions are SETTLED — do not re-litigate them.** The crew
 > may open pull requests unattended (2026-09-02, implemented in `610eb0a`), and

@@ -56,7 +56,8 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `settings-registry.ts` | Durable record of settings files written into an agent's repo, so a force-killed harness can undo them on the next boot | 0009 |
 | `agora.ts` | On-disk layout, registry/ledger/board accessors, `log.jsonl` appender AND its publish/subscribe (`onAppend` — the single writer publishes, so no appender has to remember to notify anybody), the whole-log readers with their cost reported, the single git committer (queue, retry+backoff, startup reconcile) | 0004 |
 | `ledger.ts` | The task-ledger endpoint (§7.1): validates Artemis's `propose` acts and writes `tasks.json` and `board.md` through the single committer — agents never touch either file | 0005, 0004 |
-| `artemis.ts` | Orchestrator lifecycle: auto-spawn, reserved seat, respawn-with-memory, prompt/config assembly, delegated-authority table | 0005 |
+| `artemis.ts` | Orchestrator lifecycle: auto-spawn, reserved seat, respawn-with-memory, prompt/config assembly, delegated-authority table. The backoff ladder itself moved to `respawn.ts` at M8.6; what stays here is the orchestrator's own policy — that a company with no orchestrator is a degradation the Architect must be told about, and that her roster seat is cleared when she will not be coming back | 0005 |
+| `respawn.ts` | `RespawnLadder` (one agent's attempts, backoff, stability window, capacity hold and the standing-decision veto), `CrewSurvival` (one ladder per hire that declared `onExit: "respawn"`) and `createCrewSurvival` (the log kind, the degradation causes and the "still down" reading, kept out of `index.ts` so they are testable). Added M8.6: FR-5.4's ladder had exactly one user while three crew agents logged terminal exits four, five and five times in a day and nothing brought any of them back | 0011 |
 | `library.ts` | Memory read/write helpers, the corpus, the recall ladder and its visible state, MemPalace driver (`eph-recall`, archive ingestion), reflection scheduler, knowledge shelf. `library-fts.ts` holds the FTS rung's behaviour (mtime gate, scoring, scope) and `library-fts-sqlite.ts` its SQLite FTS5 storage, split so the native module stays out of the test runner; `library-mempalace.ts` drives the MemPalace CLI under ADR-0009's subprocess discipline (version probe, visible install offer, no daemon flags, engine-side auto-save hooks forced off) | 0006, 0016 |
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
 | `herald/` | `seam.ts` (STT/TTS/Duplex interfaces), `policy.ts` (wake word, barge-in, repeat-back, failover), `elevenlabs.ts`, `openai-realtime.ts` | 0007 |
@@ -170,6 +171,31 @@ Defined normatively in ADR-0009. Runtime notes:
   secret grants (ADR-0010) ∪ `EPH_AGENT_ID`/`EPH_HOOK_TOKEN`, and settings injection
   (e.g. writing hook shims into `<cwd>/.claude/settings.local.json`, backed up, with
   uninstall).
+- **Who asks for `worktree: true` (M8.6, `src/shared/isolation.ts`).** A bare
+  `agents.spawn` (UC-01, where the Architect typed the working directory and
+  confirmed one agent) keeps the schema's optional-false default. A PROFILE
+  activation — several hires from one confirmation — composes it, in the shape
+  `composeAutonomyTable` already uses for autonomy: hire template → profile
+  document → built-in default, then the Architect's per-activation choice
+  (`as-declared` / `isolate-all` / `none`), then a clamp for a target that has
+  no repository to make a worktree of. **The built-in default is `worktree`**:
+  a bundle that declares nothing gets isolation rather than the Architect's
+  checkout, which is what both shipped bundles did for their entire production
+  life. `PlannedHire.spawn.worktree` is DERIVED from `PlannedHire.isolation.effective`
+  in one expression, so the sentence the activation screen renders and the flag
+  the spawn carries are the same decision; a test asserts that equality for
+  every planned hire under every choice. Whether the worktree can actually be
+  made is deliberately not pre-checked — the create is the truth, and a screen
+  that says "ok" before a `git worktree add` that fails is two code paths that
+  can disagree (the M8.5 lesson).
+- **A hire also declares what happens when it dies** (`onExit: "offer" | "respawn"`,
+  same two layers, default `offer` = SDD §10's own word). Both fields are
+  additive and optional on `hireTemplateSchema` and `profileDocumentSchema`, so
+  every document written against the previous shape still validates — the same
+  reasoning `budget` carried at M7.1 — and neither costs a `schemaVersion` bump.
+  The two shipped bundles declare theirs explicitly and took a version bump for
+  it, because ADR-0012 makes the profile version a record of what an Architect
+  approved.
 - **Identity injection:** at spawn the adapter arranges for `identity.md` +
   `PROTOCOL.md` + the agent's **memory layer** to reach the agent (engine-native
   context file, `--append-system-prompt`, or first-prompt injection — adapter's
@@ -243,7 +269,7 @@ or `gates` is non-empty.
 ```
 `kind ∈ { message, delivery, bounce, spawn, exit, ghost, hook, task, gate, memo,
 brief, deck, meeting, breaker, budget, memory, orchestrator, remote, secret-rotated, profile,
-gym, stoa, shutdown, capacity, error, degradation }`. `capacity` carries the provider's usage
+gym, stoa, shutdown, capacity, respawn, error, degradation }`. `capacity` carries the provider's usage
 limit (`src/shared/capacity.ts`): parked (with the engine's own refusal text and
 the retry it is waiting for), resuming (and by which of the two continuations),
 cleared. It is distinct from `breaker` and from `exit` on purpose — one is our
@@ -260,6 +286,16 @@ rather than thousands; the exact count stays live in the UI, which reads the rin
 rather than the file. At boot the log tail is replayed, so a condition that
 outlived the last quit is shown as carried over rather than as a clean slate
 (invariant §7; the model is `src/shared/degradation.ts`).
+`respawn` carries the harness bringing an agent back (M8.6, `src/main/respawn.ts`):
+`scheduled` with its `attempt` and `waitMs`, `respawned`, `deferred`/`released`
+around a capacity hold, and `blocked` when a standing rung-3 stop refuses the
+return. Its own kind rather than another `spawn`, because the question actually
+asked of it — *did the company survive the night* — has to be answerable from
+the log alone; it was answerable before only for the orchestrator, under
+`orchestrator`, which is how "46 respawn-scheduled rows, all Artemis, zero crew"
+could be established at all. The orchestrator's rows keep their historic
+`orchestrator` names, so a year of log files stays readable.
+
 
 `shutdown` carries closing time (GYM-003):
 begin / ack / complete, with the shortfall named. `stoa` carries the research
@@ -356,6 +392,10 @@ generated from `ipc.ts` is normative once code exists):
 
 ```
 agents:   list() spawn(cfg) kill(id) interrupt(id) resume(id) card(id) send(id, text)
+          respawn(id)                               // M8.6: accepts the card's
+          // RespawnOffer (§10). Rejects with the reason when a standing rung-3
+          // stop refuses it — the same guard both ladders ask, so the human
+          // path and the automatic ones cannot disagree
 pty:      write(id, data) resize(id, cols, rows) onData(id, cb) onExit(id, cb)
 avatars:  list()                                     // §6 snapshots; push on state:avatars
 commands: list() submit(id, text)                    // FR-1.3 queue-until-idle
@@ -592,6 +632,13 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   carries it as a decision the shim already relays, so it lands mid-turn — and
   falls back to the FR-1.3 command queue below that grade; the channel taken is
   a `breaker`/`steer-channel` log event (GYM-002, `watch/steer-notes.ts`).
+- **A rung-3 stop is sticky** (M8.6, B11). `Breaker` keeps a `BreakerStop` per
+  agent — the signals and the numbers that caused it — recorded *before* the
+  stop is performed, since the process is about to exit and the exit forgets
+  the session. `forgetSession` (what an exit calls) drops the spans and the
+  rung; `forgetAgent` (decommissioning) drops the stop too; `clearStop` is the
+  Architect's, and returns the agent to rung 0. The record is serializable and
+  single-owner on purpose, so M8.8 can persist it without redesigning it.
 - **Telemetry**: every tool call becomes a span (agent, tool, duration, outcome) →
   waterfall UI; spans are local-only (NFR-10).
 - **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`
@@ -617,7 +664,9 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 
 | Failure | Behavior |
 |---|---|
-| Agent process crash | ghost → archive; ledger tasks back to `todo` with note (the note is a `task`/`returned` entry in `log.jsonl` — `tasks.json` carries no notes field); respawn offer on the agent card (`resumable` only where the adapter has `resume` *and* the event plane saw a session; `memorySections` from ADR-0006 layer 1) |
+| Agent process crash | ghost → archive; ledger tasks back to `todo` with note (the note is a `task`/`returned` entry in `log.jsonl` — `tasks.json` carries no notes field); respawn offer on the agent card (`resumable` only where the adapter has `resume` *and* the event plane saw a session; `memorySections` from ADR-0006 layer 1). **Amended M8.6:** the offer is now RENDERED — it had zero references outside main until then, so a dead crew agent had no way back — and it carries `blockedBecause`, so a card never shows a control for a respawn that would be refused. A hire whose bundle declares `onExit: "respawn"` additionally gets a backoff ladder (`respawn.ts`, three rungs, five-minute stability window); the default stays `offer` |
+| Agent stopped by the breaker at rung 3 | The stop is a decision about the AGENT, not about the process: it is recorded before the stop is performed and outlives the exit it causes (M8.6, B11). It refuses every respawn path — the crew's ladder, the orchestrator's ladder, and the Architect accepting the offer — until a human clears it (`Breaker.clearStop`), which also returns the agent to rung 0. Before this, `forget` ran on every exit including the one rung 3 had just caused, so an exhausted budget cycled instead of stopping: 21 climbs to rung 1 against exactly one completed stop across a 24.9M-token day |
+| Worktree isolation requested and unavailable | The spawn is REFUSED, naming git's own reason, and the agent id is released so the Architect can fix the repository and activate again (M8.6, Architect decision 2026-09-04). It used to log the failure and continue in the Architect's own checkout; that fallback was the harm isolation is requested to prevent. Profile activation is all-or-nothing, so one refused hire refuses the instance rather than leaving a partial crew |
 | Harness crash | On start: committer reconciles uncommitted Agora files; cursors prevent re-processing; PTYs are gone — agents relisted as `ghost`, resumable ones offered |
 | Hook socket down | Engine shims fail-open (agent unaffected); floor freezes with a visible "events stale" banner, never invents motion |
 | Message to dead agent | bounce `refuse` + log (FR-3.4) |

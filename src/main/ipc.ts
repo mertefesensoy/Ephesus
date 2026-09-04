@@ -554,6 +554,10 @@ export function registerIpc(deps: IpcDeps): void {
     agents.kill(agentIdPayloadSchema.parse(raw).agentId)
   })
 
+  ipcMain.handle(IpcChannels.agentsRespawn, async (_ev, raw: unknown) => {
+    return agents.respawn(agentIdPayloadSchema.parse(raw).agentId)
+  })
+
   ipcMain.handle(IpcChannels.agentsInterrupt, (_ev, raw: unknown) => {
     const { agentId } = agentIdPayloadSchema.parse(raw)
     // Interrupting drops queued text: stopping the agent did not mean "and then

@@ -65,6 +65,7 @@ const REALISTIC: Record<LogKind, Record<string, unknown>> = {
   stoa: { event: 'registered', sourceId: 'src-md', url: 'https://example.test/x', by: 'architect' },
   shutdown: { event: 'closing-complete', acked: ['agent.mason'], missing: ['agent.tess'] },
   capacity: { event: 'parked', agentId: 'agent.mason', limitKind: '5h', detail: 'retry at 18:00' },
+  respawn: { event: 'scheduled', agentId: 'agent.mason', attempt: 2, waitMs: 30000 },
   error: { subsystem: 'hermes', reason: 'sweep failed' },
   degradation: { source: 'library', detail: 'no index', cause: 'library/fts', count: 12 }
 }
