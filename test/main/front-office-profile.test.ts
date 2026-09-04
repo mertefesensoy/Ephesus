@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { deriveRepo } from '../../src/shared/repo-remote'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ProfileStore } from '../../src/main/profiles'
@@ -78,10 +79,10 @@ describe('front-office ships as an ordinary ADR-0012 bundle', () => {
     expect(names).toContain('skeleton-crew')
 
     const target = { kind: 'repo' as const, id: 'myapp', path: REPO_ROOT }
-    const office = activationPlan(frontOffice(), target, 'autonomous', () => [])
+    const office = activationPlan(frontOffice(), target, 'autonomous', () => [], deriveRepo([]))
     const crewLoaded = builtinStore().load('skeleton-crew')
     if (!office.ok || !crewLoaded.ok) throw new Error('both built-ins must load')
-    const crew = activationPlan(crewLoaded.bundle, target, 'autonomous', () => [])
+    const crew = activationPlan(crewLoaded.bundle, target, 'autonomous', () => [], deriveRepo([]))
     if (!crew.ok) throw new Error(crew.reasons.join('; '))
 
     const officeIds = office.plan.hires.map((hire) => hire.agentId)
@@ -107,7 +108,8 @@ describe('the shipped Front Office is draft-only', () => {
         bundle,
         { kind: 'repo', id: 'myapp', path: REPO_ROOT },
         global as AutonomyLevel,
-        () => []
+        () => [],
+        deriveRepo([])
       )
       if (!planned.ok) throw new Error(planned.reasons.join('; '))
       const outbound = planned.plan.autonomy.find((row) => row.kind === 'outbound')
@@ -122,7 +124,8 @@ describe('the shipped Front Office is draft-only', () => {
         bundle,
         { kind: 'repo', id: 'myapp', path: REPO_ROOT },
         global as AutonomyLevel,
-        () => []
+        () => [],
+        deriveRepo([])
       )
       if (!planned.ok) throw new Error(planned.reasons.join('; '))
       for (const row of planned.plan.autonomy) {
@@ -154,7 +157,8 @@ describe('the shipped Front Office is draft-only', () => {
       raised,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
       'autonomous',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     const byKind = Object.fromEntries(planned.plan.autonomy.map((row) => [row.kind, row.effective]))
@@ -173,7 +177,8 @@ describe('the outbound kind reaches the plan at all', () => {
       frontOffice(),
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
       'supervised',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     expect(planned.plan.autonomy.map((row) => row.kind)).toContain('outbound')

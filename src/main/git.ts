@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import type { GitRemote } from '../shared/repo-remote'
 
 /**
  * The one place in Ephesus that runs `git`.
@@ -239,4 +240,54 @@ export class Worktrees {
     await this.options.runner.run(repo, ['worktree', 'prune'])
     return { removed: true }
   }
+}
+
+/**
+ * Reading a checkout's remotes (M8.5).
+ *
+ * It lives here for the same reason the worktrees do: this is the one module
+ * allowed to run `git`, and "only main runs git" is only checkable while every
+ * invocation is in this file. ADR-0004's rule is about the single COMMITTER —
+ * this reads, commits nothing, and never touches the Agora — but the check is
+ * literal on purpose, and a second file shelling out to git would defeat it
+ * whatever that file did.
+ *
+ * Contract: never throws. A directory that is not a repository, a git that is
+ * not installed, and a repository with no remotes are three different answers,
+ * because the Architect gets told which one it was.
+ */
+export type RemotesRead =
+  | { readonly ok: true; readonly remotes: readonly GitRemote[] }
+  | { readonly ok: false; readonly because: string }
+
+export async function readRemotes(runner: GitRunner, cwd: string): Promise<RemotesRead> {
+  const result = await runner.run(cwd, ['remote', '-v'])
+  if (!result.ok) {
+    const first = result.stderr.split('\n')[0]?.trim()
+    return {
+      ok: false,
+      // The stderr line, not the path: `git` names the problem better than we
+      // can guess at it ("not a git repository", "command not found").
+      because:
+        first !== undefined && first.length > 0
+          ? `git could not read the target's remotes: ${first}`
+          : "git could not read the target's remotes"
+    }
+  }
+
+  // `origin\thttps://github.com/owner/repo.git (fetch)` — one line per remote
+  // per direction, so fetch and push both appear and are deduplicated here.
+  const seen = new Set<string>()
+  const remotes: GitRemote[] = []
+  for (const line of result.stdout.split('\n')) {
+    const match = /^(\S+)\s+(\S+)\s+\((?:fetch|push)\)\s*$/.exec(line.trim())
+    const name = match?.[1]
+    const url = match?.[2]
+    if (name === undefined || url === undefined) continue
+    const key = `${name}\u0000${url}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    remotes.push({ name, url })
+  }
+  return { ok: true, remotes }
 }

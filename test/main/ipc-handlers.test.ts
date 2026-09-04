@@ -120,7 +120,7 @@ async function rig(options: RigOptions = {}): Promise<{
     profilesList: () => options.profiles?.list() ?? [],
     profilesInspect: (name: string) =>
       options.profiles?.load(name) ?? { ok: false as const, name, reasons: [] },
-    profilesPreview: () => ({ ok: false as const, reasons: [] }),
+    profilesPreview: () => Promise.resolve({ ok: false as const, reasons: [] }),
     profilesActivate: () => Promise.resolve({ ok: false as const, reasons: [] }),
     profilesDeactivate: () => ({ ok: false, reason: 'no activations in this rig' }),
     harborHireExport: () => ({ ok: false as const, reason: 'no exchange in this rig' }),

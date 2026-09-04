@@ -6,12 +6,14 @@ import {
   instanceIdFor,
   type ActivationPlan,
   type ActivationPlanResult,
-  type ActivationRequest
+  type ActivationRequest,
+  type ActivationTarget
 } from '../shared/profile-activation'
 import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { AutonomyLevel, GateKind } from '../shared/gates'
 import type { SpawnRequest } from '../shared/agents'
+import type { RepoDerivation } from '../shared/repo-remote'
 import type { Trigger } from './scheduler'
 import { composeMessage, makeMessageId, type Message } from '../shared/message'
 import { PROFILE_ENDPOINT } from '../shared/reserved'
@@ -284,6 +286,29 @@ export interface ProfileActivationOptions {
    * old behaviour and is why the parameter exists.
    */
   missingGrants?(declared: readonly string[]): readonly string[]
+  /**
+   * What the target checkout's own git remotes say it is (M8.5). Absent means
+   * nothing is read, which is the pre-M8.5 behaviour and is why the parameter
+   * exists — but in the shipped app it is always wired, because both shipped
+   * bundles carry `repos: []` and without it every activation watches nothing.
+   */
+  resolveRepos?(target: ActivationTarget): Promise<RepoDerivation>
+  /**
+   * Whether this instance has anything to watch — `because` names the reason
+   * when it has NOT, and is null when it has (M8.5).
+   *
+   * Its own seam rather than a line inside the activated log row, because the
+   * Architect has to SEE it: this is the condition that made the flagship
+   * mission inert on first use, and it looked exactly like a healthy
+   * activation. Main routes it to the degradation channel (invariant §7).
+   *
+   * ONE callback carrying both directions rather than two, because a
+   * degradation that is raised and never cleared is the failure mode M8.2 was
+   * written against: the Architect fixes the remote, reactivates, and the
+   * health list still says the mission watches nothing. A second callback
+   * could be left unwired; this one cannot be half-wired.
+   */
+  onWatching?(instanceId: string, because: string | null): void
   /** Spawns one hire. Rejecting unwinds the whole activation — see `activate`. */
   spawn(request: SpawnRequest): Promise<unknown>
   /** Kills one agent, on deactivation or on an unwind. */
@@ -322,15 +347,25 @@ export class ProfileActivations {
    * Contract: what activating this profile on this target WOULD do, without
    * doing any of it. The activation screen's source, and `activate`'s own —
    * one computation, so the preview cannot drift from the act.
+   *
+   * Asynchronous since M8.5: the target's remotes are READ, not remembered.
+   * A cached derivation would be a setting nobody re-reads, and the Architect
+   * adds a remote to a checkout between two activations like anybody else.
    */
-  preview(request: ActivationRequest): ActivationPlanResult {
+  async preview(request: ActivationRequest): Promise<ActivationPlanResult> {
     const loaded = this.options.store.load(request.profile)
     if (!loaded.ok) return { ok: false, reasons: loaded.reasons }
+    const derived = (await this.options.resolveRepos?.(request.target)) ?? {
+      ok: false as const,
+      because: 'the harness did not look at the target’s remotes'
+    }
     return activationPlan(
       loaded.bundle,
       request.target,
       this.options.globalAutonomy(),
-      (declared) => this.options.missingGrants?.(declared) ?? []
+      (declared) => this.options.missingGrants?.(declared) ?? [],
+      derived,
+      request.repos ?? []
     )
   }
 
@@ -354,7 +389,7 @@ export class ProfileActivations {
       }
     }
 
-    const planned = this.preview(request)
+    const planned = await this.preview(request)
     if (!planned.ok) return { ok: false, reasons: planned.reasons }
     const { plan } = planned
 
@@ -424,8 +459,20 @@ export class ProfileActivations {
       // say what the crew may actually do, and a clamped request is a fact
       // worth being able to find later.
       autonomy: Object.fromEntries(plan.autonomy.map((row) => [row.kind, row.effective])),
-      clamped: plan.autonomy.filter((row) => row.clamped).map((row) => row.kind)
+      clamped: plan.autonomy.filter((row) => row.clamped).map((row) => row.kind),
+      // What it watches and where that came from (M8.5, NFR-13). A forensic
+      // reader asking why no incident was ever raised for this instance can
+      // now answer it from `log.jsonl` alone, which was the whole of B7.
+      repos: [...plan.repos],
+      reposFrom: plan.reposFrom
     })
+    // An instance watching nothing is a mission that cannot work, and until
+    // M8.5 that was the silent outcome of every activation there had ever been
+    // (invariant §7). It is not a REFUSAL: a profile pointed at a checkout with
+    // no usable remote should still hire its crew and run its schedules, and
+    // refusing would put a new cliff exactly where M8 is removing one. It is
+    // said instead — before activation on the screen, and here afterwards.
+    this.options.onWatching?.(instanceId, plan.repos.length === 0 ? plan.reposBecause : null)
     return { ok: true, instance }
   }
 
@@ -442,6 +489,10 @@ export class ProfileActivations {
     for (const triggerId of instance.armed) this.options.removeTrigger(triggerId)
     for (const agentId of instance.agentIds) this.options.kill(agentId)
     this.live.delete(instanceId)
+    // An instance that is gone is not an instance watching nothing (M8.5). Left
+    // standing, the condition would outlive the thing it described and the
+    // health list would keep naming an instance that no longer exists.
+    this.options.onWatching?.(instanceId, null)
     this.options.onLogEvent?.({
       kind: 'profile',
       event: 'deactivated',

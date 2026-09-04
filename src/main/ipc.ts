@@ -263,7 +263,7 @@ export interface IpcDeps {
   /** One bundle, or every reason it was refused. Reading activates nothing. */
   profilesInspect(name: string): ProfileLoad
   /** What activating would do — the screen's source and `activate`'s own. */
-  profilesPreview(request: ActivationRequest): ActivationPlanResult
+  profilesPreview(request: ActivationRequest): Promise<ActivationPlanResult>
   profilesActivate(request: ActivationRequest): Promise<ActivationResult>
   profilesDeactivate(instanceId: string): { ok: boolean; reason: string | null }
   profilesInstances(): readonly ProfileInstanceView[]
@@ -460,9 +460,12 @@ export function registerIpc(deps: IpcDeps): void {
     const { name } = profileNamePayloadSchema.parse(raw)
     return deps.profilesInspect(name)
   })
-  ipcMain.handle(IpcChannels.profilesPreview, (_ev, raw: unknown): ActivationPlanResult => {
-    return deps.profilesPreview(activationRequestSchema.parse(raw))
-  })
+  ipcMain.handle(
+    IpcChannels.profilesPreview,
+    (_ev, raw: unknown): Promise<ActivationPlanResult> => {
+      return deps.profilesPreview(activationRequestSchema.parse(raw))
+    }
+  )
   ipcMain.handle(
     IpcChannels.profilesActivate,
     async (_ev, raw: unknown): Promise<ActivationResult> => {

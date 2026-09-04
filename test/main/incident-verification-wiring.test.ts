@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { deriveRepo } from '../../src/shared/repo-remote'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -127,7 +128,8 @@ function crewPlan(): ActivationPlan {
     loaded.bundle,
     { kind: 'repo', id: 'myapp', path: REPO },
     'autonomous',
-    () => []
+    () => [],
+    deriveRepo([])
   )
   if (!planned.ok) throw new Error(planned.reasons.join('; '))
   return planned.plan

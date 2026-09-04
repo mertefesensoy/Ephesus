@@ -19,6 +19,7 @@ import {
   type TriggerEvent
 } from './profile'
 import type { SpawnRequest } from './agents'
+import type { RepoDerivation } from './repo-remote'
 
 /**
  * Activating a mission profile (ADR-0012, FR-9.4, FR-11.1, SDD §9 — M7.2).
@@ -74,8 +75,36 @@ export const activationTargetSchema = z
 
 export type ActivationTarget = z.infer<typeof activationTargetSchema>
 
+/**
+ * `owner/repo`, the only shape `gh` takes (`src/shared/harbor.ts`).
+ *
+ * Stated here rather than imported so the activation contract does not depend
+ * on the Harbor's module, and kept byte-identical to it; a test asserts the two
+ * accept and refuse the same strings, because two regexes that drift are how a
+ * value validated on one screen is rejected by the subsystem that consumes it.
+ */
+const repoSlugSchema = z
+  .string()
+  .min(3)
+  .max(200)
+  .regex(/^[\w.-]+\/[\w.-]+$/, 'a remote like owner/repo')
+
 export const activationRequestSchema = z
-  .object({ profile: profileNameSchema, target: activationTargetSchema })
+  .object({
+    profile: profileNameSchema,
+    target: activationTargetSchema,
+    /**
+     * The repositories the Architect chose to watch, overriding both the
+     * bundle's declaration and whatever the target's remotes say (M8.5).
+     *
+     * Optional because the normal path is that nobody types anything: the
+     * checkout knows what it is. It exists because a derivation can be REFUSED
+     * — a fork has two remotes and two answers, and guessing between them would
+     * be the harness deciding whose repository the company files incidents
+     * against — and a refusal that the Architect cannot answer is a dead end.
+     */
+    repos: z.array(repoSlugSchema).max(64).optional()
+  })
   .strict()
 
 export type ActivationRequest = z.infer<typeof activationRequestSchema>
@@ -240,6 +269,18 @@ export interface ActivationPlan {
   readonly memoRequires: readonly string[]
   /** Repositories the instance would reach through the Harbor (FR-10.1). */
   readonly repos: readonly string[]
+  /**
+   * Where `repos` came from (M8.5, B7).
+   *
+   * On the screen so the Architect can tell a repository they chose from one
+   * the harness read off the checkout, and — when it is `none` — so the fact
+   * that this mission will watch nothing is a sentence rather than an empty
+   * list. Both shipped bundles carry `repos: []`, so `none` was the silent
+   * outcome of every activation that has ever happened.
+   */
+  readonly reposFrom: 'architect' | 'bundle' | 'target' | 'none'
+  /** How it was derived, or why there is nothing. Always a sentence. */
+  readonly reposBecause: string
   /** Playbook file names the hires read. Prose — listed, never parsed. */
   readonly playbooks: readonly string[]
 }
@@ -267,7 +308,16 @@ export function activationPlan(
    * than optional: a default of "assume they are all available" is exactly the
    * silent assertion this parameter exists to remove.
    */
-  missingGrants: (declared: readonly string[]) => readonly string[]
+  missingGrants: (declared: readonly string[]) => readonly string[],
+  /**
+   * What the TARGET's own git remotes say this repository is (M8.5). Required
+   * for the same reason `missingGrants` is: a default of "assume there is
+   * none" is how both shipped bundles' `repos: []` became an inert mission
+   * nobody could see.
+   */
+  derivedRepo: RepoDerivation,
+  /** The `owner/repo` list the Architect typed on the activation screen. */
+  chosenRepos: readonly string[] = []
 ): ActivationPlanResult {
   const reasons: string[] = []
 
@@ -347,7 +397,7 @@ export function activationPlan(
       autonomy: composeAutonomyTable(globalAutonomy, bundle.document.autonomy),
       triggers,
       memoRequires: [...bundle.memoPolicy.requires],
-      repos: bundle.harbor.repos.map((repo) => repo.remote),
+      ...plannedRepos(bundle, chosenRepos, derivedRepo),
       playbooks: bundle.playbooks.map((book) => book.file)
     }
   }
@@ -391,4 +441,86 @@ export function verifierAgentFor(
     (candidate) => candidate.hire === VERIFIER_HIRE && candidate.agentId !== reportedBy
   )
   return hire?.agentId ?? null
+}
+
+/**
+ * Which repositories the instance will watch, and where that came from (M8.5).
+ *
+ * ## Precedence, and the reason for each step
+ *
+ * 1. **What the Architect typed.** The most specific and most recent statement
+ *    anyone has made about this activation, and the override that exists so a
+ *    refused or wrong derivation is never a dead end.
+ * 2. **What the bundle declares.** Explicit configuration, and a profile
+ *    written for a fixed set of repositories means it.
+ * 3. **What the target's remotes say.** The checkout already knows what it is;
+ *    asking it is what removes the setup step.
+ * 4. **Nothing, with the reason.** The mission will ingest no CI run, issue or
+ *    pull request, so it can raise no incident — which is exactly what happened
+ *    on every activation before this, silently. It is a sentence now.
+ *
+ * The refusal is never repaired by guessing. A wrong slug is worse than no
+ * slug: the company would watch somebody else's repository and raise incidents
+ * about it.
+ */
+function plannedRepos(
+  bundle: ProfileBundle,
+  chosen: readonly string[],
+  derived: RepoDerivation
+): {
+  readonly repos: readonly string[]
+  readonly reposFrom: ActivationPlan['reposFrom']
+  readonly reposBecause: string
+} {
+  if (chosen.length > 0) {
+    return {
+      repos: [...chosen],
+      reposFrom: 'architect',
+      reposBecause: 'named on the activation screen'
+    }
+  }
+  const declared = bundle.harbor.repos.map((repo) => repo.remote)
+  if (declared.length > 0) {
+    return {
+      repos: declared,
+      reposFrom: 'bundle',
+      reposBecause: `declared by ${bundle.name}'s harbor.json`
+    }
+  }
+  if (derived.ok) {
+    return {
+      repos: [derived.slug],
+      reposFrom: 'target',
+      reposBecause: `read from the target's ${derived.from} remote`
+    }
+  }
+  return {
+    repos: [],
+    reposFrom: 'none',
+    reposBecause: `${derived.because} — this instance will watch no repository, so no CI run, issue or pull request can reach it`
+  }
+}
+
+/**
+ * Contract: the repositories the live instances watch, deduplicated and sorted.
+ * Pure; never throws.
+ *
+ * ONE function for two questions that must never disagree (M8.5): what the
+ * Harbor ingests from, and whether the ingest cadence is armed at all. They
+ * were two expressions inlined in `index.ts` —
+ * `[...new Set(instances.flatMap(i => i.plan.repos))]` beside
+ * `instances.some(i => i.plan.repos.length > 0)` — and an inlined resolver is
+ * untestable, so the only assertion available would be a COPY in a test file
+ * that stays green while the original rots. M7.4 shipped exactly that: the
+ * incident path filtered `trigger.when === 'ci'` against a plan rendering
+ * `"on ci"`, every unit test passed bindings in by hand, and every CI failure
+ * on a real repository was dropped.
+ *
+ * Sorted so the ingest order does not depend on activation order, which is the
+ * kind of difference that makes one machine's log unlike another's.
+ */
+export function watchedRepos(
+  instances: readonly { readonly plan: { readonly repos: readonly string[] } }[]
+): readonly string[] {
+  return [...new Set(instances.flatMap((instance) => instance.plan.repos))].sort()
 }
