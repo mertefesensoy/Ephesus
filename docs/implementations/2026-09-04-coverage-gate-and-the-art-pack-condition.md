@@ -262,8 +262,24 @@ class as `loadOne`: a path that runs only where the asset happens to exist.
 **Fixed by giving each resolver a credit-bearing fixture case.** Both arms now
 run from fixtures alone, with no glob and no pack involved — verified
 `arms=[1, 1]` and `arms=[9, 1]` at those two lines from the two test files by
-themselves. The branch difference closes, and a licence term gets its first
-deterministic test.
+themselves. A licence term gets its first deterministic test.
+
+### The end state, measured on both platforms
+
+| terraces | win32, pack present | linux CI, pack-free |
+|---|---|---|
+| lines | 76.39 | **76.39** |
+| branches | 72.91 | **72.91** |
+| functions | 85.22 | **85.22** |
+| statements | 76.40 | **76.40** |
+
+Identical on all four metrics, to the hundredth, across two operating systems and
+two art-pack states. Linux rose from 72.64 to 72.91 — exactly the two arms — on
+CI run `33879385995`, with `failures: []`. GYM-007's first success metric is met
+by measurement rather than by argument.
+
+Where it started, for the record: `84.16 / 84.65 / 85.15` were three answers to
+one question about `terraces.functions`, and nobody could say which was right.
 
 ## Related docs
 

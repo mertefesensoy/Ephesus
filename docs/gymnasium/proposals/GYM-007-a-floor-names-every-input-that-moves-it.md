@@ -109,7 +109,10 @@ metric that told us to do the wrong thing.
    every shipped manifest carries one, so the credit side ran only on a machine
    holding the licensed pack — never in CI. Closed by giving each resolver a
    credit-bearing fixture case, which also gives a UI-DESIGN §7 licence
-   obligation its first deterministic test.
+   obligation its first deterministic test. **Confirmed on CI run
+   `33879385995`: linux reads 76.39 / 72.91 / 85.22 / 76.40 and win32-with-pack
+   reads the same four figures — identical to the hundredth on every metric,
+   across two operating systems and two pack states, `failures: []`.**
 
    *The method is the transferable part: when a figure moves with an
    undeclared input, diff the two conditions at ARM level. Percentages are what
