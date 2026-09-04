@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "engine": "claude",
+      "probe": "versionProbe",
+      "command": "claude --version",
+      "file": "claude/version.txt",
+      "capturedAt": "2026-09-04",
+      "engineVersion": "2.1.252",
+      "platform": "win32",
+      "redacted": [],
+      "note": "Verbatim stdout."
+    },
+    {
+      "engine": "claude",
+      "probe": "authProbe",
+      "command": "claude auth status",
+      "file": "claude/auth-status.json",
+      "capturedAt": "2026-09-04",
+      "engineVersion": "2.1.252",
+      "platform": "win32",
+      "redacted": ["projectsDirectory", "email", "orgId", "orgName"],
+      "redactionMethod": "substring substitution of the account email, the org id and the OS username; every other byte is the CLI's",
+      "note": "Real stdout of the DEFAULT invocation: `claude auth status --help` states `--json` is the default and `--text` is opt-in. Redacted by substituting identifying SUBSTRINGS in the text, so the CLI's own keys, ordering, types, escaping and indentation survive byte for byte — never re-serialised, which would have made this our formatting rather than the engine's. The matcher reads `loggedIn` and nothing else, so no redaction can flatter the test."
+    },
+    {
+      "engine": "claude",
+      "probe": "authProbe",
+      "command": "claude auth status --text",
+      "file": "claude/auth-status-text.txt",
+      "capturedAt": "2026-09-04",
+      "engineVersion": "2.1.252",
+      "platform": "win32",
+      "redacted": ["Organization", "Email"],
+      "redactionMethod": "substring substitution of the account email and the OS username; every other byte is the CLI's",
+      "note": "The opt-in human-readable mode. Kept because it is what a future default flip, or an Architect running the command by hand, would produce — and because it is the evidence that the pre-fix matcher's `logged in as` / `account:` patterns match NEITHER of this CLI's two output modes."
+    }
+  ],
+  "uncapturable": [
+    {
+      "engine": "codex",
+      "probe": "versionProbe",
+      "why": "`@openai/codex` is not installed on the build machine and the adapter does not ship in the MVP (ADR-0024, claude-only). Its `parseVersion` is therefore unproven against a real CLI. Capture `codex --version` and delete this entry before the adapter is offered to an Architect."
+    },
+    {
+      "engine": "gemini",
+      "probe": "versionProbe",
+      "why": "`@google/gemini-cli` is not installed on the build machine and the adapter does not ship in the MVP (ADR-0024, claude-only). Its `parseVersion` is therefore unproven against a real CLI. Capture `gemini --version` and delete this entry before the adapter is offered to an Architect."
+    }
+  ],
+  "notCaptured": [
+    {
+      "engine": "claude",
+      "probe": "authProbe",
+      "case": "logged out",
+      "why": "Capturing it means signing the Architect out of their own machine. Not done, and not faked: a fixture invented to look like a real capture is worse than no fixture, because the next reader would trust it.",
+      "evidenceInstead": "The JSON answer is a boolean field, so the logged-out shape is the captured document with `loggedIn: false` — the matcher keys on that field, not on prose, and the test derives it from the real file rather than retyping one. For the text path, the CLI's own denial wording was read out of the shipped binary (`@anthropic-ai/claude-code/bin/claude.exe`, 2.1.252): it carries the literals `Not logged in · Run /login`, `Not logged in · Please run /login` and the regex `/^Not logged in$/`. `test/main/engines/claude.test.ts` asserts the matcher against those exact strings."
+    }
+  ]
+}

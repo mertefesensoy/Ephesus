@@ -175,6 +175,30 @@ describe('the log publishes what it appends', () => {
     expect(seen).toEqual(['first', 'second'])
   })
 
+  it('a subscriber added DURING delivery does not receive the entry it arrived after', async () => {
+    // The other half of "delivery walks a snapshot", and the half a Set does
+    // NOT give for free: deleting during iteration is safe in JavaScript, but
+    // ADDING is not — a listener appended to the live set is visited in the
+    // same pass. It would then be handed an entry that was already on its way
+    // before it existed, which is a duplicate for anything that also reads the
+    // log when it subscribes (the Activity panel does exactly that), and a
+    // listener that subscribes on every delivery would never terminate.
+    const store = agora()
+    await store.ensureRepo()
+    const late: number[] = []
+    let arrived = false
+    store.onAppend(() => {
+      if (arrived) return
+      arrived = true
+      store.onAppend((entry) => late.push(entry.seq))
+    })
+
+    store.appendLog({ kind: 'delivery' })
+    expect(late).toEqual([])
+    store.appendLog({ kind: 'delivery' })
+    expect(late).toEqual([2])
+  })
+
   it('covers an appender that never notified anybody by hand', async () => {
     // The point of publishing at the single writer: a module that appends and
     // knows nothing about the renderer is covered anyway. Hermes appends in

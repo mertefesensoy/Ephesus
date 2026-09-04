@@ -13,6 +13,7 @@ import {
 import { EngineRegistry } from '../../src/main/engines'
 import type { SpawnPlan } from '../../src/main/engines'
 import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
+import { CodexAdapter } from '../../src/main/engines/codex'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { postHookEvent, buildEnvelope } from '../../shims/hook-client.mjs'
@@ -89,6 +90,12 @@ interface RigOptions {
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
   readonly onLogEvent?: AgentManagerOptions['onLogEvent']
   readonly authProbe?: AgentManagerOptions['authProbe']
+  /**
+   * Which engine the spawn names. Codex is registered too when it is asked
+   * for, because its BinarySpec declares NO auth probe — which is the case
+   * the manager has to trust rather than refuse.
+   */
+  readonly engine?: 'claude' | 'codex'
 }
 
 async function rig(
@@ -110,6 +117,7 @@ async function rig(
   registry.register(
     new ClaudeAdapter({ prompts, hookShimPath: path.join(home, 'shims', 'eph-hook.mjs') })
   )
+  if (extra.engine === 'codex') registry.register(new CodexAdapter({ prompts }))
 
   const spawner = new RecordingSpawner()
   const changes: string[] = []
@@ -139,7 +147,7 @@ async function rig(
       agentId: 'agent.mason',
       name: 'Mason',
       role: 'ci-babysitter',
-      engine: 'claude',
+      engine: extra.engine ?? 'claude',
       cwd: repo,
       capabilities: ['ci', 'git'],
       envGrants: ['GH_TOKEN']
@@ -667,5 +675,26 @@ describe('AgentManager — an engine that is installed but logged out', () => {
   it('asks nothing when no probe is wired at all', async () => {
     const started = await rig()
     expect((await started.manager.spawn(started.request)).lifecycle).toBe('running')
+  })
+
+  it('starts an engine whose ADAPTER declares no probe, and never asks about it', async () => {
+    // The other absence, and the one the test above cannot reach: Codex's
+    // `BinarySpec` has no `authProbe` at all, so there is no question to ask.
+    // Reading that silence as "logged out" would turn every adapter without a
+    // probe into a company that will not start — which is most of the roster,
+    // and would be a regression caused entirely by adding a feature to one
+    // adapter (ADR-0009: adapters own engine specifics).
+    let asked = 0
+    const started = await rig(async () => '0.9.0', undefined, {
+      engine: 'codex',
+      authProbe: async () => {
+        asked += 1
+        return { stdout: 'Not logged in', exitCode: 1 }
+      }
+    })
+    const card = await started.manager.spawn(started.request)
+    expect(card.lifecycle).toBe('running')
+    expect(card.fixCommand).toBeNull()
+    expect(asked).toBe(0)
   })
 })

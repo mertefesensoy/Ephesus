@@ -36,6 +36,8 @@ interface BundleOptions {
   readonly byKind?: Record<string, AutonomyLevel>
   readonly hires?: readonly string[]
   readonly triggers?: readonly Record<string, unknown>[]
+  /** Secret names every hire in this bundle declares. */
+  readonly envGrants?: readonly string[]
 }
 
 function writeBundle(root: string, name: string, options: BundleOptions = {}): void {
@@ -75,7 +77,7 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
         role: hire,
         engine: 'claude',
         capabilities: ['triage'],
-        envGrants: [],
+        envGrants: [...(options.envGrants ?? [])],
         brief: 'Work.',
         budget: { dailyTokens: 1_000 * (i + 1) }
       })
@@ -91,6 +93,8 @@ interface RigOptions {
   readonly global?: AutonomyLevel
   /** Hire names that should fail to spawn, to exercise the unwind. */
   readonly failOn?: readonly string[]
+  /** The broker's answer — the SAME shape the spawn path's resolver returns. */
+  readonly missingGrants?: (declared: readonly string[]) => readonly string[]
 }
 
 function rig(options: RigOptions = {}) {
@@ -109,6 +113,7 @@ function rig(options: RigOptions = {}) {
   const activations = new ProfileActivations({
     store: new ProfileStore(profiles, path.join(home, 'no-builtins')),
     globalAutonomy: () => options.global ?? 'autonomous',
+    ...(options.missingGrants ? { missingGrants: options.missingGrants } : {}),
     spawn: (request) => {
       if ((options.failOn ?? []).some((name) => request.agentId.endsWith(`-${name}`))) {
         return Promise.reject(new Error(`engine "${request.engine}" is not installed`))
@@ -505,5 +510,60 @@ describe('the Watch seam — composition reaches a real gate decision', () => {
       packaging: PACKAGING
     })
     expect(outcome.held).toBe(false)
+  })
+})
+
+/**
+ * The activation screen and the spawn agree about the secrets (M8.4, B9).
+ *
+ * The preview listed what a profile DECLARES and stopped there, so it promised
+ * `GH_TOKEN` on an install with no `github-app.json` and no such secret — an
+ * affirmative promise about something that would simply be absent at spawn.
+ * The fix wires the preview to the SAME resolver the spawn path uses, and this
+ * is what says so: nothing else in the suite asserted `grantsUnavailable` at
+ * all, and gutting it to a constant `[]` passed every test in four files.
+ */
+describe('the preview asks the broker, rather than assuming', () => {
+  it('reports what the broker cannot supply, from the resolver it is given', async () => {
+    const asked: string[][] = []
+    const r = rig({
+      missingGrants: (declared) => {
+        asked.push([...declared])
+        return declared.filter((name) => name === 'GH_TOKEN')
+      }
+    })
+    writeBundle(r.profiles, 'skeleton-crew', { envGrants: ['GH_TOKEN', 'NPM_TOKEN'] })
+
+    const planned = r.activations.preview({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(asked).toEqual([['GH_TOKEN', 'NPM_TOKEN']])
+    expect(planned.plan.grantsUnavailable).toEqual(['GH_TOKEN'])
+    // Declared and available are two different facts; the screen shows both.
+    expect(planned.plan.envGrants).toEqual(['GH_TOKEN', 'NPM_TOKEN'])
+
+    // And the plan the instance keeps is the same plan, so what the Architect
+    // was shown is what the record says they were shown.
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(result.instance.plan.grantsUnavailable).toEqual(['GH_TOKEN'])
+  })
+
+  it('claims nothing when no resolver is wired', () => {
+    // The parameter is optional so the class stays constructible in a rig that
+    // has no broker; absent means "not checked", never "all available".
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { envGrants: ['GH_TOKEN'] })
+    const planned = r.activations.preview({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.grantsUnavailable).toEqual([])
   })
 })

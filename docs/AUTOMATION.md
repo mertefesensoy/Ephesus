@@ -63,15 +63,43 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
   measurement is uploaded as an artifact on every run so linux floors are recorded from
   the CI condition (`--seed --from <artifact> --platform linux` for the first record,
   `--update --from` for every ratchet after it; `--update` cannot start a block).
-- **Required status checks on `main` — DECIDED 2026-09-04, NOT YET APPLIED.**
-  The Architect chose to require `Typecheck · lint · test`, `Docs integrity`
-  and `Commit attribution` before any merge to `main`. Until that setting is
-  live every gate in this file is ADVISORY:
-  `gh api repos/.../branches/main/protection` still answers 404, and PR #6 was
-  merged over a red code job on 2026-09-02. Three times during the M8 run a red
-  suite skipped the coverage and reachability gates entirely, because they run
-  after the tests. Re-check the API and drop the "not yet applied" note when it
-  is on.
+- **Required status checks on `main` — APPLIED 2026-09-04.** `Typecheck · lint ·
+  test`, `Docs integrity` and `Commit attribution` are required before a merge
+  to `main`, with `strict` (a branch must be up to date first), force-pushes and
+  deletions refused, and conversation resolution required.
+
+  *A correction to the record:* the note here previously said the setting could
+  not be applied because `gh api repos/.../branches/main/protection` "still
+  answers 404". That 404 is GitHub's ordinary answer for **`Branch not
+  protected`** — it was the absence of protection, not a refusal to grant it.
+  The repository is public and the Architect holds admin, so nothing had been
+  blocking it. Reading an API's normal empty answer as an error is the same
+  mistake this repository keeps finding in its own matchers, and it cost the
+  gates a milestone of teeth: PR #6 merged over a red code job on 2026-09-02,
+  and three times during the M8 run a red suite skipped the coverage and
+  reachability gates entirely because they run after the tests.
+
+  `enforce_admins` is deliberately **off**: the Architect merges locally and
+  pushes to `main`, and turning it on would force every change through a PR.
+  What protection buys at this setting is that a *merge* cannot be completed
+  over a red check without an explicit, recorded admin override.
+
+  To verify or change it in the web UI: **Settings → Branches → Branch
+  protection rules → `main`**. What is ticked:
+  - ☑ Require status checks to pass before merging
+    - ☑ Require branches to be up to date before merging
+    - required checks: `Typecheck · lint · test`, `Docs integrity`,
+      `Commit attribution`
+  - ☑ Require conversation resolution before merging
+  - ☐ Require a pull request before merging *(off — solo repository)*
+  - ☐ Do not allow bypassing the above settings *(`enforce_admins`, off)*
+  - ☐ Allow force pushes · ☐ Allow deletions
+
+- **Recorded engine output** (`scripts/check-invariants.cjs`): every probe an
+  engine adapter declares is backed by a real capture under
+  `test/fixtures/engine-output/` with its provenance, or waived there in writing
+  (ENGINEERING-STANDARDS §6.8). The waiver list is the visible debt: `codex` and
+  `gemini` are unproven against a real CLI and are not shipped (ADR-0024).
 
 - **Commit attribution**: `scripts/check-attribution.cjs` over the full history — no
   commit is authored, committed or co-authored as Claude (ENGINEERING-STANDARDS §2).

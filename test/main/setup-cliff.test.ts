@@ -6,6 +6,7 @@ import { ensureHarnessHome } from '../../src/main/home'
 import { loadGatePolicy } from '../../src/main/watch/gates'
 import {
   composeAutonomy,
+  evaluateGate,
   gatePolicySchema,
   shippedGatePolicy,
   type GateKind
@@ -67,6 +68,29 @@ describe('the shipped config cannot drift from its schema', () => {
       'route',
       'task'
     ])
+  })
+
+  it('ships a spend ceiling that a spend request is actually measured against', () => {
+    // The number was never asserted, so it could be changed to anything —
+    // including a value that makes every spend request fail — without a test
+    // noticing. Asserted through `evaluateGate` rather than by reading the
+    // field back, because the ceiling only means something if the evaluator
+    // uses it: an uncapped spend rule permits NOTHING (`spend-cap`), so a
+    // silent loss of this number is a company that cannot spend at all.
+    const spend = shippedGatePolicy.rules.find((rule) => rule.kind === 'spend')
+    expect(spend?.maxSpendTokens).toBe(200_000)
+
+    const ask = (spendTokens: number): boolean =>
+      evaluateGate(shippedGatePolicy, {
+        agentId: 'agent.mason',
+        kind: 'spend',
+        channel: 'local',
+        profileAutonomy: 'autonomous',
+        spendTokens
+      }).allow
+    expect(ask(199_999)).toBe(true)
+    expect(ask(200_000)).toBe(true)
+    expect(ask(200_001)).toBe(false)
   })
 
   it('lets a profile’s own declaration govern, which is what B5 broke', () => {

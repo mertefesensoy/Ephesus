@@ -142,6 +142,14 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   transient vs latency-breach → correct failover state machine transitions).
 - A new adapter PR is *only* its adapter + passing conformance run — any core diff
   fails the import-boundary lint (ENGINEERING-STANDARDS §1).
+- **Every output the adapter MATCHES on is a recorded capture, never a string we
+  wrote.** Version lines, auth status, capacity messages: the bytes live in
+  `test/fixtures/engine-output/` with their command, engine version, platform and
+  date in `PROVENANCE.json`, and the tests run the shipped matcher over them.
+  `scripts/check-invariants.cjs` fails on a declared probe with neither a capture
+  nor a written waiver (ENGINEERING-STANDARDS §6.8). M8.4 is why: a matcher
+  written against imagined output passed forty-five tests while being unable to
+  read a single byte the real CLI prints.
 
 ## 6. Agent-behavior evals (quality, not correctness)
 

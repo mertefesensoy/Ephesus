@@ -1,0 +1,4 @@
+Login method: Claude Max account
+Organization: <architect>@example.test's Organization
+Email: <architect>@example.test
+Anthropic base URL: https://api.anthropic.com

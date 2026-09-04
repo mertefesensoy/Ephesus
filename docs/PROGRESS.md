@@ -4888,6 +4888,45 @@ structural rather than a habit.
       ratcheted the block, and run `33811944369` on `8998918` is GREEN on all
       three jobs. Branch `feature/m8-4-setup-cliff`.*
 
+### M8.3 / M8.4 defect clearance (2026-09-04) — 2 defects, 7 surviving mutants
+
+An adversarial pass over both merged packages, at the Architect's instruction
+that nothing may survive. Both had landed green; 52 targeted mutations and a
+read of the production code against what the world actually does found this:
+
+- **The login probe could not read the engine it was written for.** The shipped
+  matcher looked for `logged in as` / `account:`; the real CLI answers JSON by
+  default (`{"loggedIn": true, …}`, verified on 2.1.252) and `Login method: …`
+  in its opt-in `--text` mode. It matched NEITHER, always answered "cannot
+  tell", and `needs-login` could not fire on any machine — while the README
+  told the Architect Ephesus asks at every spawn. Forty-five tests passed, all
+  of them fed strings we wrote ourselves. Third instance of the shape
+  (`reproduce`/`prod` in M7.4; a spoken refusal confirming a gate in M6), so it
+  is now a **rule**: ENGINEERING-STANDARDS §6.8, enforced by
+  `scripts/check-invariants.cjs` rule 6 against
+  `test/fixtures/engine-output/PROVENANCE.json`. **Six bypasses attempted, six
+  caught** before the gate was believed.
+- **The Activity panel's opening race could restore B4.** An append landing
+  before the tail read answered issued a forward page from seq 0; if it answered
+  second it appended the company's FIRST rows and rewound the cursor — the exact
+  defect the tail read was added to fix, on that code path. Fixed with two
+  independent guarantees (monotonic `absorb`, no page before the panel opens),
+  each killed by its own test.
+- **Seven surviving mutants, now dead.** `grantsUnavailable` gutted to `[]`
+  (M8.4's "the preview asks the spawn's resolver" — asserted nowhere); the
+  dock's whole `notReady` branch deleted, and its fix command deleted (M8.4's
+  `needs-login` visibility — asserted nowhere); an adapter declaring no probe
+  read as logged out; the shipped 200k spend ceiling changed to anything; the
+  Agora's publish snapshot; the `×1` suppression.
+
+*Evidence: 22 new cases. Mutation score on the same 40-mutation set 33/40 → 40/40,
+plus 12 new mutations over the new code, 12/12 killed. `typecheck && lint &&
+check-invariants && test:coverage && check-coverage` green. Branch protection on
+`main` APPLIED (see AUTOMATION.md — the previous session's "the API answers 404"
+was a misreading of GitHub's ordinary `Branch not protected`). Doc:
+`docs/implementations/2026-09-04-m8-3-m8-4-defect-clearance.md`. Branch
+`fix/m8-3-m8-4-defects`.*
+
 - [ ] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
       carry `repos: []`; the activation plan is the only source of that list; and
       the ingest cadence disables itself entirely when every instance has zero
