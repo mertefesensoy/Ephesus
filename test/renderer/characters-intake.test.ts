@@ -49,6 +49,21 @@ describe('deciding whether a character pack is usable', () => {
     expect(state.note).toContain('test pack')
   })
 
+  it('puts the pack’s CREDIT on the note, which is a licence term', () => {
+    // UI-DESIGN §7: "license terms and credits are mandatory". Every fixture in
+    // this file omits `credit`, so the suite only ever took the no-credit side;
+    // the shipped `limezu.chars.json` carries one, so the credit side ran only
+    // on a machine holding the licensed pack — never in CI. An arm-level diff of
+    // two full runs, pack on and pack off, named this arm and `tileset.ts:284`
+    // as the only two in `terraces` that differed between the two conditions.
+    const state = resolveCharacters(
+      { '/a/a.png': 'blob:a', '/a/b.png': 'blob:b' },
+      { '/a/p.chars.json': { ...manifestFor(['a.png', 'b.png']), credit: 'LimeZu — example' } }
+    )
+    expect(state.installed).toBe(true)
+    expect(state.note).toBe('citizens: test pack — LimeZu — example')
+  })
+
   it('says procedural, and why, for a manifest it cannot parse', () => {
     const state = resolveCharacters({ '/a/a.png': 'blob:a' }, { '/a/p.chars.json': { nope: 1 } })
     expect(state.installed).toBe(false)

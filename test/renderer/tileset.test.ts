@@ -221,6 +221,27 @@ describe('the floor says which art it is drawing (invariant §7)', () => {
     expect(state.note).toBe('tileset: Test Pack')
   })
 
+  it('puts the pack’s CREDIT on the note, which is a licence term', () => {
+    // UI-DESIGN §7: "license terms and credits are mandatory", and the note is
+    // the only place a credit is ever shown — `resolveTileset`'s own comment
+    // says it: "a licence term nobody can see is a licence term nobody is
+    // honouring."
+    //
+    // Until 2026-09-04 this arm was covered on exactly ONE machine on earth.
+    // Every fixture here omits `credit`, so the suite only ever took the
+    // no-credit side; the shipped `*.tiles.json` files all carry one, so the
+    // credit side ran only where the licensed pack happened to be installed —
+    // never in CI. An arm-level diff of two full runs, pack on and pack off,
+    // named this and `characters.ts:182` as the only two arms in the whole
+    // `terraces` subsystem that differed.
+    const state = resolveTileset(
+      { '../assets/tileset/pack.png': '/pack.png' },
+      { '../assets/tileset/pack.tiles.json': { ...MAP, credit: 'A. Painter — painter.example' } }
+    )
+    expect(state.installed).toBe(true)
+    expect(state.note).toBe('tileset: Test Pack — A. Painter — painter.example')
+  })
+
   // ── The M6 close-out audit's finding, as a regression ─────────────────────
   // `validateCompositions` had only TEST callers: a pack shipping a wrong-sized
   // composition really did fall back to the procedural painter, and really did

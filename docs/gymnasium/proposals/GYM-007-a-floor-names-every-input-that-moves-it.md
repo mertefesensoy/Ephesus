@@ -101,14 +101,20 @@ metric that told us to do the wrong thing.
    and M8.7 branches. Verified by moving the pack aside and re-running, recorded
    in the implementation doc.
 
-   **Partially met as of 2026-09-04, and the unmet part is named.** `FloorCanvas`
-   reads 121/331 lines and 29/48 functions with the pack, without it, and on CI
-   linux. Across win32-with-pack and linux CI the `terraces` row agrees to the
-   hundredth on lines (76.39), functions (85.22) and statements (76.40) — and
-   still differs by 0.27 on **branches** (72.91 vs 72.64), cause not isolated.
-   Until it is, `terraces.branches` must not be ratchetted from win32: doing so
-   would leave linux 0.27 below a 0.25 tolerance, which is this proposal's own
-   failure reproduced. Closing that gap is what completes this metric.
+   **Met as of 2026-09-04.** `FloorCanvas` reads identically with the pack,
+   without it, and on CI linux. The last 0.27 was two branch arms, found by an
+   arm-level diff of two full runs rather than by comparing percentages:
+   `src/shared/characters.ts:182` and `src/shared/tileset.ts:284`, both the
+   `credit === undefined ? '' : …` ternary. Every fixture omitted `credit` and
+   every shipped manifest carries one, so the credit side ran only on a machine
+   holding the licensed pack — never in CI. Closed by giving each resolver a
+   credit-bearing fixture case, which also gives a UI-DESIGN §7 licence
+   obligation its first deterministic test.
+
+   *The method is the transferable part: when a figure moves with an
+   undeclared input, diff the two conditions at ARM level. Percentages are what
+   hid this for three wrong diagnoses.*
+
 2. **No floor is corrected by hand again before 2026-10-02.** Every floor change
    in that window is an `--update` over a full window, visible in the diff as a
    candidate with three runs. A hand edit in the window counts as a failure of

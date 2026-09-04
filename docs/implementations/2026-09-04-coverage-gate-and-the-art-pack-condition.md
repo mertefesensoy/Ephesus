@@ -218,21 +218,52 @@ Across win32-with-pack and linux CI (permanently pack-free), on this branch:
 `FloorCanvas.tsx` itself reads **36.56% (121/331) in both**, which is the claim
 this change was made for. Three metrics of four now agree to the hundredth.
 
-**Branches still differ by 0.27 — roughly two branches — and the cause is not
-isolated.** The likely path is `floor-glob-modules.test.tsx` itself: it enters
-the two glob modules for real, which means `resolveTileset` /
-`resolveCharacters` take their installed arm on a machine with the pack and
-their not-installed arm without it. Those resolvers are separately and
-exhaustively tested from fixtures in `test/renderer/tileset.test.ts` and
-`characters-intake.test.ts`, so the union should already be covered; it is not
-yet established which branches remain.
+**Branches differed by 0.27 — and an arm-level diff of two full runs named the
+cause outright.**
 
-Consequence, stated so nobody walks into it: **do not ratchet `terraces.branches`
-from win32.** A win32 ratchet to 72.91 would leave linux reading 72.64 — a 0.27
-regression past a 0.25 tolerance, which is the trap of this whole episode
-reproduced in miniature. Both platforms currently pass with headroom against the
-unchanged 72.61 floor, so nothing is failing; this is a note about the next
-ratchet, not a defect today. Tracked as the open half of GYM-007's metric 1.
+Percentages could not do it; they are what hid the whole thing. Two complete
+`npm run test:coverage` runs on this branch, one with the pack installed and one
+with it moved aside, keeping `coverage-final.json` from each, then diffing every
+`(branchId, arm)` whose count is zero in one report and non-zero in the other:
+
+```
+src/shared/characters.ts  line 182  cond-expr  arm 1  WITH-PACK only  (3 vs 0)
+src/shared/tileset.ts     line 284  cond-expr  arm 1  WITH-PACK only  (9 vs 0)
+total differing arms: 2
+```
+
+Two arms, one in each resolver, and nothing else in the subsystem moved —
+`FloorCanvas.tsx` read `129/364` lines and `33/178` branches in **both** runs,
+and every line total was identical.
+
+Both arms are the same expression:
+
+```ts
+`${name}${credit === undefined ? '' : ` — ${credit}`}`
+```
+
+Every fixture in `test/renderer/tileset.test.ts` and `characters-intake.test.ts`
+omits `credit`, so the suite only ever took the no-credit side. Every shipped
+manifest — `limezu.chars.json` and all three `*.tiles.json` — carries one. So the
+credit side ran **only on a machine holding the licensed pack, and never in CI.**
+
+### The residual was not really about coverage
+
+`src/shared/tileset.ts:281`, above that very line:
+
+> *"The credit rides the same line as the name: a licence term nobody can see is
+> a licence term nobody is honouring."*
+
+UI-DESIGN §7 makes licence credits mandatory, and the note is the only place one
+is ever shown. The code that honours that obligation was exercised by accident,
+on one machine, and by nothing deterministic anywhere. That is the same defect
+class as `loadOne`: a path that runs only where the asset happens to exist.
+
+**Fixed by giving each resolver a credit-bearing fixture case.** Both arms now
+run from fixtures alone, with no glob and no pack involved — verified
+`arms=[1, 1]` and `arms=[9, 1]` at those two lines from the two test files by
+themselves. The branch difference closes, and a licence term gets its first
+deterministic test.
 
 ## Related docs
 
