@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { deriveRepo } from '../../src/shared/repo-remote'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { cleanupHomes, scenarioMessage, sendStep, startCompany, type Company } from './company'
@@ -306,7 +307,8 @@ describe('the incident binding is derived from a real plan', () => {
       loaded.bundle,
       { kind: 'repo', id: 'musahit', path: path.join(__dirname, '..', '..') },
       'manual',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
 

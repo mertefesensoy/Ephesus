@@ -53,14 +53,51 @@ export function targetReady(fields: TargetFields): boolean {
   return fields.id.trim().length > 0 && fields.path.trim().length > 0
 }
 
-/** Contract: pure. The form as the `profiles:preview`/`activate` request. */
+/**
+ * Contract: pure. The `owner/repo` slugs in a line the Architect typed.
+ *
+ * Split on commas and whitespace, trimmed, blanks dropped, order and
+ * duplicates preserved-then-deduplicated — a paste from a browser tab is the
+ * expected input, so `owner/repo, owner/other` and `owner/repo owner/other`
+ * both work. NOT validated here: main validates against the same schema the
+ * Harbor uses, and a renderer that pre-judged would be a second opinion that
+ * can drift from the one that decides.
+ *
+ * Exported because the alternative is an expression inside a component, which
+ * is where the M5b.1 pin defect lived.
+ */
+export function parseRepoList(text: string): readonly string[] {
+  const seen: string[] = []
+  for (const part of text.split(/[\s,]+/)) {
+    const slug = part.trim()
+    if (slug.length === 0 || seen.includes(slug)) continue
+    seen.push(slug)
+  }
+  return seen
+}
+
+/**
+ * Contract: pure. The form as the `profiles:preview`/`activate` request.
+ *
+ * `repos` is omitted rather than sent empty: the schema's field is optional and
+ * an empty array would read as "the Architect chose no repositories", which is
+ * a different statement from "the Architect did not choose" — the first would
+ * override a bundle's own declaration with nothing.
+ */
 export function activationRequest(
   profile: string,
-  fields: TargetFields
-): { profile: string; target: { kind: 'repo' | 'app'; id: string; path: string } } {
+  fields: TargetFields,
+  repos = ''
+): {
+  profile: string
+  target: { kind: 'repo' | 'app'; id: string; path: string }
+  repos?: string[]
+} {
+  const chosen = parseRepoList(repos)
   return {
     profile,
-    target: { kind: fields.kind, id: fields.id.trim(), path: fields.path.trim() }
+    target: { kind: fields.kind, id: fields.id.trim(), path: fields.path.trim() },
+    ...(chosen.length > 0 ? { repos: [...chosen] } : {})
   }
 }
 
@@ -230,11 +267,20 @@ export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElem
         </p>
       ) : null}
 
-      <p style={heading}>It would reach</p>
+      <p style={heading}>It would watch</p>
       {plan.repos.length === 0 ? (
-        <p style={note}>no repositories — add them to the bundle&rsquo;s harbor.json</p>
+        // The condition that made the flagship mission inert on first use, said
+        // out loud BEFORE the Architect activates it (M8.5, B7). It used to
+        // read "add them to the bundle's harbor.json", which described the fix
+        // for a problem the screen never said you had.
+        <p style={warn}>nothing — {plan.reposBecause}</p>
       ) : (
-        <p style={{ margin: '4px 0' }}>{plan.repos.join(', ')}</p>
+        <>
+          <p style={{ margin: '4px 0' }}>{plan.repos.join(', ')}</p>
+          {/* Where it came from, so a repository the Architect chose reads
+              differently from one the harness read off the checkout. */}
+          <p style={note}>{plan.reposBecause}</p>
+        </>
       )}
 
       <p style={heading}>It holds these for a memo</p>
@@ -290,6 +336,8 @@ export function ProfilesPanel(): ReactElement {
   const [instances, setInstances] = useState<readonly ProfileInstanceView[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [target, setTarget] = useState<TargetFields>(EMPTY_TARGET)
+  /** The Architect's repository override, empty on the normal path (M8.5). */
+  const [repos, setRepos] = useState('')
   const [plan, setPlan] = useState<ActivationPlan | null>(null)
   const [reasons, setReasons] = useState<readonly string[]>([])
 
@@ -309,6 +357,27 @@ export function ProfilesPanel(): ReactElement {
     }
   }, [refresh])
 
+  /**
+   * Points the form at a different target, dropping any repository override
+   * typed for the previous one (M8.5).
+   *
+   * An override is an answer about ONE checkout — the fork the derivation
+   * refused to choose between. Letting it follow the Architect to another
+   * target is how the company ends up watching the wrong repository, which is
+   * the exact outcome `deriveRepo` refuses to risk by guessing. Clearing it on
+   * any edit to the target is blunt, and blunt in the safe direction: the plan
+   * is re-read before anything is activated, so a cleared box is visible.
+   */
+  const retarget = useCallback(
+    (next: TargetFields) => {
+      if (next.kind !== target.kind || next.id !== target.id || next.path !== target.path) {
+        setRepos('')
+      }
+      setTarget(next)
+    },
+    [target]
+  )
+
   const preview = useCallback(
     (name: string) => {
       const eph = window.eph
@@ -316,27 +385,30 @@ export function ProfilesPanel(): ReactElement {
       setSelected(name)
       setPlan(null)
       setReasons([])
-      void eph.profiles.preview(activationRequest(name, target)).then((result) => {
+      void eph.profiles.preview(activationRequest(name, target, repos)).then((result) => {
         if (result.ok) setPlan(result.plan)
         else setReasons(result.reasons)
       })
     },
-    [target]
+    [target, repos]
   )
 
   const activate = useCallback(() => {
     const eph = window.eph
     if (!eph || selected === null) return
-    void eph.profiles.activate(activationRequest(selected, target)).then((result) => {
+    void eph.profiles.activate(activationRequest(selected, target, repos)).then((result) => {
       if (!result.ok) setReasons(result.reasons)
       else {
         setPlan(null)
         setSelected(null)
         setReasons([])
+        // The next activation starts from what the checkout says, not from an
+        // override typed for the one that just went live.
+        setRepos('')
       }
       refresh()
     })
-  }, [selected, target, refresh])
+  }, [selected, target, repos, refresh])
 
   const deactivate = useCallback(
     (instanceId: string) => {
@@ -359,7 +431,7 @@ export function ProfilesPanel(): ReactElement {
         aria-label="target kind"
         value={target.kind}
         onChange={(event) => {
-          setTarget({ ...target, kind: event.target.value === 'app' ? 'app' : 'repo' })
+          retarget({ ...target, kind: event.target.value === 'app' ? 'app' : 'repo' })
         }}
       >
         <option value="repo">repo</option>
@@ -371,7 +443,7 @@ export function ProfilesPanel(): ReactElement {
         placeholder="id, e.g. myapp"
         value={target.id}
         onChange={(event) => {
-          setTarget({ ...target, id: event.target.value })
+          retarget({ ...target, id: event.target.value })
         }}
       />
       <input
@@ -380,7 +452,21 @@ export function ProfilesPanel(): ReactElement {
         placeholder="absolute path to the working copy"
         value={target.path}
         onChange={(event) => {
-          setTarget({ ...target, path: event.target.value })
+          retarget({ ...target, path: event.target.value })
+        }}
+      />
+      {/* Left empty on the normal path: the checkout's own remote answers this
+          (M8.5). It exists because a derivation can be REFUSED — a fork has two
+          remotes and two answers, and guessing between them would be the
+          harness deciding whose repository the company files incidents against.
+          The preview below always says which of the two happened. */}
+      <input
+        style={field}
+        aria-label="repositories to watch"
+        placeholder="repositories to watch — leave empty to read the target's remote"
+        value={repos}
+        onChange={(event) => {
+          setRepos(event.target.value)
         }}
       />
 
@@ -408,7 +494,7 @@ export function ProfilesPanel(): ReactElement {
                     // Fills the form and nothing else. Preview and activate
                     // still run exactly as they do for a typed path — a
                     // remembered target is a convenience, never an approval.
-                    setTarget({
+                    retarget({
                       kind: known.kind === 'app' ? 'app' : 'repo',
                       id: known.id,
                       path: known.path

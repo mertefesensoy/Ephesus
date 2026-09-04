@@ -1,9 +1,14 @@
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
+import { deriveRepo } from '../../src/shared/repo-remote'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { cleanupHomes, scenarioMessage, sendStep, startCompany, type Company } from './company'
 import { ProfileStore } from '../../src/main/profiles'
-import { activationPlan } from '../../src/shared/profile-activation'
+import { activationPlan, watchedRepos } from '../../src/shared/profile-activation'
+import { ExecGitRunner, readRemotes } from '../../src/main/git'
+import { removeTempDir } from '../tmpdir'
 import { AUTONOMY_LEVELS, type AutonomyLevel } from '../../src/shared/gates'
 import { HARBOR_ENDPOINT } from '../../src/shared/reserved'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
@@ -85,7 +90,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
       'autonomous',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
 
@@ -114,7 +120,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
       'autonomous',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!planned.ok) throw new Error(planned.reasons.join('; '))
     const byKind = Object.fromEntries(planned.plan.autonomy.map((row) => [row.kind, row.effective]))
@@ -133,7 +140,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
       bundle,
       { kind: 'repo', id: 'myapp', path: REPO_ROOT },
       'manual',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!clamped.ok) throw new Error(clamped.reasons.join('; '))
     for (const row of clamped.plan.autonomy) {
@@ -149,7 +157,8 @@ describe('S-PROFILE — Skeleton Crew on a fixture repo', () => {
         bundle,
         { kind: 'repo', id: 'myapp', path: REPO_ROOT },
         global as AutonomyLevel,
-        () => []
+        () => [],
+        deriveRepo([])
       )
       if (!planned.ok) throw new Error(planned.reasons.join('; '))
       for (const row of planned.plan.autonomy) {
@@ -366,5 +375,128 @@ describe('S-PROFILE — the playbook path back', () => {
     // The brief will cite this entry (UC-09 step 3). A rewritten sentence would
     // be a claim nobody made — E-BRIEF-FAITH's rule, at the incident's end.
     expect(log).toContain('the login service returns 500 for every request since the deploy')
+  })
+})
+/**
+ * S-PROFILE — the shipped bundle, on a real checkout, raises a real incident
+ * (M8.5, B7).
+ *
+ * The gap this closes is the one the whole package is named for. Every case
+ * above hands the incident binding a repository by hand, and the SHIPPED
+ * Skeleton Crew declares `repos: []` — so on a real machine `plan.repos` was
+ * always empty, the ingest cadence disarmed itself, no item was ever ingested,
+ * and the chain those cases prove could not START. This one derives the
+ * repository the way the app does — real git, real remotes, the shipped
+ * `readRemotes` and `deriveRepo` — and then runs the same chain off the plan
+ * rather than off a literal.
+ */
+describe('S-PROFILE — an activation against a real checkout can raise an incident', () => {
+  const ONCALL = 'agent.mason'
+  const temps: string[] = []
+
+  afterEach(() => {
+    for (const dir of temps.splice(0)) removeTempDir(dir)
+  })
+
+  /** A real git checkout whose only remote is a GitHub repository. */
+  function checkoutOf(slug: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-s-profile-'))
+    temps.push(root)
+    const repo = path.join(root, 'target')
+    fs.mkdirSync(repo, { recursive: true })
+    const git = (args: readonly string[]): void => {
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd: repo })
+    }
+    git(['init', '-q', '-b', 'main'])
+    git(['remote', 'add', 'origin', `https://github.com/${slug}.git`])
+    return repo
+  }
+
+  it('watches what the checkout says it is, and the crew is woken for it', async () => {
+    const slug = 'octocat/hello-world'
+    const target = checkoutOf(slug)
+
+    // Exactly what `index.ts` wires: the one git module reads the remotes, the
+    // shared function decides, and the plan carries the answer.
+    const read = await readRemotes(new ExecGitRunner(), target)
+    if (!read.ok) throw new Error(read.because)
+    const derived = deriveRepo(read.remotes)
+
+    const planned = activationPlan(
+      skeletonCrew(),
+      { kind: 'repo', id: 'myapp', path: target },
+      'autonomous',
+      () => [],
+      derived
+    )
+    if (!planned.ok) throw new Error(planned.reasons.join('; '))
+
+    // The shipped bundle declares NOTHING; the checkout answered.
+    expect(skeletonCrew().harbor.repos).toEqual([])
+    expect(planned.plan.repos).toEqual([slug])
+    expect(planned.plan.reposFrom).toBe('target')
+    // And the ingest cadence has something to be armed for — the same function
+    // `index.ts` asks, so the screen and the scheduler cannot disagree.
+    expect(watchedRepos([{ plan: planned.plan }])).toEqual([slug])
+
+    // Now the chain those other cases prove, started from the PLAN.
+    const co = await company()
+    co.hire('agent.artemis')
+    co.hire(ONCALL)
+    const registry = co.agora.registry()
+    co.agora.writeRegistry({ ...registry, orchestratorId: 'agent.artemis' })
+    co.incidentBindings.push({
+      instanceId: planned.plan.instanceId,
+      agentId: ONCALL,
+      playbook: 'incident.md',
+      repos: [...planned.plan.repos]
+    })
+
+    const raised = co.incidents.raise([failedRun({ repo: slug, url: `https://x/${slug}` })])
+    expect(raised).toHaveLength(1)
+    const names = co.inbox('agent.artemis')
+    expect(names).toHaveLength(1)
+    expect(co.readInbox('agent.artemis', names[0] as string).body).toContain(slug)
+  })
+
+  it('refuses to guess on a fork, and the crew is NOT woken for either side', async () => {
+    // The risk line, end to end. A wrong slug here would have the company
+    // filing incidents against somebody else's repository.
+    const target = checkoutOf('me/app')
+    execFileSync('git', ['remote', 'add', 'upstream', 'https://github.com/canonical/app.git'], {
+      cwd: target
+    })
+
+    const read = await readRemotes(new ExecGitRunner(), target)
+    if (!read.ok) throw new Error(read.because)
+    const planned = activationPlan(
+      skeletonCrew(),
+      { kind: 'repo', id: 'myapp', path: target },
+      'autonomous',
+      () => [],
+      deriveRepo(read.remotes)
+    )
+    if (!planned.ok) throw new Error(planned.reasons.join('; '))
+    expect(planned.plan.repos).toEqual([])
+    expect(planned.plan.reposBecause).toContain('more than one')
+
+    const co = await company()
+    co.hire('agent.artemis')
+    co.hire(ONCALL)
+    co.incidentBindings.push({
+      instanceId: planned.plan.instanceId,
+      agentId: ONCALL,
+      playbook: 'incident.md',
+      repos: [...planned.plan.repos]
+    })
+    for (const repo of ['me/app', 'canonical/app']) {
+      co.incidents.raise([failedRun({ repo })])
+    }
+    // Nobody is woken, and the log says why nothing was claimed — which is a
+    // far better outcome than half the company triaging the wrong repository.
+    expect(co.inbox('agent.artemis')).toHaveLength(0)
+    expect(fs.readFileSync(path.join(co.agora.root, 'log.jsonl'), 'utf8')).toContain(
+      'incident-unclaimed'
+    )
   })
 })

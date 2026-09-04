@@ -21,7 +21,8 @@ import {
 import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis, ARTEMIS_AGENT_ID } from './artemis'
-import { ExecGitRunner, Worktrees } from './git'
+import { ExecGitRunner, Worktrees, readRemotes } from './git'
+import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
 import { ODEON_ENDPOINT } from '../shared/reserved'
@@ -33,7 +34,7 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { targetRef, verifierAgentFor } from '../shared/profile-activation'
+import { targetRef, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
@@ -829,8 +830,9 @@ async function boot(): Promise<void> {
   // reconciled before anything can write to it.
   // The one git path (ADR-0004) also owns worktree isolation, and is told which
   // root it must never make a worktree of: the Agora's own.
+  const gitRunner = new ExecGitRunner()
   const worktrees = new Worktrees({
-    runner: new ExecGitRunner(),
+    runner: gitRunner,
     forbiddenRoot: path.join(home.root, 'agora')
   })
   agora = new Agora({
@@ -2053,6 +2055,26 @@ async function boot(): Promise<void> {
     store: profiles,
     globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
     missingGrants: (declared) => resolveDeclaredGrants(declared).missing,
+    // The checkout already knows which repository it is (M8.5, B7). Both
+    // shipped bundles carry `repos: []`, so without this every activation
+    // watched nothing: no CI run, issue or pull request was ingested, and no
+    // incident could ever be raised. READ each time — the Architect adds a
+    // remote between two activations like anybody else, and a cached answer is
+    // a setting nobody re-reads.
+    resolveRepos: async (target) => {
+      const read = await readRemotes(gitRunner, target.path)
+      return read.ok ? deriveRepo(read.remotes) : { ok: false, because: read.because }
+    },
+    // Raised AND cleared through one seam (M8.5): the Architect fixes the
+    // remote, reactivates, and the health list has to stop saying the mission
+    // watches nothing — a degradation that is raised and never cleared is the
+    // failure M8.2 exists to prevent.
+    onWatching: (instanceId, because) => {
+      const cause = `profiles/watches-nothing:${instanceId}` as const
+      if (because === null) degradations.clear(cause)
+      else
+        reportDegradation(cause, `${instanceId} is active but watches no repository — ${because}`)
+    },
     spawn: (request) => {
       if (agentManager === null) return Promise.reject(new Error('agents: not started'))
       return agentManager.spawn(request)
@@ -2110,9 +2132,7 @@ async function boot(): Promise<void> {
   })
 
   harbor = new GitHubHarbor({
-    repos: () => [
-      ...new Set((activations?.instances() ?? []).flatMap((instance) => instance.plan.repos))
-    ],
+    repos: () => watchedRepos(activations?.instances() ?? []),
     onLogEvent: (draft) => {
       // FR-10.3: every inbound item lands in `log.jsonl` tagged `remote`.
       agora?.appendLog(draft)
@@ -2129,7 +2149,7 @@ async function boot(): Promise<void> {
     // Only when something is actually watching a repository. An ingestion
     // cadence that ran against an empty list would still shell out to `gh`
     // every ten minutes for nothing.
-    enabled: () => (activations?.instances() ?? []).some((i) => i.plan.repos.length > 0),
+    enabled: () => watchedRepos(activations?.instances() ?? []).length > 0,
     run: async () => {
       const view = await harbor?.ingest()
       if (view === undefined) return
@@ -2543,7 +2563,8 @@ async function boot(): Promise<void> {
     // are what a caller gets if that order ever changes — a refusal that names
     // the reason, never a silent success or a crash mid-activation.
     profilesPreview: (request) =>
-      activations?.preview(request) ?? { ok: false, reasons: ['profiles: not started'] },
+      activations?.preview(request) ??
+      Promise.resolve({ ok: false, reasons: ['profiles: not started'] }),
     // Remembered on success only: a chip that reproduces the Architect's own
     // failed attempt is worse than an empty form.
     profilesActivate: async (request) => {

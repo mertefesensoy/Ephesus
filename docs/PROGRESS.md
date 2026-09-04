@@ -4927,7 +4927,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
 `docs/implementations/2026-09-04-m8-3-m8-4-defect-clearance.md`. Branch
 `fix/m8-3-m8-4-defects`.*
 
-- [ ] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
+- [x] **M8.5 The mission actually watches the repository** — B7. Shipped bundles
       carry `repos: []`; the activation plan is the only source of that list; and
       the ingest cadence disables itself entirely when every instance has zero
       repos. So activating the Skeleton Crew against a real repository watches
@@ -4938,6 +4938,48 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `harbor.json` still ingests from the named target; the cadence stays armed.
       Risk: deriving the repo from the target guesses a remote — refuse and say
       so when the target has no unambiguous remote, rather than inventing one.*
+      *Evidence: the checkout is asked which repository it is (`git remote -v`
+      through `readRemotes`, the one module allowed to run git; the parse and the
+      refusal are `src/shared/repo-remote.ts`), the answer is SHOWN on the
+      activation screen with where it came from, and the **Architect may
+      overrule it** — the three-part shape they chose over deriving silently
+      (a wrong guess files incidents against somebody else's repository) and
+      over asking them to type it (a setup step on the flagship first-run path).
+      Precedence: architect → bundle → target → nothing WITH THE REASON, and the
+      reason names the consequence. **Refusing is a first-class answer**: a fork
+      names both candidates and says `name the one to watch`; several remotes
+      naming one repository is not ambiguity; a non-github remote beside a
+      github one is not either. A remote URL is NEVER echoed (`gh` writes
+      `https://x-access-token:<token>@…`) and a Windows drive letter is not a
+      host — a Windows path had parsed as scp-with-host-`c`. `watchedRepos`
+      replaced two inlined expressions in `index.ts` — the Harbor's ingest list
+      and the cadence's arming condition — for the M7.4 reason. `preview` is now
+      async because the remotes are READ, never cached. An instance that comes
+      up watching nothing is not refused (that would be a new cliff) but
+      REPORTED, through the M8.2 channel and on the screen in the warning
+      colour, and CLEARED when it starts watching something or is torn down —
+      one callback carrying both directions, found by the adversarial pass on
+      this package's own code, because a degradation raised and never cleared is
+      the failure M8.2 exists to prevent. A repository override typed for one
+      checkout is also dropped when the target changes, since letting it follow
+      the Architect elsewhere is the wrong-repository outcome the derivation
+      refuses to risk. Tests: 52 new cases — the parse and the refusal, `readRemotes`
+      against REAL git in temp repositories plus an injected runner for the
+      lines git will not print on demand, the precedence table, the seam through
+      the shipped `ProfileActivations`, the screen, and **S-PROFILE end to end**:
+      a real `git init` checkout with one GitHub remote + the shipped
+      Skeleton Crew (`repos: []`) → an incident actually raised, and its
+      opposite, a fork refused with nobody woken for either side. **33 mutations,
+      33 killed** (4 survived the first pass — the fetch/push anchor, dedup,
+      sort, and the warning colour, which the page carried elsewhere; each got
+      the case that makes it load-bearing). **Production call path:**
+      `index.ts` `resolveRepos` → `readRemotes(gitRunner, target.path)` →
+      `deriveRepo` → `ProfileActivations.preview` → `activationPlan`;
+      `watchedRepos` is the `GitHubHarbor.repos` source AND the
+      `harbor-github` scheduler's `enabled`. Docs: SDD §1.1 (`git.ts`,
+      `profiles.ts`),
+      `docs/implementations/2026-09-04-m8-5-mission-watches-repository.md`.
+      Branch `feature/m8-5-mission-watches-repository`.*
 
 - [ ] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
       path never requests worktree isolation (verified: zero `worktree`

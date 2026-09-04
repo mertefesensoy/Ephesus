@@ -190,8 +190,27 @@ company at once.
 
 A mission profile is activated against a target repository from the **Profiles**
 tab. The activation screen shows what would happen before anything does: which
-agents get hired, what they may do, which triggers get armed, and which declared
-secrets the broker cannot actually supply.
+agents get hired, what they may do, which triggers get armed, which declared
+secrets the broker cannot actually supply, and **which repository it would
+watch**.
+
+You do not have to tell it which repository that is — Ephesus reads the target
+checkout's git remote and says what it found and where it found it. Two cases
+where it will not guess, and says so on the screen instead:
+
+| What it finds | What it does |
+|---|---|
+| one GitHub remote | watches that repository |
+| a fork (`origin` and `upstream` at different repositories) | refuses, names both, asks you to pick |
+| no remote, or no GitHub remote | says the instance will watch nothing, and why |
+
+In either of those, type the `owner/repo` into the repositories box before
+reading the plan. Whatever the bundle's own `harbor.json` declares wins over the
+checkout; what you type wins over both.
+
+An instance that comes up watching nothing still hires its crew and arms its
+schedules — but it can ingest no CI run, issue or pull request, so it will raise
+no incident, and that shows up as a degradation rather than as silence.
 
 ## Status
 
@@ -206,9 +225,11 @@ seam with no test is a defect, not a gap); a quit path that actually runs, with
 one door to the renderer and one ordered, isolated shutdown sequence; a
 degradation channel where every give-up is visible, durable and countable; the
 log-derived surfaces reading the whole book instead of its oldest 500 entries;
-and the setup cliff — the config files the harness needs are now created,
+the setup cliff — the config files the harness needs are now created,
 documented and reported, and an engine with no session says so instead of
-pretending to work.
+pretending to work; and a mission activated against a repository now actually
+watches it, because the checkout is asked which repository it is rather than a
+bundle that ships an empty list being the only source of the answer.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8.

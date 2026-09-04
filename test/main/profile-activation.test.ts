@@ -7,6 +7,8 @@ import type { Trigger } from '../../src/main/scheduler'
 import type { SpawnRequest } from '../../src/shared/agents'
 import { GATE_SCHEMA_VERSION, type AutonomyLevel, type GatePolicy } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
+import { watchedRepos } from '../../src/shared/profile-activation'
+import type { RepoDerivation } from '../../src/shared/repo-remote'
 import { removeTempDir } from '../tmpdir'
 
 /**
@@ -38,6 +40,8 @@ interface BundleOptions {
   readonly triggers?: readonly Record<string, unknown>[]
   /** Secret names every hire in this bundle declares. */
   readonly envGrants?: readonly string[]
+  /** What harbor.json declares. Both SHIPPED bundles carry [] — that is B7. */
+  readonly repos?: readonly { id: string; remote: string }[]
 }
 
 function writeBundle(root: string, name: string, options: BundleOptions = {}): void {
@@ -64,7 +68,12 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
   )
   fs.writeFileSync(
     path.join(dir, 'harbor.json'),
-    JSON.stringify({ schemaVersion: 1, repos: [], channels: [], webhooks: [] })
+    JSON.stringify({
+      schemaVersion: 1,
+      repos: [...(options.repos ?? [])],
+      channels: [],
+      webhooks: []
+    })
   )
   const hires = options.hires ?? ['oncall']
   for (const [i, hire] of hires.entries()) {
@@ -95,6 +104,9 @@ interface RigOptions {
   readonly failOn?: readonly string[]
   /** The broker's answer — the SAME shape the spawn path's resolver returns. */
   readonly missingGrants?: (declared: readonly string[]) => readonly string[]
+  /** What the TARGET checkout's own git remotes say it is (M8.5). */
+  readonly resolveRepos?: (target: { path: string }) => Promise<RepoDerivation>
+  readonly onWatching?: (instanceId: string, because: string | null) => void
 }
 
 function rig(options: RigOptions = {}) {
@@ -114,6 +126,8 @@ function rig(options: RigOptions = {}) {
     store: new ProfileStore(profiles, path.join(home, 'no-builtins')),
     globalAutonomy: () => options.global ?? 'autonomous',
     ...(options.missingGrants ? { missingGrants: options.missingGrants } : {}),
+    ...(options.resolveRepos ? { resolveRepos: options.resolveRepos } : {}),
+    ...(options.onWatching ? { onWatching: options.onWatching } : {}),
     spawn: (request) => {
       if ((options.failOn ?? []).some((name) => request.agentId.endsWith(`-${name}`))) {
         return Promise.reject(new Error(`engine "${request.engine}" is not installed`))
@@ -534,7 +548,7 @@ describe('the preview asks the broker, rather than assuming', () => {
     })
     writeBundle(r.profiles, 'skeleton-crew', { envGrants: ['GH_TOKEN', 'NPM_TOKEN'] })
 
-    const planned = r.activations.preview({
+    const planned = await r.activations.preview({
       profile: 'skeleton-crew',
       target: target(r.targetDir)
     })
@@ -554,16 +568,278 @@ describe('the preview asks the broker, rather than assuming', () => {
     expect(result.instance.plan.grantsUnavailable).toEqual(['GH_TOKEN'])
   })
 
-  it('claims nothing when no resolver is wired', () => {
+  it('claims nothing when no resolver is wired', async () => {
     // The parameter is optional so the class stays constructible in a rig that
     // has no broker; absent means "not checked", never "all available".
     const r = rig()
     writeBundle(r.profiles, 'skeleton-crew', { envGrants: ['GH_TOKEN'] })
-    const planned = r.activations.preview({
+    const planned = await r.activations.preview({
       profile: 'skeleton-crew',
       target: target(r.targetDir)
     })
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.grantsUnavailable).toEqual([])
+  })
+})
+/**
+ * The mission actually watches the repository (M8.5, B7).
+ *
+ * Both shipped bundles carry `repos: []` and `harbor.json` was the only source
+ * of that list, so activating the Skeleton Crew against a real repository
+ * watched nothing: no CI run, issue or pull request was ingested, therefore no
+ * incident could ever be raised. The flagship mission was inert on first use,
+ * silently, and this machine only worked because `harbor.json` had been
+ * hand-edited.
+ *
+ * These run through the SHIPPED class rather than the pure planner: `preview`
+ * and `activate` share one plan, and the ingest list and the ingest cadence
+ * share one function, so the assertions here are about the seams — the
+ * arithmetic is held by `test/shared/profile-activation.test.ts`.
+ */
+describe('an instance watches the target it was pointed at', () => {
+  const fromCheckout: RepoDerivation = {
+    ok: true,
+    slug: 'owner/app',
+    from: 'origin'
+  }
+
+  it('derives the repository when harbor.json declares none — and INGESTS from it', async () => {
+    const asked: string[] = []
+    const r = rig({
+      resolveRepos: (t) => {
+        asked.push(t.path)
+        return Promise.resolve(fromCheckout)
+      }
+    })
+    writeBundle(r.profiles, 'skeleton-crew') // repos: [] — the shipped shape
+
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(asked).toEqual([r.targetDir])
+    expect(result.instance.plan.repos).toEqual(['owner/app'])
+    expect(result.instance.plan.reposFrom).toBe('target')
+
+    // The Harbor's ingest list and the cadence's arming condition are ONE
+    // function over the live instances, so they cannot disagree about whether
+    // there is anything to watch. Both are what B7 broke.
+    expect(watchedRepos(r.activations.instances())).toEqual(['owner/app'])
+    expect(watchedRepos(r.activations.instances()).length > 0).toBe(true)
+  })
+
+  it('records what it watches in the book of record', async () => {
+    // NFR-13: a forensic reader asking why no incident was ever raised for an
+    // instance must be able to answer it from `log.jsonl` alone.
+    const r = rig({ resolveRepos: () => Promise.resolve(fromCheckout) })
+    writeBundle(r.profiles, 'skeleton-crew')
+    await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+
+    const activated = r.logs.find((row) => row['event'] === 'activated')
+    expect(activated?.['repos']).toEqual(['owner/app'])
+    expect(activated?.['reposFrom']).toBe('target')
+  })
+
+  it('refuses to invent one, activates anyway, and SAYS the mission is inert', async () => {
+    // Refusing the activation outright would put a new cliff exactly where M8
+    // is removing one — a profile also hires a crew and arms schedules. So it
+    // comes up, and the condition that made it useless is reported rather than
+    // being the silent outcome it has always been (invariant §7).
+    const nothing: RepoDerivation = {
+      ok: false,
+      because:
+        'the target has more than one github.com remote (origin → me/app, upstream → them/app)'
+    }
+    const silent: { id: string; because: string | null }[] = []
+    const r = rig({
+      resolveRepos: () => Promise.resolve(nothing),
+      onWatching: (id, because) => silent.push({ id, because })
+    })
+    writeBundle(r.profiles, 'skeleton-crew')
+
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(result.instance.plan.repos).toEqual([])
+    expect(silent).toHaveLength(1)
+    expect(silent[0]?.id).toBe('skeleton-crew@repo:myapp')
+    expect(silent[0]?.because).toContain('more than one')
+    // And the cadence has nothing to arm for, which is now a said thing.
+    expect(watchedRepos(r.activations.instances())).toEqual([])
+  })
+
+  it('reports a healthy instance as HEALTHY, which is what clears the condition', async () => {
+    // The report is a fact, not decoration: a healthy activation must not carry
+    // a degradation that reads as though something is wrong — and `null` is
+    // what takes a previous refusal off the Architect's health list.
+    const said: { id: string; because: string | null }[] = []
+    const r = rig({
+      resolveRepos: () => Promise.resolve(fromCheckout),
+      onWatching: (id, because) => said.push({ id, because })
+    })
+    writeBundle(r.profiles, 'skeleton-crew')
+    await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+    expect(said).toEqual([{ id: 'skeleton-crew@repo:myapp', because: null }])
+  })
+
+  it('lets the Architect name the repository when the derivation refused', async () => {
+    // The answer to the fork. Without it a refused derivation is a dead end.
+    const r = rig({
+      resolveRepos: () => Promise.resolve({ ok: false, because: 'the target has no git remote' })
+    })
+    writeBundle(r.profiles, 'skeleton-crew')
+
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir),
+      repos: ['chosen/app']
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(result.instance.plan.repos).toEqual(['chosen/app'])
+    expect(result.instance.plan.reposFrom).toBe('architect')
+    expect(watchedRepos(r.activations.instances())).toEqual(['chosen/app'])
+  })
+
+  it('shows on the preview exactly what the activation will do', async () => {
+    // ADR-0012's whole safety argument. One plan, so the screen cannot promise
+    // one repository and the instance watch another.
+    const r = rig({ resolveRepos: () => Promise.resolve(fromCheckout) })
+    writeBundle(r.profiles, 'skeleton-crew')
+    const request = { profile: 'skeleton-crew', target: target(r.targetDir) }
+
+    const planned = await r.activations.preview(request)
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    const result = await r.activations.activate(request)
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+    expect(result.instance.plan.repos).toEqual(planned.plan.repos)
+    expect(result.instance.plan.reposBecause).toBe(planned.plan.reposBecause)
+  })
+
+  it('re-reads the remotes on every preview rather than remembering them', async () => {
+    // The Architect adds a remote to a checkout between two activations like
+    // anybody else, and a cached derivation is a setting nobody re-reads —
+    // the shape of every defect this milestone has found.
+    let answer: RepoDerivation = {
+      ok: false,
+      because: 'the target has no git remote'
+    }
+    const r = rig({ resolveRepos: () => Promise.resolve(answer) })
+    writeBundle(r.profiles, 'skeleton-crew')
+    const request = { profile: 'skeleton-crew', target: target(r.targetDir) }
+
+    const first = await r.activations.preview(request)
+    if (!first.ok) throw new Error(first.reasons.join(' · '))
+    expect(first.plan.repos).toEqual([])
+
+    answer = fromCheckout
+    const second = await r.activations.preview(request)
+    if (!second.ok) throw new Error(second.reasons.join(' · '))
+    expect(second.plan.repos).toEqual(['owner/app'])
+  })
+
+  it('lets a bundle that declares repositories keep them', async () => {
+    const r = rig({ resolveRepos: () => Promise.resolve(fromCheckout) })
+    writeBundle(r.profiles, 'front-office', {
+      repos: [{ id: 'app', remote: 'declared/app' }]
+    })
+    const planned = await r.activations.preview({
+      profile: 'front-office',
+      target: target(r.targetDir)
+    })
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual(['declared/app'])
+    expect(planned.plan.reposFrom).toBe('bundle')
+  })
+
+  it('gathers every live instance repository, deduplicated and sorted', async () => {
+    // Two profiles on one floor, one of them on another target: the Harbor
+    // ingests each repository once, in an order that does not depend on which
+    // was activated first.
+    const r = rig({ resolveRepos: () => Promise.resolve(fromCheckout) })
+    writeBundle(r.profiles, 'skeleton-crew')
+    writeBundle(r.profiles, 'front-office', {
+      repos: [{ id: 'a', remote: 'aaa/one' }]
+    })
+    const second = path.join(r.targetDir, '..', 'other')
+    fs.mkdirSync(second, { recursive: true })
+
+    await r.activations.activate({
+      profile: 'front-office',
+      target: target(r.targetDir, 'first')
+    })
+    await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(second, 'second')
+    })
+    expect(watchedRepos(r.activations.instances())).toEqual(['aaa/one', 'owner/app'])
+  })
+})
+
+/**
+ * The condition that says a mission is inert has to be able to STOP being true
+ * (M8.5, and the M8.2 rule it inherits).
+ *
+ * A degradation raised and never cleared is worse than one never raised: the
+ * Architect fixes the remote, reactivates, and the health list still says the
+ * mission watches nothing — so they learn to disbelieve the list. One callback
+ * carries both directions, so it cannot be half-wired.
+ */
+describe('an instance that starts watching something says so', () => {
+  /** The consequence clause `plannedRepos` appends to every refusal. */
+  const TAIL =
+    ' — this instance will watch no repository, so no CI run, issue or pull request can reach it'
+
+  it('reports healthy after a refusal was fixed', async () => {
+    let answer: RepoDerivation = { ok: false, because: 'the target has no git remote' }
+    const said: (string | null)[] = []
+    const r = rig({
+      resolveRepos: () => Promise.resolve(answer),
+      onWatching: (_id, because) => said.push(because)
+    })
+    writeBundle(r.profiles, 'skeleton-crew')
+    const request = { profile: 'skeleton-crew', target: target(r.targetDir) }
+
+    await r.activations.activate(request)
+    // The whole sentence, consequence included — what `plan.reposBecause` says.
+    expect(said).toEqual([`the target has no git remote${TAIL}`])
+
+    // The Architect adds the remote and reactivates.
+    r.activations.deactivate('skeleton-crew@repo:myapp')
+    answer = { ok: true, slug: 'owner/app', from: 'origin' }
+    await r.activations.activate(request)
+
+    // Deactivation clears it too — an instance that is gone is not an instance
+    // watching nothing — and the new activation reports healthy.
+    expect(said).toEqual([`the target has no git remote${TAIL}`, null, null])
+  })
+
+  it('clears when the instance is torn down', async () => {
+    const said: (string | null)[] = []
+    const r = rig({
+      resolveRepos: () => Promise.resolve({ ok: false, because: 'the target has no git remote' }),
+      onWatching: (_id, because) => said.push(because)
+    })
+    writeBundle(r.profiles, 'skeleton-crew')
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+    expect(said).toEqual([`the target has no git remote${TAIL}`])
+
+    expect(r.activations.deactivate('skeleton-crew@repo:myapp').ok).toBe(true)
+    expect(said).toEqual([`the target has no git remote${TAIL}`, null])
+  })
+
+  it('says nothing about an instance that was never live', () => {
+    const said: string[] = []
+    const r = rig({ onWatching: (id) => said.push(id) })
+    expect(r.activations.deactivate('never@repo:existed').ok).toBe(false)
+    expect(said).toEqual([])
   })
 })

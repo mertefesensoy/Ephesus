@@ -189,6 +189,7 @@
         "src/main/closing.ts",
         "src/shared/profile.ts",
         "src/shared/profile-activation.ts",
+        "src/shared/repo-remote.ts",
         "src/shared/profile-view.ts",
         "src/shared/mode.ts",
         "src/shared/mode-view.ts",
@@ -231,10 +232,10 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-04T06:05:54.600Z",
-        "commit": "50fa291",
+        "at": "2026-09-04T06:55:41.262Z",
+        "commit": "757d934",
         "ref": "local",
-        "tree": "c688ab7aaeb2",
+        "tree": "c08617b1335b",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
@@ -263,10 +264,10 @@
           "files": 7
         },
         "agora": {
-          "lines": 98.02,
-          "branches": 88.39,
-          "functions": 97.22,
-          "statements": 96.45,
+          "lines": 98.07,
+          "branches": 88.47,
+          "functions": 97.24,
+          "statements": 96.54,
           "files": 11
         },
         "artemis": {
@@ -307,7 +308,7 @@
         "terraces": {
           "lines": 76.23,
           "branches": 72.61,
-          "functions": 85.15,
+          "functions": 84.65,
           "statements": 76.26,
           "files": 22
         },
@@ -326,11 +327,11 @@
           "files": 5
         },
         "company": {
-          "lines": 96.7,
-          "branches": 91.61,
-          "functions": 92.59,
-          "statements": 95.2,
-          "files": 11
+          "lines": 97.03,
+          "branches": 91.69,
+          "functions": 92.96,
+          "statements": 95.51,
+          "files": 12
         },
         "home": {
           "lines": 51.76,
@@ -340,10 +341,10 @@
           "files": 6
         },
         "panels": {
-          "lines": 24.32,
-          "branches": 27.2,
-          "functions": 17.96,
-          "statements": 23.49,
+          "lines": 24.84,
+          "branches": 27.89,
+          "functions": 18.15,
+          "statements": 24.03,
           "files": 24
         },
         "herald": {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { deriveRepo } from '../../src/shared/repo-remote'
 import {
   activationPlan,
   agentIdForHire,
@@ -49,6 +50,8 @@ interface BundleOptions {
   readonly targetKind?: 'repo' | 'app'
   readonly hires?: readonly Record<string, unknown>[]
   readonly triggers?: readonly Record<string, unknown>[]
+  /** What harbor.json declares. Both SHIPPED bundles carry [] — that is B7. */
+  readonly repos?: readonly { id: string; remote: string }[]
 }
 
 function bundle(options: BundleOptions = {}): ProfileBundle {
@@ -74,7 +77,7 @@ function bundle(options: BundleOptions = {}): ProfileBundle {
     memoPolicyJson: JSON.stringify({ schemaVersion: 1, requires: ['new-dependency'] }),
     harborJson: JSON.stringify({
       schemaVersion: 1,
-      repos: [{ id: 'myapp', remote: 'octocat/myapp' }],
+      repos: options.repos ?? [{ id: 'myapp', remote: 'octocat/myapp' }],
       channels: [],
       webhooks: []
     })
@@ -148,12 +151,13 @@ describe('stricter wins — in both directions, over the whole table', () => {
 describe('ids: two crews never share an agent', () => {
   it('gives one profile on two targets two disjoint agent sets', () => {
     const crew = bundle()
-    const a = activationPlan(crew, TARGET, 'supervised', () => [])
+    const a = activationPlan(crew, TARGET, 'supervised', () => [], deriveRepo([]))
     const b = activationPlan(
       crew,
       { kind: 'repo', id: 'other', path: '/repos/other' },
       'supervised',
-      () => []
+      () => [],
+      deriveRepo([])
     )
     if (!a.ok || !b.ok) throw new Error('expected both plans to be ok')
     const idsA = a.plan.hires.map((h) => h.agentId)
@@ -164,8 +168,20 @@ describe('ids: two crews never share an agent', () => {
   })
 
   it('gives two profiles on ONE target two disjoint agent sets (FR-9.4)', () => {
-    const a = activationPlan(bundle({ name: 'skeleton-crew' }), TARGET, 'supervised', () => [])
-    const b = activationPlan(bundle({ name: 'front-office' }), TARGET, 'supervised', () => [])
+    const a = activationPlan(
+      bundle({ name: 'skeleton-crew' }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
+    const b = activationPlan(
+      bundle({ name: 'front-office' }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
     if (!a.ok || !b.ok) throw new Error('expected both plans to be ok')
     const idsA = a.plan.hires.map((h) => h.agentId)
     const idsB = b.plan.hires.map((h) => h.agentId)
@@ -199,7 +215,7 @@ describe('ids: two crews never share an agent', () => {
 
 describe('the plan is the disclosure', () => {
   it('lists the grants, budgets, repos, memo classes and playbooks the crew would get', () => {
-    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [])
+    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [], deriveRepo([]))
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     const { plan } = planned
     expect(plan.envGrants).toEqual(['GH_TOKEN'])
@@ -218,10 +234,16 @@ describe('the plan is the disclosure', () => {
     // an install with no `github-app.json` and no such secret — an affirmative
     // promise about something that would simply be absent at spawn.
     const asked: readonly string[][] = []
-    const planned = activationPlan(bundle(), TARGET, 'supervised', (declared) => {
-      ;(asked as string[][]).push([...declared])
-      return declared.filter((name) => name === 'GH_TOKEN')
-    })
+    const planned = activationPlan(
+      bundle(),
+      TARGET,
+      'supervised',
+      (declared) => {
+        ;(asked as string[][]).push([...declared])
+        return declared.filter((name) => name === 'GH_TOKEN')
+      },
+      deriveRepo([])
+    )
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     // The resolver is asked about the DECLARED set, not a subset of it…
     expect(asked).toEqual([['GH_TOKEN']])
@@ -233,7 +255,7 @@ describe('the plan is the disclosure', () => {
   })
 
   it('promises nothing extra when the broker can supply everything', () => {
-    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [])
+    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [], deriveRepo([]))
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.grantsUnavailable).toEqual([])
     expect(planned.plan.envGrants).toEqual(['GH_TOKEN'])
@@ -246,7 +268,7 @@ describe('the plan is the disclosure', () => {
         hire({ name: 'deps', budget: { dailyTokens: 900 } })
       ]
     })
-    const planned = activationPlan(crew, TARGET, 'supervised', () => [])
+    const planned = activationPlan(crew, TARGET, 'supervised', () => [], deriveRepo([]))
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.hires.map((h) => [h.hire, h.spawn.budget?.dailyTokens])).toEqual([
       ['oncall', 100],
@@ -257,13 +279,25 @@ describe('the plan is the disclosure', () => {
   it('leaves an unbudgeted hire unbudgeted, rather than inventing a zero', () => {
     const noBudget = hire()
     delete noBudget['budget']
-    const planned = activationPlan(bundle({ hires: [noBudget] }), TARGET, 'supervised', () => [])
+    const planned = activationPlan(
+      bundle({ hires: [noBudget] }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.hires[0]?.spawn.budget).toBeUndefined()
   })
 
   it('refuses a target of the wrong KIND, naming both', () => {
-    const planned = activationPlan(bundle({ targetKind: 'app' }), TARGET, 'supervised', () => [])
+    const planned = activationPlan(
+      bundle({ targetKind: 'app' }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
     expect(planned.ok).toBe(false)
     if (planned.ok) return
     expect(planned.reasons.join(' · ')).toContain('binds to a app, not a repo')
@@ -282,7 +316,7 @@ describe('the plan is the disclosure', () => {
         { id: 'ci', kind: 'event', event: 'ci', hire: 'oncall', playbook: 'incident.md' }
       ]
     })
-    const planned = activationPlan(crew, TARGET, 'supervised', () => [])
+    const planned = activationPlan(crew, TARGET, 'supervised', () => [], deriveRepo([]))
     if (!planned.ok) throw new Error(planned.reasons.join(' · '))
     expect(planned.plan.triggers.map((t) => t.when)).toEqual(['every 15 min', 'on ci'])
     expect(
@@ -292,8 +326,12 @@ describe('the plan is the disclosure', () => {
 
   it('plans nothing into existence — calling it twice gives the same answer', () => {
     const crew = bundle()
-    const first = JSON.stringify(activationPlan(crew, TARGET, 'supervised', () => []))
-    const second = JSON.stringify(activationPlan(crew, TARGET, 'supervised', () => []))
+    const first = JSON.stringify(
+      activationPlan(crew, TARGET, 'supervised', () => [], deriveRepo([]))
+    )
+    const second = JSON.stringify(
+      activationPlan(crew, TARGET, 'supervised', () => [], deriveRepo([]))
+    )
     expect(first).toBe(second)
   })
 })
@@ -314,7 +352,7 @@ describe('the plan is the disclosure', () => {
 describe('a hire can be called something a person would say', () => {
   it('uses the display name for the spawn, and leaves the id alone', () => {
     const built = bundle({ hires: [hire({ displayName: 'Mason' })] })
-    const plan = activationPlan(built, TARGET, 'supervised', () => [])
+    const plan = activationPlan(built, TARGET, 'supervised', () => [], deriveRepo([]))
     if (!plan.ok) throw new Error(plan.reasons.join('; '))
     const row = plan.plan.hires[0]
     expect(row?.spawn.name).toBe('Mason')
@@ -324,8 +362,96 @@ describe('a hire can be called something a person would say', () => {
   })
 
   it('falls back to the role, so an unnamed hire behaves exactly as before', () => {
-    const plan = activationPlan(bundle({ hires: [hire()] }), TARGET, 'supervised', () => [])
+    const plan = activationPlan(
+      bundle({ hires: [hire()] }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
     if (!plan.ok) throw new Error(plan.reasons.join('; '))
     expect(plan.plan.hires[0]?.spawn.name).toBe(plan.plan.hires[0]?.spawn.role)
+  })
+})
+
+/**
+ * Which repositories the instance will watch, and where that came from (M8.5).
+ *
+ * Both shipped bundles carry `repos: []`, and `harbor.json` was the only source
+ * of that list, so every activation that has ever happened watched nothing:
+ * no CI run, issue or pull request ingested, therefore no incident ever raised
+ * — silently, on the flagship mission, on first use (register item B7).
+ *
+ * Four sources with a precedence, and each step of it is a decision that can be
+ * got wrong in a way no count of repositories would catch.
+ */
+describe('what the instance would watch', () => {
+  const EMPTY_HARBOR: readonly { id: string; remote: string }[] = []
+  const found = { ok: true as const, slug: 'owner/from-checkout', from: 'origin' }
+  const refused = { ok: false as const, because: 'the target has no git remote' }
+
+  const planOf = (
+    options: Parameters<typeof bundle>[0],
+    derived: typeof found | typeof refused,
+    chosen: readonly string[] = []
+  ): ReturnType<typeof activationPlan> =>
+    activationPlan(bundle(options), TARGET, 'supervised', () => [], derived, chosen)
+
+  it('reads the target’s remote when the bundle declares nothing — which is B7', () => {
+    const planned = planOf({ repos: EMPTY_HARBOR }, found)
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual(['owner/from-checkout'])
+    expect(planned.plan.reposFrom).toBe('target')
+    expect(planned.plan.reposBecause).toContain('origin')
+  })
+
+  it('lets the bundle’s own declaration stand when it has one', () => {
+    // A profile written for a fixed set of repositories means it, and the
+    // checkout it happens to be activated against does not overrule it.
+    const planned = planOf({}, found)
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual(['octocat/myapp'])
+    expect(planned.plan.reposFrom).toBe('bundle')
+  })
+
+  it('lets the Architect override BOTH', () => {
+    // The most specific and most recent statement anybody has made. It is what
+    // makes a refused derivation answerable instead of a dead end.
+    const planned = planOf({}, found, ['chosen/one', 'chosen/two'])
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual(['chosen/one', 'chosen/two'])
+    expect(planned.plan.reposFrom).toBe('architect')
+  })
+
+  it('watches NOTHING rather than guessing, and says why', () => {
+    // The risk line: a wrong slug is worse than no slug, because the company
+    // would watch somebody else's repository and raise incidents about it.
+    const planned = planOf({ repos: EMPTY_HARBOR }, refused)
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual([])
+    expect(planned.plan.reposFrom).toBe('none')
+    expect(planned.plan.reposBecause).toContain('no git remote')
+    // The CONSEQUENCE, not just the fact — this is the sentence that would have
+    // saved the flagship mission's first use.
+    expect(planned.plan.reposBecause).toContain('no CI run, issue or pull request')
+  })
+
+  it('still refuses to guess when the Architect chose nothing and the fork is ambiguous', () => {
+    const planned = planOf(
+      { repos: EMPTY_HARBOR },
+      { ok: false, because: 'the target has more than one github.com remote (a → x/y, b → p/q)' }
+    )
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual([])
+    expect(planned.plan.reposBecause).toContain('more than one')
+  })
+
+  it('does not let an empty override erase a bundle’s declaration', () => {
+    // "the Architect chose no repositories" and "the Architect did not choose"
+    // are different statements, and only the second may fall through.
+    const planned = planOf({}, refused, [])
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.repos).toEqual(['octocat/myapp'])
+    expect(planned.plan.reposFrom).toBe('bundle')
   })
 })
