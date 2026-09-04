@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "about": [
     "The coverage record for the seam rule (ENGINEERING-STANDARDS §6.7, TEST-STRATEGY §2; M8.0).",
     "Checked by scripts/check-coverage.cjs against coverage/coverage-summary.json from `npm run test:coverage`.",
@@ -11,13 +11,25 @@
     "  enters there. The first record on a platform is `--seed`; `--update` ratchets an existing block and can",
     "  never start one. Floors only rise through --update; a fall is a hand edit with a reason in the diff.",
     "  --update never adds an untested module; a new one is added by hand, which is the review.",
+    "platforms.<name>.candidate: the corroboration window — the last corroboratingRuns runs measured on one production",
+    "  tree AND one subsystem map, each with its condition, the identity of the coverage report it read, and the figures",
+    "  it measured. A floor rises only once the window is full, and only to the metric-wise MINIMUM across it. The window",
+    "  SLIDES (the tree hash covers production files only, so adding tests must still be recordable) and restarts when the",
+    "  tree or the subsystem map changes. Absent is legal: a window is evidence a run accumulates, never a human seed.",
     "tolerance: points a subsystem may sit below its floor before the check fails — see toleranceReason.",
-    "ratchetLag: points a floor may sit BELOW reality before the check fails as stale — see ratchetLagReason."
+    "ratchetLag: points a floor may sit BELOW reality before the check fails as stale — see ratchetLagReason.",
+    "corroboratingRuns: runs of one tree a RAISE needs before it may happen — see corroboratingRunsReason.",
+    "  Only the raise path waits: a regression past the tolerance still fails on the single run that measured it.",
+    "NOTE: the tree hash covers src/**/*.{ts,tsx} and shims/**/*.mjs ONLY. It cannot see assets, node_modules or",
+    "  the licensed art drop, so a build input outside that set can move a figure without moving the hash. That",
+    "  happened on 2026-09-04 and cost two wrong diagnoses — see corroboratingRunsReason."
   ],
   "tolerance": 0.25,
   "toleranceReason": "Measured, not assumed: three full `npm run test:coverage` runs on win32 at the M8.0 baseline (same tree, one of them under load, n = 3) agreed to the hundredth on every subsystem and metric, a spread of 0.00. 0.25 points is headroom for timing-dependent paths the runs happened to take the same way, which is the one thing n = 3 cannot exclude. What it buys varies by row: at the baseline it is between about 0.2 and 2.9 coverable lines per subsystem (home the smallest, boot the largest), so on the large rows a few lines can slip inside it — which is why the untested-module record exists beside the floors, and why --update ratchets the floor to every measurement. A failure inside this band is a false positive to RE-MEASURE (raise n, record the spread here), never a floor to lower.",
   "ratchetLag": 5,
   "ratchetLagReason": "A floor is a record of what was measured, and floors rise only when somebody runs --update; nothing in CI writes this file. So a subsystem more than 5 points ABOVE its floor means the record has been left behind by more than a package's worth of coverage, and the check fails until it is ratcheted — otherwise coverage gained after the baseline could be lost again without any failure, and the record would be a number nobody turned. Set at M8.0 as the size of one package's typical gain; revise with the same reasoning.",
+  "corroboratingRuns": 3,
+  "corroboratingRunsReason": "Measured, not assumed — and the first diagnosis of WHY was wrong twice, which is the part worth keeping. --update ratcheted terraces.functions to 85.15% on ONE win32 run (9b57f86); later win32 runs in the same checkout read 84.65%; runs in a git worktree and on CI linux read 84.16%. Five runs, three answers, a spread of 0.99 points against a tolerance of 0.25. It was read first as a lucky ratchet, then as machine jitter. Neither was the bulk of it. 0.49 of that point was the LICENSED ART PACK: src/renderer/src/assets/{tileset,characters}/*.png are a deliberate gitignored drop (ATTRIBUTION.md rule 2), so the globs are populated on a machine that bought the pack and empty on every CI runner, fresh clone and worktree — with them empty the two loader loops in FloorCanvas iterate zero times and loadOne is never called, worth exactly 10 lines, 1 function, 6 branches and 10 statements. That input is invisible to the tree hash, which covers .ts/.tsx only. It is fixed at the source: the test now stubs both glob modules, so the figure is the same with the pack and without it. The REMAINDER, about one line, was genuine jitter from a floating Promise.all no test awaited, and is fixed by the bring-up handle FloorCanvas now hands out. Three runs is the smallest window that outlives a back-to-back pair sharing one machine mood; it costs one extra suite run per ratchet, and lowering it below 3 is refused by the validator. If a row keeps needing a hand correction, the cause is an unrecorded condition, not a number that needs lowering — GYM-006 metric 2 says never lower a floor, and it is right.",
   "subsystems": {
     "boot": {
       "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts)",

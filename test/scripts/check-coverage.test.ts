@@ -50,8 +50,19 @@ interface Condition {
   os: string
   command: string
 }
+interface Run extends Condition {
+  report: string
+  floors: Record<string, Record<Metric, number>>
+}
+interface Candidate {
+  tree: string
+  /** Fingerprint of the subsystem MAP the runs were measured under. */
+  map: string
+  runs: Run[]
+}
 interface Block {
   measured: Condition
+  candidate?: Candidate
   floors: Record<string, Partial<Floors>>
   untested: string[]
 }
@@ -61,6 +72,8 @@ interface FloorsDoc {
   toleranceReason: string
   ratchetLag: number
   ratchetLagReason: string
+  corroboratingRuns: number
+  corroboratingRunsReason: string
   subsystems: Record<string, { members: string[] }>
   platforms: Record<string, Block>
 }
@@ -96,6 +109,7 @@ const check = require_(SCRIPT) as {
   productionFiles: (root: string) => string[]
   unexpectedSources: (root: string) => string[]
   treeHash: (root: string) => string
+  subsystemMapHash: (subsystems: Record<string, { members: string[] }>) => string
   assignSubsystems: (
     files: readonly string[],
     subsystems: Record<string, { members: string[] }>
@@ -114,6 +128,8 @@ const check = require_(SCRIPT) as {
     notes: string[]
   }
   validateFloors: (doc: unknown) => string | null
+  validateCandidate: (candidate: unknown, platform: string, keep: number) => string | null
+  windowFloors: (candidate: Candidate) => Record<string, Record<Metric, number>>
   parseArgs: (argv: readonly string[]) => Record<string, unknown>
   headCommit: (root: string) => string
   run: (options: RunOptions) => RunResult
@@ -164,11 +180,13 @@ const BASE_SUMMARY: Record<string, FileData> = {
   'shims/s.mjs': data([10, 10])
 }
 const BASE_FLOORS = (): FloorsDoc => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   tolerance: 0.5,
   toleranceReason: REASON,
   ratchetLag: 5,
   ratchetLagReason: REASON,
+  corroboratingRuns: 3,
+  corroboratingRunsReason: REASON,
   subsystems: {
     alpha: { members: ['src/main/'] },
     gamma: { members: ['src/shared/c.ts'] },
@@ -191,6 +209,8 @@ interface Project {
   readonly root: string
   readonly floorsPath: string
   summary: (entries: Record<string, FileData>) => void
+  /** `--update` until the window is full, each call reading a fresh report. */
+  corroborate: (times: number, entries?: Record<string, FileData>) => RunResult
   floors: (doc: FloorsDoc | Record<string, unknown>) => void
   readFloors: () => FloorsDoc
   rawFloors: () => string
@@ -212,6 +232,12 @@ function writeSource(root: string, rel: string, text: string): void {
 function project(): Project {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-cov-'))
   temps.push(root)
+  // A run is identified by the report it read, and the report's identity is its
+  // mtime — so every WRITE of the summary is a new measurement and writing it
+  // once is one, however often it is read. Stamped rather than left to the
+  // clock so two writes in the same millisecond are still two runs, and kept
+  // newer than the backdated sources so the staleness rule is not what fires.
+  let reports = 0
   const past = new Date(Date.now() - 60_000)
   for (const rel of Object.keys(BASE_SUMMARY)) {
     const abs = path.join(root, rel)
@@ -232,6 +258,19 @@ function project(): Project {
       const keyed: Record<string, FileData> = {}
       for (const [rel, value] of Object.entries(entries)) keyed[path.join(root, rel)] = value
       fs.writeFileSync(summaryPath, JSON.stringify({ total: data([0, 0]), ...keyed }))
+      reports += 1
+      const stamp = new Date(Date.now() - 50_000 + reports * 100)
+      fs.utimesSync(summaryPath, stamp, stamp)
+    },
+    corroborate(times, entries) {
+      let last: RunResult | null = null
+      for (let i = 0; i < times; i += 1) {
+        if (entries !== undefined) p.summary(entries)
+        else p.summary(BASE_SUMMARY)
+        last = p.run({ update: true })
+      }
+      if (last === null) throw new Error('corroborate needs at least one run')
+      return last
     },
     floors(doc) {
       fs.writeFileSync(floorsPath, `${JSON.stringify(doc, null, 2)}\n`)
@@ -515,7 +554,7 @@ describe('could-not-establish fails', () => {
   it('fails on a floors file of the wrong schema or shape, naming the first fault', () => {
     const p = project()
     const cases: [Record<string, unknown>, string][] = [
-      [{ ...BASE_FLOORS(), schemaVersion: 1 }, 'schemaVersion 1 (expected 2)'],
+      [{ ...BASE_FLOORS(), schemaVersion: 1 }, 'schemaVersion 1 (expected 3)'],
       [{ ...BASE_FLOORS(), tolerance: 5 }, 'tolerance must be a number'],
       [{ ...BASE_FLOORS(), toleranceReason: 'short' }, 'toleranceReason must say how'],
       [{ ...BASE_FLOORS(), ratchetLag: 0 }, 'ratchetLag must be a number'],
@@ -560,16 +599,20 @@ describe('could-not-establish fails', () => {
 describe('--update is a ratchet', () => {
   it('raises a floor that rose, removes an untested module a test now enters, and re-stamps the condition', () => {
     const p = project()
-    p.summary({
+    const risen = {
       ...BASE_SUMMARY,
       'src/main/a.ts': data([90, 100]),
       'src/main/b.ts': data([10, 50])
-    })
-    const result = p.run({ update: true })
+    }
+    // Three runs of the same tree, because one is not a measurement (M8.5).
+    const result = p.corroborate(3, risen)
     expect(result.exitCode).toBe(0)
     expect(result.wrote).toBe(true)
-    expect(result.changes).toContain('subsystem alpha: lines 53.33% → 66.67%')
-    expect(result.changes).toContain('now tested: src/main/b.ts')
+    expect(result.changes).toContain(
+      `subsystem alpha: lines 53.33% → 66.67% (lowest of 3 runs on tree ${check.treeHash(p.root)})`
+    )
+    // The untested list is not the raise path: the first run already had it.
+    expect(result.changes.some((c) => c === 'now tested: src/main/b.ts')).toBe(false)
     const after = p.readFloors()
     expect(after.platforms.testos?.floors.alpha?.lines).toBe(66.67)
     expect(after.platforms.testos?.untested).toEqual([])
@@ -596,16 +639,25 @@ describe('--update is a ratchet', () => {
     expect(p.rawFloors()).toBe(before)
   })
 
-  it('a no-op update writes nothing and does not move the condition', () => {
+  it('a run that moves no floor still joins the window, and still does not move the condition', () => {
     const p = project()
-    const before = p.rawFloors()
     const result = p.run({ update: true })
     expect(result.exitCode).toBe(0)
-    expect(result.wrote).toBe(false)
+    // The window is evidence: a run dropped here is a run that cannot
+    // corroborate the next raise, which is how a low measurement would go
+    // missing exactly when it matters.
+    expect(result.wrote).toBe(true)
     expect(result.notes).toContain(
-      'nothing to ratchet: the record is unchanged, condition included'
+      'no floor moved: this run is recorded in the corroboration window, and the condition beside the floors still describes the run that set them'
     )
-    expect(p.rawFloors()).toBe(before)
+    const after = p.readFloors()
+    expect(after.platforms.testos?.candidate?.runs).toHaveLength(1)
+    expect(after.platforms.testos?.floors.alpha?.lines).toBe(53.33)
+    expect(after.platforms.testos?.measured.at).toBe(CONDITION.at)
+    // And offering the very same report again adds nothing at all.
+    const again = p.run({ update: true })
+    expect(again.wrote).toBe(false)
+    expect(again.notes).toContain('nothing to ratchet: the record is unchanged, condition included')
   })
 
   it('keeps a floor through a dip inside the tolerance, and does not call it a regression', () => {
@@ -639,7 +691,11 @@ describe('--update is a ratchet', () => {
       files: 1
     }
     p.floors(doc)
-    const result = p.run({ update: true })
+    const result = p.corroborate(3, {
+      ...BASE_SUMMARY,
+      'src/shared/c.ts': data([0, 50]),
+      'src/main/a.ts': data([100, 100])
+    })
     expect(result.exitCode).toBe(1)
     expect(result.failures).toHaveLength(1)
     expect(result.failures[0]).toMatch(/^src\/shared\/c\.ts {2}no test enters/)
@@ -667,6 +723,264 @@ describe('--update is a ratchet', () => {
     const before = p.rawFloors()
     const result = p.run({ update: true })
     expect(result.exitCode).toBe(1)
+    expect(p.rawFloors()).toBe(before)
+  })
+})
+
+describe('a raise takes corroboration, and the ways round it were tried', () => {
+  /** The measurement every case here wants promoted: alpha 53.33 → 66.67. */
+  const RISEN: Record<string, FileData> = {
+    ...BASE_SUMMARY,
+    'src/main/a.ts': data([90, 100]),
+    'src/main/b.ts': data([10, 50])
+  }
+  const alphaLines = (p: Project): number | undefined =>
+    p.readFloors().platforms.testos?.floors.alpha?.lines
+
+  it('one run records the candidate and raises nothing, and says how many runs are still owed', () => {
+    const p = project()
+    p.summary(RISEN)
+    const result = p.run({ update: true })
+    expect(result.exitCode).toBe(0)
+    expect(alphaLines(p)).toBe(53.33)
+    expect(result.changes.some((c) => c.startsWith('subsystem alpha: lines'))).toBe(false)
+    expect(
+      result.notes.find((n) => n.startsWith('subsystem alpha: lines measured 66.67%'))
+    ).toContain('1 of 3 corroborating runs are recorded on tree')
+  })
+
+  it('BYPASS 1 — --update run again over the SAME report is one measurement, not two', () => {
+    const p = project()
+    p.summary(RISEN)
+    p.run({ update: true })
+    const before = p.rawFloors()
+    // Three invocations, one coverage run. The record must not move at all.
+    expect(p.run({ update: true }).wrote).toBe(false)
+    expect(p.run({ update: true }).wrote).toBe(false)
+    expect(p.rawFloors()).toBe(before)
+    expect(alphaLines(p)).toBe(53.33)
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(1)
+  })
+
+  it('BYPASS 2 — one coverage run emitted three times is still one measurement', () => {
+    const p = project()
+    p.summary(RISEN)
+    // Three artifacts, three different `measured.at` stamps, one report behind
+    // them: the identity that counts is the coverage run's, not the artifact's.
+    for (const n of ['a', 'b', 'c']) {
+      p.run({ emit: `coverage/m-${n}.json`, platform: 'testos' })
+    }
+    const reports = ['a', 'b', 'c'].map(
+      (n) =>
+        (
+          JSON.parse(fs.readFileSync(path.join(p.root, 'coverage', `m-${n}.json`), 'utf8')) as {
+            report: string
+          }
+        ).report
+    )
+    expect(new Set(reports).size).toBe(1)
+    for (const n of ['a', 'b', 'c']) {
+      const from = `coverage/m-${n}.json`
+      expect(p.run({ update: true, from, platform: 'testos' }).exitCode).toBe(0)
+    }
+    expect(alphaLines(p)).toBe(53.33)
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(1)
+  })
+
+  it('BYPASS 3 — deleting the window restarts it at one run; it cannot buy a raise', () => {
+    const p = project()
+    p.summary(RISEN)
+    p.run({ update: true })
+    p.summary(RISEN)
+    p.run({ update: true }) // two runs banked, one short
+    const doc = p.readFloors()
+    delete doc.platforms.testos?.candidate
+    p.floors(doc)
+    p.summary(RISEN)
+    const result = p.run({ update: true })
+    expect(result.exitCode).toBe(0)
+    expect(alphaLines(p)).toBe(53.33)
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(1)
+  })
+
+  it('BYPASS 10 — a window recorded under a different subsystem MAP is refused', () => {
+    // The first version of this guard compared `Object.keys(...)`, so moving a
+    // directory from one subsystem to another — which leaves both names in
+    // place and changes what every figure under them means — folded straight
+    // through and a minimum was taken across two different subjects. Three
+    // honest runs are still not evidence about a map they were not measured
+    // under.
+    const p = project()
+    const doc = BASE_FLOORS()
+    const tree = check.treeHash(p.root)
+    const run = (report: string, lines: number): Run => ({
+      ...CONDITION,
+      tree,
+      report,
+      floors: {
+        alpha: { lines, branches: lines, functions: lines, statements: lines },
+        gamma: { lines: 90, branches: 90, functions: 100, statements: 90 },
+        shims: { lines: 100, branches: 100, functions: 100, statements: 100 }
+      }
+    })
+    doc.platforms.testos!.candidate = {
+      tree,
+      // A map hash from a DIFFERENT membership — the same three names.
+      map: check.subsystemMapHash({
+        ...doc.subsystems,
+        alpha: { members: ['src/somewhere-else.ts'] }
+      }),
+      runs: [run('r1', 55), run('r2', 55), run('r3', 55)]
+    }
+    p.floors(doc)
+    p.summary(RISEN)
+    const result = p.run({ update: true })
+    expect(result.exitCode).toBe(0)
+    // No raise: the window restarted, so this run is the only one in it.
+    expect(alphaLines(p)).toBe(53.33)
+    expect(p.readFloors().platforms.testos!.candidate!.runs).toHaveLength(1)
+  })
+
+  it('a window whose map matches keeps accumulating across runs', () => {
+    // The other direction, so the guard cannot be satisfied by refusing
+    // everything: an unchanged map lets three runs corroborate as intended.
+    const p = project()
+    p.corroborate(3, RISEN)
+    expect(p.readFloors().platforms.testos!.candidate!.runs).toHaveLength(3)
+    // …the window names the map it was measured under…
+    expect(p.readFloors().platforms.testos!.candidate!.map).toBeTruthy()
+    // …and three agreeing runs raise the floor all the way, because the
+    // window's minimum IS that figure when the runs agree.
+    expect(alphaLines(p)).toBe(66.67)
+  })
+
+  it('BYPASS 4 — a hand-written window still caps the raise at what it claims to have seen', () => {
+    const p = project()
+    const doc = BASE_FLOORS()
+    const tree = check.treeHash(p.root)
+    const run = (report: string, lines: number): Run => ({
+      ...CONDITION,
+      tree,
+      report,
+      floors: {
+        alpha: { lines, branches: lines, functions: lines, statements: lines },
+        gamma: { lines: 90, branches: 90, functions: 100, statements: 90 },
+        shims: { lines: 100, branches: 100, functions: 100, statements: 100 }
+      }
+    })
+    // Three runs invented wholesale — the shape passes, and it buys 55, which is
+    // what they say they saw. Fabricating the COUNT is not fabricating the
+    // FIGURES, and the figures are what a floor is made of.
+    doc.platforms.testos!.candidate = {
+      tree,
+      map: check.subsystemMapHash(doc.subsystems),
+      runs: [run('r1', 55), run('r2', 55), run('r3', 55)]
+    }
+    p.floors(doc)
+    p.summary(RISEN)
+    const result = p.run({ update: true })
+    expect(result.exitCode).toBe(0)
+    expect(alphaLines(p)).toBe(55)
+    expect(result.changes).toContain(
+      `subsystem alpha: lines 53.33% → 55% (lowest of 3 runs on tree ${tree})`
+    )
+  })
+
+  it('BYPASS 5 — a window whose runs read one report, or another tree, is refused by name', () => {
+    const p = project()
+    const doc = BASE_FLOORS()
+    const tree = check.treeHash(p.root)
+    const high = { lines: 99, branches: 99, functions: 99, statements: 99 }
+    const floors = { alpha: { ...high }, gamma: { ...high }, shims: { ...high } }
+    doc.platforms.testos!.candidate = {
+      tree,
+      map: check.subsystemMapHash(doc.subsystems),
+      runs: [
+        { ...CONDITION, tree, report: 'same', floors },
+        { ...CONDITION, tree, report: 'same', floors },
+        { ...CONDITION, tree, report: 'same', floors }
+      ]
+    }
+    p.floors(doc)
+    expect(p.run({ update: true }).failures[0]).toContain(
+      'two runs read the same report (same) — one coverage run offered twice is one measurement'
+    )
+    doc.platforms.testos!.candidate!.runs[1]!.report = 'other'
+    doc.platforms.testos!.candidate!.runs[1]!.tree = 'deadbeefcafe'
+    p.floors(doc)
+    expect(p.run({ update: true }).failures[0]).toContain(
+      "a run measured tree deadbeefcafe, not the window's"
+    )
+    // And a run whose figures are not figures is a run that measured nothing:
+    // deleting a metric must be a fault to read, never a metric that quietly
+    // stops counting — the 2026-09-02 refutation found exactly that shape in
+    // the floors themselves.
+    doc.platforms.testos!.candidate!.runs[1]!.tree = tree
+    doc.platforms.testos!.candidate!.runs[1]!.report = 'third'
+    doc.platforms.testos!.candidate!.runs[2]!.report = 'fourth'
+    doc.platforms.testos!.candidate!.runs[2]!.floors = {
+      ...floors,
+      alpha: { ...high, functions: 'lots' as unknown as number }
+    }
+    p.floors(doc)
+    expect(p.run({ update: true }).failures[0]).toContain(
+      'the run of fourth lacks a numeric functions for subsystem alpha'
+    )
+  })
+
+  it('BYPASS 6 — corroboratingRuns cannot be argued down to one or two', () => {
+    const p = project()
+    for (const runs of [1, 2, 0, -1, 2.5]) {
+      const doc = BASE_FLOORS()
+      doc.corroboratingRuns = runs
+      p.floors(doc)
+      expect(p.run({ update: true }).failures[0]).toContain(
+        'corroboratingRuns must be an integer of at least 3'
+      )
+    }
+  })
+
+  it('BYPASS 7 — touching a production file between runs restarts the window', () => {
+    const p = project()
+    p.summary(RISEN)
+    p.run({ update: true })
+    p.summary(RISEN)
+    p.run({ update: true })
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(2)
+    // A new production file is a new subject: two runs of the old one do not
+    // corroborate a claim about this one, however convenient that would be.
+    writeSource(p.root, 'src/main/d.ts', 'export const d = 1\n')
+    p.summary({ ...RISEN, 'src/main/d.ts': data([10, 10]) })
+    const result = p.run({ update: true })
+    expect(result.exitCode).toBe(0)
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(1)
+    expect(alphaLines(p)).toBe(53.33)
+  })
+
+  it('the window slides, so three agreeing runs still lift a floor an old low one held', () => {
+    const p = project()
+    p.summary(BASE_SUMMARY) // a low run first: alpha at its floor
+    p.run({ update: true })
+    const result = p.corroborate(3, RISEN)
+    expect(result.exitCode).toBe(0)
+    expect(alphaLines(p)).toBe(66.67)
+    expect(p.readFloors().platforms.testos?.candidate?.runs).toHaveLength(3)
+  })
+
+  it('the FAILURE side waits for nobody: one run below the tolerance still fails, window or none', () => {
+    const p = project()
+    // Bank three healthy runs, so the window is as full as it can be...
+    p.corroborate(3, RISEN)
+    expect(alphaLines(p)).toBe(66.67)
+    // ...and a single regressing run fails the check, and is refused by --update.
+    p.summary({ ...RISEN, 'src/main/a.ts': data([40, 100]) })
+    const checked = p.run()
+    expect(checked.exitCode).toBe(1)
+    expect(checked.failures[0]).toContain('is below its testos floor of 66.67%')
+    const before = p.rawFloors()
+    const refused = p.run({ update: true })
+    expect(refused.exitCode).toBe(1)
+    expect(refused.failures[0]).toContain('--update never lowers a floor')
     expect(p.rawFloors()).toBe(before)
   })
 })
@@ -723,9 +1037,11 @@ describe('a measurement can travel', () => {
       schemaVersion: number
       platform: string
       measured: Condition
+      report: string
       measurement: { floors: Record<string, Floors>; files: Record<string, unknown> }
     }
-    expect(file.schemaVersion).toBe(2)
+    expect(file.schemaVersion).toBe(3)
+    expect(file.report).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/)
     expect(file.platform).toBe('ci-linux')
     expect(file.measured.command).toBe('npm run test:coverage')
     expect(file.measured.tree).toMatch(/^[0-9a-f]{12}$/)
@@ -744,10 +1060,26 @@ describe('a measurement can travel', () => {
     expect(block?.floors.alpha?.lines).toBe(60)
     expect(block?.measured.platform).toBe('ci-linux')
 
+    // A travelling measurement is corroborated like any other. The seeded run
+    // is the window's first, and it measured 60 — so the two that follow it
+    // cannot lift the floor past what it saw, however high they read.
     p.summary({ ...BASE_SUMMARY, 'src/main/a.ts': data([95, 100]) })
     p.run({ emit: 'coverage/measured2.json', platform: 'ci-linux' })
-    const updated = p.run({ update: true, from: 'coverage/measured2.json', platform: 'ci-linux' })
-    expect(updated.exitCode).toBe(0)
+    const second = p.run({ update: true, from: 'coverage/measured2.json', platform: 'ci-linux' })
+    expect(second.exitCode).toBe(0)
+    expect(p.readFloors().platforms['ci-linux']?.floors.alpha?.lines).toBe(60)
+    p.summary({ ...BASE_SUMMARY, 'src/main/a.ts': data([95, 100]) })
+    p.run({ emit: 'coverage/measured3.json', platform: 'ci-linux' })
+    const third = p.run({ update: true, from: 'coverage/measured3.json', platform: 'ci-linux' })
+    expect(third.exitCode).toBe(0)
+    expect(p.readFloors().platforms['ci-linux']?.floors.alpha?.lines).toBe(60)
+    expect(third.notes.some((n) => n.includes('the lowest of 3 runs'))).toBe(true)
+    // A fourth pushes the seeded 60 out of the sliding window, and now the
+    // three runs that agree on 63.33 are what the floor rises to.
+    p.summary({ ...BASE_SUMMARY, 'src/main/a.ts': data([95, 100]) })
+    p.run({ emit: 'coverage/measured4.json', platform: 'ci-linux' })
+    const fourth = p.run({ update: true, from: 'coverage/measured4.json', platform: 'ci-linux' })
+    expect(fourth.exitCode).toBe(0)
     expect(p.readFloors().platforms['ci-linux']?.floors.alpha?.lines).toBe(63.33)
   })
 
@@ -765,7 +1097,7 @@ describe('a measurement can travel', () => {
     expect(mismatch.failures[0]).toContain(
       'measurement covers subsystems [alpha, gamma] but the map has [alpha, gamma, shims]'
     )
-    fs.writeFileSync(emittedPath, JSON.stringify({ schemaVersion: 2, platform: 'ci-linux' }))
+    fs.writeFileSync(emittedPath, JSON.stringify({ schemaVersion: 3, platform: 'ci-linux' }))
     const malformed = p.run({ seed: true, from: 'coverage/measured.json', platform: 'ci-linux' })
     expect(malformed.exitCode).toBe(1)
     expect(malformed.failures[0]).toContain('emitted measurement is not usable: measured missing')
