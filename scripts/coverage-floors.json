@@ -231,10 +231,10 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-03T22:07:20.809Z",
-        "commit": "ce55915",
+        "at": "2026-09-04T06:05:54.600Z",
+        "commit": "50fa291",
         "ref": "local",
-        "tree": "64805f68b496",
+        "tree": "c688ab7aaeb2",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
@@ -249,10 +249,10 @@
           "files": 7
         },
         "engines": {
-          "lines": 94.08,
-          "branches": 86.3,
-          "functions": 90.58,
-          "statements": 91.1,
+          "lines": 94.14,
+          "branches": 86.39,
+          "functions": 90.63,
+          "statements": 91.12,
           "files": 20
         },
         "hermes": {
@@ -264,7 +264,7 @@
         },
         "agora": {
           "lines": 98.02,
-          "branches": 88.17,
+          "branches": 88.39,
           "functions": 97.22,
           "statements": 96.45,
           "files": 11
@@ -305,10 +305,10 @@
           "files": 19
         },
         "terraces": {
-          "lines": 76.13,
-          "branches": 72.48,
-          "functions": 84.65,
-          "statements": 76.17,
+          "lines": 76.23,
+          "branches": 72.61,
+          "functions": 85.15,
+          "statements": 76.26,
           "files": 22
         },
         "gymnasium": {
@@ -340,10 +340,10 @@
           "files": 6
         },
         "panels": {
-          "lines": 23.07,
-          "branches": 26.1,
-          "functions": 17.47,
-          "statements": 22.31,
+          "lines": 24.32,
+          "branches": 27.2,
+          "functions": 17.96,
+          "statements": 23.49,
           "files": 24
         },
         "herald": {

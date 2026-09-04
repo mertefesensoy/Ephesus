@@ -11,6 +11,7 @@ function card(over: Partial<AgentCard> = {}): AgentCard {
     name: 'Mason',
     role: 'ci-babysitter',
     lifecycle: 'running',
+    fixCommand: null,
     engine: 'claude',
     engineVersion: null,
     cwd: 'C:/repo',
@@ -239,4 +240,61 @@ describe('what one agent is spending', () => {
   it('says so when there is nothing recorded at all', () => {
     expect(spendLines(null).join(' ')).toContain('no spend recorded')
   })
+})
+
+/**
+ * An agent that cannot work yet says so, and says what to do (M8.4, B8).
+ *
+ * These lifecycles mean NO PROCESS EXISTS, so nothing on the event plane will
+ * ever describe them and the dock has to read the card. Before M8.4 every one
+ * of them rendered as `no signal yet` — which reads as "any moment now" to an
+ * Architect whose engine is simply logged out, and is how three crew agents
+ * spent a whole day parked on a login prompt while the floor showed them as
+ * spawned.
+ *
+ * Nothing asserted any of this: deleting the branch entirely, and deleting the
+ * fix command from it, both passed the whole file.
+ */
+describe('an agent that cannot start says why, and what fixes it', () => {
+  it('names a logged-out engine and the command that fixes it', () => {
+    const rows = dockRows(
+      [card({ lifecycle: 'needs-login', fixCommand: 'claude auth login' })],
+      new Map()
+    )
+    expect(rows[0]?.status).toBe('engine not logged in — run: claude auth login')
+    // The wrong answer is the one it replaced: "no signal yet" is a promise
+    // that something is coming, and nothing is.
+    expect(rows[0]?.status).not.toContain('no signal yet')
+  })
+
+  it('names a missing binary the same way', () => {
+    const rows = dockRows([card({ lifecycle: 'missing-binary' })], new Map())
+    expect(rows[0]?.status).toBe('engine not installed')
+  })
+
+  it('says an install is under way rather than nothing at all', () => {
+    const rows = dockRows([card({ lifecycle: 'installing' })], new Map())
+    expect(rows[0]?.status).toBe('installing the engine')
+  })
+
+  it('still says it when the floor HAS a phase for the agent', () => {
+    // A stale phase from a previous life must not paper over a card that says
+    // the engine cannot run — the card is the fact about the process.
+    const rows = dockRows(
+      [card({ lifecycle: 'needs-login', fixCommand: 'claude auth login' })],
+      new Map([['agent.mason', { phase: 'idle', pendingMail: 0 }]])
+    )
+    expect(rows[0]?.status).toContain('engine not logged in')
+  })
+
+  it(`leaves a working agent's status alone`, () => {
+    const rows = dockRows([card()], new Map([['agent.mason', { phase: 'idle', pendingMail: 0 }]]))
+    expect(rows[0]?.status).not.toContain('engine not')
+  })
+
+  // The component renders `row.status` verbatim (AgentDock.tsx:405, and into
+  // the row's aria-label at :379), so what `dockRows` decides above is what
+  // reaches the screen. `AgentDock` fetches its own cards over IPC and cannot
+  // be handed one, so the seam worth asserting is this projection rather than
+  // a second render that would only re-check React.
 })

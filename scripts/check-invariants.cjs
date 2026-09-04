@@ -229,6 +229,91 @@ for (const dir of SEARCH_DIRS) {
 const { reachabilityFailures, reachableModules } = require('./reachability.cjs')
 failures.push(...reachabilityFailures())
 
+/**
+ * 6. Recorded engine output (Architect decision 2026-09-04) — an engine adapter
+ *    may not match on output this repository has never seen.
+ *
+ *    M8.4 shipped a `claude auth status` matcher looking for `logged in as` /
+ *    `account:`. The real CLI answers JSON by default (`{"loggedIn": true, …}`)
+ *    and `Login method: …` in its opt-in text mode, so the matcher matched
+ *    NEITHER, always said "cannot tell", and the `needs-login` state it exists
+ *    to raise could not fire on any machine. Forty-five tests passed, every one
+ *    of them feeding it a string we had written ourselves — the same shape as
+ *    `reproduce` matching `prod` (M7.4) and a spoken refusal confirming a gate
+ *    (M6). Three times is a rule, not a habit.
+ *
+ *    So every probe an adapter declares is either backed by a capture in
+ *    `test/fixtures/engine-output/` or waived in that directory's
+ *    `PROVENANCE.json` with a reason. A waiver is cheap to write and visible in
+ *    review; an unproven matcher is neither.
+ */
+const FIXTURE_DIR = path.join(ROOT, 'test', 'fixtures', 'engine-output')
+const PROVENANCE = path.join(FIXTURE_DIR, 'PROVENANCE.json')
+/** Files in `src/main/engines/` that are not adapters. */
+const NOT_AN_ADAPTER = new Set(['types.ts', 'index.ts', 'settings-install.ts', 'spawn-env.ts'])
+/** The probe declarations a `BinarySpec` can carry, as they appear in source. */
+const DECLARED_PROBES = ['versionProbe', 'authProbe']
+
+if (!fs.existsSync(PROVENANCE)) {
+  failures.push(
+    `test/fixtures/engine-output/PROVENANCE.json is missing — every engine probe needs a recorded capture or a written waiver`
+  )
+} else {
+  let provenance = null
+  try {
+    provenance = JSON.parse(fs.readFileSync(PROVENANCE, 'utf8'))
+  } catch (err) {
+    failures.push(`test/fixtures/engine-output/PROVENANCE.json does not parse: ${err.message}`)
+  }
+  if (provenance) {
+    const covered = new Set()
+    for (const entry of provenance.fixtures ?? []) {
+      covered.add(`${entry.engine}:${entry.probe}`)
+      const file = path.join(FIXTURE_DIR, entry.file ?? '')
+      if (!entry.file || !fs.existsSync(file) || fs.statSync(file).size === 0) {
+        failures.push(
+          `PROVENANCE.json names test/fixtures/engine-output/${String(entry.file)}, which is missing or empty — a fixture nobody can read proves nothing`
+        )
+      }
+      for (const required of ['command', 'capturedAt', 'engineVersion', 'platform']) {
+        if (!entry[required]) {
+          failures.push(
+            `PROVENANCE.json entry for ${String(entry.engine)}:${String(entry.probe)} has no ${required} — a capture whose origin is unrecorded cannot be re-taken or audited`
+          )
+        }
+      }
+    }
+    for (const entry of provenance.uncapturable ?? []) {
+      if (!entry.why || String(entry.why).length < 40) {
+        failures.push(
+          `PROVENANCE.json waives ${String(entry.engine)}:${String(entry.probe)} without saying why — a waiver with no reason is the gap it is meant to make visible`
+        )
+        continue
+      }
+      covered.add(`${entry.engine}:${entry.probe}`)
+    }
+    for (const file of fs.readdirSync(path.join(ROOT, 'src', 'main', 'engines'))) {
+      if (!file.endsWith('.ts') || NOT_AN_ADAPTER.has(file)) continue
+      const source = fs.readFileSync(path.join(ROOT, 'src', 'main', 'engines', file), 'utf8')
+      const id = /readonly id\s*=\s*'([a-z0-9-]+)'/.exec(source)?.[1]
+      if (id === undefined) continue
+      // Comment lines are skipped so the doc comments that EXPLAIN a probe do
+      // not demand a fixture; anything else counts, wherever on the line it
+      // sits, so collapsing the declaration onto one line evades nothing.
+      const code = source.split('\n').filter((line) => !IS_COMMENT.test(line))
+      for (const probe of DECLARED_PROBES) {
+        const pattern = new RegExp(`\\b${probe}\\s*:`)
+        const declared = code.some((line) => pattern.test(line))
+        if (declared && !covered.has(`${id}:${probe}`)) {
+          failures.push(
+            `src/main/engines/${file}  declares ${probe} with no recorded output — capture it into test/fixtures/engine-output/ or waive it in PROVENANCE.json with a reason (an adapter may not match on output this repository has never seen)`
+          )
+        }
+      }
+    }
+  }
+}
+
 if (failures.length > 0) {
   console.error('Invariant tripwire failures:\n')
   for (const failure of failures) console.error(`  ${failure}`)

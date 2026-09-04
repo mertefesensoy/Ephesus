@@ -130,6 +130,23 @@ describe('the rows that were wrong', () => {
       logRowSummary(entry('degradation', { ...REALISTIC.degradation, event: 'cleared' }))
     ).toContain('cleared')
   })
+
+  it('does not decorate a degradation that has only happened once', () => {
+    // `×1` is noise on the row that matters most — the first report of a new
+    // condition. The count earns its place only when it is telling the reader
+    // something the row does not already say.
+    expect(logRowSummary(entry('degradation', { ...REALISTIC.degradation, count: 1 }))).toBe(
+      'library · no index'
+    )
+    // And a missing count is not a count of one dressed up as absent.
+    const noCount = { ...REALISTIC.degradation }
+    delete noCount['count']
+    expect(logRowSummary(entry('degradation', noCount))).toBe('library · no index')
+    // Two is worth saying.
+    expect(logRowSummary(entry('degradation', { ...REALISTIC.degradation, count: 2 }))).toBe(
+      'library · no index · ×2'
+    )
+  })
 })
 
 describe('the awkward shapes', () => {

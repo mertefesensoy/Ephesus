@@ -143,6 +143,21 @@ A change is done when:
    drops below its floor in `scripts/coverage-floors.json`. A wiring seam with no test
    is a defect, not a gap: a package's evidence names its production call path — file
    and line — or records that there is none. *(M8.0, GYM-006.)*
+8. **An engine adapter may not match on output this repository has never seen.**
+   Every probe an adapter declares (`versionProbe`, `authProbe`) is backed by a
+   capture from a real installation in `test/fixtures/engine-output/`, with its
+   command, engine version, platform and date in that directory's
+   `PROVENANCE.json` — or waived there in writing, with the reason. Tests run the
+   *shipped* matcher over those bytes. Enforced by `scripts/check-invariants.cjs`.
+
+   Why it is a rule and not advice: M8.4 shipped a `claude auth status` matcher
+   looking for `logged in as` / `account:`, while the CLI answers JSON by default
+   (`{"loggedIn": true, …}`) and `Login method: …` in its opt-in text mode. It
+   matched neither, always answered "cannot tell", and the `needs-login` state it
+   exists to raise could not fire on any machine — with forty-five green tests, all
+   of them feeding it strings we had written ourselves. That is the third instance
+   of the shape (`reproduce` matching `prod` in the M7.4 scorer; a spoken refusal
+   confirming a gate in M6). *(Architect decision 2026-09-04.)*
 
 ## 7. Agent-specific standards
 

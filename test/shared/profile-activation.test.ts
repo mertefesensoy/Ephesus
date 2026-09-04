@@ -212,6 +212,33 @@ describe('the plan is the disclosure', () => {
     expect(plan.profileVersion).toBe(2)
   })
 
+  it('says which declared grants the broker cannot supply, and asks about all of them', () => {
+    // M8.4's claim, and the one nothing asserted: the preview used to list what
+    // a profile DECLARES and stop there, so the screen promised `GH_TOKEN` on
+    // an install with no `github-app.json` and no such secret — an affirmative
+    // promise about something that would simply be absent at spawn.
+    const asked: readonly string[][] = []
+    const planned = activationPlan(bundle(), TARGET, 'supervised', (declared) => {
+      ;(asked as string[][]).push([...declared])
+      return declared.filter((name) => name === 'GH_TOKEN')
+    })
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    // The resolver is asked about the DECLARED set, not a subset of it…
+    expect(asked).toEqual([['GH_TOKEN']])
+    // …and its answer is what the screen shows, unedited.
+    expect(planned.plan.grantsUnavailable).toEqual(['GH_TOKEN'])
+    // The declaration is still listed: "declared" and "available" are two
+    // different facts and the screen has to show both.
+    expect(planned.plan.envGrants).toEqual(['GH_TOKEN'])
+  })
+
+  it('promises nothing extra when the broker can supply everything', () => {
+    const planned = activationPlan(bundle(), TARGET, 'supervised', () => [])
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.grantsUnavailable).toEqual([])
+    expect(planned.plan.envGrants).toEqual(['GH_TOKEN'])
+  })
+
   it('carries each hire its OWN budget, so two targets never pool one allowance', () => {
     const crew = bundle({
       hires: [

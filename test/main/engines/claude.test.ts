@@ -576,3 +576,102 @@ describe('the auth probe reads a denial as a denial (M8.4)', () => {
     expect(probe().command).toEqual({ command: 'claude', args: ['auth', 'status'] })
   })
 })
+
+/**
+ * The matcher, against what the CLI actually prints (2026-09-04).
+ *
+ * Everything above this block feeds the probe strings WE wrote, and every one
+ * of them passed while the shipped matcher could not read a single byte of the
+ * real `claude auth status`: it answers JSON by default
+ * (`{"loggedIn": true, …}`) and, in `--text` mode, `Login method: … / Email: …`
+ * — so the pre-fix patterns matched neither, always answered "cannot tell", and
+ * `needs-login` could never fire on any machine that has ever existed.
+ *
+ * These read `test/fixtures/engine-output/`, whose provenance names the exact
+ * command, CLI version and platform each capture came from, and pass the bytes
+ * to the SHIPPED matcher. That is the whole difference: a test that can be
+ * wrong about the engine is not a test of the engine.
+ */
+describe('the auth probe reads what the real CLI prints', () => {
+  const FIXTURES = fileURLToPath(new URL('../../fixtures/engine-output/', import.meta.url))
+
+  const probe = (): NonNullable<ReturnType<ClaudeAdapter['binary']>['authProbe']> => {
+    const found = new ClaudeAdapter({ prompts: null as never, hookShimPath: 'shim' }).binary()
+      .authProbe
+    if (found === undefined) throw new Error('the reference adapter must have an auth probe')
+    return found
+  }
+  const fixture = (rel: string): string => fs.readFileSync(path.join(FIXTURES, rel), 'utf8')
+
+  it('reads the DEFAULT json answer of a logged-in machine', () => {
+    expect(probe().authenticated(fixture('claude/auth-status.json'), 0)).toBe(true)
+  })
+
+  it('reads the same document with loggedIn false as logged out', () => {
+    // The one case that cannot be captured — capturing it means signing the
+    // Architect out of their own machine (recorded in PROVENANCE.json under
+    // `notCaptured`). It is derived from the CAPTURED document by flipping the
+    // one field the matcher keys on, not invented: every other key, type and
+    // byte is the real answer.
+    const loggedOut = fixture('claude/auth-status.json').replace(
+      '"loggedIn": true',
+      '"loggedIn": false'
+    )
+    expect(loggedOut).toContain('"loggedIn": false')
+    expect(probe().authenticated(loggedOut, 0)).toBe(false)
+  })
+
+  it('reads the opt-in --text answer of a logged-in machine', () => {
+    expect(probe().authenticated(fixture('claude/auth-status-text.txt'), 0)).toBe(true)
+  })
+
+  it('reads the CLI’s own logged-out wording, taken from the shipped binary', () => {
+    // These three literals were read out of `@anthropic-ai/claude-code`'s
+    // packaged binary at 2.1.252 — they are the CLI's words, not ours.
+    expect(probe().authenticated('Not logged in · Run /login', 1)).toBe(false)
+    expect(probe().authenticated('Not logged in · Please run /login', 1)).toBe(false)
+    expect(probe().authenticated('Not logged in', 1)).toBe(false)
+  })
+
+  it('does not read a usage line as a denial', () => {
+    // The literal `auth login` appears in this CLI's own help output — the
+    // observed formatter prints `Usage: claude auth status [options]`, so the
+    // login subcommand's is `Usage: claude auth login [options]`. Treating the
+    // mere presence of those two words as "logged out" would refuse to start a
+    // perfectly healthy company because the CLI printed its usage, so the
+    // denial pattern demands the imperative around it.
+    expect(probe().authenticated('Usage: claude auth login [options]', 1)).toBeNull()
+    expect(probe().authenticated('Commands:\n  login\n  logout\n  status\n', 1)).toBeNull()
+    expect(probe().authenticated('Usage: claude auth [options] [command]', 1)).toBeNull()
+    // …and the imperative IS a denial, whichever way it is worded.
+    expect(probe().authenticated('Run `claude auth login` to sign in.', 1)).toBe(false)
+    expect(probe().authenticated('run claude auth login first', 1)).toBe(false)
+  })
+
+  it('falls back to cannot-tell when the json is not that document', () => {
+    // A JSON answer without the field, and a truncated one. Both must reach
+    // the manager as trusted, never as a refusal to start.
+    expect(probe().authenticated('{"apiProvider":"firstParty"}', 0)).toBeNull()
+    expect(probe().authenticated('{"loggedIn": tru', 0)).toBeNull()
+    // A STRING is not a boolean: the matcher will not invent an answer from it.
+    expect(probe().authenticated('{"loggedIn": "false"}', 0)).toBeNull()
+  })
+
+  it('parses the recorded version output with the shipped parser', () => {
+    const binary = new ClaudeAdapter({ prompts: null as never, hookShimPath: 'shim' }).binary()
+    expect(binary.parseVersion(fixture('claude/version.txt'))).toBe('2.1.252')
+  })
+
+  it('keeps the provenance honest about every fixture it ships', () => {
+    const provenance = JSON.parse(fixture('PROVENANCE.json')) as {
+      fixtures: { engine: string; probe: string; file: string; redacted: string[] }[]
+    }
+    for (const entry of provenance.fixtures) {
+      // The file it names exists and is not empty…
+      expect(fixture(entry.file).length).toBeGreaterThan(0)
+      // …and a redacted field is never one the matcher reads, or the fixture
+      // would be testing our redaction rather than the engine.
+      expect(entry.redacted).not.toContain('loggedIn')
+    }
+  })
+})

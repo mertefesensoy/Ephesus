@@ -435,6 +435,30 @@ export function claudeProjectKey(cwd: string): string {
   return path.resolve(cwd).split(path.sep).join('/')
 }
 
+/**
+ * `loggedIn` out of `claude auth status`'s JSON answer, or null.
+ *
+ * Contract: null means "this output is not that document" — not parseable, not
+ * an object, or carrying no boolean `loggedIn`. Null routes the caller to the
+ * prose patterns and, failing those, to "cannot tell", so a CLI that changes
+ * its answer degrades to trusted rather than to logged-out.
+ *
+ * Deliberately strict about the TYPE: a `loggedIn` that is the string
+ * `"false"`, or absent, is not an answer this function will invent one from.
+ * See `test/fixtures/engine-output/claude/auth-status.json` for the real shape.
+ */
+function loggedInField(stdout: string): boolean | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const value = (parsed as Record<string, unknown>)['loggedIn']
+  return typeof value === 'boolean' ? value : null
+}
+
 /** Claude Code's cancel key is Escape (ADR-0009 `interrupt()`): U+001B. */
 const ESCAPE_KEY = String.fromCharCode(0x1b)
 
@@ -738,30 +762,53 @@ export class ClaudeAdapter implements EngineAdapter {
       install: { command: 'npm', args: ['install', '-g', '@anthropic-ai/claude-code'] },
       versionProbe: { command: 'claude', args: ['--version'] },
       /**
-       * Whether this machine is logged in (M8.4).
+       * Whether this machine is logged in (M8.4, corrected 2026-09-04).
        *
        * `claude auth status` is the CLI's own answer, and it is a different
        * question from `--version`: the binary can be present and perfectly
        * healthy while no session exists, which is when the agent starts, prints
        * a login prompt and does nothing until somebody notices.
        *
-       * Read conservatively — a session is proven, never assumed. The probe is
-       * only trusted when it EXITS CLEAN and says so; anything else routes to
-       * "cannot tell", which the manager treats as trusted rather than as
-       * logged out (a probe that changes its wording must not stop the company).
+       * ## The JSON document is the contract; the prose is the fallback
+       *
+       * `claude auth status --help` states that `--json` is the DEFAULT and
+       * `--text` is opt-in, and the default answer is
+       * `{"loggedIn": true, "authMethod": …}` on exit 0. The first version of
+       * this matcher looked only for `logged in as` / `authenticated as` /
+       * `account:` and so matched **neither** of the CLI's two output modes —
+       * it always answered "cannot tell", and `needs-login` could not fire on
+       * any real machine. Forty-five tests passed because every one of them fed
+       * it a string we had written ourselves. The recorded output now lives in
+       * `test/fixtures/engine-output/` and the matcher is tested against it.
+       *
+       * So: read the machine-readable field when the CLI gives one, and keep
+       * the prose patterns for the `--text` mode and for a future version that
+       * changes its mind about the default.
+       *
+       * Still three-valued, and still conservative in the direction that
+       * matters: anything unrecognised is "cannot tell", which the manager
+       * treats as trusted. A wording we have not seen must never be the reason
+       * a healthy company refuses to start.
        */
       authProbe: {
         command: { command: 'claude', args: ['auth', 'status'] },
         authenticated: (stdout, exitCode) => {
-          // The DENIAL is read first, and the positive patterns all carry a
-          // word that a denial cannot: `Not logged in` contains `logged in`,
-          // so a bare substring test reads a logged-out engine as ready. That
-          // is the same trap that made `reproduce` match `prod` in the M7.4
-          // scorer and made a spoken refusal confirm a gate in M6 — here it
-          // would send a company to work with no session at all.
-          if (/not logged in|not authenticated|no active session|auth login/i.test(stdout)) {
-            return false
-          }
+          // 1. The answer the CLI means to be read by a program.
+          const declared = loggedInField(stdout)
+          if (declared !== null) return declared
+
+          // 2. Prose. The DENIAL is read first, because the positive patterns
+          //    are substrings of denials: `Not logged in` contains `logged in`,
+          //    and a bare substring test therefore reads a logged-out engine as
+          //    ready. That is the same trap that made `reproduce` match `prod`
+          //    in the M7.4 scorer and a spoken refusal confirm a gate in M6 —
+          //    here it would send a company to work with no session at all.
+          //    The wordings are the CLI's own, read out of the shipped binary.
+          if (/not logged in|not authenticated|no active session/i.test(stdout)) return false
+          if (/\brun\b[^.\n]{0,24}\bauth login\b/i.test(stdout)) return false
+          // 3. `Login method:` and `Email:` are what `--text` prints for a live
+          //    session; the other two are wordings other builds have used.
+          if (/^login method:/im.test(stdout)) return true
           if (/logged in as|authenticated as|account:/i.test(stdout)) return true
           // A non-zero exit with nothing recognisable is still not proof of
           // being logged out: the subcommand may not exist on this version.

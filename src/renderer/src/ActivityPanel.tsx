@@ -35,10 +35,26 @@ export function ActivityPanel(): ReactElement {
     const eph = window.eph
     if (!eph) return
 
+    /** Set once the opening tail read has landed; see `onAppend` below. */
+    let opened = false
+    /** An append arrived before it did, and is owed a pull. */
+    let missed = false
+
+    /**
+     * Adds a batch, and is MONOTONIC on purpose.
+     *
+     * Two reads can be in flight at once, and they may answer in either order.
+     * A batch that is not newer than what the panel has already shown is
+     * dropped rather than appended, and the cursor never moves backwards —
+     * without that, a forward page issued at seq 0 answering after the tail
+     * would rewind the cursor to 300 and put the company's FIRST rows back on
+     * screen, which is register item B4 arriving through the back door.
+     */
     const absorb = (batch: readonly LogEntry[]): void => {
-      if (batch.length === 0) return
-      cursorRef.current = batch[batch.length - 1]?.seq ?? cursorRef.current
-      setEntries((current) => [...current, ...batch].slice(-WINDOW_SIZE))
+      const fresh = batch.filter((entry) => entry.seq > cursorRef.current)
+      if (fresh.length === 0) return
+      cursorRef.current = fresh[fresh.length - 1]?.seq ?? cursorRef.current
+      setEntries((current) => [...current, ...fresh].slice(-WINDOW_SIZE))
     }
 
     /** Follows the log forward from what this panel has already shown. */
@@ -51,8 +67,23 @@ export function ActivityPanel(): ReactElement {
     // it showed an overnight run's FIRST 300 events and then crawled towards
     // the present one append at a time (register item B4). The tail read is the
     // one M8.2 added for the degradation replay, which had the same question.
-    void eph.agora.logTail(WINDOW_SIZE).then(absorb)
+    void eph.agora.logTail(WINDOW_SIZE).then((batch) => {
+      absorb(batch)
+      opened = true
+      // Whatever landed while the tail was in flight is newer than the tail,
+      // so one forward page from the new cursor collects all of it.
+      if (missed) {
+        missed = false
+        pull()
+      }
+    })
     const off = eph.agora.onAppend(() => {
+      // Before the panel has opened there is no cursor to page from: a pull
+      // now would ask for seq 0 and race the tail. Remember it instead.
+      if (!opened) {
+        missed = true
+        return
+      }
       // Coalesce a burst into one pull, and therefore one render (SDD §11).
       if (pendingRef.current) return
       pendingRef.current = setTimeout(() => {

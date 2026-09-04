@@ -109,6 +109,28 @@ describe('the plan is rendered as a disclosure', () => {
     expect(html).toContain('none')
   })
 
+  it('warns about a declared secret the broker cannot actually supply (M8.4)', () => {
+    // The screen used to list what the profile DECLARES and stop, so it
+    // promised `GH_TOKEN` on an install with no `github-app.json` and no such
+    // secret. The promise is the problem: the Architect said yes to a crew
+    // they were told would have it, and the hires started without it.
+    const html = renderToStaticMarkup(
+      <PlanView
+        plan={plan({ envGrants: ['GH_TOKEN', 'NPM_TOKEN'], grantsUnavailable: ['GH_TOKEN'] })}
+      />
+    )
+    expect(html).toContain('the broker cannot supply')
+    expect(html).toContain('GH_TOKEN')
+    expect(html).toContain('without them')
+  })
+
+  it('says nothing about the broker when it can supply everything', () => {
+    // The warning is a fact, not decoration: an install where nothing is
+    // missing must not carry a line that reads as though something is.
+    const html = renderToStaticMarkup(<PlanView plan={plan({ grantsUnavailable: [] })} />)
+    expect(html).not.toContain('the broker cannot supply')
+  })
+
   it('shows a CLAMPED autonomy row, not just the effective level', () => {
     const html = renderToStaticMarkup(<AutonomyRow row={AUTONOMY[1] as ComposedAutonomy} />)
     // A profile that wanted `autonomous` and was cut back is a fact about the

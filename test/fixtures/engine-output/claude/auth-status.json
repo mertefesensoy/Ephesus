@@ -1,0 +1,11 @@
+{
+  "loggedIn": true,
+  "authMethod": "claude.ai",
+  "apiProvider": "firstParty",
+  "analyticsDisabled": false,
+  "projectsDirectory": "C:\\Users\\<architect>\\.claude\\projects",
+  "email": "<architect>@example.test",
+  "orgId": "00000000-0000-0000-0000-000000000000",
+  "orgName": "<architect>@example.test's Organization",
+  "subscriptionType": "max"
+}
