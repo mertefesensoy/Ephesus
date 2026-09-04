@@ -99,8 +99,16 @@ metric that told us to do the wrong thing.
 1. **The same number everywhere.** `terraces` measures identically with the art
    pack installed and with it absent, on win32 and on CI linux, across the M8.6
    and M8.7 branches. Verified by moving the pack aside and re-running, recorded
-   in the implementation doc. *(Already true once as of 2026-09-04:
-   `FloorCanvas` 121/331 lines and 29/48 functions in both states.)*
+   in the implementation doc.
+
+   **Partially met as of 2026-09-04, and the unmet part is named.** `FloorCanvas`
+   reads 121/331 lines and 29/48 functions with the pack, without it, and on CI
+   linux. Across win32-with-pack and linux CI the `terraces` row agrees to the
+   hundredth on lines (76.39), functions (85.22) and statements (76.40) — and
+   still differs by 0.27 on **branches** (72.91 vs 72.64), cause not isolated.
+   Until it is, `terraces.branches` must not be ratchetted from win32: doing so
+   would leave linux 0.27 below a 0.25 tolerance, which is this proposal's own
+   failure reproduced. Closing that gap is what completes this metric.
 2. **No floor is corrected by hand again before 2026-10-02.** Every floor change
    in that window is an `--update` over a full window, visible in the diff as a
    candidate with three runs. A hand edit in the window counts as a failure of

@@ -204,6 +204,36 @@ Mutation evidence on the new guard: both mutations killed —
 - remove the map check entirely → BYPASS 10 fails;
 - compare by name-set again (the original bug) → BYPASS 10 fails.
 
+### A residual, measured and not theorised
+
+Across win32-with-pack and linux CI (permanently pack-free), on this branch:
+
+| terraces | win32, pack present | linux CI, pack-free |
+|---|---|---|
+| lines | 76.39 | **76.39** |
+| functions | 85.22 | **85.22** |
+| statements | 76.40 | **76.40** |
+| branches | 72.91 | 72.64 |
+
+`FloorCanvas.tsx` itself reads **36.56% (121/331) in both**, which is the claim
+this change was made for. Three metrics of four now agree to the hundredth.
+
+**Branches still differ by 0.27 — roughly two branches — and the cause is not
+isolated.** The likely path is `floor-glob-modules.test.tsx` itself: it enters
+the two glob modules for real, which means `resolveTileset` /
+`resolveCharacters` take their installed arm on a machine with the pack and
+their not-installed arm without it. Those resolvers are separately and
+exhaustively tested from fixtures in `test/renderer/tileset.test.ts` and
+`characters-intake.test.ts`, so the union should already be covered; it is not
+yet established which branches remain.
+
+Consequence, stated so nobody walks into it: **do not ratchet `terraces.branches`
+from win32.** A win32 ratchet to 72.91 would leave linux reading 72.64 — a 0.27
+regression past a 0.25 tolerance, which is the trap of this whole episode
+reproduced in miniature. Both platforms currently pass with headroom against the
+unchanged 72.61 floor, so nothing is failing; this is a note about the next
+ratchet, not a defect today. Tracked as the open half of GYM-007's metric 1.
+
 ## Related docs
 
 - `docs/gymnasium/proposals/GYM-007-a-floor-names-every-input-that-moves-it.md`
