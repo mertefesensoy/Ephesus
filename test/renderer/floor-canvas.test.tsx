@@ -29,8 +29,102 @@ vi.hoisted(() => {
   HTMLCanvasElement.prototype.getContext = (() => null) as never
 })
 
+/**
+ * The licensed art pack, supplied to this file rather than read off the disk.
+ *
+ * ## Why this stub exists, and why it is not a convenience
+ *
+ * `floor/tileset.ts` and `floor/characters.ts` resolve their state from
+ * `import.meta.glob('../assets/{tileset,characters}/*.png')`. Those PNGs are a
+ * deliberate gitignored drop (`.gitignore:14`, `:26`; `assets/ATTRIBUTION.md`
+ * rule 2 keeps assets whose licence forbids redistributing them in source form
+ * out of the repository). So the glob is populated on a machine that bought the
+ * pack and EMPTY everywhere else — every CI runner, every fresh clone, every
+ * `git worktree`, permanently and by design.
+ *
+ * With the glob empty, `tileset.layers` and `characters.urls` are both empty,
+ * the two loader loops in `FloorCanvas` iterate zero times, and `loadOne` is
+ * never called. That had two consequences, and the second is the serious one:
+ *
+ *  - The subsystem's coverage differed by ten lines, one function, six branches
+ *    and ten statements depending on whether the machine held a licence — a
+ *    build input `scripts/check-coverage.cjs` cannot see, because its tree hash
+ *    covers `.ts`/`.tsx` only. On 2026-09-04 that split reached the gate as a
+ *    win32 floor recorded WITH the pack and a worktree measurement taken
+ *    without one, and was misread twice: first as a ratchet on a lucky run,
+ *    then as machine jitter.
+ *  - **The art-loading path was exercised on exactly one machine on earth.**
+ *    `loadOne`, both loader loops and the sheet-error arm have never once run
+ *    in CI. Under this repository's own seam rule (ENGINEERING-STANDARDS §6.7)
+ *    that is a defect, and it would still be one if the floors were perfect.
+ *
+ * So the inputs are pinned here. The stub calls the REAL resolvers over fixed
+ * glob records rather than hand-building a `TilesetState`/`CharactersState`,
+ * for the reason the M8.4 fixtures were captured rather than typed: a literal
+ * state object is our idea of the shape, and it drifts from the schema the
+ * moment the schema moves. What the component receives is what
+ * `resolveTileset`/`resolveCharacters` actually produce for an installed pack.
+ */
+vi.mock('../../src/renderer/src/floor/tileset', async () => {
+  const { resolveTileset } = await vi.importActual<typeof import('../../src/shared/tileset')>(
+    '../../src/shared/tileset'
+  )
+  return {
+    tilesetState: () =>
+      resolveTileset(
+        { '../assets/tileset/pack.png': '/pack.png' },
+        {
+          '../assets/tileset/pack.tiles.json': {
+            schemaVersion: 1,
+            name: 'Stub Pack',
+            sheet: 'pack.png',
+            tilePx: 16,
+            columns: 10,
+            frames: { wall: 0, 'floor-a': 11, 'floor-b': 12, station: 20 }
+          }
+        }
+      )
+  }
+})
+
+vi.mock('../../src/renderer/src/floor/characters', async () => {
+  const { resolveCharacters } = await vi.importActual<typeof import('../../src/shared/characters')>(
+    '../../src/shared/characters'
+  )
+  return {
+    charactersState: () =>
+      resolveCharacters(
+        { '../assets/characters/a.png': '/a.png', '../assets/characters/b.png': '/b.png' },
+        {
+          '../assets/characters/pack.chars.json': {
+            schemaVersion: 1,
+            name: 'stub pack',
+            sheets: ['a.png', 'b.png'],
+            frameW: 16,
+            frameH: 32,
+            idleRow: 0,
+            walkRow: 1,
+            walkFrames: 6
+          }
+        }
+      )
+  }
+})
+
 let root: Root | null = null
 let host: HTMLDivElement | null = null
+/**
+ * The mount's bring-up, captured so every case can WAIT for it.
+ *
+ * Without it each case raced the component's own fire-and-forget chain and
+ * measured whatever had happened by the time the file tore down: this file's
+ * covered line count moved between runs on an unchanged tree (103 or 104 of
+ * 324, 26 or 27 functions), and that reached the coverage gate as
+ * `terraces.functions` 84.16 against a floor of 84.65. Flushing a couple of
+ * microtasks — `await Promise.resolve()`, which is what these cases used to
+ * do — is not waiting; it is guessing how deep the chain is.
+ */
+let broughtUp: Promise<void> = Promise.resolve()
 
 afterEach(() => {
   if (root && host) {
@@ -49,8 +143,30 @@ function mount(): HTMLDivElement {
   document.body.appendChild(host)
   const r = createRoot(host)
   root = r
-  act(() => r.render(<FloorCanvas />))
+  broughtUp = Promise.resolve()
+  act(() =>
+    r.render(
+      <FloorCanvas
+        onBringUp={(settled) => {
+          broughtUp = settled
+        }}
+      />
+    )
+  )
   return host
+}
+
+/**
+ * Mount, and wait until the floor has finished trying — every case starts here.
+ * `act` around the await is what flushes the state update the bring-up's
+ * failure arm makes, so the degradation the next assertion reads is on screen.
+ */
+async function mounted(): Promise<HTMLDivElement> {
+  const el = mount()
+  await act(async () => {
+    await broughtUp
+  })
+  return el
 }
 
 /** The label §8's parity lands on — a `<canvas>` is opaque to a screen reader. */
@@ -67,11 +183,29 @@ const snapshot = (over: Record<string, unknown> = {}): Record<string, unknown> =
 })
 
 describe('the floor mounts, and says what it cannot do (invariant §7)', () => {
-  it('renders the canvas host with a census even with no bridge at all', () => {
+  it('renders the canvas host with a census even with no bridge at all', async () => {
     // A window opened before the preload bridge exists must not render a blank
     // opaque canvas: the station half of §8's parity is seeded from the start.
-    const el = mount()
+    const el = await mounted()
     expect(el.querySelector('[role="img"]')).not.toBeNull()
+    expect(census(el)).toContain('station')
+  })
+
+  it('says the floor is unavailable once the bring-up has finished failing', async () => {
+    // The assertion this file's own docblock has always claimed and never
+    // made. It could not be made: the failure arm runs whenever the bring-up
+    // gets round to it, and before `onBringUp` there was no way to know that
+    // had happened — so the degradation was EXERCISED (which is why its lines
+    // moved between runs) and never READ.
+    //
+    // It is also what keeps the wait in `mounted` load-bearing: drop the await
+    // and this case fails, rather than the suite quietly going back to
+    // measuring whatever the machine felt like doing.
+    const el = await mounted()
+    expect(el.textContent).toContain('floor unavailable:')
+    // And the census survives it. A floor that cannot paint a single pixel
+    // still reports its population in words, which is the whole of what a
+    // screen reader was ever getting (NFR-15, §8 parity).
     expect(census(el)).toContain('station')
   })
 })
@@ -117,10 +251,7 @@ describe('the floor subscribes to the channels it claims to (SDD §5)', () => {
 
   it('folds a pushed avatar into the census', async () => {
     const b = bridge()
-    const el = mount()
-    await act(async () => {
-      await Promise.resolve()
-    })
+    const el = await mounted()
 
     await act(async () => {
       b.push({ agentId: 'iris', snapshot: snapshot(), pendingMail: 0 } as never)
@@ -138,10 +269,7 @@ describe('the floor subscribes to the channels it claims to (SDD §5)', () => {
     // that the component re-reads the queue when the Watch says it changed,
     // and that the count it stores is the one it just read.
     const b = bridge()
-    const el = mount()
-    await act(async () => {
-      await Promise.resolve()
-    })
+    const el = await mounted()
 
     await act(async () => {
       b.gates(2)

@@ -442,8 +442,35 @@ const ACCENTS = [
   tokens.cypress
 ]
 
-export function FloorCanvas(): ReactElement {
+export interface FloorCanvasProps {
+  /**
+   * Handed the mount's bring-up the moment it starts: a promise that settles
+   * when the Pixi application, the tilesheets and the character faces have ALL
+   * finished, however they finished. Production passes nothing.
+   *
+   * It exists because the bring-up is fire-and-forget by design — the floor
+   * paints when it is ready and the component renders before it is — and a
+   * caller with no handle on it cannot know when "before" ended. A test
+   * without that handle is left racing its own teardown, which is not a
+   * flaky test but an unmeasurable one: on 2026-09-04 this file's covered
+   * line count moved between runs on an unchanged tree, because whether the
+   * chain's rejection arm had run yet was decided by how the machine felt.
+   * That drift reached the coverage gate as `terraces.functions` 84.16 vs
+   * 84.65, and it is exactly this one arm.
+   *
+   * Awaiting it is the ONLY thing it is for. It never rejects — the bring-up
+   * handles its own failure by making it visible (invariant §7) — so it says
+   * "the floor has finished trying", not "the floor came up".
+   */
+  readonly onBringUp?: (settled: Promise<void>) => void
+}
+
+export function FloorCanvas({ onBringUp }: FloorCanvasProps = {}): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null)
+  // Read inside the mount effect, which must not re-run when a caller passes a
+  // fresh closure — re-running it would tear down and rebuild the renderer.
+  const onBringUpRef = useRef(onBringUp)
+  onBringUpRef.current = onBringUp
   const [initError, setInitError] = useState<string | null>(null)
   const [population, setPopulation] = useState(0)
   const seatsRef = useRef<Map<string, { role: string; seat: string }>>(new Map())
@@ -731,16 +758,18 @@ export function FloorCanvas(): ReactElement {
         return null
       }
     }
-    void Promise.all([
-      app.init({
-        width: ROOM_COLS * TILE_PX,
-        height: ROOM_ROWS * TILE_PX,
-        background: tokens.marble200,
-        antialias: false // pixel-snapped everything (§1.1)
-      }),
-      loadSheets(),
-      loadCharacters()
-    ])
+    // Named rather than inlined so the bring-up can be handed out below. The
+    // three run concurrently exactly as before; `Promise.all` still settles on
+    // the FIRST rejection, which is why what is handed out is not this promise.
+    const starting = app.init({
+      width: ROOM_COLS * TILE_PX,
+      height: ROOM_ROWS * TILE_PX,
+      background: tokens.marble200,
+      antialias: false // pixel-snapped everything (§1.1)
+    })
+    const loadingSheets = loadSheets()
+    const loadingFaces = loadCharacters()
+    const painting = Promise.all([starting, loadingSheets, loadingFaces])
       .then(([, sheets, faces]) => {
         // Only layers whose image actually decoded may paint.
         const layers = tileset.layers.filter((layer) => sheets.has(layer.sheet))
@@ -919,6 +948,14 @@ export function FloorCanvas(): ReactElement {
         // Degradations are visible, never silent (invariant §7).
         setInitError(err instanceof Error ? err.message : String(err))
       })
+    // `painting` is finished as soon as ANY of the three rejects, but the other
+    // two are still running and can still call `setSheetError` — so what a
+    // caller is handed waits for all four, and `allSettled` because the point
+    // is that they have STOPPED, not that they succeeded. Built only when
+    // somebody asked for it: production hands out nothing and allocates nothing.
+    onBringUpRef.current?.(
+      Promise.allSettled([starting, loadingSheets, loadingFaces, painting]).then(() => undefined)
+    )
 
     return () => {
       cancelled = true

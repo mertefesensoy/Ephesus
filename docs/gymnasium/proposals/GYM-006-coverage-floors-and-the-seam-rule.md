@@ -100,7 +100,20 @@ Binary, measurable by **2026-09-16**:
 2. **No false positives on green work.** Zero failures of either gate on a
    change that regressed nothing, across every M8 branch pushed in the window.
    A platform-jitter failure counts as a false positive and triggers a
-   re-measured tolerance, never a lowered floor. Excluded by design: the M8.0
+   re-measured tolerance, never a lowered floor.
+
+   **Amended 2026-09-04 (GYM-007).** The instruction above is right and stands.
+   The DIAGNOSIS it offers was too narrow, and the narrowness cost two wrong
+   corrections: it assumes the only cross-machine variable is timing. It is not.
+   `terraces` moved by 10 lines, 6 branches, 10 statements and 1 function
+   depending on whether the machine held the gitignored licensed art pack — a
+   build input `treeHash` cannot see, because it covers `src/**/*.{ts,tsx}` and
+   `shims/**/*.mjs` only. Two observers agreed on the low figure and it was read
+   as corroboration; they shared the condition rather than checking it. So the
+   metric now requires: **a per-platform floor names every input that changes
+   it.** A failure that reproduces on one machine and not another is a
+   CONDITION to find, not a tolerance to widen and not a floor to lower. The
+   false-positive count for this window is one, and its cause was not jitter. Excluded by design: the M8.0
    branch's first CI run, red on "no coverage floors are recorded for platform
    linux" before those floors could be recorded from its own artifact — that
    is the could-not-establish path working, not a false positive.

@@ -30,6 +30,44 @@
  * first record on a platform is an explicit verb, `--seed`, so that
  * `--update` can never quietly start over.
  *
+ * ## Why a raise needs more than one run, and takes the lowest of them
+ *
+ * A floor is a claim that the suite REPRODUCES a figure, and one run cannot
+ * make that claim. On 2026-09-04 `--update` ratcheted `terraces.functions`
+ * from 84.65% to 85.15% on a single win32 measurement and the gate then
+ * refused a branch that had not touched the subsystem. The cause is in the
+ * subsystem, not the arithmetic: `FloorCanvas.tsx` fires a floating
+ * `void Promise.all([app.init(…), loadSheets(), loadCharacters()])` that no
+ * test awaits, so how far that chain gets before the file tears down decides
+ * how many of its 324 lines were entered — 103, 113 and higher have all been
+ * measured on the SAME production tree.
+ *
+ * So a raise is corroborated. Every measurement folds into a `candidate`
+ * window kept per platform — the last `corroboratingRuns` runs, each with the
+ * condition it was taken in, the identity of the report it read, and the
+ * figures it measured. A floor rises only once that window is full, and only
+ * to the window's metric-wise MINIMUM — never to what the newest run happened
+ * to see. The window SLIDES rather than accumulating, because the tree hash
+ * covers production files only: adding tests raises coverage without changing
+ * it, and an all-time minimum per tree could never record that gain. It
+ * restarts when the tree or the subsystem map changes, which are the two ways
+ * of becoming a measurement of something else.
+ *
+ * Two runs agreeing was rejected as the rule, by measurement rather than by
+ * taste: the pair the record calls corroborated (84.65 twice) is itself 0.49
+ * points above what two later runs both read (84.16 twice, matching the linux
+ * record exactly). Runs taken back to back share a machine's mood, so
+ * agreement between them is not independence, and the minimum of more of them
+ * is the only thing that gets monotonically closer to the truth. What this
+ * CANNOT do is make correlated samples independent — three optimistic runs in
+ * one session still raise a floor too far. It makes the ratchet strictly more
+ * conservative than a single run, and it writes down the spread it saw.
+ *
+ * Only the RAISE path is corroborated. A regression past the tolerance fails
+ * on the run that measured it, with no window and no second opinion: a gate
+ * that waited for corroboration before failing would be a gate that lets the
+ * first regression through.
+ *
  * ## The map is total, and the report must be the tree
  *
  * Every production file belongs to exactly one subsystem: a file that belongs
@@ -66,9 +104,11 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..')
 const DEFAULT_SUMMARY = path.join('coverage', 'coverage-summary.json')
 const DEFAULT_FLOORS = path.join('scripts', 'coverage-floors.json')
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const METRICS = ['lines', 'branches', 'functions', 'statements']
 const COMMAND = 'npm run test:coverage'
+/** A window wider than this is a policy nobody would run; see `corroboratingRuns`. */
+const MAX_WINDOW_RUNS = 10
 /** A source extension electron-vite would bundle that neither list below names. */
 const SOURCE_LIKE = /\.(js|jsx|mjs|cjs|mts|cts)$/
 
@@ -387,7 +427,7 @@ function compare(measurement, block, doc, platform) {
         )
       } else if (round2(have - want) > lag) {
         stale.push(
-          `subsystem ${name}: ${metric} ${String(have)}% is more than ${String(lag)} points above its ${platform} floor of ${String(want)}% — the record is stale; ratchet it (\`--update\`, or \`--update --from\` the CI artifact) and commit`
+          `subsystem ${name}: ${metric} ${String(have)}% is more than ${String(lag)} points above its ${platform} floor of ${String(want)}% — the record is stale; ratchet it (\`--update\`, or \`--update --from\` the CI artifact) and commit, remembering that a raise takes ${String(doc.corroboratingRuns)} runs of the same tree and rises only to their lowest`
         )
       } else if (have > want) {
         notes.push(
@@ -417,17 +457,116 @@ function compare(measurement, block, doc, platform) {
 }
 
 /**
- * Contract: the floors document after one measurement is folded into an
- * EXISTING platform block. Floors only rise; the untested list loses what a
- * test now enters or what is gone, and gains nothing; the condition is
- * re-stamped only when something changed, so a refused or no-op update
- * leaves the block byte-identical. Returns the changes made and the
- * regressions it refused to hide. Pure.
+ * Contract: the corroboration window after one measurement is folded in —
+ * `{ tree, runs, floors }`, where `floors` is the ELEMENTWISE MINIMUM of the
+ * metrics measured by exactly the runs in `runs`, newest last. A run is
+ * identified by the coverage report it read (`run.report`), so offering the
+ * same report twice adds nothing: two `--update` calls over one coverage run
+ * are one measurement however many times they are made.
+ *
+ * The window restarts — rather than accumulating a minimum over things that
+ * were never comparable — when the production tree changes, and when the
+ * subsystem map changes (the map lives in this file, not in the tree, so it
+ * can move under an unchanged hash). It does not restart on length: a full
+ * window SLIDES, keeping the newest `keep` runs, because a floor that could
+ * only rise on a window that had just been emptied would rise almost never.
  */
-function ratchet(doc, platform, measurement, condition) {
+function foldCandidate(existing, measurement, run, keep, mapHash) {
+  const entry = { ...run, floors: metricsOnly(measurement.floors) }
+  const fresh = () => ({ tree: run.tree, map: mapHash, runs: [entry] })
+  if (typeof existing !== 'object' || existing === null) return fresh()
+  if (existing.tree !== run.tree) return fresh()
+  // The map lives in this file, not in the tree, so it can move under an
+  // unchanged hash; a minimum across two maps is a minimum across two subjects.
+  // Compared by MEMBERSHIP, not by the set of names: moving a directory from
+  // one subsystem to another leaves both names standing and changes what every
+  // figure under them means.
+  if (existing.map !== mapHash) return fresh()
+  if (!Array.isArray(existing.runs) || existing.runs.length === 0) return fresh()
+  if (existing.runs.some((r) => r.report === run.report)) return existing
+  return { tree: run.tree, map: mapHash, runs: [...existing.runs, entry].slice(-keep) }
+}
+
+/**
+ * Contract: a fingerprint of the subsystem MAP — every name and the members
+ * under it. Pure.
+ *
+ * The name set is not the map. Moving `src/renderer/src/floor/` from
+ * `terraces` to `panels` leaves both names in place and changes what every
+ * figure under them means, and a minimum taken across that move is a minimum
+ * across two different subjects. The first version of this guard compared
+ * `Object.keys(...)` and would have folded straight through it.
+ */
+function subsystemMapHash(subsystems) {
+  // JSON rather than a delimiter: it escapes for us, so no member string can
+  // ever forge a boundary and make two different maps hash the same.
+  const shape = Object.keys(subsystems ?? {})
+    .sort()
+    .map((name) => [name, [...(subsystems[name]?.members ?? [])].sort()])
+  return crypto.createHash('sha256').update(JSON.stringify(shape)).digest('hex').slice(0, 12)
+}
+
+/** Contract: each subsystem's four metrics, without the descriptive file count. Pure. */
+function metricsOnly(floors) {
+  const out = {}
+  for (const [name, floor] of Object.entries(floors)) {
+    out[name] = {}
+    for (const metric of METRICS) out[name][metric] = round2(floor[metric])
+  }
+  return out
+}
+
+/**
+ * Contract: what the whole window reproduced — each subsystem's metric-wise
+ * MINIMUM across every run in it, which is the most a floor may rise to. A
+ * metric missing from any run is absent here rather than guessed. Pure.
+ */
+function windowFloors(candidate) {
+  const out = {}
+  const runs = candidate.runs
+  for (const [name, floor] of Object.entries(runs[0].floors)) {
+    out[name] = {}
+    for (const metric of METRICS) {
+      let low = floor[metric]
+      for (const run of runs) {
+        const seen = run.floors[name]?.[metric]
+        if (!isPct(seen)) {
+          low = undefined
+          break
+        }
+        if (round2(seen) < round2(low)) low = seen
+      }
+      if (isPct(low)) out[name][metric] = round2(low)
+    }
+  }
+  return out
+}
+
+/**
+ * Contract: the floors document after one measurement is folded into an
+ * EXISTING platform block. Floors only rise, and only as far as the
+ * corroboration window supports (see `foldCandidate`); the untested list
+ * loses what a test now enters or what is gone, and gains nothing; the
+ * condition is re-stamped only when a FLOOR or the untested list changed, so
+ * a refused update leaves the block byte-identical and a run that only
+ * widens the window moves no stamp. Returns the changes made, the raises it
+ * held back for want of corroboration, and the regressions it refused to
+ * hide. Pure.
+ */
+function ratchet(doc, platform, measurement, condition, run) {
   const changes = []
+  const held = []
   const regressions = []
   const existing = doc.platforms[platform]
+  const candidate = foldCandidate(
+    existing.candidate,
+    measurement,
+    run,
+    doc.corroboratingRuns,
+    subsystemMapHash(doc.subsystems)
+  )
+  const corroborated = candidate.runs.length >= doc.corroboratingRuns
+  const supportedBy = windowFloors(candidate)
   const floors = {}
   for (const [name, measured] of Object.entries(measurement.floors)) {
     const old = existing.floors[name]
@@ -437,12 +576,26 @@ function ratchet(doc, platform, measurement, condition) {
       continue
     }
     for (const metric of METRICS) {
+      // What the window as a whole reproduced, never what this run alone saw.
+      const supported = supportedBy[name]?.[metric]
       if (!isPct(old[metric])) {
         changes.push(`subsystem ${name}: ${metric} floor restored (it had no numeric value)`)
+        floors[name][metric] = isPct(supported) ? supported : measured[metric]
       } else if (round2(measured[metric]) > round2(old[metric])) {
-        changes.push(
-          `subsystem ${name}: ${metric} ${String(old[metric])}% → ${String(measured[metric])}%`
-        )
+        const rises = corroborated && isPct(supported) && round2(supported) > round2(old[metric])
+        if (rises) {
+          changes.push(
+            `subsystem ${name}: ${metric} ${String(old[metric])}% → ${String(supported)}% (lowest of ${String(candidate.runs.length)} runs on tree ${candidate.tree})`
+          )
+          floors[name][metric] = supported
+        } else {
+          floors[name][metric] = old[metric]
+          held.push(
+            corroborated
+              ? `subsystem ${name}: ${metric} measured ${String(measured[metric])}% but the lowest of ${String(candidate.runs.length)} runs on tree ${candidate.tree} is ${String(supported)}% — the floor stays at ${String(old[metric])}%, because a floor is what the suite reproduces`
+              : `subsystem ${name}: ${metric} measured ${String(measured[metric])}% above its floor of ${String(old[metric])}%, and ${String(candidate.runs.length)} of ${String(doc.corroboratingRuns)} corroborating runs are recorded on tree ${candidate.tree} — run \`${COMMAND}\` and \`--update\` again without touching a production file`
+          )
+        }
       } else if (round2(measured[metric]) < round2(old[metric] - doc.tolerance)) {
         regressions.push(
           `subsystem ${name}: ${metric} ${String(measured[metric])}% is below its floor of ${String(old[metric])}% — --update never lowers a floor; fix the regression or edit the file with a reason`
@@ -463,14 +616,20 @@ function ratchet(doc, platform, measurement, condition) {
     if (now.has(file)) continue
     changes.push(inReport.has(file) ? `now tested: ${file}` : `gone from the tree: ${file}`)
   }
-  const changed = changes.length > 0
+  const ratcheted = changes.length > 0
+  // The window is evidence, so a run widening it is written even when no floor
+  // moved — otherwise the run that corroborates the next raise is forgotten.
+  // The STAMP still only moves for a floor or the untested list, so the
+  // condition beside the figures never describes a run that did not set them.
+  const changed = ratcheted || candidate !== existing.candidate
   const next = { ...doc, platforms: { ...doc.platforms } }
   next.platforms[platform] = {
-    measured: changed ? condition : existing.measured,
+    measured: ratcheted ? condition : existing.measured,
+    candidate,
     floors,
     untested
   }
-  return { doc: next, changes, regressions, changed }
+  return { doc: next, changes, held, regressions, changed, ratcheted }
 }
 
 function loadJson(file) {
@@ -479,6 +638,57 @@ function loadJson(file) {
 
 const isReason = (s) => typeof s === 'string' && s.trim().length >= 40
 const CONDITION_KEYS = ['at', 'commit', 'ref', 'tree', 'platform', 'node', 'os', 'command']
+/** A window's run is a condition plus the identity of the report it read. */
+const RUN_KEYS = [...CONDITION_KEYS, 'report']
+
+/**
+ * Contract: null if this platform's corroboration window is absent (which is
+ * legal — it is evidence a run accumulates, not a record a human seeds) or is
+ * a window whose shape can be trusted, and otherwise the first fault in it.
+ * A window that fails here is a hand edit that has to be read, so the message
+ * names the platform.
+ */
+function validateCandidate(candidate, platform, keep) {
+  if (candidate === undefined) return null
+  const where = `platform ${platform} candidate`
+  if (typeof candidate !== 'object' || candidate === null) return `${where} is not an object`
+  if (typeof candidate.tree !== 'string' || candidate.tree.length === 0) {
+    return `${where} has no tree — a window with no subject corroborates nothing`
+  }
+  if (!Array.isArray(candidate.runs) || candidate.runs.length === 0) {
+    return `${where} has no runs`
+  }
+  if (candidate.runs.length > keep) {
+    return `${where} holds ${String(candidate.runs.length)} runs, more than the ${String(keep)} a raise is measured over — the window slides, it does not collect`
+  }
+  const reports = new Set()
+  for (const run of candidate.runs) {
+    if (typeof run !== 'object' || run === null) return `${where}: a run is not an object`
+    for (const key of RUN_KEYS) {
+      if (typeof run[key] !== 'string' || run[key].length === 0) {
+        return `${where}: a run lacks '${key}'`
+      }
+    }
+    if (run.tree !== candidate.tree) {
+      return `${where}: a run measured tree ${run.tree}, not the window's ${candidate.tree} — a minimum over different trees is a minimum over different subjects`
+    }
+    if (reports.has(run.report)) {
+      return `${where}: two runs read the same report (${run.report}) — one coverage run offered twice is one measurement, however many times it is offered`
+    }
+    reports.add(run.report)
+    if (typeof run.floors !== 'object' || run.floors === null) {
+      return `${where}: the run of ${run.report} recorded no floors — a run with no figures corroborates nothing`
+    }
+    for (const [name, floor] of Object.entries(run.floors)) {
+      for (const metric of METRICS) {
+        if (!isPct(floor?.[metric])) {
+          return `${where}: the run of ${run.report} lacks a numeric ${metric} for subsystem ${name}`
+        }
+      }
+    }
+  }
+  return null
+}
 
 function validateFloors(doc) {
   if (typeof doc !== 'object' || doc === null) return 'not an object'
@@ -496,6 +706,17 @@ function validateFloors(doc) {
   }
   if (!isReason(doc.ratchetLagReason)) {
     return 'ratchetLagReason must say why a floor may lag reality by that much (at least 40 characters)'
+  }
+  // Two is not a corroboration: the pair this rule was written for agreed with
+  // each other and were still half a point above what the suite reproduces.
+  if (!Number.isInteger(doc.corroboratingRuns) || doc.corroboratingRuns < 3) {
+    return 'corroboratingRuns must be an integer of at least 3 — a floor one or two runs reached is not a floor the suite reproduces'
+  }
+  if (doc.corroboratingRuns > MAX_WINDOW_RUNS) {
+    return `corroboratingRuns must be at most ${String(MAX_WINDOW_RUNS)}, the length at which a window restarts`
+  }
+  if (!isReason(doc.corroboratingRunsReason)) {
+    return 'corroboratingRunsReason must say how that number was chosen (at least 40 characters)'
   }
   if (typeof doc.subsystems !== 'object' || doc.subsystems === null) return 'subsystems missing'
   const names = Object.keys(doc.subsystems)
@@ -544,6 +765,8 @@ function validateFloors(doc) {
         return `platform ${platform}: floor for unknown subsystem ${name}`
       }
     }
+    const candidateFault = validateCandidate(block.candidate, platform, doc.corroboratingRuns)
+    if (candidateFault !== null) return candidateFault
     if (!Array.isArray(block.untested)) return `platform ${platform} block has no untested list`
     for (const file of block.untested) {
       if (typeof file !== 'string' || file.includes('\\')) {
@@ -563,6 +786,11 @@ function validateEmitted(emitted, doc) {
   if (typeof emitted.measured !== 'object' || emitted.measured === null) return 'measured missing'
   for (const key of CONDITION_KEYS) {
     if (typeof emitted.measured[key] !== 'string') return `measured condition lacks '${key}'`
+  }
+  // The identity of the coverage report, not of this artifact: emitting the
+  // same report twice must not buy a second corroborating run.
+  if (typeof emitted.report !== 'string' || emitted.report.length === 0) {
+    return "artifact lacks 'report', the identity of the coverage run behind it — re-emit it with a build of this script"
   }
   const m = emitted.measurement
   if (typeof m !== 'object' || m === null) return 'measurement missing'
@@ -708,6 +936,7 @@ function run(options = {}) {
 
   let measurement
   let condition
+  let report
   if (options.from !== null && options.from !== undefined) {
     let emitted
     try {
@@ -726,6 +955,7 @@ function run(options = {}) {
     }
     measurement = emitted.measurement
     condition = emitted.measured
+    report = emitted.report
   } else {
     let summary
     let reportMtimeMs
@@ -745,6 +975,10 @@ function run(options = {}) {
     }
     measurement = measure(summary, root, doc.subsystems, productionFiles(root))
     condition = measuredCondition(root, platform)
+    // The report's own mtime, not the clock: `--update` run twice over one
+    // coverage run reads one report and is one measurement, however long
+    // apart the two invocations are.
+    report = new Date(reportMtimeMs).toISOString()
   }
   out.measurement = measurement
   for (const failure of measurement.failures) fail(failure)
@@ -759,7 +993,7 @@ function run(options = {}) {
     fs.mkdirSync(path.dirname(emitPath), { recursive: true })
     fs.writeFileSync(
       emitPath,
-      `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, platform, measured: condition, measurement }, null, 2)}\n`
+      `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, platform, measured: condition, report, measurement }, null, 2)}\n`
     )
     out.notes.push(`measurement written to ${slashed(path.relative(root, emitPath))}`)
   }
@@ -778,13 +1012,22 @@ function run(options = {}) {
     const next = { ...doc, platforms: { ...doc.platforms } }
     next.platforms[platform] = {
       measured: condition,
+      // The seeded run opens the window: it is a real measurement of this
+      // tree, so the first --update after it is the second run, not the first.
+      candidate: foldCandidate(
+        null,
+        measurement,
+        { ...condition, report },
+        doc.corroboratingRuns,
+        subsystemMapHash(doc.subsystems)
+      ),
       floors: measurement.floors,
       untested: measurement.untested
     }
     writeDoc(floorsPath, next)
     out.wrote = true
     out.changes.push(
-      `seeded platform ${platform}: ${String(Object.keys(measurement.floors).length)} subsystems, ${String(measurement.untested.length)} untested modules recorded — REVIEW THE LIST, it is the first record and nothing checked it`
+      `seeded platform ${platform}: ${String(Object.keys(measurement.floors).length)} subsystems, ${String(measurement.untested.length)} untested modules recorded — REVIEW THE LIST, it is the first record and nothing checked it, and one run is not a floor the suite reproduces`
     )
     for (const file of measurement.untested) out.changes.push(`  untested: ${file}`)
     return out
@@ -800,18 +1043,26 @@ function run(options = {}) {
     const {
       doc: next,
       changes,
+      held,
       regressions,
-      changed
-    } = ratchet(doc, platform, measurement, condition)
+      changed,
+      ratcheted
+    } = ratchet(doc, platform, measurement, condition, { ...condition, report })
     if (regressions.length > 0) {
       for (const regression of regressions) fail(regression)
       out.notes.push('nothing written: a refused update leaves the record exactly as it was')
       return out
     }
     out.changes = changes
+    out.notes.push(...held)
     if (changed) {
       writeDoc(floorsPath, next)
       out.wrote = true
+      if (!ratcheted) {
+        out.notes.push(
+          'no floor moved: this run is recorded in the corroboration window, and the condition beside the floors still describes the run that set them'
+        )
+      }
     } else {
       out.notes.push('nothing to ratchet: the record is unchanged, condition included')
     }
@@ -884,6 +1135,11 @@ module.exports = {
   measure,
   compare,
   ratchet,
+  subsystemMapHash,
+  foldCandidate,
+  windowFloors,
+  metricsOnly,
+  validateCandidate,
   validateFloors,
   validateEmitted,
   renderTable,
