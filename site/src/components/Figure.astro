@@ -1,0 +1,51 @@
+---
+// A screenshot with a WebP source and a PNG fallback. Explicit width and height
+// are required rather than optional: without them the browser cannot reserve
+// space, the page reflows when the image lands, and that reflow is Cumulative
+// Layout Shift, which Google measures directly.
+interface Props {
+  src: string // e.g. "/img/floor" — no extension; both are emitted
+  alt: string
+  width: number
+  height: number
+  caption?: string
+  eager?: boolean
+}
+const { src, alt, width, height, caption, eager = false } = Astro.props
+---
+
+<figure>
+  <picture>
+    <source srcset={`${src}.webp`} type="image/webp" />
+    <img
+      src={`${src}.png`}
+      alt={alt}
+      width={width}
+      height={height}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+    />
+  </picture>
+  {caption && <figcaption><slot>{caption}</slot></figcaption>}
+</figure>
+
+<style>
+  figure { margin: 28px 0 0; }
+  picture { display: block; }
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 2px solid var(--ink);
+    box-shadow: var(--shadow);
+    background: var(--paper-2);
+  }
+  figcaption {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--ink-3);
+    margin-top: 12px;
+    max-width: 62ch;
+  }
+</style>

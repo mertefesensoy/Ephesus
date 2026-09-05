@@ -1,0 +1,161 @@
+---
+import Base from '../layouts/Base.astro'
+import Mark from '../components/Mark.astro'
+
+// The wall is honest about being empty. A fabricated list of supporters would be
+// exactly the kind of claim this project exists to refuse.
+const founders: Array<{ name: string; note: string; href?: string }> = []
+
+const otherWork = [
+  { name: 'motus', what: 'A transport-agnostic messaging seam for C++17, with a per-backend conformance suite', href: 'https://github.com/mertefesensoy/motus' },
+  { name: 'aftershock', what: 'A command-and-control system for a post-earthquake search-and-rescue exercise, with deterministic mission verdicts', href: 'https://github.com/mertefesensoy/aftershock' },
+  { name: 'MÜŞAHİT', what: 'A single laptop that watches 37 Turkish news sources overnight and tells you what mattered by morning', href: 'https://github.com/mertefesensoy/MUSAHIT' },
+  { name: 'CASSANDRA', what: 'Can useful language-model behaviour be formed on consumer hardware without brute-force gradient training?', href: 'https://github.com/mertefesensoy/CASSANDRA' }
+]
+---
+
+<Base
+  title="About — who builds Ephesus and why"
+  description="Ephesus is built by Mert Efe Şensoy, a software engineer in Turkey. What the project is for, how it is built in the open, and the wall where contributors are named.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">About</span>
+      <h1>Who builds this, and why</h1>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="bio">
+        <div>
+          <h2>Mert Efe Şensoy</h2>
+          <p>
+            I am a software engineer in Turkey. Ephesus is mine, and at the time of writing it is
+            the work of one person — every commit on this repository is authored by me, which is a
+            deliberate policy rather than an accident of scale.
+          </p>
+          <p>
+            The projects I care about have one property in common, and I did not notice it until
+            someone pointed it out: they are all instruments for telling whether something is
+            actually true. A decoder that validates a memory module beyond its checksum. A
+            conformance suite that has to pass on every backend. A rescue simulation whose verdicts
+            are deterministic. Ephesus is the same instinct pointed at software construction
+            itself — a company of agents that cannot claim work is done without producing the
+            evidence.
+          </p>
+          <div class="btnrow">
+            <a class="btn solid" href="https://mertefesensoy.dev">mertefesensoy.dev</a>
+            <a class="btn" href="https://github.com/mertefesensoy">GitHub</a>
+          </div>
+        </div>
+        <div class="portrait"><Mark size={132} /></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Other work</span>
+      <h2>Related projects</h2>
+      <div class="works">
+        {otherWork.map((w) => (
+          <a class="work" href={w.href}>
+            <h3>{w.name}</h3>
+            <p>{w.what}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The founders&rsquo; wall</span>
+      <h2>Names cut into the wall</h2>
+      <p class="lede" style="margin-bottom:24px">
+        Ancient cities inscribed the names of the people who paid for the aqueduct, the library, the
+        colonnade. Ephesus did it more than most — the stones of the real city are covered in them.
+        This is that wall.
+      </p>
+      <p>
+        Anyone whose contribution is merged is named here: code, a bug report that found something
+        real, a documentation fix, a build report from a platform nobody had tested. Not sponsors —
+        <em>contributors</em>. The wall records work.
+      </p>
+
+      <div class="wall">
+        {founders.length === 0 ? (
+          <div class="empty">
+            <p class="inscription">THIS WALL IS EMPTY</p>
+            <p class="chisel">
+              No contribution has been merged from anyone but the architect yet.<br />
+              The first name cut here will be the first person who is not me.
+            </p>
+            <div class="btnrow" style="justify-content:center;margin-top:22px">
+              <a class="btn solid" href="https://github.com/mertefesensoy/Ephesus/labels/good%20first%20issue">Take a first issue</a>
+            </div>
+          </div>
+        ) : (
+          <div class="plaques">
+            {founders.map((f) => (
+              <div class="plaque">
+                <span class="pname">{f.name}</span>
+                <span class="pnote">{f.note}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p class="note">
+        The wall is written by hand from merged pull requests and closed issues, not generated from
+        a contributor count. If you are on it, someone read your work.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The project</span>
+      <h2>Built in the open, under rules</h2>
+      <p>
+        Everything about how Ephesus is built is public: the requirements, the decision records, the
+        design document, the milestone-by-milestone progress with its evidence, and the
+        implementation record for every change. When those documents disagree with the code, the
+        code is wrong.
+      </p>
+      <p>
+        It is MIT licensed. It is pre-alpha and says so everywhere rather than only in the small
+        print. If it interests you, the fastest way in is
+        <a href="/contribute">a first issue</a>, and the fastest way to understand it is
+        <a href="/blog/check-that-cannot-fail">the post about checks that cannot fail</a>.
+      </p>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 34px; border-bottom: 1px solid var(--paper-3); }
+    .bio { display: grid; grid-template-columns: 1fr auto; gap: 44px; align-items: start; }
+    @media (max-width: 800px) { .bio { grid-template-columns: 1fr; } .portrait { display: none; } }
+    .portrait svg { box-shadow: 4px 4px 0 0 var(--ink); }
+    .works { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2px; background: var(--ink); border: 2px solid var(--ink); }
+    .work { display: block; background: #FBF9F4; padding: 20px 22px; border: 0; color: var(--ink); }
+    .work:hover { background: var(--paper-2); color: var(--ink); }
+    .work h3 { margin: 0 0 6px; font-size: 17px; color: var(--terracotta); }
+    .work p { margin: 0; font-size: 15px; color: var(--ink-2); }
+
+    .wall { border: 2px solid var(--ink); background: var(--paper-2); box-shadow: var(--shadow); padding: 44px 30px; margin: 28px 0 0; }
+    .empty { text-align: center; }
+    .inscription {
+      font-family: var(--pixel); font-size: 13px; letter-spacing: .22em; color: var(--ink);
+      margin: 0 0 16px; max-width: none;
+    }
+    .chisel { font-family: var(--mono); font-size: 13.5px; line-height: 2; color: var(--ink-3); margin: 0 auto; max-width: 52ch; }
+    .plaques { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; }
+    .plaque { border: 1px solid var(--ink-3); padding: 14px 16px; background: #FBF9F4; }
+    .pname { display: block; font-weight: 600; }
+    .pnote { display: block; font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+    .note { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); margin-top: 16px; max-width: 74ch; }
+  </style>
+</Base>

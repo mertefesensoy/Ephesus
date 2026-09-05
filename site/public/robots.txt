@@ -1,0 +1,5 @@
+# ephesushq.com
+User-agent: *
+Allow: /
+
+Sitemap: https://ephesushq.com/sitemap.xml

@@ -9,11 +9,24 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props
 const { Content } = await render(post)
+
+// Related posts: same tag first, then most recent. The seven posts are one
+// argument told seven ways, so linking them is not decoration — it is the
+// topic cluster, and it is the strongest on-site signal available.
+const all = (await getCollection("blog")).filter((p) => p.id !== post.id)
+const sameTag = all.filter((p) => p.data.tag === post.data.tag)
+const rest = all.filter((p) => p.data.tag !== post.data.tag)
+const related = [...sameTag, ...rest]
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
+  .slice(0, 3)
 const fmt = (d: Date) =>
   d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 ---
 
-<Base title={`${post.data.title} — Ephesus`} description={post.data.summary}>
+<Base
+  title={`${post.data.title} — Ephesus`}
+  description={post.data.summary}
+  article={{ date: post.data.date, tag: post.data.tag }}>
   <article>
     <header class="phead">
       <div class="wrap narrow">
@@ -29,6 +42,19 @@ const fmt = (d: Date) =>
 
     <div class="wrap narrow body">
       <Content />
+
+      <aside class="related">
+        <h2>Related</h2>
+        <ul>
+          {related.map((r) => (
+            <li>
+              <a href={`/blog/${r.id}`}>{r.data.title}</a>
+              <span>{r.data.summary}</span>
+            </li>
+          ))}
+        </ul>
+      </aside>
+
       <div class="btnrow">
         <a class="btn" href="/blog">All writing</a>
         <a class="btn" href="https://github.com/mertefesensoy/Ephesus">The repository</a>
@@ -54,5 +80,15 @@ const fmt = (d: Date) =>
     .body :global(blockquote) { font-size: 20px; }
     .body :global(table) { margin: 24px 0; }
     .body :global(td:first-child) { color: var(--ink); font-weight: 400; white-space: normal; }
+    .related { margin-top: 52px; border-top: 2px solid var(--ink); padding-top: 26px; }
+    .related h2 {
+      font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+      color: var(--ink-3); font-weight: 400; margin: 0 0 16px;
+    }
+    .related ul { list-style: none; padding: 0; margin: 0; }
+    .related li { padding: 14px 0; border-bottom: 1px solid var(--paper-3); }
+    .related li:last-child { border-bottom: 0; }
+    .related a { display: block; font-weight: 600; font-size: 17px; border: 0; }
+    .related span { display: block; color: var(--ink-3); font-size: 15px; margin-top: 4px; }
   </style>
 </Base>
