@@ -159,6 +159,13 @@ const nav = [
     gtag('config', 'G-RFSCBBKQT5', { anonymize_ip: true })
   </script>
   <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-RFSCBBKQT5"></script>
+  <!-- Vercel Web Analytics: Tracks page views, unique visitors, and referrers.
+       The inject() function loads a 1.1kb script from /_vercel/insights/script.js
+       when deployed to Vercel. -->
+  <script>
+    import { inject } from '@vercel/analytics';
+    inject();
+  </script>
   <!-- Fonts are self-hosted (src/styles/fonts.css). The two faces that paint
        first are preloaded; the rest arrive on demand via unicode-range. -->
   <link rel="preload" as="font" type="font/woff2" href="/fonts/ibm-plex-sans-400-latin.woff2" crossorigin>
