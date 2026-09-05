@@ -155,7 +155,7 @@ typecheck    green (all four projects)
 lint         green
 invariants   ok — reachability 173/181 (was 170/178: all three new modules reachable)
 attribution  ok — 343 commits, 199 on main's first-parent chain
-tests        3771 passed / 8 skipped (3779) across 199 files  [baseline 3703/8 (3711), 194 files]
+tests        3777 passed / 8 skipped (3785) across 199 files  [baseline 3703/8 (3711), 194 files]
 coverage     coverage floors ok (17 subsystems on win32; 22 untested modules, all recorded)
 ```
 
@@ -185,7 +185,7 @@ restarts a company holding NOTHING (`liveAgents: () => []`, a fresh deny-all
 `GateManager`), which is why this entire class of defect was invisible to a
 green suite for the whole life of the project.
 
-**32 mutations, every one killed or resolved**, each reverted:
+**35 mutations, every one killed or resolved**, each reverted:
 
 - 9 over the activation restore (arming a restored trigger, restoring `crew` as
   live, displacing a live instance, dropping each persist, the rehire path).
@@ -217,6 +217,33 @@ restart that may be weeks away.
 **The M8.0 seam rule fired once and was right.** The three new modules belonged
 to no subsystem, and the suite refused them until they were assigned — the same
 check that caught M8.7b twice.
+
+### A defect this package shipped, found in self-review
+
+The first draft of the boot wiring read the durable blocks like this:
+
+```ts
+try { return agora.tasks().tasks.map(…) } catch { return null }
+```
+
+**`Agora.tasks()` does not throw on a corrupt ledger.** It returns the empty one
+and records the file in `fileWarnings()` — deliberately, so a bad file is never
+destroyed by being treated as an error (`readSchemaFile`, `agora.ts`). So the
+`catch` could never fire, the reconcile would read "no blocks" off an unreadable
+`tasks.json`, and it would report **zero orphans**: silence in exactly the place
+this milestone exists to remove.
+
+It is the same "absent is not damaged" distinction the package builds into
+`JsonStateStore` — not applied at the one seam that reads somebody else's store.
+And the unit test passed the whole time, because the stub returned `null` and
+**production never returns `null`**: a test asking a question production does not
+ask ([[ask-the-question-where-production-asks-it]], the standing lesson).
+
+The fix asks for the corruption by name, in `blockedTasksFrom` — extracted so it
+is testable at all, since `index.ts` "holds no logic of its own". Six cases now
+run it over a REAL Agora on a real disk, including a genuinely corrupt file, and
+three mutations pin it — the first of which restores the original defective code
+and is killed by three of those cases.
 
 ## Design decisions
 

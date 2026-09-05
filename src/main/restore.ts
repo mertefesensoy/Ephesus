@@ -63,6 +63,36 @@ export function activationsRecord(instances: readonly ProfileInstance[]): Activa
   }
 }
 
+/** What the reconcile needs off the Agora, and nothing more. */
+export interface LedgerSource {
+  tasks(): { readonly tasks: readonly { readonly id: string; readonly gates: readonly string[] }[] }
+  fileWarnings(): readonly { readonly file: string }[]
+}
+
+/**
+ * Contract: the durable blocks, or null when the ledger could not be READ.
+ *
+ * The distinction this exists to preserve, and the reason it is a function
+ * rather than two lines in `index.ts`: **`Agora.tasks()` does not throw on a
+ * corrupt ledger.** It returns the empty one and records the file in
+ * `fileWarnings()` — deliberately, so a bad file is never destroyed by being
+ * treated as an error. A caller that wrapped it in try/catch would therefore
+ * never see a failure, would read "no blocks" off an unreadable file, and would
+ * report zero orphans: silence in exactly the place this milestone exists to
+ * remove.
+ *
+ * ABSENT is not unreadable. A first run has no ledger and therefore genuinely
+ * has no blocks — that is true, not unknown, and must not be reported.
+ */
+export function blockedTasksFrom(
+  agora: LedgerSource,
+  tasksRel: string
+): { readonly id: string; readonly gates: readonly string[] }[] | null {
+  const ledger = agora.tasks()
+  if (agora.fileWarnings().some((warning) => warning.file === tasksRel)) return null
+  return ledger.tasks.map((task) => ({ id: task.id, gates: task.gates }))
+}
+
 /** One thing that did not come back, with the consequence stated. */
 export interface RestoreProblem {
   /** The degradation cause, `<source>/<slug>` (M8.2). */

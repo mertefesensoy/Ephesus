@@ -72,7 +72,7 @@ import { Library } from './library'
 import { RECALL_SCHEMA_VERSION } from '../shared/recall'
 import { ReflectionJob } from './reflection'
 import { Scheduler } from './scheduler'
-import { activationsRecord, restoreCompany } from './restore'
+import { activationsRecord, blockedTasksFrom, restoreCompany } from './restore'
 import { JsonStateStore, type StateStore } from './state-store'
 import {
   EMPTY_TRIGGERS,
@@ -83,7 +83,7 @@ import {
 import { FtsIndex } from './library-fts'
 import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
-import { Agora } from './agora'
+import { Agora, TASKS_REL } from './agora'
 import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
 import { QuitSequence, summarizeQuit } from './shutdown'
@@ -2379,17 +2379,9 @@ async function boot(): Promise<void> {
       restoreActivations: (record) => activations?.restore(record.instances) ?? [],
       restoreGates: (record) => gates?.restore(record) ?? { open: 0, settled: 0 },
       openGates: () => gates?.list() ?? [],
-      blockedTasks: () => {
-        // The Agora's file, and legitimately absent on a first run. A throw
-        // here must not cost the replay, so it is a null the report explains.
-        try {
-          return agora
-            ? agora.tasks().tasks.map((task) => ({ id: task.id, gates: task.gates }))
-            : null
-        } catch {
-          return null
-        }
-      }
+      // `Agora.tasks()` does NOT throw on a corrupt ledger, so the corruption
+      // is asked for by name rather than caught — see `blockedTasksFrom`.
+      blockedTasks: () => (agora === null ? null : blockedTasksFrom(agora, TASKS_REL))
     })
     for (const note of replay.notes) {
       console.info(`restart: ${note}`)

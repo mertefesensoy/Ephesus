@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import { restoreCompany, type RestoreStores, type RestoreTargets } from '../../src/main/restore'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, expect, it } from 'vitest'
+import { Agora, TASKS_REL } from '../../src/main/agora'
+import { removeTempDir } from '../tmpdir'
+import {
+  blockedTasksFrom,
+  restoreCompany,
+  type RestoreStores,
+  type RestoreTargets
+} from '../../src/main/restore'
 import type { StateLoad, StateStore } from '../../src/main/state-store'
 import {
   EMPTY_GATES,
@@ -263,5 +274,130 @@ describe('the boot replay', () => {
         blockedTasks: () => null
       })
     ).not.toThrow()
+  })
+})
+/**
+ * The durable blocks, read off a REAL Agora (M8.8).
+ *
+ * These exist because the stub above cannot produce the case that matters.
+ * `Agora.tasks()` does NOT throw on a corrupt ledger — it returns the empty one
+ * and records the file in `fileWarnings()`, deliberately, so a bad file is never
+ * destroyed by being treated as an error. A caller that wrapped it in try/catch
+ * would never see a failure, would read "no blocks" off an unreadable file, and
+ * would report zero orphans: silence in exactly the place this milestone exists
+ * to remove. The first draft of the boot wiring did precisely that, and the
+ * stubbed test above passed the whole time.
+ */
+describe('reading the durable blocks off a real Agora', () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) removeTempDir(dir)
+  })
+
+  async function agoraIn(): Promise<{
+    agora: InstanceType<typeof Agora>
+    root: string
+  }> {
+    const { Agora: A } = await import('../../src/main/agora')
+    const { PromptStore } = await import('../../src/main/prompts')
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-blocked-tasks-'))
+    dirs.push(home)
+    const repo = fileURLToPath(new URL('../../', import.meta.url))
+    const root = path.join(home, 'agora')
+    const agora = new A({
+      root,
+      prompts: new PromptStore(path.join(home, 'prompts'), path.join(repo, 'prompts')),
+      backoffMs: 1
+    })
+    await agora.ensureRepo()
+    return { agora, root }
+  }
+
+  it('an ABSENT ledger is no blocks, not unknown — a first run has none', async () => {
+    const { agora, root } = await agoraIn()
+    fs.rmSync(path.join(root, TASKS_REL), { force: true })
+
+    expect(blockedTasksFrom(agora, TASKS_REL)).toEqual([])
+  })
+
+  it('reads the gates each task is blocked by', async () => {
+    const { agora, root } = await agoraIn()
+    fs.writeFileSync(
+      path.join(root, TASKS_REL),
+      JSON.stringify({
+        schemaVersion: 1,
+        tasks: [
+          {
+            id: 't-held',
+            title: 'A held task',
+            spec: 'Held behind a gate.',
+            assignee: null,
+            status: 'blocked',
+            priority: 1,
+            deps: [],
+            review: [],
+            gates: ['g-2026-09-05t03-00-00-000z-abcdef01'],
+            artifacts: { deck: null, memos: [], resultRef: null },
+            source: { kind: 'architect', via: 'ui', log: 'log#1' },
+            createdAt: '2026-09-05T03:00:00.000Z',
+            updatedAt: '2026-09-05T03:00:00.000Z'
+          }
+        ]
+      })
+    )
+
+    expect(blockedTasksFrom(agora, TASKS_REL)).toEqual([
+      { id: 't-held', gates: ['g-2026-09-05t03-00-00-000z-abcdef01'] }
+    ])
+  })
+
+  /**
+   * The case the stub could not produce, and the defect it hid: a corrupt
+   * ledger must be UNKNOWN, never "no blocks". Reported, so the Architect learns
+   * a task may be held by a gate that is in no queue.
+   */
+  it('an UNREADABLE ledger is null — it does not read as zero blocks', async () => {
+    const { agora, root } = await agoraIn()
+    fs.writeFileSync(path.join(root, TASKS_REL), '{ this is not json')
+
+    // The premise, pinned: tasks() does NOT throw, and it answers empty.
+    expect(() => agora.tasks()).not.toThrow()
+    expect(agora.tasks().tasks).toEqual([])
+
+    // …so the corruption has to be asked for by name.
+    expect(blockedTasksFrom(agora, TASKS_REL)).toBeNull()
+  })
+
+  it('a ledger that is JSON but fails the schema is also unreadable', async () => {
+    const { agora, root } = await agoraIn()
+    fs.writeFileSync(path.join(root, TASKS_REL), JSON.stringify({ schemaVersion: 9, tasks: [] }))
+
+    expect(blockedTasksFrom(agora, TASKS_REL)).toBeNull()
+  })
+
+  /** A warning about a DIFFERENT file must not blind the reconcile. */
+  it('a corrupt registry does not make the task ledger unreadable', async () => {
+    const { agora, root } = await agoraIn()
+    fs.writeFileSync(path.join(root, 'registry.json'), '{ not json either')
+    agora.registry()
+
+    expect(agora.fileWarnings().length).toBeGreaterThan(0)
+    expect(blockedTasksFrom(agora, TASKS_REL)).toEqual([])
+  })
+
+  /** End to end: an unreadable ledger becomes a stated problem in the report. */
+  it('the replay reports it rather than finding zero orphans', async () => {
+    const { agora, root } = await agoraIn()
+    fs.writeFileSync(path.join(root, TASKS_REL), '{ this is not json')
+    const r = rig()
+
+    const report = restoreCompany(r.stores, {
+      ...r.targets,
+      blockedTasks: () => blockedTasksFrom(agora, TASKS_REL)
+    })
+
+    expect(report.counts.orphanBlocks).toBe(0)
+    expect(report.problems.map((p) => p.cause)).toEqual(['restart/tasks-unreadable'])
+    expect(report.problems[0]?.detail).toContain('would not be noticed')
   })
 })
