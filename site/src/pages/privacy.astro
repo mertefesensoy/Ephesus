@@ -1,0 +1,106 @@
+---
+import Base from '../layouts/Base.astro'
+const updated = '5 September 2026'
+---
+
+<Base
+  title="Privacy — what this site collects"
+  description="What ephesushq.com collects, what it does not, and how analytics is configured. No cookies are set unless you consent, and nothing is sold or shared.">
+
+  <section class="pagehead">
+    <div class="wrap narrow">
+      <span class="eyebrow">Privacy</span>
+      <h1>What this site collects</h1>
+      <p class="lede">
+        Short version: no cookies are set, no account exists, nothing is sold, and the only third
+        party involved is Google Analytics — configured so that it stores nothing on your device
+        unless you consent, which this site never asks you to do.
+      </p>
+      <p class="updated">Last updated {updated}</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap narrow">
+      <h2>Analytics</h2>
+      <p>
+        This site uses Google Analytics 4 to count page views and see where visitors arrive from.
+        It runs with <strong>Google Consent Mode v2, with every storage type denied by default</strong>:
+      </p>
+      <pre><code>ad_storage            denied
+ad_user_data          denied
+ad_personalization    denied
+analytics_storage     denied</code></pre>
+      <p>
+        Because analytics storage is denied, <strong>no analytics cookies are written to your
+        device and no persistent identifier is created for you</strong>. Google receives an
+        anonymous, aggregated signal — that a page was viewed, roughly where from, and what referred
+        it — with no way to link it to you across visits. IP addresses are anonymised before
+        storage.
+      </p>
+      <p>
+        That is why there is no consent banner. A banner exists to ask permission to store things on
+        your device, and this site does not store anything on your device.
+      </p>
+
+      <h2>What is not collected</h2>
+      <ul>
+        <li>No account, login, or profile — there is nothing to sign up for.</li>
+        <li>No contact form, newsletter, or email capture.</li>
+        <li>No advertising, remarketing, or cross-site tracking.</li>
+        <li>No session recording, heatmaps, or scroll tracking.</li>
+        <li>No data is ever sold, rented, or shared with anyone beyond the processors named here.</li>
+      </ul>
+
+      <h2>Fonts and assets</h2>
+      <p>
+        All fonts are <strong>self-hosted on this domain</strong>. Loading a page here makes no
+        request to Google Fonts, so no request from your browser reaches a font CDN and no IP
+        address is disclosed to one. Every image, stylesheet and script other than the analytics tag
+        is served from <code>ephesushq.com</code>.
+      </p>
+
+      <h2>Hosting</h2>
+      <p>
+        The site is static and hosted on Vercel, which processes standard server request data — IP
+        address, user agent, requested URL — to deliver pages and defend against abuse. That is
+        ordinary web-server operation and is not used to profile you.
+      </p>
+
+      <h2>Your rights</h2>
+      <p>
+        Under the GDPR and Turkey&rsquo;s KVKK you may ask what data relating to you is held, and ask
+        for it to be corrected or erased. Given the above there is realistically nothing to retrieve
+        — no identifier for you exists — but the request is welcome and will be answered honestly.
+        Write to <a href="mailto:sensoymertefe@gmail.com">sensoymertefe@gmail.com</a>.
+      </p>
+      <p>
+        You can also block analytics entirely with any content blocker, or by enabling
+        &ldquo;Do Not Track&rdquo;. Nothing on this site is withheld from you if you do.
+      </p>
+
+      <h2>The software</h2>
+      <p>
+        This page is about the website. <strong>The Ephesus application is different</strong>: it
+        runs entirely on your own machine, has no telemetry, and sends nothing anywhere. It drives
+        agent CLIs that are already installed on your computer; whatever those send to their vendors
+        is governed by their own terms and is unchanged by Ephesus being in front of them.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        If this changes, the date at the top changes with it, and the change is in the
+        <a href="https://github.com/mertefesensoy/Ephesus/commits/main/site/src/pages/privacy.astro">git history of this page</a>
+        like everything else here.
+      </p>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 40px; border-bottom: 1px solid var(--paper-3); }
+    .updated { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 18px; }
+    h2 { margin-top: 40px; }
+    ul { padding-left: 20px; max-width: var(--measure); }
+    li { margin-bottom: 8px; }
+  </style>
+</Base>

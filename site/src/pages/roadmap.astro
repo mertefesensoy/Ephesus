@@ -1,0 +1,131 @@
+---
+import Base from '../layouts/Base.astro'
+
+const done = [
+  ['M0', 'Skeleton', 'Electron shell, preload bridge, a real PTY vertical, the floor, persistent app state.'],
+  ['M1', 'One real agent', 'A single agent CLI under management on both planes — the process, and the record of what it did.'],
+  ['M3', 'The floor becomes true', 'Stations that are facts rather than decoration, the circuit breaker armed, gates that hold work.'],
+  ['M5', 'The accountable company', 'A review task is mechanically unclosable until its deck is archived. New dependencies are held at the choke point until a memo is verdict-ed.'],
+  ['M5b', 'The learning company', 'The Stoa: registered sources at pinned commits, read-only research plans, briefs whose findings must cite a path or die.'],
+  ['M6', 'The floor’s face', 'Citizens at specification, stations, act-coloured envelope flights.'],
+  ['M7', 'The outward missions', 'Skeleton Crew and Front Office — the company watching something real.'],
+  ['M8', 'The company you can leave running', 'Coverage baseline and the seam rule; a quit path that actually runs; visible, countable degradations; every hire in its own checkout and its own engine install.']
+]
+
+const next = [
+  ['M7b.1', 'Company GitHub identity', 'One Architect-owned machine identity so the company can act on GitHub as itself.'],
+  ['M7b.2', 'Recursive Improvement profile', 'The self-improvement mission as a switchable crew.'],
+  ['M7b.3', 'Pull requests with provenance', 'Approved proposals arrive as pull requests that cite the brief they descend from.'],
+  ['M7b.4', 'Chat bridge', 'One Slack-compatible webhook so the company can reach you where you already are.'],
+  ['M7b.5', 'Packaging and update check', 'Signed builds for macOS, Windows and Linux. This is the milestone that turns Ephesus into something you can install.'],
+  ['M7b.6', 'Suites and exit review', 'The recursive chain proven end to end in CI.']
+]
+
+const notPlanned = [
+  ['A hosted or cloud version', 'Ephesus is a desktop application that drives CLIs on your machine. A hosted version would need to hold your credentials and run your code on someone else’s computer, which is a different product with a different threat model.'],
+  ['A plugin marketplace', 'Not while the core is pre-alpha. A stable extension surface is a promise, and promises are expensive to keep.'],
+  ['Autonomy without gates', 'There is no configuration that removes the human from irreversible actions. Gates can be tuned; they cannot be turned off.'],
+  ['Support for every agent CLI at once', 'Adapters are added one at a time, each backed by captured output from a real installation. An adapter written against imagined output is worse than no adapter.']
+]
+---
+
+<Base
+  title="Roadmap — what is built, what is next, what is not planned"
+  description="Where Ephesus actually is: eight milestones landed, packaging and the recursive improvement chain next, and the things deliberately not on the roadmap.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">Roadmap</span>
+      <h1>What is built, and what is not</h1>
+      <p class="lede">
+        The honest version. Milestones are only marked done when they close on a run rather than a
+        checklist, audited by two independent passes — one verifying by execution, one checking the
+        diff against the documented design.
+      </p>
+      <div class="statusbar">
+        <span><b>Now</b> M8 — hardening</span>
+        <span><b>Next</b> M7b — packaging and delivery</span>
+        <span><b>Installer</b> not until M7b.5</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Landed</span>
+      <h2>Eight milestones, each closed on evidence</h2>
+      <div class="ms">
+        {done.map(([id, name, what]) => (
+          <article class="m done">
+            <div class="mid">{id}</div>
+            <div><h3>{name}</h3><p>{what}</p></div>
+            <div class="tick" aria-label="landed">✓</div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Next</span>
+      <h2>M7b — the milestone that produces an installer</h2>
+      <p>
+        M8 is being finished first, deliberately. M7b ships signed builds of a company that improves
+        itself, and shipping that before it could survive a restart, report that it had stopped, or
+        keep its agents out of the architect’s working tree would have been worse than not shipping
+        it.
+      </p>
+      <div class="ms">
+        {next.map(([id, name, what]) => (
+          <article class="m">
+            <div class="mid">{id}</div>
+            <div><h3>{name}</h3><p>{what}</p></div>
+            <div class="tick pending" aria-label="planned">·</div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Deliberately not planned</span>
+      <h2>Things that are not coming</h2>
+      <p class="lede" style="margin-bottom:24px">
+        A roadmap that only lists intentions is half a roadmap. These are decisions, not omissions.
+      </p>
+      <div class="grid g2">
+        {notPlanned.map(([title, why]) => (
+          <div class="panel no">
+            <h3>{title}</h3>
+            <p>{why}</p>
+          </div>
+        ))}
+      </div>
+      <div class="btnrow">
+        <a class="btn solid" href="/contribute">Help move this along</a>
+        <a class="btn" href="https://github.com/mertefesensoy/Ephesus/blob/main/docs/PROGRESS.md">Package-by-package progress</a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .statusbar { display: flex; flex-wrap: wrap; border: 2px solid var(--ink); margin-top: 30px; background: #FBF9F4; }
+    .statusbar span { font-family: var(--mono); font-size: 12.5px; padding: 12px 18px; border-right: 1px solid var(--paper-3); flex: 1; min-width: 190px; color: var(--ink-2); }
+    .statusbar span:last-child { border-right: 0; }
+    .statusbar b { display: block; font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; margin-bottom: 3px; }
+    .ms { border: 2px solid var(--ink); background: #FBF9F4; }
+    .m { display: grid; grid-template-columns: 74px 1fr 40px; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--paper-3); align-items: start; }
+    .m:last-child { border-bottom: 0; }
+    .mid { font-family: var(--pixel); font-size: 11px; color: var(--terracotta); padding-top: 4px; }
+    .m h3 { margin: 0 0 4px; font-size: 17px; }
+    .m p { margin: 0; font-size: 15.5px; max-width: 76ch; }
+    .tick { font-size: 20px; color: var(--olive); text-align: right; }
+    .tick.pending { color: var(--ink-4); }
+    .panel.no { border-left-width: 6px; border-left-color: var(--ink-4); }
+    .panel.no h3 { margin: 0 0 8px; font-size: 17px; }
+    .panel.no p { margin: 0; font-size: 15.5px; }
+  </style>
+</Base>

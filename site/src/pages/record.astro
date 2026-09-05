@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro'
+import Figure from '../components/Figure.astro'
 
 const figures = [
   ['327', 'commits'],
@@ -84,13 +85,9 @@ const milestones = [
         <li>A spoken refusal that <b>confirmed the very gate it should have blocked</b>.</li>
         <li>A Pixi initialisation failure that was silent. It now surfaces a visible “floor unavailable” state, because a silent fallback is an invariant violation.</li>
       </ul>
-      <figure>
-        <img src="/img/stoa-brief.png" alt="A research brief on screen, each finding citing a path at a pinned commit" width="1583" height="922" loading="lazy" />
-        <figcaption>
-          A Stoa brief. Every finding must cite a path at the pinned commit, or the brief is refused
-          before a human reads it — which is what caught the citation that pointed nowhere.
-        </figcaption>
-      </figure>
+      <Figure src="/img/stoa-brief" width={1583} height={922}
+        alt="A research brief on screen, each finding citing a path at a pinned commit"
+        caption="A Stoa brief. Every finding must cite a path at the pinned commit, or the brief is refused before a human reads it — which is what caught the citation that pointed nowhere." />
     </div>
   </section>
 
@@ -126,10 +123,9 @@ const milestones = [
         other change, and are measured after they land. Every outcome stays in the ledger —
         including the rejections and the rollbacks.
       </p>
-      <figure>
-        <img src="/img/gymnasium.png" alt="The Gymnasium panel listing improvement proposals and their verdicts" width="1583" height="922" loading="lazy" />
-        <figcaption>The Gymnasium. A proposal without a falsifiable metric never reaches a human; verdicts are the architect’s alone; authority-widening is refused before an approver could say yes.</figcaption>
-      </figure>
+      <Figure src="/img/gymnasium" width={1583} height={922}
+        alt="The Gymnasium panel listing improvement proposals and their verdicts"
+        caption="The Gymnasium. A proposal without a falsifiable metric never reaches a human; verdicts are the architect alone; authority-widening is refused before an approver could say yes." />
     </div>
   </section>
 

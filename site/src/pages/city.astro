@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro'
+import Figure from '../components/Figure.astro'
 
 const subsystems = [
   {
@@ -105,14 +106,9 @@ const invariants = [
         milestone reviews archive as slide decks, and Artemis briefs you on schedule or on demand.
         Everything is watchable on the floor while it happens.
       </p>
-      <figure>
-        <img src="/img/floor.png" alt="Four agents at their desks on the Terraces floor, with a live agent terminal alongside" width="1280" height="773" loading="lazy" />
-        <figcaption>
-          Four hired agents at their desks, one live in a real terminal. A development build: the
-          floor is drawing procedural tiles because the licensed sprite sheets are deliberately kept
-          out of the repository.
-        </figcaption>
-      </figure>
+      <Figure src="/img/floor" width={1280} height={773}
+        alt="Four agents at their desks on the Terraces floor, with a live agent terminal alongside"
+        caption="Four hired agents at their desks, one live in a real terminal. A development build: the floor is drawing procedural tiles because the licensed sprite sheets are deliberately kept out of the repository." />
     </div>
   </section>
 
@@ -145,14 +141,12 @@ const invariants = [
         action rather than merely noting disapproval.
       </p>
       <div class="grid g2">
-        <figure>
-          <img src="/img/odeon.png" alt="A meeting in progress in the Odeon panel, with turn order enforced" width="1583" height="922" loading="lazy" />
-          <figcaption>A meeting in the Odeon. Turn order is enforced — an answer given early is held, not lost — and the minutes file themselves.</figcaption>
-        </figure>
-        <figure>
-          <img src="/img/gate.png" alt="An open approval gate awaiting the architect's decision" width="1280" height="773" loading="lazy" />
-          <figcaption>An open gate. Every item shows what, why, blast radius and rollback before the approve and deny controls appear.</figcaption>
-        </figure>
+        <Figure src="/img/odeon" width={1583} height={922}
+        alt="A meeting in progress in the Odeon panel, with turn order enforced"
+        caption="A meeting in the Odeon. Turn order is enforced — an answer given early is held, not lost — and the minutes file themselves." />
+        <Figure src="/img/gate" width={1280} height={773}
+        alt="An open approval gate awaiting the architect decision"
+        caption="An open gate. Every item shows what, why, blast radius and rollback before the approve and deny controls appear." />
       </div>
     </div>
   </section>

@@ -1,18 +1,83 @@
 ---
+import '../styles/fonts.css'
 import '../styles/tokens.css'
 import Mark from '../components/Mark.astro'
-interface Props { title: string; description: string }
-const { title, description } = Astro.props
+interface Props {
+  title: string
+  description: string
+  article?: { date: Date; tag: string }
+}
+const { title, description, article } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, '') || '/'
 
 // Astro.site comes from astro.config.mjs. Emitting it is what makes the config
 // do anything — without a canonical link and og:url, setting `site` changes
 // nothing about the built output.
-const canonical = new URL(Astro.url.pathname, Astro.site).href
+//
+// The trailing slash is stripped because vercel.json sets trailingSlash:false.
+// A canonical that points at a URL which redirects is a canonical that argues
+// with the server.
+const clean = Astro.url.pathname.replace(/\/+$/, '') || '/'
+const canonical = new URL(clean, Astro.site).href
 const ogImage = new URL('/img/social-card.png', Astro.site).href
+const siteHome = new URL('/', Astro.site).href
+
+// A page's on-screen summary and its search snippet want different lengths, so
+// they are derived rather than shared. Google truncates a description past ~160
+// characters and a title past ~60; neither is a penalty, but a snippet that ends
+// mid-word reads as carelessness. Cutting at a sentence boundary keeps the
+// snippet a complete thought.
+function snippet(s: string, max = 158): string {
+  if (s.length <= max) return s
+  const cut = s.slice(0, max + 1)
+  const stop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '))
+  if (stop > 70) return s.slice(0, stop + 1)
+  return s.slice(0, cut.lastIndexOf(' ')) + '…'
+}
+const metaDescription = snippet(description)
+
+// The " — Ephesus" suffix costs ten characters. On a long headline that pushes
+// the title past what is displayed, and search engines append the site name
+// themselves, so it is dropped rather than truncated.
+const metaTitle = title.length > 62 ? title.replace(/ — Ephesus$/, '') : title
+
+// Structured data. BlogPosting is what earns a rich result for the posts; the
+// site-level object identifies the software the whole thing is about.
+const jsonLd = article
+  ? {
+      '@context': 'https://schema.org',
+      '@type': 'BlogPosting',
+      headline: title.replace(/ — Ephesus$/, ''),
+      description: metaDescription,
+      datePublished: article.date.toISOString(),
+      dateModified: article.date.toISOString(),
+      articleSection: article.tag,
+      image: ogImage,
+      url: canonical,
+      mainEntityOfPage: { '@type': 'WebPage', '@id': canonical },
+      author: { '@type': 'Person', name: 'Mert Efe Şensoy' },
+      publisher: { '@type': 'Organization', name: 'Ephesus', url: siteHome },
+      isAccessibleForFree: true,
+      license: 'https://opensource.org/licenses/MIT'
+    }
+  : {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'Ephesus',
+      url: siteHome,
+      description: metaDescription,
+      applicationCategory: 'DeveloperApplication',
+      operatingSystem: 'Windows, macOS, Linux',
+      license: 'https://opensource.org/licenses/MIT',
+      isAccessibleForFree: true,
+      author: { '@type': 'Person', name: 'Mert Efe Şensoy' },
+      codeRepository: 'https://github.com/mertefesensoy/Ephesus',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }
+    }
 const nav = [
+  { href: '/compare',    label: 'Compare' },
   { href: '/city',       label: 'The City' },
-  { href: '/record',     label: 'The Record' },
+  { href: '/roadmap',    label: 'Roadmap' },
   { href: '/contribute', label: 'Contribute' },
   { href: '/blog',       label: 'Writing' }
 ]
@@ -22,22 +87,61 @@ const nav = [
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{title}</title>
-  <meta name="description" content={description}>
+  <title>{metaTitle}</title>
+  <meta name="description" content={metaDescription}>
   <link rel="canonical" href={canonical}>
-  <meta property="og:title" content={title}>
-  <meta property="og:description" content={description}>
-  <meta property="og:type" content="website">
+  <meta property="og:title" content={metaTitle}>
+  <meta property="og:description" content={metaDescription}>
+  <meta property="og:type" content={article ? 'article' : 'website'}>
   <meta property="og:url" content={canonical}>
   <meta property="og:image" content={ogImage}>
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta property="og:image:alt" content="Ephesus — an agent company you govern as its architect">
   <meta property="og:site_name" content="Ephesus">
+  <meta property="og:locale" content="en_GB">
+  {article && <meta property="article:published_time" content={article.date.toISOString()} />}
+  {article && <meta property="article:section" content={article.tag} />}
+  {article && <meta property="article:author" content="Mert Efe Şensoy" />}
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content={title}>
-  <meta name="twitter:description" content={description}>
+  <meta name="twitter:title" content={metaTitle}>
+  <meta name="twitter:description" content={metaDescription}>
   <meta name="twitter:image" content={ogImage}>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <meta name="author" content="Mert Efe Şensoy">
+  <link rel="alternate" type="application/rss+xml" title="Ephesus — notes from the build" href="/rss.xml">
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)}></script>
+
+  <!-- Pages may contribute additional structured data (a FAQPage, for instance).
+       This slot has to exist or a `slot="head"` in a child renders nowhere and
+       fails silently — which is exactly what happened the first time. -->
+  <slot name="head" />
+
+  <!-- Google Analytics with Consent Mode v2, DENIED BY DEFAULT.
+       No cookies are written and no identifiers are sent unless consent is
+       granted, so this needs no banner: Google receives only anonymous,
+       aggregated pings. Google's own setup screen points EEA operators here.
+       The defaults are set before gtag.js loads — order matters, because a
+       consent default applied after the tag has fired is a consent default
+       that did nothing. -->
+  <script is:inline>
+    window.dataLayer = window.dataLayer || []
+    function gtag() { dataLayer.push(arguments) }
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'granted',
+      security_storage: 'granted'
+    })
+    gtag('js', new Date())
+    gtag('config', 'G-RFSCBBKQT5', { anonymize_ip: true })
+  </script>
+  <script is:inline async src="https://www.googletagmanager.com/gtag/js?id=G-RFSCBBKQT5"></script>
+  <!-- Fonts are self-hosted (src/styles/fonts.css). The two faces that paint
+       first are preloaded; the rest arrive on demand via unicode-range. -->
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/ibm-plex-sans-400-latin.woff2" crossorigin>
+  <link rel="preload" as="font" type="font/woff2" href="/fonts/press-start-2p-400-latin.woff2" crossorigin>
 </head>
 <body>
   <header class="site">
@@ -65,16 +169,20 @@ const nav = [
           <p class="fnote">A multi-agent harness you govern as its architect. Pre-alpha, MIT licensed, built in the open.</p>
         </div>
         <div>
+          <h4>This site</h4>
+          <a href="/compare">How it compares</a>
+          <a href="/record">The build record</a>
+          <a href="/about">About &amp; the wall</a>
+          <a href="/blog">Writing</a>
+          <a href="/rss.xml">RSS feed</a>
+        </div>
+        <div>
           <h4>Project</h4>
           <a href="https://github.com/mertefesensoy/Ephesus">Source</a>
           <a href="https://github.com/mertefesensoy/Ephesus/tree/main/docs">Design suite</a>
-          <a href="https://github.com/mertefesensoy/Ephesus/blob/main/docs/PROGRESS.md">Build progress</a>
-        </div>
-        <div>
-          <h4>Contribute</h4>
           <a href="https://github.com/mertefesensoy/Ephesus/labels/good%20first%20issue">Good first issues</a>
           <a href="https://github.com/mertefesensoy/Ephesus/blob/main/CONTRIBUTING.md">Contributing guide</a>
-          <a href="https://github.com/mertefesensoy/Ephesus/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a>
+          <a href="/privacy">Privacy</a>
         </div>
       </div>
       <p class="lineage">An original work inspired by the MIT-licensed <a href="https://github.com/chaitanyagiri/munder-difflin">Munder Difflin</a>; patterns reused with attribution, no upstream code vendored. Floor art from the LimeZu packs, licensed and kept out of the repository.</p>

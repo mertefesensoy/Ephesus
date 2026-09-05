@@ -1,0 +1,208 @@
+---
+import Base from '../layouts/Base.astro'
+
+const rows = [
+  ['Runs several agents at once', 'One session at a time', 'Yes, if you write the graph', 'Yes, one job per workflow', 'Yes, as a standing crew'],
+  ['You install and run it', 'A CLI', 'A library you build on', 'A hosted CI service', 'A desktop app'],
+  ['Shared memory between agents', 'Per-session context', 'Whatever you implement', 'None', 'Per-agent memory plus a shared archive'],
+  ['Agents message each other', 'No', 'Yes, you define it', 'No', 'Yes, speech-act messages over a router'],
+  ['A human approval gate', 'You approve each tool call', 'You implement it', 'Environment protection rules', 'Gates, budgets, a circuit breaker'],
+  ['You can watch it work', 'Terminal output', 'Logs you add', 'Job logs', 'A 2D floor, live terminals, an event log'],
+  ['Keeps a record you can audit', 'Transcript', 'Whatever you log', 'Run history', 'Append-only log, memos, briefs, decision records'],
+  ['Uses your existing subscription', 'Yes', 'No, API keys', 'No, API keys', 'Yes — it drives the CLI you already pay for'],
+  ['Ready to use today', 'Yes', 'Yes', 'Yes', 'No. Pre-alpha, builds from source']
+]
+
+const faqs = [
+  {
+    q: 'Can I use Ephesus today?',
+    a: 'Not as a product. There is no installer and no release. You can clone the repository and run it from source on Node 20, and contributions are very welcome, but if you want something that works out of the box this is not it yet.'
+  },
+  {
+    q: 'Does it work with anything other than Claude?',
+    a: 'Not today. The engine layer is an adapter seam and other CLIs are planned, but claude is the only adapter that is wired and tested. A decision record — ADR-0024 — commits the project to saying so rather than implying broader support.'
+  },
+  {
+    q: 'Does it run on macOS or Linux?',
+    a: 'It should, and nobody has confirmed it. Development has been almost entirely on Windows. Continuous integration runs the test suite on Ubuntu, but nothing has ever launched the application there. Reporting what breaks on your machine is currently the single most useful contribution anyone can make.'
+  },
+  {
+    q: 'How is this different from just using Claude Code?',
+    a: 'Claude Code is one agent in one terminal, driven by you. Ephesus runs several of them as a standing crew with their own memory, mailboxes and desks, coordinated by an orchestrator you talk to instead of prompting each one. It also keeps the record: what was decided, why, and what evidence supported it.'
+  },
+  {
+    q: 'Is it an agent framework?',
+    a: 'No. A framework is a library you build an application on top of. Ephesus is the application — a desktop program that manages agent processes for you. If you want to compose your own agent graph in code, a framework is the right tool and Ephesus is not.'
+  },
+  {
+    q: 'Does it cost anything?',
+    a: 'The software is MIT licensed and free. It drives agent CLIs you are already paying for, on your existing subscription and its limits, rather than billing API usage separately.'
+  },
+  {
+    q: 'Is my code sent anywhere?',
+    a: 'Ephesus runs entirely on your machine and drives CLIs that are already installed there. It adds no service of its own. Whatever your chosen agent CLI sends to its vendor is unchanged by Ephesus being in front of it.'
+  },
+  {
+    q: 'What happens when an agent fails?',
+    a: 'It is shown. Every degradation is a visible state rather than a silent fallback — an engine with no session reports needs-login with the command to run; a missing tileset says so; a give-up is recorded, durable and countable. That rule is an invariant, not a preference.'
+  }
+]
+
+const faqLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a }
+  }))
+}
+---
+
+<Base
+  title="How Ephesus compares to Claude Code and agent frameworks"
+  description="How Ephesus differs from using Claude Code directly, from agent frameworks like LangGraph or CrewAI, and from CI automation. Plus honest answers about what it cannot do yet.">
+
+  <script type="application/ld+json" set:html={JSON.stringify(faqLd)} slot="head" />
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">Comparison</span>
+      <h1>How Ephesus compares</h1>
+      <p class="lede">
+        Ephesus is a <strong>multi-agent harness</strong>: a desktop application that runs several
+        AI coding agents at once and coordinates them. That puts it near three other things people
+        already use, and it is genuinely better than none of them at their own jobs.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">In plain terms</span>
+      <h2>What this actually is</h2>
+      <p>
+        If you use <strong>Claude Code</strong> or a similar terminal coding agent, you drive one
+        agent in one terminal. You paste context, you approve tool calls, and when you close the
+        window the session is gone.
+      </p>
+      <p>
+        Ephesus runs <strong>several of those agents at the same time</strong>, as a standing crew.
+        Each has its own memory, its own mailbox and its own checkout. You describe what you want to
+        one orchestrator rather than prompting each agent, and the group reports back to you —
+        decisions queued for approval, work you can watch happening, and a record of what was done
+        and why.
+      </p>
+      <p>
+        It is a desktop application, not a library. It drives CLIs you already have installed, on
+        the subscription you already pay for.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Side by side</span>
+      <h2>Against the obvious alternatives</h2>
+      <div class="scroll">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Claude Code alone</th>
+              <th>Agent frameworks</th>
+              <th>CI automation</th>
+              <th>Ephesus</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([label, a, b, c, d]) => (
+              <tr>
+                <td class="rowlabel">{label}</td>
+                <td>{a}</td><td>{b}</td><td>{c}</td><td class="mine">{d}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        “Agent frameworks” means libraries like LangGraph, CrewAI or AutoGen. “CI automation” means
+        GitHub Actions and similar. Both are mature and widely used; the last row is the one that
+        matters most today.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">When not to use it</span>
+      <h2>Cases where something else is the right answer</h2>
+      <div class="grid g2">
+        <div class="panel">
+          <h3>You want to ship this week</h3>
+          <p>Use Claude Code directly. Ephesus has no installer and building it from source needs a native toolchain.</p>
+        </div>
+        <div class="panel">
+          <h3>You want to compose agents in code</h3>
+          <p>Use a framework. Ephesus is an application with opinions, not a library you build on.</p>
+        </div>
+        <div class="panel">
+          <h3>You want it running in the cloud</h3>
+          <p>Use CI. Ephesus is a desktop app that runs on your machine, driving your local CLIs.</p>
+        </div>
+        <div class="panel">
+          <h3>You need a vendor other than Anthropic</h3>
+          <p>Wait, or contribute an adapter. The seam exists; only <code>claude</code> is wired.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Questions</span>
+      <h2>Honest answers</h2>
+      <div class="faq">
+        {faqs.map((f) => (
+          <details>
+            <summary>{f.q}</summary>
+            <p>{f.a}</p>
+          </details>
+        ))}
+      </div>
+      <div class="btnrow">
+        <a class="btn solid" href="/contribute">Contribute</a>
+        <a class="btn" href="/city">How it is built</a>
+        <a class="btn" href="/roadmap">What is next</a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .cmp { font-size: 15px; }
+    .cmp th {
+      font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--ink-3); font-weight: 400;
+      border-bottom: 2px solid var(--ink); vertical-align: bottom;
+    }
+    .cmp td { color: var(--ink-2); }
+    .cmp td.rowlabel { color: var(--ink); font-weight: 600; white-space: normal; min-width: 190px; }
+    .cmp td.mine { color: var(--ink); background: #FBF9F4; box-shadow: inset 3px 0 0 0 var(--terracotta); }
+    .note { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); margin-top: 16px; max-width: 74ch; }
+    .panel h3 { margin: 0 0 8px; font-size: 17px; color: var(--terracotta); }
+    .panel p { margin: 0; font-size: 15.5px; }
+    .faq { border: 2px solid var(--ink); background: #FBF9F4; }
+    .faq details { border-bottom: 1px solid var(--paper-3); }
+    .faq details:last-child { border-bottom: 0; }
+    .faq summary {
+      cursor: pointer; padding: 16px 22px; font-weight: 600; font-size: 16.5px;
+      list-style: none; display: flex; justify-content: space-between; gap: 16px;
+    }
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: '+'; font-family: var(--mono); color: var(--terracotta); }
+    .faq details[open] summary::after { content: '−'; }
+    .faq summary:hover { color: var(--terracotta); }
+    .faq details p { margin: 0; padding: 0 22px 20px; color: var(--ink-2); max-width: 78ch; font-size: 16px; }
+  </style>
+</Base>
