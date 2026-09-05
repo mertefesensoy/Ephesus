@@ -1,0 +1,65 @@
+---
+import Base from '../../layouts/Base.astro'
+import { getCollection } from 'astro:content'
+
+const posts = (await getCollection('blog')).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf()
+)
+const fmt = (d: Date) =>
+  d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+---
+
+<Base
+  title="Writing — Ephesus"
+  description="Notes from building Ephesus: what a check that cannot fail looks like, how a green suite hid 1,406 unreachable lines, and why the crew works in its own checkout.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">Writing</span>
+      <h1>Notes from the build</h1>
+      <p class="lede">
+        Everything here comes out of this project’s own records rather than from opinion. Where a
+        post describes a defect, that defect was real, it was found on a stated date, and the fix
+        is in the repository.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="plist">
+        {posts.map((p) => (
+          <a class="post" href={`/blog/${p.id}`}>
+            <div class="pmeta">
+              <span class="ptag">{p.data.tag}</span>
+              <time datetime={p.data.date.toISOString()}>{fmt(p.data.date)}</time>
+              <span class="pread">{p.data.reading}</span>
+            </div>
+            <h2>{p.data.title}</h2>
+            <p>{p.data.summary}</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .plist { display: grid; gap: 0; border: 2px solid var(--ink); background: #FBF9F4; }
+    .post {
+      display: block; padding: 26px 26px 28px; border: 0;
+      border-bottom: 1px solid var(--paper-3); color: var(--ink);
+    }
+    .post:last-child { border-bottom: 0; }
+    .post:hover { background: var(--paper-2); color: var(--ink); }
+    .post:hover h2 { color: var(--terracotta); }
+    .pmeta { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .ptag {
+      font-family: var(--pixel); font-size: 8px; letter-spacing: .1em; text-transform: uppercase;
+      color: #FBF9F4; background: var(--terracotta); padding: 5px 8px; line-height: 1;
+    }
+    .pmeta time, .pread { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+    .post h2 { font-size: 23px; margin: 0 0 8px; }
+    .post p { margin: 0; color: var(--ink-2); max-width: 76ch; font-size: 16.5px; }
+  </style>
+</Base>

@@ -38,7 +38,11 @@ export default tseslint.config(
   // (git-ignored via .git/info/exclude). Linting them makes every rule fire
   // twice and puts a second tsconfig root under the project — prettier
   // already ignores `.claude/`; this keeps eslint about this checkout too.
-  { ignores: ['node_modules/**', 'out/**', 'dist/**', '.claude/**'] },
+  // `site/` is the project website: a separate workspace with its own
+  // package.json, lockfile and toolchain. It is not part of the application and
+  // must not be linted by the application's rules — Astro also generates
+  // `site/.astro/*.d.ts`, which is machine-written and full of `any`.
+  { ignores: ['node_modules/**', 'out/**', 'dist/**', '.claude/**', 'site/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,

@@ -1,0 +1,106 @@
+---
+import '../styles/tokens.css'
+import Mark from '../components/Mark.astro'
+interface Props { title: string; description: string }
+const { title, description } = Astro.props
+const path = Astro.url.pathname.replace(/\/$/, '') || '/'
+
+// Astro.site comes from astro.config.mjs. Emitting it is what makes the config
+// do anything — without a canonical link and og:url, setting `site` changes
+// nothing about the built output.
+const canonical = new URL(Astro.url.pathname, Astro.site).href
+const ogImage = new URL('/img/social-card.png', Astro.site).href
+const nav = [
+  { href: '/city',       label: 'The City' },
+  { href: '/record',     label: 'The Record' },
+  { href: '/contribute', label: 'Contribute' },
+  { href: '/blog',       label: 'Writing' }
+]
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title}</title>
+  <meta name="description" content={description}>
+  <link rel="canonical" href={canonical}>
+  <meta property="og:title" content={title}>
+  <meta property="og:description" content={description}>
+  <meta property="og:type" content="website">
+  <meta property="og:url" content={canonical}>
+  <meta property="og:image" content={ogImage}>
+  <meta property="og:site_name" content="Ephesus">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content={title}>
+  <meta name="twitter:description" content={description}>
+  <meta name="twitter:image" content={ogImage}>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap bar">
+      <a class="brand" href="/">
+        <Mark size={34} />
+        <span>Ephesus</span>
+      </a>
+      <nav>
+        {nav.map(n => (
+          <a href={n.href} class={path.startsWith(n.href) ? 'on' : ''}>{n.label}</a>
+        ))}
+        <a href="https://github.com/mertefesensoy/Ephesus" class="gh">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main><slot /></main>
+
+  <footer class="site">
+    <div class="wrap">
+      <div class="fgrid">
+        <div>
+          <Mark size={44} />
+          <p class="fnote">A multi-agent harness you govern as its architect. Pre-alpha, MIT licensed, built in the open.</p>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/mertefesensoy/Ephesus">Source</a>
+          <a href="https://github.com/mertefesensoy/Ephesus/tree/main/docs">Design suite</a>
+          <a href="https://github.com/mertefesensoy/Ephesus/blob/main/docs/PROGRESS.md">Build progress</a>
+        </div>
+        <div>
+          <h4>Contribute</h4>
+          <a href="https://github.com/mertefesensoy/Ephesus/labels/good%20first%20issue">Good first issues</a>
+          <a href="https://github.com/mertefesensoy/Ephesus/blob/main/CONTRIBUTING.md">Contributing guide</a>
+          <a href="https://github.com/mertefesensoy/Ephesus/blob/main/CODE_OF_CONDUCT.md">Code of conduct</a>
+        </div>
+      </div>
+      <p class="lineage">An original work inspired by the MIT-licensed <a href="https://github.com/chaitanyagiri/munder-difflin">Munder Difflin</a>; patterns reused with attribution, no upstream code vendored. Floor art from the LimeZu packs, licensed and kept out of the repository.</p>
+    </div>
+  </footer>
+
+  <style is:global>
+    header.site{border-bottom:2px solid var(--ink);background:#FBF9F4;position:sticky;top:0;z-index:20}
+    header.site .bar{display:flex;align-items:center;justify-content:space-between;gap:20px;height:64px}
+    .brand{display:flex;align-items:center;gap:12px;border:0;color:var(--ink);font-weight:600;font-size:17px}
+    .brand:hover{color:var(--terracotta)}
+    header nav{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+    header nav a{border:0;color:var(--ink-2);font-size:14.5px}
+    header nav a:hover,header nav a.on{color:var(--terracotta)}
+    header nav a.on{box-shadow:0 2px 0 0 var(--terracotta)}
+    header nav a.gh{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
+      border:2px solid var(--ink);padding:7px 13px;box-shadow:2px 2px 0 0 var(--ink);color:var(--ink)}
+    header nav a.gh:hover{background:var(--ink);color:var(--paper)}
+    footer.site{border-top:2px solid var(--ink);background:#FBF9F4;padding:44px 0 34px;margin-top:20px}
+    .fgrid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:32px}
+    @media(max-width:720px){.fgrid{grid-template-columns:1fr}}
+    footer h4{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0 0 10px;font-weight:400}
+    footer .fgrid a{display:block;border:0;color:var(--ink-2);font-size:15px;padding:3px 0}
+    footer .fgrid a:hover{color:var(--terracotta)}
+    .fnote{font-size:14.5px;color:var(--ink-3);margin:14px 0 0;max-width:34ch}
+    .lineage{font-size:13px;color:var(--ink-3);margin:30px 0 0;padding-top:18px;border-top:1px solid var(--paper-3);max-width:76ch}
+  </style>
+</body>
+</html>

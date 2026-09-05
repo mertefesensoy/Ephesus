@@ -1,0 +1,166 @@
+---
+import Base from '../layouts/Base.astro'
+
+const figures = [
+  ['327', 'commits'],
+  ['26', 'decision records'],
+  ['197', 'test files'],
+  ['106', 'documents'],
+  ['53', 'implementation records'],
+  ['11', 'days']
+]
+
+const milestones = [
+  ['M0', 'Skeleton', 'Electron shell, the preload bridge, a real PTY vertical, the floor, app state. Closed by a two-agent audit: ten execution checks and a design-conformance pass.'],
+  ['M1', 'One real agent', 'A single agent CLI under management on both data planes — the process, and the record of what it did.'],
+  ['M3', 'The floor becomes true', 'Stations that are facts rather than decoration; the breaker armed; gates that actually hold work.'],
+  ['M5', 'The accountable company', 'A review task is mechanically unclosable until its deck is archived. A new dependency is held at the choke point until a memo exists and is verdict-ed. Briefings refuse to render a sentence without a resolvable reference.'],
+  ['M5b', 'The learning company', 'The Stoa lands: registered sources, pinned commits, read-only researcher plans, and briefs whose every finding must cite a path or die.'],
+  ['M6', 'The floor’s face', 'Citizens at spec, stations, act-coloured envelope flights — and the milestone that shipped 1,406 lines nothing could reach, which is where the reachability check came from.'],
+  ['M7', 'The outward missions', 'Skeleton Crew and Front Office: the company watching something real.'],
+  ['M8', 'The company you can leave running', 'The hardening milestone. Coverage baseline and the seam rule; a quit path that actually runs; a degradation channel where every give-up is visible and countable; log-derived surfaces reading the whole book instead of its oldest 500 entries; every hire in its own checkout, and its own engine install.']
+]
+---
+
+<Base
+  title="The Record — Ephesus"
+  description="327 commits in eleven days, 26 decision records, two-agent milestone audits, and an engineering rule about proof applied to the system and its own construction alike.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">The build record</span>
+      <h1>Eleven days, written down</h1>
+      <p class="lede">
+        Ephesus keeps an unusual amount of its own history. Requirements live in a specification,
+        decisions in append-only records, design in a description document, and every milestone
+        leaves an implementation record behind it. When those documents disagree with the code, the
+        code is wrong.
+      </p>
+      <div class="figs">
+        {figures.map(([n, l]) => <div class="fig"><b>{n}</b><span>{l}</span></div>)}
+      </div>
+      <p class="asof">Counted from the repository on 5 September 2026.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The method</span>
+      <h2>A claim without evidence is not done</h2>
+      <blockquote>The recurring defect of this codebase is a check that cannot fail.</blockquote>
+      <p>
+        That sentence is from the project’s own build log, written after five separate instances
+        were found in a single day. A coverage figure that rose while the wiring stayed untested. A
+        matcher for <code>claude auth status</code> that looked for phrases the CLI never emits —
+        forty-five green tests, every one feeding it strings we had written ourselves. A suite
+        reporting green over 1,406 lines that nothing in the application could reach.
+      </p>
+      <p>
+        What followed was mechanical rather than cultural, because a resolution to be more careful
+        is exactly the kind of check that cannot fail:
+      </p>
+      <ul class="rules">
+        <li><b>A wiring seam with no test is a defect, not a gap.</b> A package’s evidence names the production call path — file and line — or records that there is none.</li>
+        <li><b>Every production module must be reachable from an application entry point.</b> A script walks the import graph from the three real entry points; a deliberate exception is allowlisted <em>with the decision that made it deliberate</em>.</li>
+        <li><b>An engine adapter may not match on output this repository has never seen.</b> Every probe is backed by a capture from a real installation, with its command, version, platform and date recorded — or waived in writing, with the reason.</li>
+        <li><b>Coverage floors are per subsystem, and they only rise on corroborating runs.</b> A single number over a whole repository is the classic check that cannot fail.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">How milestones close</span>
+      <h2>On a run, not on a checklist</h2>
+      <p>
+        Every milestone is audited by two independent passes before it is called done: one that
+        verifies by executing — running the commands, the suites, the app — and one that checks the
+        diff against the documented design. Neither trusts the implementer’s account.
+      </p>
+      <p>Those audits have caught real defects at close, not hypothetical ones:</p>
+      <ul class="rules">
+        <li>A research brief citing a commit that <b>existed in no repository</b>. The record was amended and the chain re-proven end to end against a remotely verifiable pin.</li>
+        <li>A ledger column quietly wrong, fixed with a named regression test.</li>
+        <li>A spoken refusal that <b>confirmed the very gate it should have blocked</b>.</li>
+        <li>A Pixi initialisation failure that was silent. It now surfaces a visible “floor unavailable” state, because a silent fallback is an invariant violation.</li>
+      </ul>
+      <figure>
+        <img src="/img/stoa-brief.png" alt="A research brief on screen, each finding citing a path at a pinned commit" width="1583" height="922" loading="lazy" />
+        <figcaption>
+          A Stoa brief. Every finding must cite a path at the pinned commit, or the brief is refused
+          before a human reads it — which is what caught the citation that pointed nowhere.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The milestones</span>
+      <h2>What each one actually settled</h2>
+      <div class="mlist">
+        {milestones.map(([id, name, what]) => (
+          <article class="m">
+            <div class="mid">{id}</div>
+            <div>
+              <h3>{name}</h3>
+              <p>{what}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+      <div class="btnrow">
+        <a class="btn" href="https://github.com/mertefesensoy/Ephesus/blob/main/docs/PROGRESS.md">Package-by-package progress</a>
+        <a class="btn" href="https://github.com/mertefesensoy/Ephesus/tree/main/docs/adr">The decision records</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Self-improvement</span>
+      <h2>The company’s primary mission is its own improvement</h2>
+      <p>
+        Improvement proposals rise from the company’s own operating records, carry a falsifiable
+        success metric before any human sees them, pass the same memo and gate machinery as any
+        other change, and are measured after they land. Every outcome stays in the ledger —
+        including the rejections and the rollbacks.
+      </p>
+      <figure>
+        <img src="/img/gymnasium.png" alt="The Gymnasium panel listing improvement proposals and their verdicts" width="1583" height="922" loading="lazy" />
+        <figcaption>The Gymnasium. A proposal without a falsifiable metric never reaches a human; verdicts are the architect’s alone; authority-widening is refused before an approver could say yes.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .figs {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      border: 2px solid var(--ink); background: #FBF9F4; margin-top: 34px;
+    }
+    .fig { padding: 20px 18px; border-right: 1px solid var(--paper-3); }
+    .fig:last-child { border-right: 0; }
+    .fig b { display: block; font-family: var(--pixel); font-size: 20px; color: var(--terracotta); line-height: 1.4; }
+    .fig span {
+      display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--ink-3); margin-top: 10px;
+    }
+    .asof { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 12px; }
+    .rules { padding-left: 0; list-style: none; max-width: 74ch; }
+    .rules li {
+      padding: 12px 0 12px 20px; border-left: 3px solid var(--paper-3);
+      margin-bottom: 10px; font-size: 16.5px;
+    }
+    .rules li b { color: var(--ink); }
+    .mlist { border: 2px solid var(--ink); background: #FBF9F4; }
+    .m { display: grid; grid-template-columns: 78px 1fr; gap: 18px; padding: 20px 24px; border-bottom: 1px solid var(--paper-3); }
+    .m:last-child { border-bottom: 0; }
+    .mid { font-family: var(--pixel); font-size: 13px; color: var(--terracotta); padding-top: 4px; }
+    .m h3 { margin: 0 0 5px; font-size: 17px; }
+    .m p { margin: 0; font-size: 16px; max-width: 74ch; }
+    figure { margin: 28px 0 0; }
+    figure img { display: block; width: 100%; height: auto; border: 2px solid var(--ink); box-shadow: var(--shadow); }
+    figcaption { font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink-3); margin-top: 12px; max-width: 62ch; }
+  </style>
+</Base>
