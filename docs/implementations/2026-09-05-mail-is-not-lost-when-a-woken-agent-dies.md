@@ -212,6 +212,32 @@ prompt silently.
 and her config now carries
 `"C:/Users/senso/.ephesus/agora" -> {"hasTrustDialogAccepted": true}`.
 
+## The next one in the same family, found the same way
+
+With the trust grant in, the chain finally moved: the incident reached Artemis,
+she triaged both runs, created two tasks and assigned them to the on-call agent.
+And then it stopped again.
+
+**An idle agent assigned a task is never told.** `wakeCheck` returns early when
+an agent has no mail (`if (pending === 0) continue`), and `pendingTasksFor` is
+consulted only in `decideOnStop` — which requires the agent to already be
+running a turn. So the wake watchdog, whose whole job is "something arrived
+while you were idle", knows about mail and not about work. Artemis assigned both
+tasks without sending a message, her outbox stayed empty, and the on-call agent
+sat idle holding two `todo` items.
+
+Two candidate fixes, and the second is the sound one:
+
+- Have Artemis message every assignee. Depends on an LLM remembering, every time.
+- Have the wake watchdog wake an agent that has pending tasks and no mail, with
+  the same once-per-thing discipline the mail path already uses (`nudged` keyed
+  on task id rather than on message file), so a long-lived `todo` does not nudge
+  forever.
+
+Not built here: this package is the delivery seam, and that is the ledger seam.
+Recorded rather than folded in, because a third fix in one branch is how a
+reviewable change stops being reviewable.
+
 ## Owed, recorded not built
 - The wake path could report a death that follows a hand-over as its own
   degradation cause, so the pairing is visible without reading the log by hand.
