@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { isolationModeSchema } from './isolation'
+import { toolGrantsSchema } from './engine-tools'
 import { exitPolicySchema } from './respawn'
 import { budgetSchema } from './agents'
 import type { LogEntry } from './log'
@@ -238,7 +239,22 @@ export const hireTemplateSchema = z
      * because "this agent comes back by itself" is something the Architect
      * should read on the activation screen rather than discover from the log.
      */
-    onExit: exitPolicySchema.optional()
+    onExit: exitPolicySchema.optional(),
+    /**
+     * Tool directories this hire's agents may load (M8.7b, ADR-0026).
+     *
+     * ADR-0026 stopped the engine reading any settings source but the harness's,
+     * which also stops a target repository handing an agent skills and
+     * subagents. This is how the company grants them back BY NAME, in a bundle
+     * the Architect reads before activating -- the same argument ADR-0012 makes
+     * for declaring everything else a profile may do.
+     *
+     * Optional, and omitting it grants nothing: a hire that says nothing about
+     * tools gets none, which is the direction an unknown must fail in. Additive
+     * and optional, so every document written against the previous shape still
+     * validates -- the same reasoning `budget`, `isolation` and `onExit` carry.
+     */
+    tools: toolGrantsSchema.optional()
   })
   .strict()
 

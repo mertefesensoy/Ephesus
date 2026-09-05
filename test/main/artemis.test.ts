@@ -17,6 +17,7 @@ import { respawnBlockReason } from '../../src/main/respawn'
 import { Breaker } from '../../src/main/watch/breaker'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { removeTempDir } from '../tmpdir'
+import { engineConfigDir } from '../../src/main/engines/engine-home'
 
 /**
  * Artemis's lifecycle (FR-5.1–5.5, ADR-0005), against the fake engine.
@@ -126,6 +127,10 @@ async function rig(
     hookServer,
     spawner,
     prompts,
+    // ADR-0026: the real resolver, rooted in this test's own temp home, so a
+    // spawn here isolates exactly the way a spawn in the app does.
+    engineConfigDirFor: (engineId, agentId) =>
+      engineConfigDir(path.join(home, 'engines'), engineId, agentId),
     agoraRoot,
     probe: async () => '1.0.0-fake',
     ...(over.spawnBlocked ? { respawnBlocked: over.spawnBlocked } : {}),

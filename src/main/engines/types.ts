@@ -1,4 +1,5 @@
 import type { CapacityLimit } from '../../shared/capacity'
+import type { ResolvedTools } from '../../shared/engine-tools'
 import type { EngineId, HookSupport } from '../../shared/engines'
 
 /**
@@ -78,6 +79,28 @@ export interface AgentSpawnConfig {
   readonly hookEndpoint: string
   /** Working directory: the target repo or the agent's assigned worktree. */
   readonly cwd: string
+  /**
+   * The engine's PRIVATE config directory for this agent (M8.7, ADR-0026).
+   *
+   * Harness-owned, one per agent, never the Architect's own. An adapter points
+   * its engine at this directory, and every consumer that needs to know where
+   * the engine keeps that agent's state — the transcript reader, the workspace
+   * trust record, the auth probe — reads it from HERE rather than recomputing
+   * it from `$HOME`. That is the whole point of carrying it on the spawn
+   * config: a directory the spawn uses and a directory a reader guesses are
+   * two halves that agree only until one of them moves.
+   */
+  readonly engineConfigDir: string
+  /**
+   * Tool directories this agent may load into its engine (M8.7b, ADR-0026).
+   *
+   * Already RESOLVED to absolute directories and already checked for
+   * containment, because the adapter's job is to turn a decision into flags,
+   * not to make one. An adapter that resolved paths would be a second place the
+   * "by name" rule is enforced, and the more permissive of two such places
+   * always wins in the end.
+   */
+  readonly tools: ResolvedTools
   /**
    * Role-declared secret grants, already resolved by the broker (ADR-0010).
    * Least-privilege: only what the hire template declares reaches this map.
@@ -340,7 +363,30 @@ export interface EngineAdapter {
    * target of that activation, and never from spawn. Returns what it did so the
    * caller can log it — pre-trusting must never be silent.
    */
-  trustWorkspace?(cwd: string, existence?: WorkspaceExistence): WorkspaceTrustResult
+  trustWorkspace?(
+    configDir: string,
+    cwd: string,
+    existence?: WorkspaceExistence
+  ): WorkspaceTrustResult
+  /**
+   * ADR-0026: make a fresh, harness-owned engine config directory usable by an
+   * unattended agent — accept whatever first-run flow the engine would show a
+   * human before any session begins, and therefore before any hook could
+   * report that the agent is stuck on it.
+   *
+   * Optional, because an engine with no per-agent config directory has nothing
+   * to prepare. Absent means the directory is used as-is.
+   */
+  prepareConfigDir?(configDir: string): EngineConfigDirResult
+
+  /**
+   * ADR-0026: the environment `binary().authProbe` must run in to answer for
+   * THIS agent rather than for the harness.
+   *
+   * Absent means the probe runs with no extra environment, which is correct for
+   * an engine whose login state is not per-agent.
+   */
+  probeEnv?(cfg: AgentSpawnConfig): Readonly<Record<string, string>>
   /**
    * Sorts one `notification` event into what the engine actually meant.
    *
@@ -381,6 +427,11 @@ export type NotificationKind = 'permission' | 'waiting'
  * which the harness owns and creates, so nothing a repository or a target can
  * influence is left unresolved.
  */
+/** What `prepareConfigDir` did, or why it could not. */
+export type EngineConfigDirResult =
+  | { readonly ok: true; readonly seeded: readonly string[] }
+  | { readonly ok: false; readonly because: string }
+
 export type WorkspaceExistence = 'must-exist' | 'will-be-created'
 
 /** What `trustWorkspace` did, for the log line that must follow it. */

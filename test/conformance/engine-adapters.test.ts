@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { HOOK_EVENTS, HOOK_ENVELOPE_SCHEMA_VERSION } from '../../src/shared/hooks'
 import { HOOK_SUPPORT_RANK, type HookSupport } from '../../src/shared/engines'
 import { HookServer, type HookEventRecord } from '../../src/main/hooks'
-import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
+import { CLAUDE_HARNESS_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
 import { CodexAdapter } from '../../src/main/engines/codex'
 import { GeminiAdapter } from '../../src/main/engines/gemini'
 import { PromptStore } from '../../src/main/prompts'
@@ -62,6 +62,7 @@ const FULL_LIFECYCLE_SCRIPT = {
 runAdapterConformance({
   name: 'fake engine',
   make: () => makeFakeAdapter({ scriptPath: scriptFile(FULL_LIFECYCLE_SCRIPT) }),
+  settingsRoot: 'cwd',
   settingsRel: [FAKE_SETTINGS_REL],
   wiresEveryEvent: true,
   // The fake's format: one usage fact per line, as its adapter documents.
@@ -97,7 +98,9 @@ runAdapterConformance({
       prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS),
       hookShimPath: path.join(tempDir(), 'shims', 'eph-hook.mjs')
     }),
-  settingsRel: [CLAUDE_SETTINGS_REL],
+  // ADR-0026: outside every checkout, in the agent's own engine config directory.
+  settingsRoot: 'engineConfigDir',
+  settingsRel: [CLAUDE_HARNESS_SETTINGS_REL],
   wiresEveryEvent: true,
   // Claude Code's format, captured from a real transcript: usage lives under
   // `message.usage` on `assistant` lines, and cache tokens are input tokens.
@@ -145,6 +148,7 @@ runAdapterConformance({
     }),
   // Nothing: this adapter writes no settings, which is the strongest possible
   // answer to ADR-0009's hygiene rule and the honest one for `pty-heuristic`.
+  settingsRoot: 'cwd',
   settingsRel: [],
   wiresEveryEvent: false
   // No `transcriptSample`: the adapter declares no transcript reader, so the
@@ -157,6 +161,7 @@ runAdapterConformance({
     new GeminiAdapter({
       prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS)
     }),
+  settingsRoot: 'cwd',
   settingsRel: [],
   wiresEveryEvent: false
 })

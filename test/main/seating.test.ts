@@ -12,6 +12,7 @@ import { ClaudeAdapter } from '../../src/main/engines/claude'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { removeTempDir } from '../tmpdir'
+import { engineConfigDir } from '../../src/main/engines/engine-home'
 
 /**
  * Seats reaching the roster (SDD §4.1, UI-DESIGN §5) — the M2 carried item, at
@@ -80,6 +81,10 @@ async function rig(seeded: Iterable<[string, string]> = []): Promise<Rig> {
     hookServer,
     spawner: new SilentSpawner(),
     prompts,
+    // ADR-0026: the real resolver, rooted in this test's own temp home, so a
+    // spawn here isolates exactly the way a spawn in the app does.
+    engineConfigDirFor: (engineId, agentId) =>
+      engineConfigDir(path.join(home, 'engines'), engineId, agentId),
     agoraRoot: path.join(home, 'agora'),
     probe: async () => '2.1.247',
     rosterSeats: () => {

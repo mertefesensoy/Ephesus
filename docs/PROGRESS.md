@@ -5097,20 +5097,107 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
       — M7's exit, still open.
 
-- [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
-      inherit the Architect's personal engine install: no isolated config
-      directory, so each session starts at a measured 64.8–67.4k tokens of which
-      Ephesus owns about 5%. That is the "91.4% of the day re-reading context"
-      measurement, explained. The correctness half is worse than the cost half:
-      six Stop hooks fire per turn, five of them the Architect's own, any of
-      which can block outside the harness's own decision — uncounted by the block
-      cap, invisible to the breaker's stop-loop signal, and unaffected by pacing.
-      *Docs: ADR-0009 (adapters own engine specifics), ADR-0013, NFR-12.
-      Tests: the spawn environment carries the isolated config; a foreign Stop
-      hook cannot change the harness's continuation decision. Risk: the token
-      floor was measured on a machine with an unusually large personal config —
-      the COST claim is machine-specific, the CONTROL claim is not. Do not sell
-      this package on the cost number alone.*
+- [x] **M8.7a Engine isolation, and whose autonomy hinge it is** — B13, first
+      half. Every hire now runs its OWN engine install: one config directory per
+      agent under `~/.ephesus/engines/<engine>/<agent>/`, the Architect's
+      credentials borrowed rather than copied, and the harness as the **only**
+      author of the hooks that install runs. Built on the CONTROL claim, not the
+      cost one — the 64.8–67.4k token floor was measured on a machine with an
+      unusually large personal config, but six Stop hooks per turn of which five
+      were foreign is not machine-specific, and any of them could answer
+      `{"decision":"block"}` outside the harness's decision: uncounted by the
+      block cap, invisible to the breaker's stop-loop signal, unaffected by
+      pacing. THIS repository is an instance — `.claude/settings.json` here ships
+      a Stop hook that blocks on a red typecheck, and the company's standing
+      mission points crews here first.
+      *Evidence: ground truth established by EXECUTION before any code —
+      `CLAUDE_CONFIG_DIR=<fresh> claude auth status` reports `loggedIn:false`
+      (isolation alone parks every hire on a login prompt), adding
+      `CLAUDE_SECURESTORAGE_CONFIG_DIR` reports `loggedIn:true` with the config
+      still isolated, and `projectsDirectory` moves with the config dir. The
+      obvious mechanism — `CLAUDE_CODE_MANAGED_SETTINGS_PATH` +
+      `allowManagedHooksOnly` — is INERT in this host mode (tested in both its
+      directory and file forms; foreign hooks still fired), so the lockdown is
+      two CLI flags: `--setting-sources=` and `--settings <harness file>`.
+      END-TO-END on the adapter's REAL composed spawn plan (bundled with esbuild
+      and executed): harness hook fired, repository hook did NOT. REFUTATION
+      CONTROL, the identical plan with exactly that one flag removed: repository
+      hook fired — the defect reproduced, so the check can fail. Gate: typecheck,
+      zero-warning lint, invariants (reachability 168/176), **3678 passed / 8
+      skipped** across 193 files, coverage floors ok with none lowered. 14 new
+      isolation tests. Docs: ADR-0026 (extends ADR-0013, narrows ADR-0009's
+      settings hygiene; ADR-0025 was also missing from the ADR index and was
+      added), the M8.7a implementation doc. Branch
+      `feature/m8-7-engine-isolation`.*
+      **Four Architect decisions, taken 2026-09-05, do not re-litigate:** one
+      config dir PER AGENT (not per company — the engine rewrites its config file
+      wholesale and a crew is the concurrent case); LOCKDOWN (not isolation-only,
+      which would have sounded like it closed the hole); SHARED credentials (an
+      agent runs as the same OS user and can read the credentials file anyway, so
+      a separate one buys accounting, not containment); and the harness
+      RE-SUPPLIES a curated tool set per profile.
+      **Consequences recorded, not discovered:** a target repository's hooks no
+      longer run for hired agents (here: `on-stop-check.sh`, `post-edit.sh`); its
+      `.mcp.json` no longer reaches an agent (and neither does the `Pending
+      approval` gate that came with it); the settings file left every checkout,
+      so `settings-install.ts`'s hardest case cannot arise. **Noticed, not
+      fixed:** the engine warns that the mailbox grant's `Write(<dir>/**)` rule
+      "is not matched by file permission checks — only `Edit(...)`" — predates
+      this package, owed to whoever next touches `mailboxPermissions`.
+
+- [x] **M8.7b The harness re-supplies the tools, by name** - B13, second half.
+      The M8.7a lockdown also hides a target repository's own skills and
+      subagents from a hired agent (MEASURED). A hire template now declares
+      `tools` - a named root (`target`, or `home` for `~/.ephesus/tools/`) plus a
+      relative path - which the harness resolves and hands over as one
+      `--plugin-dir` per directory. ONE mechanism, not two: `--agents` is
+      deliberately unused, because a directory already carries skills, subagents
+      and commands together and two ways to say one thing is two code paths to
+      keep in step.
+      **REFUSES on escape, REPORTS on absence** - different failures. A path
+      outside its root is a bundle asking for what it may not have, so the WHOLE
+      set is refused (honouring seven of eight would be a security decision taken
+      by a loop); a directory simply not there is the `envGrants` case, so it is
+      a visible degradation. Containment is judged on REALPATHS with the root
+      resolved too - a string-prefix check passes every test written for it and
+      then fails on the OneDrive junction the harness home actually sits under.
+      *Evidence: the mechanism measured before the schema was designed -
+      `--plugin-dir` works under the lockdown AND accepts a directory with no
+      plugin manifest, which is what makes granting a repository's bare `.claude`
+      possible without asking the Architect to add one. END-TO-END through the
+      harness's own resolution (bundled with esbuild and executed): with the
+      grant the engine reports the repository's skill available, without it, not.
+      Gate: typecheck, zero-warning lint, invariants (reachability 170/178),
+      **3700 passed / 8 skipped** across 194 files, coverage floors ok with none
+      lowered. 15 new grant tests + 4 `toolsFor` + 3 spawn-window. Docs:
+      ADR-0026 clause note (the ADR named this owed and it landed the same day),
+      SDD 3, the M8.7b implementation doc.*
+      **A LIVE PRE-EXISTING DEFECT, found while wiring this and fixed here.**
+      `AgentManager.spawnConfig` asks `ProfileActivations` for a hire's autonomy
+      DURING the spawn, and the instance was registered only AFTER the spawn
+      loop - so the answer was always `null`, and `null` means `manual`, and
+      `claudePermissionMode` maps `manual` to `--permission-mode default`. **Every
+      agent that arrived through a profile spawned with the engine's permission
+      prompt fully armed, whatever autonomy the Architect had granted** - exactly
+      the complaint `AgentSpawnConfig.autonomy` was added at M7.7 to answer. The
+      suite was green either side of it because every test asked AFTER
+      `activate()` returned, which is a different question. Fixed with one seam:
+      an `activating` SET (two activations can overlap) held in a `finally` (a
+      flag cleared on the happy path leaks on every failure), and one private
+      `planFor` both callers read. The three tests that pin it FAILED on the old
+      code first - `expected null to be 'autonomous'`.
+      *OWED: the autonomy defect deserves a SCENARIO test asserting the spawn's
+      `--permission-mode`, not only a unit one; nothing reaps
+      `~/.ephesus/engines/<engine>/<agent>/` yet.*
+      *CI FLAKE, a NEW class, recorded so it is not re-diagnosed: run
+      `33965218754` on `05ba1f8` failed in the **Install** step, not the suite —
+      `npm ci` → `better-sqlite3` → `node-gyp rebuild` died with
+      `AssertionError: assert(!this.paused)` inside undici while downloading the
+      node headers. Nothing to do with the commit; `gh run rerun --failed`
+      passed. This is DISTINCT from the M8.0-era ubuntu flake owed to M8.9 (a
+      one-millisecond timing assertion in `pacing-wakes.test.ts`) — that one is
+      product code, this one is the toolchain, and only the second is fixed by
+      re-running.*
 
 - [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
       is one in-memory map with no boot replay, so a restart silently un-hires

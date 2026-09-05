@@ -26,6 +26,7 @@ import {
   type ComposedIsolation
 } from './isolation'
 import { DEFAULT_EXIT_POLICY, type ExitPolicy } from './respawn'
+import type { ToolGrant } from './engine-tools'
 import type { RepoDerivation } from './repo-remote'
 
 /**
@@ -245,6 +246,15 @@ export interface PlannedHire {
   readonly isolation: ComposedIsolation
   /** What happens when this agent's process ends (SDD §10). */
   readonly onExit: ExitPolicy
+  /**
+   * Tool directories this hire declared (M8.7b, ADR-0026).
+   *
+   * Carried as DECLARED -- root plus relative path -- not as resolved absolute
+   * directories. The activation screen renders the declaration because the
+   * declaration is what the Architect is being asked to approve, and resolving
+   * one needs a filesystem this pure module may not touch.
+   */
+  readonly tools: readonly ToolGrant[]
 }
 
 /**
@@ -330,6 +340,15 @@ export interface ActivationPlan {
 export interface PlannedWorkspace {
   readonly path: string
   /**
+   * Which of the activation's two kinds of directory this is.
+   *
+   * Carried explicitly rather than inferred by comparing `path` to the plan's
+   * target: `plannedTrustGrants` needs the distinction, and a caller that
+   * rediscovers it by string comparison is a second opinion about the same
+   * fact — which is the drift this whole function exists to prevent.
+   */
+  readonly kind: 'target' | 'worktree'
+  /**
    * `must-exist` for the target the Architect named; `will-be-created` for a
    * worktree git makes later in this same activation.
    */
@@ -360,7 +379,7 @@ export function plannedWorkspaces(
     .filter((hire) => hire.isolation.effective !== 'worktree')
     .map((hire) => hire.agentId)
   const workspaces: PlannedWorkspace[] = [
-    { path: plan.targetPath, existence: 'must-exist', agentIds: inTarget }
+    { path: plan.targetPath, kind: 'target', existence: 'must-exist', agentIds: inTarget }
   ]
   const seen = new Set<string>()
   for (const hire of plan.hires) {
@@ -373,11 +392,60 @@ export function plannedWorkspaces(
     seen.add(worktree)
     workspaces.push({
       path: worktree,
+      kind: 'worktree',
       existence: 'will-be-created',
       agentIds: [hire.agentId]
     })
   }
   return workspaces
+}
+
+/** One (agent, directory) pair whose consent an activation must record. */
+export interface PlannedTrustGrant {
+  readonly agentId: string
+  readonly path: string
+  readonly existence: 'must-exist' | 'will-be-created'
+}
+
+/**
+ * Contract: every (agent, directory) pair this activation must record consent
+ * for. Pure, deduplicated, and derived from `plannedWorkspaces` rather than
+ * from the plan a second time.
+ *
+ * It exists because M8.7 gave each agent its OWN engine config directory, and a
+ * trust record lives in that directory. Before that there was one file for the
+ * whole machine and "trust this path" was a complete instruction; now it is
+ * only half of one, and the missing half is *whose* engine is being told.
+ *
+ * The target is granted to EVERY hire, not only the hires whose working
+ * directory it is. That preserves ADR-0021's decision unchanged — the
+ * activation records approval for the target the Architect named — which used
+ * to happen for free because one record served every agent. Narrowing it to
+ * "only the hires that land there" would be a new decision, taken silently, in
+ * the commit that split the file.
+ */
+export function plannedTrustGrants(
+  plan: ActivationPlan,
+  worktreePathFor: (agentId: string) => string
+): readonly PlannedTrustGrant[] {
+  const everyHire = plan.hires.map((hire) => hire.agentId)
+  const grants: PlannedTrustGrant[] = []
+  const seen = new Set<string>()
+  for (const workspace of plannedWorkspaces(plan, worktreePathFor)) {
+    const agentIds = workspace.kind === 'target' ? everyHire : workspace.agentIds
+    for (const agentId of agentIds) {
+      // One agent's own worktree is also reachable as its target entry when a
+      // plan mixes isolation modes; writing the same key twice would log two
+      // grants for one directory.
+      // JSON, not a delimiter: an id or a path containing the delimiter would
+      // otherwise collide and silently DROP a grant an agent needs.
+      const key = JSON.stringify([agentId, workspace.path])
+      if (seen.has(key)) continue
+      seen.add(key)
+      grants.push({ agentId, path: workspace.path, existence: workspace.existence })
+    }
+  }
+  return grants
 }
 
 export type ActivationPlanResult =
@@ -456,6 +524,10 @@ export function activationPlan(
       hireRef: `${hire.name}@${String(hire.version)}`,
       isolation,
       onExit: hire.onExit ?? bundle.document.onExit ?? DEFAULT_EXIT_POLICY,
+      // Declared, never defaulted to something: a hire that names no tools gets
+      // none. ADR-0026 made a repository unable to hand an agent skills and
+      // subagents on its own, and a default here would quietly hand them back.
+      tools: hire.tools ?? [],
       spawn: {
         agentId,
         // The name a person reads; the role stays the role. A hire that

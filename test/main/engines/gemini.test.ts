@@ -7,6 +7,7 @@ import { GeminiAdapter } from '../../../src/main/engines/gemini'
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig, EngineAdapter } from '../../../src/main/engines'
 import { removeTempDir } from '../../tmpdir'
+import { NO_TOOLS } from '../../../src/shared/engine-tools'
 
 /**
  * The gemini adapter's own behaviour, beyond the conformance table.
@@ -46,6 +47,8 @@ function rig(): { adapter: EngineAdapter; cfg: AgentSpawnConfig; cwd: string } {
       hookToken: 'gemini-token',
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
+      engineConfigDir: path.join(root, 'engine-config'),
+      tools: NO_TOOLS,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},

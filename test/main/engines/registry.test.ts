@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { EngineId } from '../../../src/shared/engines'
 import { EngineRegistry, engines } from '../../../src/main/engines'
 import type { AgentSpawnConfig, EngineAdapter } from '../../../src/main/engines'
+import { NO_TOOLS } from '../../../src/shared/engine-tools'
 
 /** The Escape key, U+001B — Claude Code's cancel key (ADR-0009 `interrupt()`). */
 const ESCAPE_BYTE = String.fromCharCode(0x1b)
@@ -44,6 +45,8 @@ const spawnConfig: AgentSpawnConfig = {
   hookToken: 'token-abc',
   hookEndpoint: '/tmp/eph/events.sock',
   cwd: '/tmp/eph/repo',
+  engineConfigDir: '/tmp/eph/engine-config',
+  tools: NO_TOOLS,
   commitIdentity: null,
   ghTokenCommand: '',
   envGrants: { GH_TOKEN: 'granted' },

@@ -71,7 +71,7 @@ describe('recording the Architect’s approval where the engine looks for it (AD
     // ignored, and the dialog appears anyway.
     const home = fakeHome()
     const dir = workspace()
-    const result = adapter(home).trustWorkspace(dir)
+    const result = adapter(home).trustWorkspace(home, dir)
     expect(result.ok).toBe(true)
     const key = claudeProjectKey(fs.realpathSync.native(dir))
     expect(key).not.toContain('\\')
@@ -81,8 +81,8 @@ describe('recording the Architect’s approval where the engine looks for it (AD
   it('reports a directory the Architect had already approved, rather than claiming the grant', () => {
     const home = fakeHome()
     const dir = workspace()
-    const first = adapter(home).trustWorkspace(dir)
-    const second = adapter(home).trustWorkspace(dir)
+    const first = adapter(home).trustWorkspace(home, dir)
+    const second = adapter(home).trustWorkspace(home, dir)
     expect(first).toEqual({ ok: true, path: expect.any(String), alreadyTrusted: false })
     expect(second).toEqual({ ok: true, path: expect.any(String), alreadyTrusted: true })
   })
@@ -100,7 +100,7 @@ describe('recording the Architect’s approval where the engine looks for it (AD
       }),
       'utf8'
     )
-    adapter(home).trustWorkspace(dir)
+    adapter(home).trustWorkspace(home, dir)
     const after = configAt(home)
     expect(after['numStartups']).toBe(128)
     expect(after['oauthAccount']).toEqual({ id: 'x' })
@@ -112,7 +112,7 @@ describe('recording the Architect’s approval where the engine looks for it (AD
     // in it — a far worse outcome than a crew that does not start.
     const home = fakeHome()
     fs.writeFileSync(path.join(home, CLAUDE_CONFIG_REL), '{ not json', 'utf8')
-    const result = adapter(home).trustWorkspace(workspace())
+    const result = adapter(home).trustWorkspace(home, workspace())
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.because).toMatch(/unreadable/)
     // The file it refused to parse is still exactly as it found it.
@@ -121,7 +121,7 @@ describe('recording the Architect’s approval where the engine looks for it (AD
 
   it('refuses a target that does not resolve', () => {
     const home = fakeHome()
-    const result = adapter(home).trustWorkspace(path.join(home, 'no', 'such', 'place'))
+    const result = adapter(home).trustWorkspace(home, path.join(home, 'no', 'such', 'place'))
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.because).toMatch(/does not resolve/)
   })
@@ -166,7 +166,7 @@ describe('trusting a workspace that does not exist yet (M8.7)', () => {
     const planned = path.join(root, 'agent.mason')
     expect(fs.existsSync(planned)).toBe(false)
 
-    const result = adapter(home).trustWorkspace(planned, 'will-be-created')
+    const result = adapter(home).trustWorkspace(home, planned, 'will-be-created')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(configAt(home)['projects']?.[result.path]?.['hasTrustDialogAccepted']).toBe(true)
@@ -181,9 +181,9 @@ describe('trusting a workspace that does not exist yet (M8.7)', () => {
     const root = workspace()
     const planned = path.join(root, 'agent.mason')
 
-    const ahead = adapter(home).trustWorkspace(planned, 'will-be-created')
+    const ahead = adapter(home).trustWorkspace(home, planned, 'will-be-created')
     fs.mkdirSync(planned, { recursive: true })
-    const behind = adapter(home).trustWorkspace(planned, 'must-exist')
+    const behind = adapter(home).trustWorkspace(home, planned, 'must-exist')
 
     expect(ahead.ok && behind.ok).toBe(true)
     if (!ahead.ok || !behind.ok) return
@@ -206,7 +206,11 @@ describe('trusting a workspace that does not exist yet (M8.7)', () => {
     } catch {
       return // unprivileged Windows cannot make one; the must-exist test covers the guard
     }
-    const result = adapter(home).trustWorkspace(path.join(link, 'agent.mason'), 'will-be-created')
+    const result = adapter(home).trustWorkspace(
+      home,
+      path.join(link, 'agent.mason'),
+      'will-be-created'
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.path).toBe(
@@ -218,6 +222,7 @@ describe('trusting a workspace that does not exist yet (M8.7)', () => {
   it('refuses when even the parent does not exist, rather than inventing a key', () => {
     const home = fakeHome()
     const result = adapter(home).trustWorkspace(
+      home,
       path.join(workspace(), 'no', 'such', 'root', 'agent.mason'),
       'will-be-created'
     )
@@ -229,7 +234,7 @@ describe('trusting a workspace that does not exist yet (M8.7)', () => {
     // ADR-0021's original contract: a target the Architect named is on the disk
     // in front of them, and a path that does not resolve is a refusal.
     const home = fakeHome()
-    const result = adapter(home).trustWorkspace(path.join(workspace(), 'nope'))
+    const result = adapter(home).trustWorkspace(home, path.join(workspace(), 'nope'))
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.because).toMatch(/target does not resolve/)
   })

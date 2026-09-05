@@ -12,12 +12,30 @@ import {
 } from '../../src/main/agents'
 import { EngineRegistry } from '../../src/main/engines'
 import type { SpawnPlan } from '../../src/main/engines'
-import { CLAUDE_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engines/claude'
+import {
+  CLAUDE_HARNESS_SETTINGS_REL,
+  CLAUDE_SETTINGS_REL,
+  ClaudeAdapter
+} from '../../src/main/engines/claude'
 import { CodexAdapter } from '../../src/main/engines/codex'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { postHookEvent, buildEnvelope } from '../../shims/hook-client.mjs'
 import { removeTempDir } from '../tmpdir'
+import { engineConfigDir } from '../../src/main/engines/engine-home'
+
+/**
+ * Where the harness's settings for one agent land since ADR-0026: inside that
+ * agent's OWN engine config directory, never inside the repository. Composed
+ * from the same resolver the manager is given, so a test cannot pass by
+ * agreeing with a path the manager does not actually use.
+ */
+function harnessSettingsFor(home: string, agentId = 'agent.mason'): string {
+  return path.join(
+    engineConfigDir(path.join(home, 'engines'), 'claude', agentId),
+    CLAUDE_HARNESS_SETTINGS_REL
+  )
+}
 
 /**
  * Lifecycle integration on real fs in a temp harness home. The spawner is the
@@ -128,6 +146,10 @@ async function rig(
     hookServer,
     spawner,
     prompts,
+    // ADR-0026: the real resolver, rooted in this test's own temp home, so a
+    // spawn here isolates exactly the way a spawn in the app does.
+    engineConfigDirFor: (engineId, agentId) =>
+      engineConfigDir(path.join(home, 'engines'), engineId, agentId),
     agoraRoot: path.join(home, 'agora'),
     probe,
     onExitError,
@@ -210,7 +232,10 @@ describe('AgentManager — spawn (FR-1.1, SDD §3)', () => {
     expect(fs.readFileSync(path.join(home, 'agora', 'PROTOCOL.md'), 'utf8')).toContain(
       'Company protocol'
     )
-    expect(fs.existsSync(path.join(repo, CLAUDE_SETTINGS_REL))).toBe(true)
+    expect(fs.existsSync(harnessSettingsFor(home))).toBe(true)
+    // ADR-0026: and NOT in the Architect's checkout — the repository is not
+    // written to at all any more, so there is nothing there to restore wrongly.
+    expect(fs.existsSync(path.join(repo, '.claude'))).toBe(false)
 
     expect(spawner.spawns).toHaveLength(1)
     expect(spawner.spawns[0]?.plan.argv[0]).toBe('claude')
@@ -218,9 +243,9 @@ describe('AgentManager — spawn (FR-1.1, SDD §3)', () => {
   })
 
   it('lists the settings it wrote on the card, so nothing is hidden from the Architect', async () => {
-    const { manager, repo, request } = await rig()
+    const { manager, home, request } = await rig()
     const card = await manager.spawn(request)
-    expect(card.settingsWritten).toEqual([path.join(repo, CLAUDE_SETTINGS_REL)])
+    expect(card.settingsWritten).toEqual([harnessSettingsFor(home)])
   })
 
   it('names granted secrets but never carries a value (ADR-0010)', async () => {
@@ -273,13 +298,16 @@ describe('AgentManager — spawn (FR-1.1, SDD §3)', () => {
 
 describe('AgentManager — exit unwinds the spawn (FR-1.4, ADR-0009 hygiene)', () => {
   it('restores the repo and revokes the token when the agent exits', async () => {
-    const { manager, spawner, hookServer, repo, request } = await rig()
+    const { manager, spawner, hookServer, home, repo, request } = await rig()
     await manager.spawn(request)
     const token = spawner.spawns[0]?.plan.env['EPH_HOOK_TOKEN'] ?? ''
-    expect(fs.existsSync(path.join(repo, CLAUDE_SETTINGS_REL))).toBe(true)
+    expect(fs.existsSync(harnessSettingsFor(home))).toBe(true)
+    // The repository was never written to in the first place (ADR-0026).
+    expect(fs.existsSync(path.join(repo, '.claude'))).toBe(false)
 
     await spawner.exit('agent.mason', 0)
 
+    expect(fs.existsSync(harnessSettingsFor(home))).toBe(false)
     expect(fs.existsSync(path.join(repo, '.claude'))).toBe(false)
     expect(manager.card('agent.mason').lifecycle).toBe('exited')
     expect(manager.card('agent.mason').exitCode).toBe(0)
@@ -298,7 +326,12 @@ describe('AgentManager — exit unwinds the spawn (FR-1.4, ADR-0009 hygiene)', (
     expect(delivery.status).toBe(401)
   })
 
-  it('restores a pre-existing settings file byte-for-byte on exit', async () => {
+  it('never touches a settings file the Architect already had (ADR-0026)', async () => {
+    // This used to be “restores it byte-for-byte on exit”, the best answer
+    // available while the harness had to write into somebody else’s repository.
+    // It does not any more, so the claim is upgraded rather than relaxed: the
+    // file is identical THROUGHOUT and no backup is ever taken — a restore that
+    // never has to run cannot run wrongly.
     const { manager, spawner, repo, request } = await rig()
     const settings = path.join(repo, CLAUDE_SETTINGS_REL)
     fs.mkdirSync(path.dirname(settings), { recursive: true })
@@ -306,6 +339,9 @@ describe('AgentManager — exit unwinds the spawn (FR-1.4, ADR-0009 hygiene)', (
     const before = fs.readFileSync(settings)
 
     await manager.spawn(request)
+    expect(fs.readFileSync(settings).equals(before)).toBe(true)
+    expect(fs.readdirSync(path.join(repo, '.claude'))).toEqual([path.basename(settings)])
+
     await spawner.exit('agent.mason', 1)
 
     expect(fs.readFileSync(settings).equals(before)).toBe(true)
@@ -364,7 +400,7 @@ describe('AgentManager — exit unwinds the spawn (FR-1.4, ADR-0009 hygiene)', (
 describe('AgentManager — missing binary (FR-1.6)', () => {
   it('runs the install offer in the agent own terminal and continues into the new binary', async () => {
     let installed = false
-    const { manager, spawner, repo, request } = await rig(async () =>
+    const { home, manager, spawner, repo, request } = await rig(async () =>
       installed ? '2.1.195' : null
     )
 
@@ -388,8 +424,11 @@ describe('AgentManager — missing binary (FR-1.6)', () => {
     }
     const envNames = Object.keys(installEnv).map((k) => k.toUpperCase())
     expect(envNames).toContain('PATH')
-    // Nothing is written into the repo until there is a binary to run.
+    // Nothing is installed anywhere until there is a binary to run — not into
+    // the repo, and (ADR-0026) not into the agent's own engine config directory
+    // either, which is where the settings actually go now.
     expect(fs.existsSync(path.join(repo, '.claude'))).toBe(false)
+    expect(fs.existsSync(harnessSettingsFor(home))).toBe(false)
 
     installed = true
     await spawner.exit('agent.mason', 0)
@@ -397,7 +436,7 @@ describe('AgentManager — missing binary (FR-1.6)', () => {
     expect(manager.card('agent.mason').lifecycle).toBe('running')
     expect(manager.card('agent.mason').engineVersion).toBe('2.1.195')
     expect(spawner.spawns[1]?.plan.argv[0]).toBe('claude')
-    expect(fs.existsSync(path.join(repo, CLAUDE_SETTINGS_REL))).toBe(true)
+    expect(fs.existsSync(harnessSettingsFor(home))).toBe(true)
   })
 
   it('shows a visible missing-binary state when the install did not help', async () => {

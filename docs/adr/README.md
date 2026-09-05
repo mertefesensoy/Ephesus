@@ -30,9 +30,18 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0022](./ADR-0022-company-identity-is-a-github-app.md) | The company identity is a GitHub App, not a machine user | accepted |
 | [ADR-0023](./ADR-0023-usage-aware-pacing.md) | Pace the company against the account's usage window, not a fixed budget | accepted |
 | [ADR-0024](./ADR-0024-claude-only-for-the-mvp.md) | The MVP ships one engine, and says so | accepted |
+| [ADR-0025](./ADR-0025-workspace-trust-covers-the-worktrees-an-activation-creates.md) | Workspace trust covers the worktrees an activation creates | accepted |
+| [ADR-0026](./ADR-0026-engine-isolation-and-the-harness-as-sole-hook-author.md) | Engine isolation, and the harness as the only hook author | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):
+
+- ADR-0026 Consequences, "That is owed, not built -- it is M8.7b, and until it
+  lands a crew working on this repository cannot reach `doc-guardian`,
+  `spec-verifier`, or the `/build-package` family" -- M8.7b LANDED the same day
+  (2026-09-05, `docs/implementations/2026-09-05-granted-tools.md`). A hire
+  template now declares `tools`, and the harness hands each granted directory
+  over as `--plugin-dir`. The rest of ADR-0026 stands as written.
 
 - ADR-0023 "writes each observation to `<home>/usage.json`" — as built, one
   report per agent at `<home>/usage/<agent>.json`. The account WINDOWS are

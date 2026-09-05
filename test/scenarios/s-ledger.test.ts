@@ -7,6 +7,7 @@ import { CostLedger, MemoryLedgerStore, type LedgerStore } from '../../src/main/
 import { BudgetWatcher, type BudgetedAgent } from '../../src/main/watch/budgets'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { cleanupHomes, startCompany, type Company } from './company'
+import { NO_TOOLS } from '../../src/shared/engine-tools'
 
 /**
  * **S-LEDGER** (TEST-STRATEGY §3): "cost folding across restart — the upstream
@@ -61,6 +62,8 @@ function budgeted(
     hookToken: 'scenario-token',
     hookEndpoint: company.hookServer.endpoint() ?? '',
     cwd,
+    engineConfigDir: path.join(company.home, 'engine-config', agentId),
+    tools: NO_TOOLS,
     commitIdentity: null,
     ghTokenCommand: '',
     envGrants: {},

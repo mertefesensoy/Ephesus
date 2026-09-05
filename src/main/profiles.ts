@@ -13,6 +13,7 @@ import {
 import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { AutonomyLevel, GateKind } from '../shared/gates'
+import { describeToolGrants, type ToolGrant } from '../shared/engine-tools'
 import type { SpawnRequest } from '../shared/agents'
 import type { RepoDerivation } from '../shared/repo-remote'
 import type { Trigger } from './scheduler'
@@ -362,6 +363,27 @@ export interface ProfileActivationOptions {
 export class ProfileActivations {
   private readonly live = new Map<string, ProfileInstance>()
 
+  /**
+   * Plans whose hires are being spawned RIGHT NOW (M8.7b).
+   *
+   * `AgentManager.spawnConfig` composes a hire's autonomy and its tool grants
+   * by asking this module, and it asks DURING the spawn -- the config is built
+   * before the process exists. An instance registered only after its last hire
+   * was up therefore answered `null` to every one of those questions, and every
+   * `null` has a quiet default behind it: `manual` autonomy, and no tools.
+   *
+   * The autonomy half was live and shipped. `claudePermissionMode` maps
+   * `manual` to `--permission-mode default`, so an Architect who granted a
+   * profile full autonomy went on answering the engine's permission prompt --
+   * the exact complaint `AgentSpawnConfig.autonomy` was added to answer at
+   * M7.7, unfixed for every agent that arrives through a profile, with a green
+   * suite either side of it because no test asked the question at spawn time.
+   *
+   * A SET, not one field: two activations can overlap, and a single slot would
+   * answer the second one's questions with the first one's plan.
+   */
+  private readonly activating = new Set<ActivationPlan>()
+
   constructor(private readonly options: ProfileActivationOptions) {}
 
   instances(): readonly ProfileInstance[] {
@@ -425,6 +447,24 @@ export class ProfileActivations {
     // (ADR-0021, M8.7).
     this.options.beforeHires?.(plan)
 
+    // Answerable from here until the instance is registered (or rolled back),
+    // because that whole window is when the spawn path asks about these hires.
+    this.activating.add(plan)
+    try {
+      return await this.hire(plan, instanceId)
+    } finally {
+      this.activating.delete(plan)
+    }
+  }
+
+  /**
+   * The spawn window: every hire up, every trigger armed, the instance
+   * registered. Split out so `activate` can hold `activating` across exactly
+   * this span with a `finally` -- a flag cleared on the happy path alone is one
+   * that leaks on every failure, and this one would leak a plan that answers
+   * for agents the roll-back has already killed.
+   */
+  private async hire(plan: ActivationPlan, instanceId: string): Promise<ActivationResult> {
     const spawned: string[] = []
     for (const hire of plan.hires) {
       try {
@@ -501,7 +541,17 @@ export class ProfileActivations {
       // reader asking why no incident was ever raised for this instance can
       // now answer it from `log.jsonl` alone, which was the whole of B7.
       repos: [...plan.repos],
-      reposFrom: plan.reposFrom
+      reposFrom: plan.reposFrom,
+      // What the company granted each hire, by the names the bundle used
+      // (M8.7b, ADR-0026). Names, not resolved paths, for the same reason
+      // `envGrants` logs names: the book of record says what was DECIDED, and
+      // a granted tool directory is a decision about what an agent may read as
+      // instructions.
+      toolGrants: Object.fromEntries(
+        plan.hires
+          .filter((hire) => hire.tools.length > 0)
+          .map((hire) => [hire.agentId, describeToolGrants(hire.tools)])
+      )
     })
     // An instance watching nothing is a mission that cannot work, and until
     // M8.5 that was the silent outcome of every activation there had ever been
@@ -555,10 +605,41 @@ export class ProfileActivations {
    * policy alone — NOT a default of `autonomous`, which is why this returns
    * null rather than a level.
    */
+  /**
+   * Contract: the tool grants an agent's hire declared, with the target they
+   * resolve against -- or null when the agent belongs to no profile.
+   *
+   * Null means "not a profile agent", and the caller then grants NOTHING. It
+   * deliberately does not mean "use a default set": ADR-0026's whole point is
+   * that a directory reaches an agent because a bundle named it.
+   */
+  toolsFor(
+    agentId: string
+  ): { readonly grants: readonly ToolGrant[]; readonly targetPath: string } | null {
+    const plan = this.planFor(agentId)
+    const hire = plan?.hires.find((row) => row.agentId === agentId)
+    if (!plan || !hire) return null
+    return { grants: hire.tools, targetPath: plan.targetPath }
+  }
+
   autonomyFor(agentId: string, kind: GateKind): AutonomyLevel | null {
+    return this.planFor(agentId)?.autonomy.find((row) => row.kind === kind)?.effective ?? null
+  }
+
+  /**
+   * Contract: the plan an agent belongs to -- live, or being spawned right now
+   * -- or null. Pure over this module's state.
+   *
+   * One place decides this, because two would eventually disagree about which
+   * agents a plan speaks for, and the disagreement would be invisible: both
+   * answers are plausible values, and the wrong one is a default.
+   */
+  private planFor(agentId: string): ActivationPlan | null {
     for (const instance of this.live.values()) {
-      if (!instance.agentIds.includes(agentId)) continue
-      return instance.plan.autonomy.find((row) => row.kind === kind)?.effective ?? null
+      if (instance.agentIds.includes(agentId)) return instance.plan
+    }
+    for (const plan of this.activating) {
+      if (plan.hires.some((hire) => hire.agentId === agentId)) return plan
     }
     return null
   }

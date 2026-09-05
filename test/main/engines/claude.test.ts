@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { HOOK_EVENTS } from '../../../src/shared/hooks'
 import {
   CLAUDE_HOOK_EVENTS,
-  CLAUDE_SETTINGS_BACKUP_REL,
-  CLAUDE_SETTINGS_REL,
+  CLAUDE_HARNESS_SETTINGS_REL,
+  claudeCredentialsDir,
+  CLAUDE_SETTINGS_BACKUP_SUFFIX,
   ClaudeAdapter,
   claudePermissionMode,
   mergeClaudeSettings
@@ -16,6 +17,7 @@ import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spa
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig } from '../../../src/main/engines'
 import { removeTempDir } from '../../tmpdir'
+import { NO_TOOLS } from '../../../src/shared/engine-tools'
 
 /**
  * Settings hygiene runs entirely inside temp cwds. Nothing here may touch the
@@ -35,6 +37,7 @@ interface Rig {
   readonly adapter: ClaudeAdapter
   readonly cfg: AgentSpawnConfig
   readonly cwd: string
+  readonly engineConfigDir: string
   readonly settingsPath: string
   readonly backupPath: string
 }
@@ -43,6 +46,10 @@ function rig(): Rig {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-claude-'))
   temps.push(root)
   const cwd = path.join(root, 'repo')
+  // ADR-0026: the harness's settings live in the agent's OWN engine config
+  // directory now, not inside the checkout. The rig names it so every
+  // assertion about where a file lands reads the same path the adapter uses.
+  const engineConfigDir = path.join(root, 'engine-config')
   const agora = path.join(root, 'agora', 'agents', 'agent.mason')
   fs.mkdirSync(cwd, { recursive: true })
   fs.mkdirSync(agora, { recursive: true })
@@ -61,13 +68,19 @@ function rig(): Rig {
   return {
     adapter,
     cwd,
-    settingsPath: path.join(cwd, CLAUDE_SETTINGS_REL),
-    backupPath: path.join(cwd, CLAUDE_SETTINGS_BACKUP_REL),
+    engineConfigDir,
+    settingsPath: path.join(engineConfigDir, CLAUDE_HARNESS_SETTINGS_REL),
+    backupPath: path.join(
+      engineConfigDir,
+      `${CLAUDE_HARNESS_SETTINGS_REL}${CLAUDE_SETTINGS_BACKUP_SUFFIX}`
+    ),
     cfg: {
       agentId: 'agent.mason',
       hookToken: 'spawn-token-1',
       hookEndpoint: '/tmp/eph/events.sock',
       cwd,
+      engineConfigDir,
+      tools: NO_TOOLS,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: { GH_TOKEN: 'granted-value' },
@@ -151,12 +164,25 @@ describe('claude adapter — spawn plan (SDD §3)', () => {
     expect(plan.env['EPH_HOOK_ENDPOINT']).toBe('/tmp/eph/events.sock')
     expect(plan.env['GH_TOKEN']).toBe('granted-value')
 
+    // ADR-0026: the agent's OWN engine install, and the Architect's credentials
+    // borrowed rather than copied. Asserted by value, not merely by presence —
+    // a config dir pointing anywhere else is an agent inheriting the
+    // Architect's hooks again, which is precisely what nothing would report.
+    expect(plan.env['CLAUDE_CONFIG_DIR']).toBe(cfg.engineConfigDir)
+    expect(plan.env['CLAUDE_SECURESTORAGE_CONFIG_DIR']).toBe(claudeCredentialsDir())
+
     // Everything else must be an allowlisted base variable — no ungranted
     // inheritance from the harness's own environment (ADR-0010).
     const harnessOnly = Object.keys(plan.env).filter(
       (key) =>
-        !['EPH_AGENT_ID', 'EPH_HOOK_TOKEN', 'EPH_HOOK_ENDPOINT', 'GH_TOKEN'].includes(key) &&
-        !AGENT_BASE_ENV_KEYS.includes(key.toUpperCase())
+        ![
+          'EPH_AGENT_ID',
+          'EPH_HOOK_TOKEN',
+          'EPH_HOOK_ENDPOINT',
+          'GH_TOKEN',
+          'CLAUDE_CONFIG_DIR',
+          'CLAUDE_SECURESTORAGE_CONFIG_DIR'
+        ].includes(key) && !AGENT_BASE_ENV_KEYS.includes(key.toUpperCase())
     )
     expect(harnessOnly).toEqual([])
   })
@@ -255,9 +281,9 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
   })
 
   it('backs up a pre-existing file and restores it byte-for-byte on uninstall', async () => {
-    const { adapter, cfg, settingsPath, backupPath, cwd } = rig()
+    const { engineConfigDir, adapter, cfg, settingsPath, backupPath } = rig()
     const original = '{\r\n  "permissions": { "allow": ["Bash(ls)"] }\r\n}\r\n'
-    fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true })
+    fs.mkdirSync(engineConfigDir, { recursive: true })
     fs.writeFileSync(settingsPath, original, 'utf8')
     const originalBytes = fs.readFileSync(settingsPath)
 
@@ -282,8 +308,8 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
   })
 
   it('keeps the Architect own hooks alongside ours', async () => {
-    const { adapter, cfg, settingsPath, cwd } = rig()
-    fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true })
+    const { engineConfigDir, adapter, cfg, settingsPath } = rig()
+    fs.mkdirSync(engineConfigDir, { recursive: true })
     fs.writeFileSync(
       settingsPath,
       JSON.stringify({
@@ -342,8 +368,8 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
   })
 
   it('refuses to overwrite a settings file it cannot parse', () => {
-    const { adapter, cfg, settingsPath, cwd } = rig()
-    fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true })
+    const { engineConfigDir, adapter, cfg, settingsPath } = rig()
+    fs.mkdirSync(engineConfigDir, { recursive: true })
     fs.writeFileSync(settingsPath, '{ this is not json', 'utf8')
 
     expect(() => adapter.wireHooks(cfg)).toThrow(/not valid JSON, refusing to overwrite/)
