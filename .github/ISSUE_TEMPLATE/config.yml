@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mertefesensoy/Ephesus/security/advisories/new
+    about: Please report security problems privately, never as a public issue.
+  - name: Read the design first
+    url: https://github.com/mertefesensoy/Ephesus/tree/main/docs
+    about: Requirements (SRS), decisions (ADRs), and design (SDD) — most "why is it like this" questions are answered there.
+  - name: Where the build currently stands
+    url: https://github.com/mertefesensoy/Ephesus/blob/main/docs/PROGRESS.md
+    about: Package-by-package progress with evidence, so you can see what is real today.

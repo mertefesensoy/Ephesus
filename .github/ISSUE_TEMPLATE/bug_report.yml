@@ -1,0 +1,91 @@
+name: Bug report
+description: Something behaves differently than the documentation says it should
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Ephesus is pre-alpha and built from source only, so the
+        most useful bug reports say exactly what you ran and exactly what you saw.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe? Paste terminal output or attach a screenshot if you have one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: If a document says it should behave differently, link the section — that makes this a much stronger report.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. npm install
+        2. npm run dev
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the city?
+      options:
+        - "Not sure"
+        - "Artemis — the orchestrator"
+        - "Hermes — messaging and routing"
+        - "The Agora — shared coordination on disk"
+        - "The Library — memory"
+        - "The Odeon — briefings, decks, memos"
+        - "The Harbor — GitHub, chat, webhooks"
+        - "The Herald — voice"
+        - "The Terraces — the 2D floor"
+        - "The Watch — gates, budgets, breaker"
+        - "The Gymnasium — self-improvement loop"
+        - "The Stoa — research"
+        - "Build, install, or tooling"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "Windows 11 26200 / macOS 15.2 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: "Output of `node --version`. The project targets Node 20."
+      placeholder: "v20.11.1"
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: "Output of `git rev-parse --short HEAD`."
+      placeholder: "1192711"
+    validations:
+      required: true
+
+  - type: textarea
+    id: checks
+    attributes:
+      label: Do the checks pass on your clone?
+      description: "Paste the tail of `npm run typecheck && npm run lint && npm test`. If they fail on a fresh clone, that is itself the bug and we want to know."
+    validations:
+      required: false

@@ -1,0 +1,54 @@
+name: Feature or change proposal
+description: Propose something Ephesus should do that it does not do yet
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ephesus is documentation-first: requirements live in the SRS, decisions in
+        ADRs, design in the SDD. A proposal that names where it would land is much
+        easier to say yes to.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is hard, impossible, or wrong today? Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What else you considered
+      description: What other approaches exist, and why is this one better? This section carries a lot of weight here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Where this lands in the documentation
+      description: "Which requirement, ADR, or SDD section does this touch or need? A best guess is fine — say \"not sure\" if you do not know."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Invariant check
+      description: "See BUILD-PROMPT.md section 3. Tick what applies — none of these disqualify a proposal, they just change the conversation."
+      options:
+        - label: This would need a new dependency (requires a decision memo)
+        - label: This would touch the renderer's access to Node or the filesystem
+        - label: This would add or change a file format that needs a schemaVersion
+        - label: This would introduce a new color, font, or spacing value
+        - label: This would change what an agent is allowed to write or commit
+        - label: I do not believe this touches any of the invariants

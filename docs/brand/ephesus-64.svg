@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" shape-rendering="crispEdges" role="img" aria-label="Ephesus">
+  <title>Ephesus — the Ionic column</title>
+  <rect x="0" y="0" width="64" height="64" fill="#221A14"/>
+  <rect x="2" y="2" width="60" height="60" fill="#F4EDE0"/>
+  <rect x="14" y="8" width="36" height="2" fill="#E8A987"/>
+  <rect x="14" y="10" width="36" height="2" fill="#C4552D"/>
+  <rect x="14" y="12" width="36" height="1" fill="#4A3B2C"/>
+  <rect x="16" y="13" width="32" height="6" fill="#C4552D"/>
+  <rect x="19" y="14" width="6" height="4" fill="#4A3B2C"/>
+  <rect x="20" y="15" width="4" height="2" fill="#E8A987"/>
+  <rect x="21" y="15" width="2" height="2" fill="#4A3B2C"/>
+  <rect x="39" y="14" width="6" height="4" fill="#4A3B2C"/>
+  <rect x="40" y="15" width="4" height="2" fill="#E8A987"/>
+  <rect x="41" y="15" width="2" height="2" fill="#4A3B2C"/>
+  <rect x="18" y="19" width="28" height="2" fill="#4A3B2C"/>
+  <rect x="22" y="21" width="1" height="29" fill="#221A14"/>
+  <rect x="42" y="21" width="1" height="29" fill="#221A14"/>
+  <rect x="23" y="21" width="4" height="29" fill="#E7DCC6"/>
+  <rect x="27" y="21" width="1" height="29" fill="#4A3B2C"/>
+  <rect x="28" y="21" width="4" height="29" fill="#E7DCC6"/>
+  <rect x="32" y="21" width="1" height="29" fill="#4A3B2C"/>
+  <rect x="33" y="21" width="4" height="29" fill="#D3C4A5"/>
+  <rect x="37" y="21" width="1" height="29" fill="#4A3B2C"/>
+  <rect x="38" y="21" width="4" height="29" fill="#4A3B2C"/>
+  <rect x="18" y="50" width="28" height="1" fill="#E7DCC6"/>
+  <rect x="18" y="51" width="28" height="1" fill="#D3C4A5"/>
+  <rect x="18" y="52" width="28" height="1" fill="#D3C4A5"/>
+  <rect x="20" y="53" width="24" height="2" fill="#4A3B2C"/>
+  <rect x="16" y="55" width="32" height="2" fill="#D3C4A5"/>
+  <rect x="16" y="57" width="32" height="1" fill="#4A3B2C"/>
+  <rect x="14" y="58" width="36" height="2" fill="#4A3B2C"/>
+</svg>
