@@ -137,7 +137,8 @@ const strip = [
       <div class="figs">
         {figures.map(([n, l]) => <div class="fig"><b>{n}</b><span>{l}</span></div>)}
       </div>
-      <p style="margin-top:26px">
+      <p class="asof">Counted from the repository on 5 September 2026.</p>
+      <p style="margin-top:20px">
         Every milestone closes on a run, not a checklist, and is audited by two independent passes —
         one verifying by execution, one checking conformance to the design.
       </p>
@@ -196,6 +197,9 @@ npm run dev</code></pre>
     .fig b {
       display: block; font-family: var(--pixel); font-size: 22px;
       color: var(--terracotta); line-height: 1.4;
+    }
+    .asof {
+      font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 12px;
     }
     .fig span {
       display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
