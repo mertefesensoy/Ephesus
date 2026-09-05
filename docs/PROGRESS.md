@@ -5305,8 +5305,8 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       roster/ledger/memory and the coordination state was the half that did not
       restore), SDD §2/§4.8/§7.9/§10/§12, TEST-STRATEGY S-BLACKOUT (amended: a
       scenario that restarts holding nothing cannot fail the way production
-      does), ENGINEERING-STANDARDS §7 (a new coverage subsystem row costs a CI
-      round-trip; never invent the other platform’s number), and the M8.8
+      does), ENGINEERING-STANDARDS §6.7 (a new coverage subsystem row costs a
+      CI round-trip; never invent the other platform’s number), and the M8.8
       implementation doc. **Floors deliberately NOT ratcheted** (`boot` now measures 20.75%
       lines against a 17.03% floor because covered modules joined it; a raise
       needs three corroborating runs of one tree). Owed, recorded not built:
