@@ -156,6 +156,22 @@ tests        3771 passed / 8 skipped (3779) across 199 files  [baseline 3703/8 (
 coverage     coverage floors ok (17 subsystems on win32; 22 untested modules, all recorded)
 ```
 
+**IT WAS RUN, NOT ONLY TESTED.** `npm run dev` twice over the Architect's own
+`~/.ephesus`. The first boot wrote `triggers.json` through the real store —
+`schemaVersion: 1` and four real triggers (`standup`, `retro`,
+`library.reflection`, `gym-metric-check`). The app was then killed and started
+again, and the second boot restored them and said so in the book of record:
+
+```json
+{"kind":"profile","event":"restored",
+ "detail":"restored the last-fired clock for 4 trigger(s)","ts":1788631839930,"seq":1224}
+```
+
+That is the whole path in the shipped app — boot, replay, restore, log entry —
+and not a scenario rig. It does NOT close M7's exit, which needs a real profile
+activated against a real target; it does close the question of whether this
+package's boot wiring works outside a test.
+
 **Reachability is the wiring proof.** 170/178 → 173/181 means all three new
 modules are loadable from the three electron-vite entry points — this is not
 another M6, where 1406 lines shipped that nothing could reach.

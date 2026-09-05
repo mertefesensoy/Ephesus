@@ -5284,6 +5284,16 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       reverted: `validateFloors` requires a floor per subsystem on every recorded
       platform, so the row could not land without a **linux** number this machine
       cannot measure, and inventing one is a figure without its condition.
+      **RUN, NOT ONLY TESTED:** `npm run dev` twice over the Architect's own
+      `~/.ephesus`. The first boot wrote `triggers.json` through the real store
+      (four real triggers: standup, retro, library.reflection, gym-metric-check);
+      the app was killed and started again, and the second boot restored them and
+      said so in the book of record —
+      `{"kind":"profile","event":"restored","detail":"restored the last-fired
+      clock for 4 trigger(s)","seq":1224}`. Boot → replay → restore → log entry,
+      in the shipped app rather than a rig. It does NOT close M7's exit, which
+      needs a real profile activated against a real target, but it does close the
+      question of whether this package's wiring works outside a test.
       **Production call path:** `src/main/index.ts` builds the three
       `JsonStateStore`s before any subsystem that writes to them, wires `persist`
       into `Scheduler`, `GateManager` and `ProfileActivations`, and calls
