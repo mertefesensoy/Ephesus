@@ -2072,7 +2072,10 @@ async function boot(): Promise<void> {
     // Measured before this existed: 21 of 79 wakes on this machine killed the
     // agent, and every one of those messages was archived as read.
     onExited: (agentId) => {
-      const returned = hermes?.returnInflight(agentId) ?? 0
+      // Everything the router remembers telling this session, forgotten: mail it
+      // was handed but never proved it read, and any task nudge it was given.
+      // The replacement session was told none of it.
+      const returned = hermes?.forgetSession(agentId) ?? 0
       if (returned > 0) {
         reportDegradation(
           `hermes/mail-returned:${agentId}`,

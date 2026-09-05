@@ -1387,6 +1387,25 @@ export class Hermes {
   }
 
   /**
+   * Contract: this agent's session is gone. Everything the router remembers
+   * telling it is forgotten, so the next session is told again. Returns the
+   * messages that came back to the inbox.
+   *
+   * One call for the whole of "what did we say to a process that no longer
+   * exists", because the parts are not independent and a caller that
+   * remembered one would forget the other. Found live on 2026-09-06: a task
+   * nudge went to an agent the activation unwind killed a second later, and
+   * the replacement session was never nudged — `nudgedTasks` still held the
+   * announcement made to a process that never read it. Mail already had the
+   * answer (`returnInflight`); tasks did not.
+   */
+  forgetSession(agentId: string): number {
+    this.nudged.delete(agentId)
+    this.nudgedTasks.delete(agentId)
+    return this.returnInflight(agentId)
+  }
+
+  /**
    * Contract: the session this mail was handed to is gone, so it was never
    * read. `.inflight/` → `inbox/`, where it is pending again and the next wake
    * redelivers it. Returns how many came back.

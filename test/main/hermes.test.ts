@@ -1467,6 +1467,44 @@ describe('Hermes — an assigned task wakes an idle agent', () => {
     expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
   })
 
+  /**
+   * Found live on 2026-09-06, by the run that was meant to prove the fix.
+   *
+   * A task nudge went to an agent the activation unwind killed a second later.
+   * The replacement session was never nudged, because `nudgedTasks` still held
+   * an announcement made to a process that never read it. Mail already had the
+   * answer in `returnInflight`; the task set did not, and "we told them" has to
+   * mean "we told a session that still exists".
+   */
+  it('a respawned agent is told again — the dead session was told, not this one', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+
+    await r.hermes.wakeCheck()
+    expect(t.nudges).toHaveLength(1)
+
+    // The session it was handed to dies.
+    r.hermes.forgetSession('agent.b')
+
+    await r.hermes.wakeCheck()
+    expect(t.nudges).toHaveLength(2)
+  })
+
+  it('forgetSession returns in-flight mail as well as clearing the nudge', async () => {
+    const t = taskRig([])
+    const r = await rig(t.options)
+    const sent = message()
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+    expect(r.inflight('agent.b')).toHaveLength(1)
+
+    expect(r.hermes.forgetSession('agent.b')).toBe(1)
+
+    expect(r.inbox('agent.b')).toEqual([`${sent.id}.json`])
+    expect(r.inflight('agent.b')).toEqual([])
+  })
+
   it('does nothing for an agent with neither mail nor tasks', async () => {
     const t = taskRig([])
     const r = await rig(t.options)
