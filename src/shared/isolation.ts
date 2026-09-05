@@ -72,6 +72,7 @@ export const DEFAULT_ISOLATION: IsolationMode = 'worktree'
 
 /** Which layer supplied the declared mode, so the screen can attribute it. */
 export const ISOLATION_SOURCES = ['hire', 'profile', 'default'] as const
+export const isolationSourceSchema = z.enum(ISOLATION_SOURCES)
 export type IsolationSource = (typeof ISOLATION_SOURCES)[number]
 
 /**
@@ -111,6 +112,27 @@ export interface ComposedIsolation {
    */
   readonly because: string
 }
+
+/**
+ * The same row, as data on disk (M8.8).
+ *
+ * A restart restores the activation plan verbatim, so every part of it needs a
+ * validator. `sameShape` below is what keeps this honest: adding a field to
+ * `ComposedIsolation` without adding it here stops compiling, so a plan can
+ * never be persisted with a field the next boot silently drops.
+ */
+export const composedIsolationSchema = z
+  .object({
+    hire: z.string().min(1).max(64),
+    agentId: z.string().min(1).max(128),
+    declared: isolationModeSchema,
+    declaredFrom: isolationSourceSchema,
+    effective: isolationModeSchema,
+    relaxed: z.boolean(),
+    tightened: z.boolean(),
+    because: z.string()
+  })
+  .strict()
 
 export interface IsolationInput {
   readonly hire: string

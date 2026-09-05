@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AUTONOMY_RANK,
   GATE_KINDS,
+  autonomyLevelSchema,
   composeAutonomy,
   type AutonomyLevel,
   type GateKind
@@ -12,21 +13,23 @@ import {
   profileNameSchema,
   requestedAutonomy,
   targetKindSchema,
+  triggerEventSchema,
   VERIFIER_HIRE,
   type ProfileAutonomy,
   type ProfileBundle,
   type TargetKind,
   type TriggerEvent
 } from './profile'
-import type { SpawnRequest } from './agents'
+import { spawnRequestSchema, type SpawnRequest } from './agents'
 import {
   activationIsolationSchema,
+  composedIsolationSchema,
   composeIsolation,
   type ActivationIsolation,
   type ComposedIsolation
 } from './isolation'
-import { DEFAULT_EXIT_POLICY, type ExitPolicy } from './respawn'
-import type { ToolGrant } from './engine-tools'
+import { DEFAULT_EXIT_POLICY, exitPolicySchema, type ExitPolicy } from './respawn'
+import { toolGrantSchema, type ToolGrant } from './engine-tools'
 import type { RepoDerivation } from './repo-remote'
 
 /**
@@ -716,3 +719,114 @@ export function watchedRepos(
 ): readonly string[] {
   return [...new Set(instances.flatMap((instance) => instance.plan.repos))].sort()
 }
+
+/**
+ * The activation plan, as data on disk (M8.8).
+ *
+ * A restart restores the plan VERBATIM rather than re-deriving it: the plan
+ * records what the Architect actually approved, and re-deriving would let a
+ * bundle edited between activation and restart silently change autonomy or
+ * grants. "Restore exactly" (NFR-5) is a claim about the approved plan, not
+ * about the current contents of `profiles/`.
+ *
+ * Drift is disclosed instead: `profileVersion` is compared against the
+ * bundle's current version at boot -- a number comparison, no git, no async --
+ * and a difference is reported rather than acted on.
+ *
+ * Every schema below mirrors an interface above it, and `test/shared/
+ * activation-plan-schema.test.ts` proves the two describe the same shape at
+ * COMPILE time. Adding a field to the interface without adding it here stops
+ * the typecheck, because the alternative -- a plan persisted with a field the
+ * next boot silently drops -- is exactly the class of defect this milestone
+ * exists to remove.
+ */
+export const composedAutonomySchema = z
+  .object({
+    kind: z.enum(GATE_KINDS),
+    global: autonomyLevelSchema,
+    requested: autonomyLevelSchema,
+    effective: autonomyLevelSchema,
+    clamped: z.boolean()
+  })
+  .strict()
+
+export const plannedHireSchema = z
+  .object({
+    agentId: z.string().min(1).max(128),
+    hire: z.string().min(1).max(64),
+    hireRef: z.string().min(1).max(160),
+    spawn: spawnRequestSchema,
+    isolation: composedIsolationSchema,
+    onExit: exitPolicySchema,
+    tools: z.array(toolGrantSchema)
+  })
+  .strict()
+
+export const plannedTriggerSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    when: z.string(),
+    everyMs: z.number().int().positive().nullable(),
+    event: triggerEventSchema.nullable(),
+    agentId: z.string().min(1).max(128),
+    playbook: z.string()
+  })
+  .strict()
+
+export const activationPlanSchema = z
+  .object({
+    instanceId: z.string().min(1).max(128),
+    profile: z.string().min(1).max(64),
+    profileVersion: z.number().int().nonnegative(),
+    targetRef: z.string(),
+    targetPath: z.string().min(1).max(4096),
+    hires: z.array(plannedHireSchema),
+    envGrants: z.array(z.string()),
+    grantsUnavailable: z.array(z.string()),
+    autonomy: z.array(composedAutonomySchema),
+    triggers: z.array(plannedTriggerSchema),
+    memoRequires: z.array(z.string()),
+    repos: z.array(z.string()),
+    reposFrom: z.enum(['architect', 'bundle', 'target', 'none']),
+    reposBecause: z.string(),
+    playbooks: z.array(z.string())
+  })
+  .strict()
+
+/**
+ * One live instance, as the restart record holds it.
+ *
+ * `agentIds` is kept even though the crew is NOT respawned (the Architect's
+ * 2026-09-05 decision): it is what `planFor` matches on, so an agent the
+ * Architect rehires by hand still finds its plan, its tool grants and its
+ * autonomy. Dropping it would restore an activation that composed nothing.
+ */
+export const profileInstanceSchema = z
+  .object({
+    instanceId: z.string().min(1).max(128),
+    plan: activationPlanSchema,
+    agentIds: z.array(z.string().min(1).max(128)),
+    crew: z.enum(['live', 'down']),
+    armed: z.array(z.string().min(1).max(128)),
+    pendingEvents: z.array(
+      z.object({ id: z.string().min(1).max(128), event: z.string() }).strict()
+    ),
+    activatedAt: z.string().min(1)
+  })
+  .strict()
+
+export const ACTIVATIONS_REL = 'activations.json'
+
+export const activationsRecordSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    instances: z.array(profileInstanceSchema)
+  })
+  .strict()
+  .refine(
+    (value) =>
+      new Set(value.instances.map((row) => row.instanceId)).size === value.instances.length,
+    'duplicate instanceId'
+  )
+export type ActivationsRecord = z.infer<typeof activationsRecordSchema>
+export const EMPTY_ACTIVATIONS: ActivationsRecord = { schemaVersion: 1, instances: [] }
