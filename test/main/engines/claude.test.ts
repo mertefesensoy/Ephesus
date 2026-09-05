@@ -11,7 +11,8 @@ import {
   CLAUDE_SETTINGS_BACKUP_SUFFIX,
   ClaudeAdapter,
   claudePermissionMode,
-  mergeClaudeSettings
+  mergeClaudeSettings,
+  CLAUDE_FILE_RULE_TOOLS
 } from '../../../src/main/engines/claude'
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
 import { PromptStore } from '../../../src/main/prompts'
@@ -298,7 +299,10 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
     // The Architect's own rule survives, with the mailbox grant merged in
     // beside it — never replacing it.
     expect(installed.permissions.allow[0]).toBe('Bash(ls)')
-    expect(installed.permissions.allow.some((rule) => rule.startsWith('Write('))).toBe(true)
+    // `Edit(` is the probe because it is the rule that actually grants: the
+    // engine matches file rules by exact tool name and only ever looks up
+    // `Edit` and `Read`.
+    expect(installed.permissions.allow.some((rule) => rule.startsWith('Edit('))).toBe(true)
     expect(installed.permissions.additionalDirectories).toHaveLength(1)
 
     await plan.uninstall()
@@ -388,9 +392,14 @@ describe('claude adapter — the mailbox grant (FR-3.2)', () => {
     const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
 
     expect(written.permissions.additionalDirectories).toEqual([agentDir])
+
+    // The shape the ENGINE actually matches, not the shape that reads well.
+    // Claude Code filters its rule table by `toolName === n` (exact equality)
+    // and only ever asks for `'Edit'` (every file-editing tool) or `'Read'`
+    // (every file-reading tool). `Edit` is therefore the rule that keeps the
+    // outbox writable, and ADR-0013's autonomy loop rests on it.
+    expect(written.permissions.allow).toContain(`Edit(${agentDir}/**)`)
     expect(written.permissions.allow).toContain(`Read(${agentDir}/**)`)
-    expect(written.permissions.allow).toContain(`Write(${agentDir}/**)`)
-    expect(written.permissions.allow).toContain(`Glob(${agentDir}/**)`)
     // Never the Agora, never `agents/`, never a sibling mailbox — single-writer-
     // per-file has to survive the grant that makes the mailbox usable at all.
     // Every rule is scoped to THIS agent's own directory and nothing above it.
@@ -403,6 +412,37 @@ describe('claude adapter — the mailbox grant (FR-3.2)', () => {
       expect(rule).not.toContain(`${parent}/**`)
     }
     expect(written.permissions.additionalDirectories).not.toContain(parent)
+
+    await plan.uninstall()
+  })
+
+  // The half that `toContain` cannot express. A grant is wrong in two
+  // directions, and only one of them is a missing rule: a rule the engine never
+  // looks up is worse than absent, because it reads like a grant, it survives
+  // review, and it makes the one load-bearing rule beside it look redundant.
+  // Adding `Write(<dir>/**)` back — the single most plausible future edit here,
+  // since the tool the agent calls IS `Write` — must fail this test.
+  it('writes no rule the engine will silently ignore', async () => {
+    const { adapter, cfg, settingsPath } = rig()
+    const plan = adapter.wireHooks(cfg)
+    await plan.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[] }
+    }
+    const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
+    const mine = written.permissions.allow.filter((rule) => rule.includes(agentDir))
+
+    expect(mine.length).toBeGreaterThan(0)
+    for (const rule of mine) {
+      const toolName = rule.slice(0, rule.indexOf('('))
+      expect(CLAUDE_FILE_RULE_TOOLS).toContain(toolName)
+    }
+    // Named individually so a failure says which decoy came back rather than
+    // only that the set changed.
+    for (const inert of ['Write', 'Glob', 'Grep', 'LS', 'NotebookEdit', 'MultiEdit']) {
+      expect(mine).not.toContain(`${inert}(${agentDir}/**)`)
+    }
 
     await plan.uninstall()
   })
@@ -520,9 +560,13 @@ describe('several agents sharing one working directory (live-run regression)', (
       allow: string[]
       additionalDirectories: string[]
     }
-    // Seven file tools per agent, three agents, none repeated.
-    expect(permissions.allow).toHaveLength(21)
-    expect(new Set(permissions.allow).size).toBe(21)
+    // One rule per matched file-rule tool per agent, three agents, none
+    // repeated. Derived rather than hardcoded: the count is a consequence of
+    // the grant's shape, and pinning the number here would make a future
+    // change to that shape look like a broken crew merge.
+    const expected = CLAUDE_FILE_RULE_TOOLS.length * crew.length
+    expect(permissions.allow).toHaveLength(expected)
+    expect(new Set(permissions.allow).size).toBe(expected)
     expect(permissions.additionalDirectories).toHaveLength(3)
     for (const agentId of crew) {
       expect(permissions.additionalDirectories).toContain(agentDirOf(r, agentId))

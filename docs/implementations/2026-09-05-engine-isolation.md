@@ -185,10 +185,14 @@ rather than leaving repository skills hidden.
 - **This repository's own hooks no longer run for hired agents** —
   `on-stop-check.sh` and `post-edit.sh`. If the company still wants those
   checks, the company must own them.
-- **Noticed in passing, not fixed:** the engine warned that the mailbox grant's
+- **Noticed in passing, since fixed:** the engine warned that the mailbox grant's
   `Write(<dir>/**)` allow-rule "is not matched by file permission checks — only
-  `Edit(...)`". That predates this package and belongs with whoever next touches
-  `mailboxPermissions`.
+  `Edit(...)`". Closed in
+  [2026-09-05-mailbox-grant-rule-shape.md](2026-09-05-mailbox-grant-rule-shape.md):
+  the engine matches file rules by exact tool name and only ever looks up `Edit`
+  and `Read`, so five of the grant's seven rules were inert. The outbox write
+  itself was never broken — `Edit` was already in the list — but the grant is now
+  the two rules that carry it, and a test refuses any rule the matcher ignores.
 - `~/.ephesus/engines/` grows one directory per agent, holding that agent's
   transcripts. Reaping it belongs with decommissioning.
 
