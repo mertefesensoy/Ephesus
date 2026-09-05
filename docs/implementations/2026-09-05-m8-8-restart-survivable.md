@@ -1,207 +1,235 @@
 # M8.8 — a restart is survivable
 
-**Status: PLAN, under execution.** Written before any code, per
-ENGINEERING-STANDARDS. Evidence sections are marked `PENDING` and are filled as
-each part lands; nothing here is a claim until its section says so.
-
 ## Problem
 
-The company's coordination state is one set of in-memory maps with no boot
-replay, so a restart silently un-hires it. Verified at `2dfb0c6`:
+The company's coordination state was in-memory maps with no boot replay, so a
+restart silently un-hired it. Two consequences were worse than "state is lost".
 
-| State | Holder | Durable today |
-|---|---|---|
-| Activations | `ProfileActivations.live` | no |
-| Open + settled gates | `GateManager.open` / `.settled` | no — but the block id is in `tasks.json` |
-| Trigger last-fired | `Scheduler.triggers[].lastFiredMs` | no |
-| Incident correlation | `IncidentEndpoint.raised` / `.awaiting` | no |
-| Capacity parks | `CapacityWatch.parks` | no |
-| Breaker rungs 1–2 | `Breaker.agents` | no |
-| Breaker rung-3 stops | `~/.ephesus/breaker-stops.json` | **yes** (M8.6) |
-| Roster and agent status | `registry.json` | **yes** |
-
-The register recorded "breaker rungs" as lost wholesale. That is half right and
-the correction matters: rung-3 **stops** already survive through
-`FileBreakerStopStore`, and this package must not re-solve them. It is the
-rung 1–2 ladder position that evaporates.
-
-Two consequences are worse than "state is lost".
-
-**A gate opened at 3am blocks its task forever.** The gate is in memory; the
+**A gate opened at 3am blocked its task forever.** The gate was in memory; the
 BLOCK is durable — `tasks.json` carries `task.gates`, and `src/shared/tasks.ts`
-refuses `done` while that array is non-empty. After a restart the queue is empty
-and the block is not, so the task can never close and there is no way back but
-hand-editing the book of record.
+refuses `done` while that array is non-empty. After a restart the approvals
+queue was empty and the block was not, so the task could never close and there
+was no way back but hand-editing the book of record.
 
-**Nothing says the watch stopped.** The Harbor stops watching, every armed
-trigger is gone, and profile autonomy stops composing into gates — with no
-degradation raised anywhere. The company looks healthy and is not, which is the
-recurring defect of this codebase (a check that cannot fail) in its most
-expensive form.
+**Nothing said the watch had stopped.** The Harbor stopped watching, every armed
+trigger was gone, and profile autonomy stopped composing into gates — with no
+degradation raised anywhere. The company looked healthy and was not.
 
-M8.7 raised the stakes: a restart must now also answer for engine config
-directories, tool grants, and `planFor` for replayed agents.
+## What the register got right, and what it did not
 
-## Architect decisions taken for this package (2026-09-05)
+The 2026-09-02 register listed five things as lost. **Two needed durability.
+Three did not, and building stores for them would have added state the tree
+already answers better.** Each refutation is a decision already recorded in the
+code, found by reading it rather than by trusting the list.
 
-Both were put with their alternatives and their costs before any code:
+| Register item | Verdict |
+|---|---|
+| Activations | **Lost.** Now durable. |
+| Open gates + verdicts | **Lost.** Now durable. |
+| Trigger last-fired | **Lost.** Now durable. |
+| Incident correlation | **Not lost — deliberate.** |
+| Capacity parks | **Not lost — derived.** |
+| Breaker rungs 1–2 | **Not lost — an observation about a dead process.** |
+
+- **Incident correlation** is in memory *by a recorded decision* (`incidents.ts`,
+  the `raised` set): a restart SHOULD re-raise a still-failing incident, because
+  nobody can be sure the earlier triage request survived in an inbox, and a
+  duplicate incident is a cheap failure while a dropped one is the subsystem not
+  working. Persisting it would have quietly reversed that decision.
+- **Capacity parks** are derived, not held. `CapacityWatch` re-reads the tail of
+  each transcript every tick and re-parks from the same refusal record — that is
+  exactly what its `handled` set exists to deduplicate — and it iterates LIVE
+  agents, of which a restart has none. *Known bounded loss, recorded not fixed:*
+  the retry `attempts` rung resets, so the first retry after a restart comes
+  sooner than the ladder intended; the next refusal re-parks one rung higher, so
+  it self-corrects.
+- **Breaker rungs 1–2** are computed from a process's own turn spans. A rehired
+  agent is a new process that has not looped, has not errored and has no hop
+  escalations, so restoring a rung onto it would assert a condition that is not
+  true of it. Rung-3 **stops** are different in kind — a standing decision about
+  an agent *identity* — which is precisely why M8.6 persisted those and only
+  those. The register recorded "breaker rungs" as lost wholesale; that is half
+  right, and the half matters.
+
+## Architect decisions (2026-09-05)
+
+Both were put with their alternatives and their costs before any code was written.
 
 1. **Per-subsystem stores plus one replay module** — not a single `session.json`
-   snapshot, and not a rebuild from `log.jsonl`. Recorded in *Design decisions*.
-2. **Restore the activation; do NOT auto-respawn the crew.** `--resume` is a
-   follow-on and is stated as owed below, not quietly skipped.
+   snapshot (which would tie fast-changing state to slow-changing state
+   permanently, and lose everything to one corrupt file), and not a rebuild from
+   `log.jsonl` (a good milestone, but rotation is M8.10 and unbuilt, an overnight
+   log already parses in 306 ms on the main loop, and some state is not in the
+   log at all).
+2. **Restore the activation; do NOT auto-respawn the crew.** Without engine
+   session recovery a respawned agent is amnesiac: it re-reads its mailbox and
+   redoes in-flight work, which is the double-processing SRS §6 criterion 6
+   forbids. `--resume` is owed, stated below, not quietly skipped.
+
+## What changed
+
+| File | Change |
+|---|---|
+| `src/main/state-store.ts` | **New.** `JsonStateStore<T>`: one durable-record mechanism, generalising the M8.6 breaker-stop store. |
+| `src/main/restore.ts` | **New.** The boot replay — owns the order and the reporting; `activationsRecord` owns the one cast. |
+| `src/shared/restart.ts` | **New.** The trigger-clock record, and the three refutations above written where the next reader will look. |
+| `src/shared/profile-activation.ts` | Plan schemas (`activationPlanSchema` and four composites) + `activationsRecordSchema`. |
+| `src/shared/gates.ts` | `gatesRecordSchema`, `SETTLED_GATE_LIMIT`, and the pure `reconcileGates`. |
+| `src/shared/degradation.ts` | New `restart` degradation source. |
+| `src/main/profiles.ts` | `ProfileInstance.crew`, `restore()`, `persist` seam; `activate` takes over a `down` instance. |
+| `src/main/watch/gates.ts` | `persist` seam, `restore()`, bounded settled list. |
+| `src/main/scheduler.ts` | One last-fired clock (was two), `restore()`, `persist` seam. |
+| `src/main/index.ts` | The three stores, the three `persist` wirings, and the replay call. |
+| `scripts/coverage-floors.json` | The three new modules assigned to `boot`. |
+| `test/scenarios/s-blackout.test.ts` | Restarts holding an activation, a gate and a trigger clock. |
 
 ## Implementation approach
 
-### Five stores, one shape
+### Absent is not damaged
 
-Each store follows `FileBreakerStopStore` exactly — the M8.6 precedent — so
-there is no new pattern to learn: a zod schema with `schemaVersion`, an atomic
-`writeFileAtomic` (temp + rename, invariant), `ENOENT` means empty, and a
-malformed record is never silently treated as absence.
+`JsonStateStore.load` never throws — boot runs before the window exists, and a
+throw there is a dead app rather than a degraded one (FR-5.4). It returns three
+outcomes, and the distinction between the last two is the whole point:
 
-| File under `~/.ephesus/` | Holds | Written on |
-|---|---|---|
-| `activations.json` | live `ProfileInstance[]` | activate, deactivate |
-| `gates.json` | open gates and settled verdicts | open, settle |
-| `triggers.json` | trigger id → `lastFiredMs` | fire |
-| `parks.json` | capacity parks | park, resume, clear |
-| `incidents.json` | raised ids and awaiting correlation | raise, settle |
+- absent → `{ ok: true, value: empty, seeded: false }` — an ordinary first run.
+- parsed → `{ ok: true, value, seeded: true }`.
+- damaged → `{ ok: false, because }` — state exists that can no longer be read.
 
-App-local, outside the Agora, for the same reason breaker stops are: this is
-harness state, no agent reads it, and committing a gate-open record to git on
-every gate would churn the book of record.
+Collapsing absent into damaged is how a restart that restored nothing looks
+healthy. `save` validates *before* writing, because a store that can write what
+it cannot load is a restart failure with a one-boot delay.
 
-None of these is a hot path. The scheduler writes on **fire**, not on tick, so
-the per-file layout costs no more renames than the state actually changes.
+`FileBreakerStopStore` is deliberately NOT migrated onto this: its `load` throws
+by design, because a breaker stop that cannot be read must block every start
+rather than degrade. That is a safety contract this class does not offer, and
+the duplication is a decision rather than an oversight.
 
-### One replay module owns the order
+### `crew`, and why it is a field
 
-New `src/main/restore.ts`. It never throws, returns a report of what was
-restored and what was not, and the caller reports every failure through the
-M8.2 degradation channel. The order is load-bearing:
+A restored instance comes back with `crew: 'down'`. Two things depend on it and
+both are silent when wrong:
 
-1. **Triggers first.** `Scheduler.register` preserves an existing entry's
-   `lastFiredMs` (`scheduler.ts:77`), so seeding last-fired *before* activations
-   re-arm is what stops a restored trigger from firing immediately.
-2. **Activations.** Re-registers each instance into `live`, which re-arms its
-   triggers against the seeded clock and rebinds Harbor watching.
-3. **Gates**, then reconciled against `tasks.json` (below).
-4. **Parks**, then **incidents.**
+- An armed schedule trigger wakes `trigger.agentId`. Arming one for an agent
+  that does not exist is a wake into the void once per interval, forever.
+- `activate` refuses a duplicate instance (FR-9.4). Without `crew`, a restored
+  instance would block the very reactivation that brings its crew back — the
+  restore would have replaced one stuck state with a worse one. A `down`
+  instance is taken over; a `live` one is still refused.
 
-### What M8.7 needs, and what it does not
+### The plan is restored verbatim
 
-- **Engine config directories need no persistence.** `engineConfigDir(root,
-  engineId, agentId)` is pure, so boot recomputes the identical path. That is
-  precisely why M8.7 collapsed it to one function, and this package must not add
-  a second source of truth for it.
-- **Tool grants ride the restored plan.** `toolsFor` reads `planFor(agentId)`,
-  and `planFor` walks `this.live` — so putting the instance back in `live` makes
-  grants and autonomy answer for replayed agents with no further wiring. A test
-  must pin that, because it is the kind of thing that is true by accident.
+`ActivationPlan` is persisted as-is rather than re-derived: it records what the
+Architect approved, and re-deriving would let a bundle edited between activation
+and restart silently change autonomy or grants. "Restore exactly" (NFR-5) is a
+claim about the approved plan, not about the current contents of `profiles/`.
 
-### Gate reconciliation against `tasks.json`
+### The gate reconcile reports and never releases
 
-Restoring `gates.json` is not enough; the durable half must agree with it. For
-every task carrying `task.gates`:
+`reconcileGates` is pure and total. A durable block whose gate is in neither the
+open nor the settled set is an **orphan**, reported by task id. Auto-clearing it
+would approve an action no human ever saw (NFR-9), so it discloses only.
 
-- an id in neither the restored open set nor the settled set is an **orphan
-  block** — the exact defect above. Reported by task id and gate id.
-- a restored open gate whose task no longer lists it is **stale** — dropped and
-  reported.
+`settled` is restored as well as `open`, and that half is what stops
+double-processing: `decide` answers "was already approved" from it, and a
+restart that dropped it turned every answered gate back into "no open gate" — a
+different answer to the same question. It is bounded at 1000, newest kept.
 
-Orphans become impossible for gates opened after this package lands, so the
-remedy here is disclosure, not an automatic release: auto-clearing a block whose
-gate cannot be reconstructed would be a deny-by-default hole (NFR-9). An
-explicit Architect-only release action is recorded as owed.
+### One clock, not two that must agree
 
-### Restoring exactly, without pretending a bundle never changed
-
-`ActivationPlan` is plain data and carries `profileVersion`, so the recorded plan
-is restored **verbatim** — that is what NFR-5's "restore exactly" means, and
-re-deriving would let a bundle edited between activation and restart silently
-change autonomy or grants.
-
-Drift is then disclosed rather than acted on: the recorded `profileVersion` is
-compared against the bundle's current version on disk — a string compare, no git,
-no async — and a difference is reported as "the bundle changed since activation;
-reactivate to pick it up". Re-deriving the plan at boot would need a git call per
-activation and would fail offline, for an answer the Architect has not asked for.
-
-### Failure modes, per store
-
-Following the breaker-stops rule (*missing on first use means empty; malformed,
-unsupported or unreadable is latched and reported, never treated as absence*),
-with the consequence spelled out per store because they differ:
-
-| Store malformed | Behaviour | Risk disclosed |
-|---|---|---|
-| `gates.json` | no block is cleared; refuse to settle until repaired | safety-critical: we no longer know what is held, and deny-by-default says assume it is |
-| `activations.json` | nothing restored; company returns un-hired and says so | the watch is off until reactivated |
-| `triggers.json` | last-fired not seeded | a trigger may fire earlier than due — duplicated work |
-| `parks.json` | parks not restored | a parked agent returns unparked and may re-hit the limit; self-correcting |
-| `incidents.json` | correlation not restored | an incident may be raised twice |
-
-## Design decisions
-
-**Per-subsystem files over one `session.json`.** A single snapshot buys one
-atomic write and therefore the guarantee that half a company can never be
-restored — genuinely the failure NFR-5 is about. It was rejected on write
-coupling: it permanently ties fast-changing state (parks, last-fired) to
-slow-changing state (activations), so every park rewrites the activation record,
-and one corrupt file costs everything at once. Per-subsystem files match the six
-durable files the tree already has, and the consistency property is recovered by
-giving the *order* an owner (`restore.ts`) rather than giving the *bytes* one.
-
-**Not a rebuild from `log.jsonl`.** NFR-13 claims every autonomous action is
-reconstructible from the log alone, so this would prove the invariant rather
-than work around it — the strongest argument for it, and the reason it is
-recorded here rather than dismissed. Rejected for M8.8 on three grounds: log
-rotation is M8.10 and unbuilt, with a synthetic overnight already at 28.4 MB and
-306 ms per parse on the main loop; some state is not in the log at all
-(capacity's `handled`, the `activating` set); and folding events forward must
-cope with a torn final write. It is a milestone, not a mechanism to smuggle into
-this one.
-
-**Restore without respawn.** Acceptance criterion 6 (SRS §6) requires that on
-restart "no message is double-processed". Without `--resume` a respawned agent
-is amnesiac: it re-reads its mailbox and redoes in-flight work, so auto-respawn
-would introduce the exact fault the package exists to prevent. The floor shows
-the crew down with the reason and offers a rehire. When `--resume` lands, this
-becomes auto-respawn without changing the restore.
+The scheduler's last-fired time began as a second copy beside
+`Registered.lastFiredMs`. A mutation pass proved the pair unfalsifiable: `tick`
+wrote both to the same value, so no test could tell which one `add` preferred.
+Two fields that can never disagree are one field with a latent bug, so the
+duplicate was removed rather than a contrived test written for it. **The
+surviving mutant was the evidence, and the fix was in the production code.**
 
 ## Verification
 
-`PENDING` — filled as each part lands. The bar for this package:
+Run at `2dfb0c6` + this branch, on win32:
 
-- **S-BLACKOUT must restart with an agent, a gate, an activation and an armed
-  trigger LIVE.** Today it restarts with none of them (`liveAgents: () => []`, a
-  fresh `GateManager` over `denyAllPolicy`), which is why this whole class was
-  invisible to a green suite. Changing that fixture is the package's central
-  test, not a supporting one.
-- A restored activation answers `toolsFor` and `autonomyFor` for its agents —
-  the M8.7 seam, asked where production asks it.
-- A task blocked by a gate id present in no store is reported by task id.
-- Each store's malformed case asserts the *behaviour* in the table above, not
-  merely that a parse threw.
-- Mutation pass over every new guard, each mutation killed by a named test and
-  reverted.
+```
+typecheck    green (all four projects)
+lint         green
+invariants   ok — reachability 173/181 (was 170/178: all three new modules reachable)
+attribution  ok — 343 commits, 199 on main's first-parent chain
+tests        3771 passed / 8 skipped (3779) across 199 files  [baseline 3703/8 (3711), 194 files]
+coverage     coverage floors ok (17 subsystems on win32; 22 untested modules, all recorded)
+```
+
+**Reachability is the wiring proof.** 170/178 → 173/181 means all three new
+modules are loadable from the three electron-vite entry points — this is not
+another M6, where 1406 lines shipped that nothing could reach.
+
+**68 new tests**, and the scenario is the one that matters: S-BLACKOUT now
+restarts holding an activation, a gate and a trigger clock. Every case above it
+restarts a company holding NOTHING (`liveAgents: () => []`, a fresh deny-all
+`GateManager`), which is why this entire class of defect was invisible to a
+green suite for the whole life of the project.
+
+**32 mutations, every one killed or resolved**, each reverted:
+
+- 9 over the activation restore (arming a restored trigger, restoring `crew` as
+  live, displacing a live instance, dropping each persist, the rehire path).
+- 10 over the gates (dropping either persist, dropping the settled half,
+  re-announcing a restored gate, unbounding the list, keeping the oldest instead
+  of the newest, and four over the reconcile).
+- 10 over the replay and the scheduler (giving up on the first damaged record,
+  swapping absent for damaged in both directions, writing an unloadable record,
+  skipping the reconcile, persisting after the await instead of before).
+- 3 over the collapsed clock.
+
+Two of those found real weaknesses **in this package's own tests** rather than
+in the code, which is the pass working in the direction that matters:
+
+1. `expect(ids).toEqual([...ids].sort())` was asserting that the settled list is
+   sorted — true whether the bound keeps the oldest or the newest, so it could
+   not fail. Replaced with an assertion naming which five ids fell off.
+2. The `add` precedence mutant survived because it was *equivalent*; the fix was
+   to delete the duplicated field, not to write a test for an unobservable
+   difference.
+
+**The compile-time shape proof caught two real drifts while this was written** —
+`crew` missing from `profileInstanceSchema`, and a smuggled field in a
+refutation run. `test/**` is inside `tsconfig.node.json`, so a schema that drifts
+from its interface fails the build, not a test run: the failure it prevents (a
+plan written with a field the next boot silently drops) is invisible until a
+restart that may be weeks away.
+
+**The M8.0 seam rule fired once and was right.** The three new modules belonged
+to no subsystem, and the suite refused them until they were assigned — the same
+check that caught M8.7b twice.
+
+## Design decisions
+
+**Assigned to `boot`, not a new `restart` subsystem.** A new row was written
+first and reverted: `validateFloors` requires a floor for every subsystem on
+every recorded platform, so the row could not land without a **linux** number
+that cannot be measured on this machine. Inventing one would have been a figure
+without its condition, which is the exact failure the floors file exists to
+prevent. `boot` is also the honest home — its row measures how true "index.ts
+holds no logic of its own" is, and moving logic out of `index.ts` into named,
+tested modules is what M8.1 did with `shutdown.ts` and `ui-bridge.ts`.
+
+**Floors deliberately not ratcheted.** `boot` now measures 20.75% lines against
+a 17.03% floor because well-covered modules joined it. A raise needs three
+corroborating runs of the same tree and is its own exercise.
 
 ## Owed, recorded not built
 
-- **`--resume` / session-id recovery**, and the auto-respawn it unlocks.
+- **`--resume` / engine session recovery**, and the auto-respawn it unlocks.
+  Until then a restored crew is `down` and the Architect rehires by reactivating.
 - **An explicit Architect release for an orphan block** whose gate cannot be
-  reconstructed.
-- **Breaker rung 1–2 ladder position** is restored as data; whether a restored
-  rung should decay with wall-clock time across a long downtime is a policy
-  question this package does not answer.
-- **Reaping `~/.ephesus/engines/<engine>/<agent>/`** stays with decommissioning
-  (carried from M8.7).
+  reconstructed. Orphans are impossible for gates opened after this package, so
+  the remaining case is historical.
+- **Capacity retry `attempts` resets across a restart** (see above); bounded and
+  self-correcting.
+- **Linux coverage floors** are unchanged and were not re-measured here.
+- Reaping `~/.ephesus/engines/<engine>/<agent>/` stays with decommissioning.
 
 ## Related docs
 
 - `docs/srs/SRS.md` — NFR-5, NFR-9, NFR-13, §6 criterion 6 (the blackout test)
-- `docs/adr/ADR-0012-mission-profiles.md` — profiles as declarative bundles
-- `docs/sdd/SDD.md` §4.1 (roster), §4.3 (log kinds), §9 (gates)
+- `docs/adr/ADR-0012-mission-profiles.md` · `ADR-0011` (the breaker ladder)
+- `docs/sdd/SDD.md` §4.1, §4.2, §4.3, §9
 - `docs/implementations/2026-09-05-durable-breaker-stops.md` — the store precedent
 - `docs/implementations/2026-09-03-m8-2-the-degradation-channel.md` — the channel every failure here reports through

@@ -32,7 +32,7 @@
   "corroboratingRunsReason": "Measured, not assumed — and the first diagnosis of WHY was wrong twice, which is the part worth keeping. --update ratcheted terraces.functions to 85.15% on ONE win32 run (9b57f86); later win32 runs in the same checkout read 84.65%; runs in a git worktree and on CI linux read 84.16%. Five runs, three answers, a spread of 0.99 points against a tolerance of 0.25. It was read first as a lucky ratchet, then as machine jitter. Neither was the bulk of it. 0.49 of that point was the LICENSED ART PACK: src/renderer/src/assets/{tileset,characters}/*.png are a deliberate gitignored drop (ATTRIBUTION.md rule 2), so the globs are populated on a machine that bought the pack and empty on every CI runner, fresh clone and worktree — with them empty the two loader loops in FloorCanvas iterate zero times and loadOne is never called, worth exactly 10 lines, 1 function, 6 branches and 10 statements. That input is invisible to the tree hash, which covers .ts/.tsx only. It is fixed at the source: the test now stubs both glob modules, so the figure is the same with the pack and without it. The REMAINDER, about one line, was genuine jitter from a floating Promise.all no test awaited, and is fixed by the bring-up handle FloorCanvas now hands out. Three runs is the smallest window that outlives a back-to-back pair sharing one machine mood; it costs one extra suite run per ratchet, and lowering it below 3 is refused by the validator. If a row keeps needing a hand correction, the cause is an unrecorded condition, not a number that needs lowering — GYM-006 metric 2 says never lower a floor, and it is right.",
   "subsystems": {
     "boot": {
-      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts)",
+      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts), M8.8 continued it (restore.ts, state-store.ts)",
       "members": [
         "src/main/index.ts",
         "src/main/ipc.ts",
@@ -40,7 +40,10 @@
         "src/main/ui-bridge.ts",
         "src/preload/index.ts",
         "src/renderer/src/main.tsx",
-        "src/renderer/src/App.tsx"
+        "src/renderer/src/App.tsx",
+        "src/main/restore.ts",
+        "src/main/state-store.ts",
+        "src/shared/restart.ts"
       ]
     },
     "engines": {

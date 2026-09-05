@@ -4,6 +4,24 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupHomes, startCompany, scenarioMessage, sendStep, type Company } from './company'
 import { QuitSequence } from '../../src/main/shutdown'
 import { UiBridge } from '../../src/main/ui-bridge'
+import os from 'node:os'
+import { GateManager } from '../../src/main/watch/gates'
+import { ProfileActivations, ProfileStore } from '../../src/main/profiles'
+import { Scheduler } from '../../src/main/scheduler'
+import { activationsRecord, restoreCompany, type RestoreStores } from '../../src/main/restore'
+import { JsonStateStore } from '../../src/main/state-store'
+import { EMPTY_GATES, GATES_REL, denyAllPolicy, gatesRecordSchema } from '../../src/shared/gates'
+import {
+  ACTIVATIONS_REL,
+  EMPTY_ACTIVATIONS,
+  activationsRecordSchema,
+  watchedRepos
+} from '../../src/shared/profile-activation'
+import { EMPTY_TRIGGERS, TRIGGERS_REL, triggersRecordSchema } from '../../src/shared/restart'
+import { removeTempDir } from '../tmpdir'
+
+/** Homes made by the M8.8 restart cases below, cleaned with the rest. */
+const blackoutHomes: string[] = []
 
 /**
  * **S-BLACKOUT** (TEST-STRATEGY §3, SRS §6.6): "kill main mid-delivery /
@@ -27,6 +45,7 @@ afterEach(async () => {
   // then remove the directories, so no teardown races a commit in flight.
   for (const company of companies.splice(0)) await company.close()
   cleanupHomes()
+  for (const dir of blackoutHomes.splice(0)) removeTempDir(dir)
 })
 
 async function boot(options: Parameters<typeof startCompany>[0] = {}): Promise<Company> {
@@ -357,3 +376,287 @@ describe('S-BLACKOUT — killed mid-commit', () => {
     expect(next.seq).toBe((before.at(-1) ?? 0) + 1)
   })
 })
+/**
+ * **S-BLACKOUT — killed holding the company's coordination state** (M8.8,
+ * NFR-5, SRS §6 criterion 6).
+ *
+ * Every case above restarts a company that was holding NOTHING: the restarted
+ * half is built with `liveAgents: () => []` and a fresh deny-all `GateManager`,
+ * so "restore exactly" was asserted over an empty set and passed for years
+ * while a restart silently un-hired the company. That is why this whole class
+ * of defect was invisible to a green suite.
+ *
+ * These cases restart with an activation, a gate and a trigger clock LIVE, over
+ * the real stores on a real disk. The first company is ABANDONED — never
+ * reused, never asked a question — exactly as a killed Electron process is; the
+ * second is built over the same home and must answer from what is on disk.
+ */
+describe('S-BLACKOUT — killed holding an activation, a gate and a trigger clock', () => {
+  const HOUR = 3_600_000
+
+  /** One harness lifetime over `home`: the stores, and the three subsystems. */
+  function lifetime(home: string, nowMs = HOUR) {
+    const stores: RestoreStores = {
+      triggers: new JsonStateStore({
+        file: path.join(home, TRIGGERS_REL),
+        schema: triggersRecordSchema,
+        empty: EMPTY_TRIGGERS
+      }),
+      activations: new JsonStateStore({
+        file: path.join(home, ACTIVATIONS_REL),
+        schema: activationsRecordSchema,
+        empty: EMPTY_ACTIVATIONS
+      }),
+      gates: new JsonStateStore({
+        file: path.join(home, GATES_REL),
+        schema: gatesRecordSchema,
+        empty: EMPTY_GATES
+      })
+    }
+    const scheduler = new Scheduler({
+      now: () => new Date(nowMs),
+      persist: (lastFired) => {
+        stores.triggers.save({ schemaVersion: 1, lastFired: { ...lastFired } })
+      }
+    })
+    const gates = new GateManager({
+      policy: () => denyAllPolicy,
+      persist: (record) => {
+        stores.gates.save(record)
+      },
+      now: () => new Date(nowMs)
+    })
+    const activations = new ProfileActivations({
+      store: new ProfileStore(path.join(home, 'profiles'), path.join(home, 'no-builtins')),
+      globalAutonomy: () => 'autonomous',
+      spawn: () => Promise.resolve({}),
+      kill: () => {},
+      addTrigger: (trigger) => scheduler.add(trigger),
+      removeTrigger: (id) => scheduler.remove(id),
+      targetExists: () => true,
+      persist: (instances) => {
+        stores.activations.save(activationsRecord(instances))
+      }
+    })
+    return { stores, scheduler, gates, activations }
+  }
+
+  function home(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-blackout-restart-'))
+    blackoutHomes.push(dir)
+    return dir
+  }
+
+  function held(gates: GateManager, taskId: string) {
+    const outcome = gates.submit({
+      agentId: 'agent.crew-myapp-oncall',
+      kind: 'destructive',
+      taskId,
+      packaging: {
+        what: 'rm -rf build',
+        why: 'the build is stale',
+        blastRadius: 'the build directory',
+        rollback: 'rerun the build'
+      }
+    })
+    if (!outcome.held) throw new Error('deny-all should have held this')
+    return outcome.gate
+  }
+
+  /** What the FIRST process did before it was killed. */
+  function firstLifetime(dir: string) {
+    const first = lifetime(dir)
+    writeBlackoutBundle(path.join(dir, 'profiles'))
+    const gate = held(first.gates, 'task-1')
+    first.scheduler.add({
+      id: 'crew@repo:myapp/sweep',
+      everyMs: HOUR,
+      run: () => {}
+    })
+    return { gate, tick: first.scheduler.tick() }
+  }
+
+  it('a gate open at the blackout is in the queue after the restart', async () => {
+    const dir = home()
+    const { gate } = firstLifetime(dir)
+
+    // The killed process is abandoned here — never touched again.
+    const second = lifetime(dir, HOUR + 60_000)
+    expect(second.gates.list()).toEqual([])
+
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => [{ id: 'task-1', gates: [gate.id] }]
+    })
+
+    expect(second.gates.list().map((g) => g.id)).toEqual([gate.id])
+    expect(second.gates.gatesFor('task-1')).toHaveLength(1)
+    // The block is answerable again: no orphan, and a verdict lands.
+    expect(report.counts.orphanBlocks).toBe(0)
+    expect(second.gates.decide(gate.id, 'approved').ok).toBe(true)
+  })
+
+  /**
+   * The defect stated plainly. Without the record, the restarted company holds
+   * no gate while `tasks.json` still says the task is blocked — so the task can
+   * never reach `done` and nothing in the queue explains why.
+   */
+  it('without the record the block is orphaned, and the restart SAYS so', () => {
+    const dir = home()
+    const second = lifetime(dir, HOUR + 60_000)
+
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => [{ id: 'task-1', gates: ['g-2026-09-05t03-00-00-000z-deadbeef'] }]
+    })
+
+    expect(second.gates.list()).toEqual([])
+    expect(report.counts.orphanBlocks).toBe(1)
+    expect(report.problems[0]?.cause).toBe('restart/orphan-block:task-1')
+    expect(report.problems[0]?.detail).toContain('cannot reach done')
+  })
+
+  it('the activation is back, with its crew honestly down', async () => {
+    const dir = home()
+    const first = lifetime(dir)
+    writeBlackoutBundle(path.join(dir, 'profiles'))
+    const activated = await first.activations.activate({
+      profile: 'crew',
+      target: { kind: 'repo', id: 'myapp', path: dir }
+    })
+    if (!activated.ok) throw new Error(activated.reasons.join(' · '))
+
+    const second = lifetime(dir, HOUR + 60_000)
+    expect(second.activations.instances()).toEqual([])
+
+    restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+
+    const [instance] = second.activations.instances()
+    expect(instance?.instanceId).toBe('crew@repo:myapp')
+    expect(instance?.crew).toBe('down')
+    // The M8.7 seam: a rehired agent must still find its plan.
+    expect(second.activations.autonomyFor('agent.crew-myapp-oncall', 'tool-permission')).toBe(
+      'autonomous'
+    )
+    // …and the Harbor watches again.
+    expect(watchedRepos(second.activations.instances())).toEqual([])
+  })
+
+  it('a trigger that fired before the blackout is not due again at boot', async () => {
+    const dir = home()
+    const { tick } = firstLifetime(dir)
+    await tick
+
+    const second = lifetime(dir, HOUR + 60_000)
+    const ran: string[] = []
+    restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+    second.scheduler.add({
+      id: 'crew@repo:myapp/sweep',
+      everyMs: HOUR,
+      run: () => {
+        ran.push('sweep')
+      }
+    })
+
+    await second.scheduler.tick()
+
+    expect(ran).toEqual([])
+  })
+
+  /** Nothing was ever written, so a first run must restore nothing and be quiet. */
+  it('a first run over an empty home restores nothing and reports nothing', () => {
+    const second = lifetime(home())
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+
+    expect(report.problems).toEqual([])
+    expect(report.notes).toEqual([])
+  })
+
+  /**
+   * Damaged is not absent. State exists that can no longer be read, and the
+   * company must say so rather than come back looking healthy and empty.
+   */
+  it('a damaged record is reported, and costs only its own subsystem', () => {
+    const dir = home()
+    const first = lifetime(dir)
+    held(first.gates, 'task-1')
+    fs.writeFileSync(path.join(dir, ACTIVATIONS_REL), '{ not json')
+
+    const second = lifetime(dir, HOUR + 60_000)
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+
+    expect(report.problems.map((p) => p.cause)).toEqual(['restart/activations-unreadable'])
+    expect(report.problems[0]?.detail).toContain('comes back un-hired')
+    // The gates still came back: one damaged record costs its own subsystem.
+    expect(second.gates.list()).toHaveLength(1)
+  })
+})
+
+/** A bundle the activation above can load off a real disk (M8.8). */
+function writeBlackoutBundle(root: string): void {
+  const dir = path.join(root, 'crew')
+  fs.mkdirSync(path.join(dir, 'hires'), { recursive: true })
+  fs.mkdirSync(path.join(dir, 'triggers'), { recursive: true })
+  fs.mkdirSync(path.join(dir, 'playbooks'), { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'profile.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      name: 'crew',
+      version: 1,
+      target: { kind: 'repo' },
+      autonomy: { default: 'autonomous', byKind: {} }
+    })
+  )
+  fs.writeFileSync(
+    path.join(dir, 'memo-policy.json'),
+    JSON.stringify({ schemaVersion: 1, requires: [] })
+  )
+  fs.writeFileSync(
+    path.join(dir, 'harbor.json'),
+    JSON.stringify({ schemaVersion: 1, repos: [], channels: [], webhooks: [] })
+  )
+  fs.writeFileSync(
+    path.join(dir, 'hires', 'oncall.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      name: 'oncall',
+      version: 1,
+      role: 'oncall',
+      engine: 'claude',
+      capabilities: ['triage'],
+      envGrants: [],
+      brief: 'Work.'
+    })
+  )
+}
