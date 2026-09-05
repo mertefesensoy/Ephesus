@@ -5186,6 +5186,19 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       flag cleared on the happy path leaks on every failure), and one private
       `planFor` both callers read. The three tests that pin it FAILED on the old
       code first - `expected null to be 'autonomous'`.
+      **THE SUITE COUNT NEEDS ITS CONDITION — two sessions already disagreed
+      about it on the SAME commit and the same machine.** `test/renderer/
+      tileset.test.ts`'s "installed tileset drop" block collects **three extra
+      cases when the Architect's licensed art packs are restored in that tree**,
+      and none when they are not. The sheets are gitignored (their licence
+      forbids redistribution), so a fresh git worktree and CI both run it empty.
+      At `1da4b81`: **3703 passed / 8 skipped WITH the drop** (the Architect's
+      main checkout), **3700 WITHOUT** it (a fresh worktree, and CI). Same tree
+      hash, same machine, both numbers correct. A session that compares its own
+      count against a recorded one WILL conclude the suite shrank; record the
+      condition or the number is not evidence. Established by diffing
+      `npx vitest list` between the two trees, which names the three cases.
+
       *OWED: the autonomy defect deserves a SCENARIO test asserting the spawn's
       `--permission-mode`, not only a unit one; nothing reaps
       `~/.ephesus/engines/<engine>/<agent>/` yet.*
