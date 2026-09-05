@@ -90,6 +90,17 @@ const nav = [
   <title>{metaTitle}</title>
   <meta name="description" content={metaDescription}>
   <link rel="canonical" href={canonical}>
+
+  <!-- Icons. The SVG scales to whatever size a browser asks for; the PNGs cover
+       the ones that will not take SVG, and apple-touch-icon covers iOS home
+       screens. theme-color is ink-900, which is the header border and the mark's
+       own keyline. -->
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#221A14">
   <meta property="og:title" content={metaTitle}>
   <meta property="og:description" content={metaDescription}>
   <meta property="og:type" content={article ? 'article' : 'website'}>
@@ -144,6 +155,7 @@ const nav = [
   <link rel="preload" as="font" type="font/woff2" href="/fonts/press-start-2p-400-latin.woff2" crossorigin>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
   <header class="site">
     <div class="wrap bar">
       <a class="brand" href="/">
@@ -159,7 +171,7 @@ const nav = [
     </div>
   </header>
 
-  <main><slot /></main>
+  <main id="main" tabindex="-1"><slot /></main>
 
   <footer class="site">
     <div class="wrap">
@@ -190,6 +202,16 @@ const nav = [
   </footer>
 
   <style is:global>
+    /* Skip link: off-screen until focused, then it lands over the header.
+       Keyboard users hit it first; nobody else ever sees it. */
+    .skip{
+      position:absolute;left:-9999px;top:0;z-index:60;border:0;
+      background:var(--ink);color:var(--paper);font-family:var(--mono);
+      font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:12px 18px;
+    }
+    .skip:focus{left:0;color:var(--paper)}
+    main:focus{outline:none}
+
     header.site{border-bottom:2px solid var(--ink);background:#FBF9F4;position:sticky;top:0;z-index:20}
     header.site .bar{display:flex;align-items:center;justify-content:space-between;gap:20px;height:64px}
     .brand{display:flex;align-items:center;gap:12px;border:0;color:var(--ink);font-weight:600;font-size:17px}
@@ -201,6 +223,24 @@ const nav = [
     header nav a.gh{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;
       border:2px solid var(--ink);padding:7px 13px;box-shadow:2px 2px 0 0 var(--ink);color:var(--ink)}
     header nav a.gh:hover{background:var(--ink);color:var(--paper)}
+    /* Mobile: the nav cannot wrap inside a fixed-height header without
+       overflowing it — items disappeared and the GitHub button escaped the
+       border. Below 780px the header becomes two rows and the nav is a
+       horizontally scrollable strip, which needs no JavaScript and no menu. */
+    @media (max-width: 780px){
+      header.site .bar{
+        height:auto; flex-direction:column; align-items:stretch; gap:0; padding:10px 0 0;
+      }
+      header.site nav{
+        flex-wrap:nowrap; overflow-x:auto; gap:18px;
+        padding:10px 0 12px; margin-top:8px;
+        border-top:1px solid var(--paper-3);
+        scrollbar-width:none;
+      }
+      header.site nav::-webkit-scrollbar{display:none}
+      header.site nav a{white-space:nowrap}
+      header.site nav a.gh{padding:6px 11px;box-shadow:2px 2px 0 0 var(--ink)}
+    }
     footer.site{border-top:2px solid var(--ink);background:#FBF9F4;padding:44px 0 34px;margin-top:20px}
     .fgrid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:32px}
     @media(max-width:720px){.fgrid{grid-template-columns:1fr}}
