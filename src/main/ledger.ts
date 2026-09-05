@@ -5,6 +5,7 @@ import {
   boundTaskFor as findBoundTask,
   parseProposal,
   pendingTasksFor,
+  pendingTaskIdsFor,
   returnTasksOf,
   stallTask,
   withDeck,
@@ -84,6 +85,23 @@ export class LedgerEndpoint {
    */
   pendingFor(agentId: string): number {
     return pendingTasksFor(this.tasks(), agentId)
+  }
+
+  /**
+   * The same question, answered with the ids — for the OTHER half of that
+   * carried item.
+   *
+   * M2 fixed the Stop hook: an agent that finishes a turn with tasks waiting is
+   * continued. Nothing fixed the wake watchdog, so an agent that was ALREADY
+   * idle when the task landed was never told at all. Observed live on
+   * 2026-09-05: Artemis triaged two CI failures, created and assigned both
+   * tasks, and the on-call agent sat holding them with an empty inbox.
+   *
+   * Ids rather than a count because the watchdog must speak once per task and
+   * then stay quiet — see `pendingTaskIdsFor`.
+   */
+  pendingIdsFor(agentId: string): readonly string[] {
+    return pendingTaskIdsFor(this.tasks(), agentId)
   }
 
   /**

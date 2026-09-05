@@ -172,8 +172,17 @@ export interface HermesOptions {
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
   readonly blockCap?: number
-  /** Unfinished tasks assigned to an agent; the ledger lands fully in M3. */
-  pendingTasksFor?(agentId: string): number
+  /**
+   * The ids of the unfinished tasks assigned to an agent.
+   *
+   * IDS and not a count, and one seam rather than two: `decideOnStop` blocks on
+   * `.length` of this, and `wakeCheck` announces the set. A count could not tell
+   * "the same two tasks, still waiting" from "a third one arrived" — the first
+   * must stay silent and the second must not — and a separate counting seam
+   * beside this one is two expressions that have to agree, which is the M8.5
+   * defect and cheaper never to create.
+   */
+  pendingTaskIdsFor?(agentId: string): readonly string[]
   /** Writes text into a live agent's session — how the watchdog nudges. */
   nudge?(agentId: string, text: string): void
   /** True when the agent has finished its turn and is waiting. */
@@ -309,6 +318,14 @@ export class Hermes {
    * must wake it".
    */
   private readonly nudged = new Map<string, ReadonlySet<string>>()
+  /**
+   * Which TASK ids each agent has already been nudged for.
+   *
+   * The mail set's twin, and needed for the same reason: without it a `todo`
+   * that nobody picks up would nudge on every sweep, forever -- a metronome
+   * pointed at the agent least able to escape it.
+   */
+  private readonly nudgedTasks = new Map<string, ReadonlySet<string>>()
   /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
   private readonly heldLogged = new Set<string>()
   /** Diverted msgIds already logged and signalled — one divert, one record. */
@@ -1100,7 +1117,7 @@ export class Hermes {
       stopHookActive,
       blocksThisSession: this.blockCount(agentId),
       pendingMail: this.pendingMailCount(agentId),
-      pendingTasks: this.options.pendingTasksFor?.(agentId) ?? 0,
+      pendingTasks: this.options.pendingTaskIdsFor?.(agentId).length ?? 0,
       ...(this.options.blockCap === undefined ? {} : { blockCap: this.options.blockCap })
     }
 
@@ -1173,8 +1190,19 @@ export class Hermes {
       const pending = pendingFiles.length
       if (pending === 0) {
         this.nudged.delete(agentId)
+        // No mail is not the same as nothing to do. Work assigned to an agent
+        // that was ALREADY idle reaches it here or nowhere: `decideOnStop`
+        // handles the agent that finishes a turn holding tasks, and an idle
+        // agent never finishes one. Live on 2026-09-05 the orchestrator triaged
+        // two CI failures, created and assigned both tasks, and the on-call
+        // agent sat holding them with an empty inbox.
+        if (this.wakeForTasks(agentId)) woken.push(agentId)
         continue
       }
+      // Mail is the louder signal and its nudge already ends with "act on
+      // each", so an agent with both hears once and finds its tasks in the same
+      // turn. Two nudges in one tick would be two submissions into a TUI.
+      this.nudgedTasks.delete(agentId)
       // New mail is mail this agent has not been nudged for. Everything it was
       // already told about stays silent, however long it sits unread.
       const told = this.nudged.get(agentId) ?? new Set<string>()
@@ -1412,6 +1440,52 @@ export class Hermes {
       })
     }
     return moved
+  }
+
+  /**
+   * Contract: nudges an idle agent about work assigned to it, at most once per
+   * task, and returns whether it did. Never throws.
+   *
+   * The mail path's twin, and deliberately built from the same three gates in
+   * the same order — anything this one skipped would be a second, quieter set
+   * of wake rules, and the pace gate in particular exists to be unskippable
+   * (ADR-0023).
+   *
+   * `nudgedTasks` is updated only AFTER the pace allows the wake, so a deferred
+   * nudge is not recorded as announced: the same task must still earn its nudge
+   * once the company speeds up, or pacing would silently become dropping.
+   */
+  private wakeForTasks(agentId: string): boolean {
+    const ids = this.options.pendingTaskIdsFor?.(agentId) ?? []
+    if (ids.length === 0) {
+      this.nudgedTasks.delete(agentId)
+      return false
+    }
+    const told = this.nudgedTasks.get(agentId) ?? new Set<string>()
+    const unannounced = ids.filter((id) => !told.has(id))
+    if (unannounced.length === 0) return false
+    if (this.options.isIdle && !this.options.isIdle(agentId)) return false
+    if (!this.wakeAllowed(agentId, 0)) return false
+
+    this.nudgedTasks.set(agentId, new Set(ids))
+    this.noteWoken(agentId)
+    try {
+      this.options.nudge?.(
+        agentId,
+        this.render('task-nudge.md', {
+          tasks: ids.join(', '),
+          pendingTasks: String(ids.length)
+        })
+      )
+    } catch {
+      // One agent's nudge failing must not cost the agents after it theirs.
+      // Nothing is consumed on this path — the tasks are still in the ledger
+      // and `nudgedTasks` is reset so the next sweep tries again.
+      this.nudgedTasks.delete(agentId)
+      return false
+    }
+    this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingTasks: ids.length })
+    return true
   }
 
   /** True when the agent has mail it has not consumed. Drives the wake watchdog. */

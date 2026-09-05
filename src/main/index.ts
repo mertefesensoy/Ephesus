@@ -1928,7 +1928,7 @@ async function boot(): Promise<void> {
     }),
     // ADR-0013's second branch, real at last (the M2 carried item): an agent
     // with assigned work keeps going even when its inbox is empty.
-    pendingTasksFor: (agentId) => ledger?.pendingFor(agentId) ?? 0,
+    pendingTaskIdsFor: (agentId) => ledger?.pendingIdsFor(agentId) ?? [],
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
     nudge: (agentId, text) => commandQueue.wake(agentId, text),
     /**

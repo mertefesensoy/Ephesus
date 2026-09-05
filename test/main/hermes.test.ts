@@ -61,6 +61,7 @@ async function rig(
     blockCap?: number
     isIdle?: (agentId: string) => boolean
     nudge?: (agentId: string, text: string) => void
+    pendingTaskIdsFor?: (agentId: string) => readonly string[]
     onPathology?: (agentId: string, blocks: number) => void
     onSweepError?: (err: unknown) => void
     onDiverted?: (record: { from: string; conversation: string; reason: string }) => void
@@ -1322,5 +1323,156 @@ describe('Hermes — mail handed to a session that dies is not lost', () => {
     // The first settled; the second is in flight, handed over by this Stop.
     expect(r.done('agent.b')).toEqual([`${first.id}.json`])
     expect(r.inflight('agent.b')).toEqual([`${second.id}.json`])
+  })
+})
+/**
+ * The other half of ADR-0013's second branch.
+ *
+ * M2 made the STOP hook continue an agent that finishes a turn with tasks
+ * waiting. Nothing woke an agent that was ALREADY idle when the task landed —
+ * `wakeCheck` returned early on an empty inbox, so the watchdog knew about mail
+ * and not about work.
+ *
+ * Found live on 2026-09-05: the orchestrator triaged two CI failures, created
+ * and assigned both tasks, and the on-call agent sat holding two `todo` items
+ * with an empty inbox. The company's work reached the ledger and stopped there.
+ */
+describe('Hermes — an assigned task wakes an idle agent', () => {
+  function taskRig(ids: string[]) {
+    const nudges: { agentId: string; text: string }[] = []
+    let pending = [...ids]
+    return {
+      nudges,
+      setTasks: (next: string[]) => {
+        pending = [...next]
+      },
+      options: {
+        nudge: (agentId: string, text: string) => nudges.push({ agentId, text }),
+        isIdle: () => true,
+        pendingTaskIdsFor: (agentId: string) =>
+          agentId === 'agent.b' ? pending : ([] as readonly string[])
+      }
+    }
+  }
+
+  it('nudges an idle agent that has a task and no mail', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges.map((n) => n.agentId)).toEqual(['agent.b'])
+    expect(t.nudges[0]?.text).toContain('t-1')
+    // A pointer, like the mail nudge: one line, never a payload.
+    expect(t.nudges[0]?.text).not.toContain('\n')
+  })
+
+  /** Without this a `todo` nobody picks up nudges on every sweep, forever. */
+  it('says it once — a second sweep with the same task is silent', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+
+    await r.hermes.wakeCheck()
+    await r.hermes.wakeCheck()
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges).toHaveLength(1)
+  })
+
+  it('speaks again when a NEW task is assigned', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+    await r.hermes.wakeCheck()
+
+    t.setTasks(['t-1', 't-2'])
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges).toHaveLength(2)
+    expect(t.nudges[1]?.text).toContain('t-2')
+  })
+
+  it('goes quiet when the work is finished, and is ready to speak again', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+    await r.hermes.wakeCheck()
+
+    t.setTasks([])
+    await r.hermes.wakeCheck()
+    expect(t.nudges).toHaveLength(1)
+
+    // The same id assigned again is new work, not the old announcement.
+    t.setTasks(['t-1'])
+    await r.hermes.wakeCheck()
+    expect(t.nudges).toHaveLength(2)
+  })
+
+  it('never interrupts an agent that is working', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig({ ...t.options, isIdle: () => false })
+
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges).toEqual([])
+  })
+
+  /**
+   * Mail is the louder signal and its nudge already ends with "act on each", so
+   * an agent with both hears once and finds its tasks in the same turn. Two
+   * nudges in one tick would be two submissions into a TUI.
+   */
+  it('an agent with mail AND tasks takes the mail path only', async () => {
+    const t = taskRig(['t-1'])
+    const r = await rig(t.options)
+    r.send('agent.a', message())
+    await r.hermes.sweep()
+
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges).toHaveLength(1)
+    expect(t.nudges[0]?.text).toContain('inbox/.inflight/')
+    expect(t.nudges[0]?.text).not.toContain('t-1')
+  })
+
+  it('records the wake in the book of record', async () => {
+    const t = taskRig(['t-1', 't-2'])
+    const r = await rig(t.options)
+
+    await r.hermes.wakeCheck()
+
+    const wakes = r.agora.readLog().filter((e) => e['event'] === 'wake')
+    expect(wakes).toHaveLength(1)
+    expect(wakes[0]?.['pendingTasks']).toBe(2)
+  })
+
+  /**
+   * The other half of the same seam. `decideOnStop` blocks on the COUNT of
+   * pending tasks, and that count is `.length` of the very ids the watchdog
+   * announces — one source, so the number the Stop hook acts on and the set the
+   * wake path speaks about can never disagree.
+   *
+   * Found by a mutation: replacing the count with a hardcoded 0 survived the
+   * whole suite, because nothing wired a task through `decideOnStop`.
+   */
+  it('the Stop hook blocks on the same ids the watchdog announces', async () => {
+    const t = taskRig(['t-1', 't-2'])
+    const r = await rig({ ...t.options, blockCap: 10 })
+
+    const reply = await r.hermes.decideOnStop('agent.b', {})
+
+    expect(reply?.decision).toBe('block')
+    expect(reply?.reason).toContain('2')
+
+    // An agent with nothing assigned is not blocked.
+    t.setTasks([])
+    expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
+  })
+
+  it('does nothing for an agent with neither mail nor tasks', async () => {
+    const t = taskRig([])
+    const r = await rig(t.options)
+
+    await r.hermes.wakeCheck()
+
+    expect(t.nudges).toEqual([])
   })
 })
