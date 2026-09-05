@@ -714,15 +714,68 @@ describe('AgentManager — an engine that is installed but logged out', () => {
  * enforces it is a check that cannot fail.
  */
 describe('a stopped agent will not be respawned, whoever asks', () => {
+  it('refuses a fresh boot hire under a standing stop before claiming the id', async () => {
+    let blocked: string | null = 'persisted rung 3'
+    const r = await rig(async () => '2.1.195', undefined, { respawnBlocked: () => blocked })
+    await expect(r.manager.spawn(r.request)).rejects.toThrow('persisted rung 3')
+    expect(r.manager.list()).toEqual([])
+    expect(r.spawner.spawns).toEqual([])
+    blocked = null
+    await expect(r.manager.spawn(r.request)).resolves.toBeDefined()
+  })
+
+  it('refreshes a cleared offer without emitting another exit or starting a process', async () => {
+    let blocked: string | null = null
+    const r = await rig(async () => '2.1.195', undefined, { respawnBlocked: () => blocked })
+    await r.manager.spawn(r.request)
+    blocked = 'rung 3'
+    await r.spawner.exit('agent.mason', 1)
+    const changes = r.changes.length
+    blocked = null
+    expect(r.manager.refreshRespawnBlock('agent.mason')?.respawnOffer?.blockedBecause).toBeNull()
+    expect(r.changes).toHaveLength(changes)
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.manager.refreshRespawnBlock('agent.absent')).toBeNull()
+    await r.manager.respawn('agent.mason')
+    expect(r.manager.refreshRespawnBlock('agent.mason')).toBeNull()
+  })
+
+  it('rechecks a stop that arrives while respawn installs hooks', async () => {
+    let blocked: string | null = null
+    const r = await rig(async () => '2.1.195', undefined, {
+      respawnBlocked: () => blocked
+    })
+    await r.manager.spawn(r.request)
+    await r.spawner.exit('agent.mason', 1)
+    const respawn = r.manager.respawn('agent.mason')
+    blocked = 'stopped at rung 3 during setup'
+    await expect(respawn).rejects.toThrow('rung 3')
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.manager.card('agent.mason').lifecycle).toBe('exited')
+    expect(r.manager.card('agent.mason').respawnOffer?.blockedBecause).toBe(blocked)
+  })
+
+  it('refuses overlapping manual and automatic respawns before a process exists', async () => {
+    const r = await rig()
+    await r.manager.spawn(r.request)
+    await r.spawner.exit('agent.mason', 1)
+    const first = r.manager.respawn('agent.mason')
+    await expect(r.manager.respawn('agent.mason')).rejects.toThrow()
+    await first
+    expect(r.spawner.spawns).toHaveLength(2)
+  })
+
   async function stopped(): Promise<{
     manager: AgentManager
     spawner: RecordingSpawner
   }> {
+    let blocked = false
     const r = await rig(async () => '2.1.195', undefined, {
       respawnBlocked: (agentId) =>
-        agentId === 'agent.mason' ? 'the breaker stopped it at rung 3 (burn-rate)' : null
+        blocked && agentId === 'agent.mason' ? 'the breaker stopped it at rung 3 (burn-rate)' : null
     })
     await r.manager.spawn(r.request)
+    blocked = true
     await r.spawner.exit('agent.mason', 1)
     return { manager: r.manager, spawner: r.spawner }
   }

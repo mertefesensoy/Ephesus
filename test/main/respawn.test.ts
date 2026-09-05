@@ -225,6 +225,121 @@ describe('a standing decision blocks the ladder', () => {
 })
 
 describe('stop and resume', () => {
+  it('keeps a newer wait queued when a cancelled wait finishes', async () => {
+    const wakes: (() => void)[] = []
+    let calls = 0
+    const ladder = new RespawnLadder({
+      policy: FAST,
+      delay: () => new Promise((resolve) => wakes.push(resolve)),
+      respawn: async () => {
+        calls += 1
+        return { stillDown: false, exitCode: null }
+      },
+      onExhausted: () => {}
+    })
+    ladder.noteExited(1)
+    ladder.stop()
+    ladder.resume()
+    ladder.noteExited(1)
+    wakes[0]!()
+    await Promise.resolve()
+    ladder.noteExited(1)
+    expect(wakes).toHaveLength(2)
+    expect(calls).toBe(0)
+    wakes[1]!()
+    await ladder.drained()
+    expect(calls).toBe(1)
+  })
+
+  it('drains the in-flight spawn and serves its exit exactly once', async () => {
+    let finish!: (value: { stillDown: boolean; exitCode: number | null }) => void
+    let calls = 0
+    const ladder = new RespawnLadder({
+      policy: FAST,
+      delay: () => Promise.resolve(),
+      respawn: () => {
+        calls += 1
+        return calls === 1
+          ? new Promise((resolve) => {
+              finish = resolve
+            })
+          : Promise.resolve({ stillDown: false, exitCode: null })
+      },
+      onExhausted: () => {}
+    })
+    ladder.noteExited(1)
+    await Promise.resolve()
+    let drained = false
+    const draining = ladder.drained().then(() => {
+      drained = true
+    })
+    ladder.noteExited(2)
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    expect(calls).toBe(1)
+    finish({ stillDown: true, exitCode: 2 })
+    await draining
+    expect(calls).toBe(2)
+  })
+
+  it('leaves a manual respawn alone when it wins the backoff race', async () => {
+    const r = rig()
+    r.ladder.noteExited(1)
+    r.ladder.noteRunning()
+    await r.ladder.drained()
+    expect(r.attempts).toEqual([])
+    expect(r.ladder.spent()).toBe(0)
+  })
+
+  it('never revives an old wait after stop and resume', async () => {
+    const r = rig()
+    r.ladder.noteExited(1)
+    r.ladder.stop()
+    r.ladder.resume()
+    await Promise.resolve()
+    await r.ladder.drained()
+    expect(r.attempts).toEqual([])
+  })
+
+  it('honors a capacity hold acquired during backoff', async () => {
+    const r = rig()
+    r.ladder.noteExited(1)
+    r.ladder.hold('capacity')
+    await r.ladder.drained()
+    expect(r.attempts).toEqual([])
+    expect(r.ladder.spent()).toBe(0)
+    r.ladder.release()
+    await r.ladder.drained()
+    expect(r.attempts).toHaveLength(1)
+  })
+
+  it('does not overlap attempts when an exit arrives during async respawn', async () => {
+    let finish!: (value: { stillDown: boolean; exitCode: number | null }) => void
+    let calls = 0
+    const ladder = new RespawnLadder({
+      policy: FAST,
+      delay: () => Promise.resolve(),
+      respawn: () => {
+        calls += 1
+        return new Promise((resolve) => {
+          finish = resolve
+        })
+      },
+      onExhausted: () => {}
+    })
+    ladder.noteExited(1)
+    await Promise.resolve()
+    ladder.noteExited(2)
+    await Promise.resolve()
+    expect(calls).toBe(1)
+    ladder.stop()
+    ladder.resume()
+    finish({ stillDown: true, exitCode: 2 })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(calls).toBe(1)
+  })
+
   it('cancels a queued attempt', async () => {
     const r = rig()
     r.outcome = { stillDown: true, exitCode: 1 }
@@ -304,6 +419,16 @@ function exit(agentId: string): { agentId: string; lifecycle: string; exitCode: 
 }
 
 describe('the crew comes back only when its bundle said so', () => {
+  it('cancels an outstanding respawn when the declaration changes to offer', async () => {
+    const r = crewRig()
+    r.crew.declare('agent.mason', 'respawn')
+    r.crew.noteCard(exit('agent.mason'))
+    r.crew.declare('agent.mason', 'offer')
+    await Promise.resolve()
+    await r.crew.drained()
+    expect(r.attempts).toEqual([])
+  })
+
   it('brings back a hire that declared respawn', async () => {
     const r = crewRig()
     r.crew.declare('agent.mason', 'respawn')

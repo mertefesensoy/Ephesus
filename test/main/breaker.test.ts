@@ -475,6 +475,8 @@ describe('lifting a stop is a human act', () => {
     // lifted: the next evaluation would find `current >= 3` and hold there.
     expect(breaker.stateFor('agent.mason').rung).toBe(0)
     expect(rec.avatars.at(-1)).toBe('recover')
+    expect(rec.paused.at(-1)).toBe(false)
+    expect(rec.constrained.at(-1)).toBe(false)
   })
 
   it('says so when there was nothing to clear', () => {

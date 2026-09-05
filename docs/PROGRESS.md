@@ -5045,6 +5045,49 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       under these rules, which is M7's still-open exit criterion. Branch
       `feature/m8-6-crew-isolation`.*
 
+      **POST-CLOSE DEFECT CLEARANCE (2026-09-05, ADR-0025).** An adversarial
+      audit of this package — 8 lenses, 58 findings — returned one that survived
+      every refuter, and it was M8.6's own doing: **isolation silently re-opened
+      the failure ADR-0021 exists to close.** ADR-0021 pre-trusts
+      `request.target.path` in Claude Code's own trust store; M8.6 then moved
+      every hire into `<home>/worktrees/<agentId>`, and the engine matches its
+      trust key on the exact resolved path — so no crew agent's real working
+      directory was ever trusted, every one met the first-run dialog (highlighted
+      default `No, exit`) BEFORE any session existed, and therefore with no hook
+      to report it. That is the live MUSAHIT parking failure, re-entered from the
+      other side. **No test could have caught it: nothing related the directory
+      the trust record NAMES to the directory the agent is spawned INTO** —
+      `claude-trust.test.ts` only ever passed a bare directory and no activation
+      test opened `.claude.json`. The same shape as the two defects M8.6's own
+      mutation pass found. Fixed at activation time, because ADR-0021 forbids the
+      obvious wiring by name ("never from spawn, respawn, or a wake", with
+      pre-trust-at-spawn listed as a rejected option): `ProfileActivations` gained
+      a `beforeHires(plan)` seam, and `plannedWorkspaces(plan, worktreePathFor)`
+      names the target plus one entry per isolated hire. **The anti-drift property
+      is the fix** — it reads the same plan object the hires spawn from and asks
+      the same path function the lifecycle spawns with, because a trusted path one
+      character off is a record nothing reads whose only symptom is a hung agent;
+      `index.ts` had three independent copies of the worktree root and now has
+      one. `realpath` cannot guard a directory git has not made, so
+      `WorkspaceExistence` makes the two cases explicit: `must-exist` (the
+      default, so every pre-existing caller is bit-identical) resolves the whole
+      path, `will-be-created` resolves the PARENT and appends the leaf — the
+      parent is harness-owned, so nothing an attacker controls is left unresolved,
+      and a test proves both modes produce the SAME key once the directory
+      exists. Tests: 6 (trust) + 7 (workspaces). **13 mutations, 13 killed**,
+      including the original blocker, a partial set, a `beforeHires` that never
+      runs, one that records consent for a refused plan, and a default flipped to
+      the weaker mode. **Method note, recorded because it cost two passes:** `src/**`
+      is CRLF, so a mutation anchored across a line boundary never applies and the
+      harness prints NOT-APPLIED, which reads like a mutation that ran — five of
+      ten silently did not run the first time, including the blocker's. Single-line
+      anchors only. Docs: ADR-0025 (extends 0021 — ADRs are append-only and this
+      widens an accepted security decision), SDD §1.1 `engines/` row and §3, the
+      M8.7 trust implementation doc. OWED, RECORDED NOT FIXED: no profile has been
+      activated against a real repository in the shipped app under these rules, so
+      the end-to-end claim rests on the key-equality test rather than observation
+      — M7's exit, still open.
+
 - [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
       inherit the Architect's personal engine install: no isolated config
       directory, so each session starts at a measured 64.8–67.4k tokens of which

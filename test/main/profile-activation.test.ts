@@ -7,7 +7,11 @@ import type { Trigger } from '../../src/main/scheduler'
 import type { SpawnRequest } from '../../src/shared/agents'
 import { GATE_SCHEMA_VERSION, type AutonomyLevel, type GatePolicy } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
-import { watchedRepos } from '../../src/shared/profile-activation'
+import {
+  plannedWorkspaces,
+  watchedRepos,
+  type ActivationPlan
+} from '../../src/shared/profile-activation'
 import type { RepoDerivation } from '../../src/shared/repo-remote'
 import { removeTempDir } from '../tmpdir'
 
@@ -132,6 +136,7 @@ function rig(options: RigOptions = {}) {
   const spawned: SpawnRequest[] = []
   const killed: string[] = []
   const hired: { agentId: string; onExit: string }[] = []
+  const beforeHires: ActivationPlan[] = []
   const released: string[] = []
   /** Interleaved, so a test can assert that release happens BEFORE the kill. */
   const order: string[] = []
@@ -149,7 +154,12 @@ function rig(options: RigOptions = {}) {
         return Promise.reject(new Error(`engine "${request.engine}" is not installed`))
       }
       spawned.push(request)
+      order.push(`spawn:${request.agentId}`)
       return Promise.resolve({})
+    },
+    beforeHires: (plan) => {
+      beforeHires.push(plan)
+      order.push('beforeHires')
     },
     kill: (agentId) => {
       killed.push(agentId)
@@ -1072,5 +1082,133 @@ describe('what happens when a hire dies is declared, not inferred (B12)', () => 
     expect(r.order.indexOf('release:agent.crew-myapp-oncall')).toBeLessThan(
       r.order.indexOf('kill:agent.crew-myapp-oncall')
     )
+  })
+})
+/**
+ * M8.7 — which directories an activation must trust (ADR-0021 + ADR-0025).
+ *
+ * The blocker this closes: M8.6 made isolation the default, so every hire moved
+ * into `<home>/worktrees/<agentId>` while the activation went on trusting only
+ * the target. The engine keys trust on the exact directory, so no crew agent's
+ * real working directory was ever trusted, and each met the first-run dialog
+ * with no session — no hook, no report, parked for ever.
+ *
+ * These assert the SET, because the set is the fix. A missing entry is an agent
+ * that hangs with nothing said about it.
+ */
+describe('every directory an activation will work in gets trusted (M8.7)', () => {
+  const wtFor = (agentId: string): string => `/home/worktrees/${agentId}`
+
+  async function planFor(
+    r: ReturnType<typeof rig>,
+    options: Parameters<typeof writeBundle>[2] = {},
+    isolation?: 'as-declared' | 'isolate-all' | 'none'
+  ) {
+    writeBundle(r.profiles, 'crew', options)
+    const planned = await r.activations.preview({
+      profile: 'crew',
+      target: target(r.targetDir),
+      ...(isolation ? { isolation } : {})
+    })
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    return planned.plan
+  }
+
+  it('lists the target and one worktree per isolated hire', async () => {
+    const r = rig()
+    const plan = await planFor(r, { hires: ['oncall', 'deps'] })
+    const spaces = plannedWorkspaces(plan, wtFor)
+
+    expect(spaces.map((s) => s.path)).toEqual([
+      r.targetDir,
+      '/home/worktrees/agent.crew-myapp-deps',
+      '/home/worktrees/agent.crew-myapp-oncall'
+    ])
+    // The target exists; the worktrees do not yet — git makes them during this
+    // activation, which is why they cannot be resolved in full.
+    expect(spaces[0]?.existence).toBe('must-exist')
+    expect(spaces.slice(1).every((s) => s.existence === 'will-be-created')).toBe(true)
+  })
+
+  it('leaves a hire that works in the target on the target, with no worktree entry', async () => {
+    const r = rig()
+    const plan = await planFor(r, { hires: ['oncall'], isolation: 'target' })
+    const spaces = plannedWorkspaces(plan, wtFor)
+
+    expect(spaces).toHaveLength(1)
+    expect(spaces[0]?.path).toBe(r.targetDir)
+    // Named, so a reader can tell "the target nobody uses" from "the target
+    // this agent works in".
+    expect(spaces[0]?.agentIds).toEqual(['agent.crew-myapp-oncall'])
+  })
+
+  it('follows the Architect’s override in both directions', async () => {
+    const isolated = rig()
+    const up = await planFor(isolated, { hires: ['oncall'], isolation: 'target' }, 'isolate-all')
+    expect(plannedWorkspaces(up, wtFor).map((s) => s.existence)).toEqual([
+      'must-exist',
+      'will-be-created'
+    ])
+
+    const loose = rig()
+    const down = await planFor(loose, { hires: ['oncall'], isolation: 'worktree' }, 'none')
+    expect(plannedWorkspaces(down, wtFor)).toHaveLength(1)
+  })
+
+  it('covers EVERY hire — the count is the property that fails silently', async () => {
+    // One missing entry is one agent that parks with no session and no hook.
+    const r = rig()
+    const plan = await planFor(r, { hires: ['a', 'b', 'c', 'd'] })
+    const spaces = plannedWorkspaces(plan, wtFor)
+    const isolated = plan.hires.filter((h) => h.isolation.effective === 'worktree')
+
+    expect(isolated).toHaveLength(4)
+    for (const hire of isolated) {
+      expect(spaces.some((s) => s.path === wtFor(hire.agentId))).toBe(true)
+    }
+  })
+
+  it('asks the SAME path function the lifecycle spawns with', async () => {
+    // The anti-drift property. The trusted directory and the directory the
+    // agent is actually put in come from one function; a second copy that
+    // differed by a character would trust a path nothing reads, and the only
+    // symptom would be a parked agent.
+    const r = rig()
+    const plan = await planFor(r, { hires: ['oncall'] })
+    const asked: string[] = []
+    plannedWorkspaces(plan, (agentId) => {
+      asked.push(agentId)
+      return `/wt/${agentId}`
+    })
+    expect(asked).toEqual(['agent.crew-myapp-oncall'])
+  })
+
+  it('is called before a single hire is spawned', async () => {
+    // Trust has to be recorded before any process exists: the dialog it answers
+    // appears before the session, so an agent that meets it can never report it.
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+    if (!result.ok) throw new Error(result.reasons.join(' · '))
+
+    expect(r.order[0]).toBe('beforeHires')
+    expect(r.order.indexOf('beforeHires')).toBeLessThan(
+      r.order.findIndex((step) => step.startsWith('spawn:'))
+    )
+  })
+
+  it('is not called at all when the plan is refused', async () => {
+    // Nothing was activated, so nothing is consented to.
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    const result = await r.activations.activate({
+      profile: 'crew',
+      target: { kind: 'app', id: 'myapp', path: r.targetDir }
+    })
+    expect(result.ok).toBe(false)
+    expect(r.order).not.toContain('beforeHires')
   })
 })

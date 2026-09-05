@@ -48,6 +48,36 @@ export const TRIP_SIGNALS = ['repetition', 'error-rate', 'hop-cap', 'burn-rate']
 export const tripSignalSchema = z.enum(TRIP_SIGNALS)
 export type TripSignal = z.infer<typeof tripSignalSchema>
 
+export const breakerStopSchema = z
+  .object({
+    agentId: z.string().min(1).max(128),
+    at: z.number().int().nonnegative(),
+    signals: z.array(tripSignalSchema).min(1),
+    detail: z.array(z.record(z.string(), z.union([z.string(), z.number()])))
+  })
+  .strict()
+export type BreakerStop = z.infer<typeof breakerStopSchema>
+export const breakerStopsSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    stops: z.array(breakerStopSchema)
+  })
+  .strict()
+  .refine(
+    (value) => new Set(value.stops.map((stop) => stop.agentId)).size === value.stops.length,
+    'duplicate breaker stop'
+  )
+export interface BreakerStopsView {
+  readonly stops: readonly BreakerStop[]
+  readonly error: string | null
+}
+export const clearBreakerStopSchema = z
+  .object({
+    agentId: z.string().min(1).max(128),
+    expectedAt: z.number().int().nonnegative()
+  })
+  .strict()
+
 /** The ladder, in ADR-0011's order. Rung 0 means "nothing tripped". */
 export const RUNGS = [0, 1, 2, 3] as const
 export type Rung = (typeof RUNGS)[number]

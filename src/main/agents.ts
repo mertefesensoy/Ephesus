@@ -396,6 +396,20 @@ export class AgentManager {
     return agent.card
   }
 
+  refreshRespawnBlock(agentId: string): AgentCard | null {
+    const agent = this.agents.get(agentId)
+    if (!agent?.card.respawnOffer) return null
+    // This is an offer refresh, not another lifecycle exit for the ladders.
+    agent.card = {
+      ...agent.card,
+      respawnOffer: {
+        ...agent.card.respawnOffer,
+        blockedBecause: this.options.respawnBlocked?.(agentId) ?? null
+      }
+    }
+    return agent.card
+  }
+
   /**
    * Spawns one agent.
    *
@@ -410,6 +424,8 @@ export class AgentManager {
    * rolled back here rather than at some later cleanup that may never run.
    */
   async spawn(request: SpawnRequest): Promise<AgentCard> {
+    // Boot and profile activation must respect the same durable decision as respawn.
+    this.assertRespawnAllowed(request.agentId)
     const existing = this.agents.get(request.agentId)
     if (
       existing &&
@@ -802,12 +818,17 @@ export class AgentManager {
     if (this.options.spawner.has(agentId)) {
       throw new Error(`agents: "${agentId}" is still running; stop it before respawning`)
     }
+    if (agent.card.lifecycle !== 'exited') {
+      throw new Error(
+        `agents: "${agentId}" is ${agent.card.lifecycle}; only exited agents can respawn`
+      )
+    }
     // Both respawn paths pass through here — the crew's ladder and the
     // Architect accepting an offer — so a stop decided at rung 3 holds against
     // both (B11). Refused with the reason rather than ignored: an offer that
     // silently does nothing is worse than one that says why it cannot.
-    const blocked = this.options.respawnBlocked?.(agentId) ?? null
-    if (blocked !== null) throw new Error(`agents: "${agentId}" will not be respawned — ${blocked}`)
+    this.assertRespawnAllowed(agentId)
+    const previous = agent.card
     agent.cfg = { ...agent.cfg, hookToken: randomBytes(32).toString('hex') }
     this.update(agentId, { lifecycle: 'starting', exitCode: null, respawnOffer: null })
     // An isolated agent's clean worktree was removed when it died, so it needs
@@ -819,13 +840,34 @@ export class AgentManager {
         // Back to `exited`, where it was: a respawn that cannot restore the
         // isolation the agent had is not a respawn into the Architect's
         // checkout, it is a respawn that did not happen.
-        this.update(agentId, { lifecycle: 'exited', exitCode: agent.card.exitCode })
+        this.update(agentId, {
+          lifecycle: 'exited',
+          exitCode: previous.exitCode,
+          respawnOffer: previous.respawnOffer
+        })
         throw new Error(
           `agents: "${agentId}" cannot be respawned without its worktree — ${refused}`
         )
       }
     }
-    await this.start(agentId, { resume: true })
+    try {
+      await this.start(agentId, { resume: true })
+    } catch (err) {
+      // Failed setup is still the same exited agent. Preserve its memory offer
+      // without returning its tasks a second time, and refresh the standing stop.
+      this.update(agentId, {
+        lifecycle: 'exited',
+        exitCode: previous.exitCode,
+        respawnOffer:
+          previous.respawnOffer === null
+            ? null
+            : {
+                ...previous.respawnOffer,
+                blockedBecause: this.options.respawnBlocked?.(agentId) ?? null
+              }
+      })
+      throw err
+    }
     return this.card(agentId)
   }
 
@@ -838,6 +880,11 @@ export class AgentManager {
     const sessionId = agent.sessionIds.at(-1)
     if (sessionId === undefined || !agent.adapter.resume) return []
     return agent.adapter.resume.resumeArgs(sessionId)
+  }
+
+  private assertRespawnAllowed(agentId: string): void {
+    const blocked = this.options.respawnBlocked?.(agentId) ?? null
+    if (blocked !== null) throw new Error(`agents: "${agentId}" will not be respawned — ${blocked}`)
   }
 
   private async start(agentId: string, opts: { resume?: boolean } = {}): Promise<void> {
@@ -868,6 +915,10 @@ export class AgentManager {
       const hookPlan = agent.adapter.wireHooks(agent.cfg)
       await hookPlan.install()
       agent.hookPlan = hookPlan
+
+      // Setup awaited filesystem work. A stop decided during it must still
+      // prevent the process from existing; the catch unwinds the installed hooks.
+      this.assertRespawnAllowed(agentId)
 
       const plan = agent.adapter.spawnArgs(agent.cfg)
       const resumeArgs = opts.resume ? this.resumeArgsFor(agent) : []

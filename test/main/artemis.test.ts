@@ -13,6 +13,8 @@ import { EngineRegistry, type SpawnPlan } from '../../src/main/engines'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { MemorySettingsRegistry } from '../../src/main/settings-registry'
+import { respawnBlockReason } from '../../src/main/respawn'
+import { Breaker } from '../../src/main/watch/breaker'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { removeTempDir } from '../tmpdir'
 
@@ -88,6 +90,7 @@ async function rig(
     stabilityMs?: number
     /** A standing decision that she must not be brought back (M8.6, B11). */
     blocked?: () => string | null
+    spawnBlocked?: () => string | null
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-artemis-'))
@@ -125,6 +128,7 @@ async function rig(
     prompts,
     agoraRoot,
     probe: async () => '1.0.0-fake',
+    ...(over.spawnBlocked ? { respawnBlocked: over.spawnBlocked } : {}),
     roleBrief: (card) => artemis?.roleBrief(card) ?? null,
     rosterSeats: () => new Map([...roster].map(([id, entry]) => [id, entry.seat])),
     onRosterChange: (agentId, entry) => {
@@ -667,6 +671,48 @@ describe('Artemis and the provider usage limit', () => {
  * must at least be consequential enough to keep her down.
  */
 describe('a standing breaker stop holds against her ladder too', () => {
+  it('reports a blocked boot hire without creating a process or claiming the seat', async () => {
+    const r = await rig({ spawnBlocked: () => 'persisted rung 3 stop' })
+    expect(await r.artemis.start(ENGINE)).toBeNull()
+    expect(r.spawner.spawns).toEqual([])
+    expect(r.orchestratorId).toBeNull()
+    expect(r.degradations.join(' ')).toContain('persisted rung 3 stop')
+  })
+
+  it('keeps a real rung-3 decision through session cleanup and a capacity release', async () => {
+    const breaker = new Breaker({
+      now: () => 100_000,
+      budgetState: () => 'breached',
+      steerText: () => 'stop looping',
+      effects: {
+        steer: () => {},
+        pauseDeliveries: () => {},
+        constrainBudget: () => {},
+        interrupt: () => {},
+        stop: () => {},
+        returnTask: () => {},
+        avatar: () => {}
+      }
+    })
+    const r = await rig({
+      backoffMs: [1, 1],
+      blocked: () => respawnBlockReason(breaker.stopOf(ARTEMIS_AGENT_ID))
+    })
+    await r.artemis.start(ENGINE)
+    for (const rung of [1, 2, 3]) {
+      expect(breaker.forceEvaluate(ARTEMIS_AGENT_ID)).toBe(rung)
+    }
+    r.artemis.holdForCapacity()
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    breaker.forgetSession(ARTEMIS_AGENT_ID)
+    r.artemis.releaseForCapacity()
+    await r.settle()
+    expect(breaker.stopOf(ARTEMIS_AGENT_ID)).not.toBeNull()
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.orchestratorId).toBeNull()
+    expect(r.logs.some((entry) => entry['event'] === 'respawn-blocked')).toBe(true)
+  })
+
   it('does not bring her back, and does not spend the ladder finding out', async () => {
     const r = await rig({
       backoffMs: [1, 1, 1],

@@ -340,7 +340,7 @@ export interface EngineAdapter {
    * target of that activation, and never from spawn. Returns what it did so the
    * caller can log it — pre-trusting must never be silent.
    */
-  trustWorkspace?(cwd: string): WorkspaceTrustResult
+  trustWorkspace?(cwd: string, existence?: WorkspaceExistence): WorkspaceTrustResult
   /**
    * Sorts one `notification` event into what the engine actually meant.
    *
@@ -361,6 +361,27 @@ export interface EngineAdapter {
  * decision, and gating it asks the Architect to approve an agent's silence.
  */
 export type NotificationKind = 'permission' | 'waiting'
+
+/**
+ * Whether the directory being trusted is there yet (M8.7).
+ *
+ * `must-exist` is the default and ADR-0021's original case: the Architect named
+ * a target that is on the disk in front of them, and it is resolved through
+ * `realpath` in full so the record cannot be aimed at another directory by a
+ * junction swapped in afterwards.
+ *
+ * `will-be-created` exists because M8.6 made isolation the default: the agents
+ * an activation hires now work in `<home>/worktrees/<agentId>`, which git has
+ * not made yet at the moment the Architect clicks. Trust is keyed on the exact
+ * directory, so trusting only the target leaves every isolated hire meeting the
+ * first-run dialog with no session and therefore no hook to report it — the
+ * MUSAHIT parking failure ADR-0021 was written to close, re-opened from the
+ * other side. The leaf cannot be resolved before it exists, so the PARENT is
+ * resolved instead and the leaf appended; the parent is `<home>/worktrees`,
+ * which the harness owns and creates, so nothing a repository or a target can
+ * influence is left unresolved.
+ */
+export type WorkspaceExistence = 'must-exist' | 'will-be-created'
 
 /** What `trustWorkspace` did, for the log line that must follow it. */
 export type WorkspaceTrustResult =

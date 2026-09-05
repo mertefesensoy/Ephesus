@@ -54,7 +54,7 @@ import type { MemoVerdictName } from './memo'
 export type MemoQueueName = 'open' | 'decided' | 'all'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
-import type { BreakerState } from './breaker'
+import type { BreakerState, BreakerStopsView } from './breaker'
 import type { CapacityView } from './capacity'
 import type { AgentSpend } from './cost'
 import type { GateVerdict, OpenGate } from './gates'
@@ -185,6 +185,8 @@ export const IpcChannels = {
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
   watchBreaker: 'watch:breaker-state',
+  watchBreakerStops: 'watch:breaker-stops',
+  watchClearBreakerStop: 'watch:clear-breaker-stop',
   watchCapacity: 'watch:capacity',
   watchDismiss: 'watch:dismiss'
 } as const
@@ -616,6 +618,8 @@ export interface EphApi {
      * which ADR-0011 requires on the agent card rather than hidden.
      */
     breakerState: () => Promise<readonly BreakerState[]>
+    breakerStops: () => Promise<BreakerStopsView>
+    clearBreakerStop: (agentId: string, expectedAt: number) => Promise<boolean>
     /**
      * Who is waiting on the provider, since when, and when the harness will ask
      * again (`src/shared/capacity.ts`).

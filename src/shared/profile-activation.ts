@@ -316,6 +316,70 @@ export interface ActivationPlan {
   readonly playbooks: readonly string[]
 }
 
+/**
+ * A directory this activation's agents will actually work in (M8.7).
+ *
+ * It exists because ADR-0021 pre-trusts the engine's workspace at activation
+ * time, and M8.6 then moved every isolated hire OUT of the target and into
+ * `<home>/worktrees/<agentId>`. Claude Code keys its trust record on the exact
+ * directory, so trusting the target alone left every isolated hire meeting the
+ * first-run trust dialog — before any session exists, so no hook could report
+ * it and the agent parked for ever. That is the MUSAHIT failure ADR-0021 was
+ * written to close, re-opened from the other side by isolation.
+ */
+export interface PlannedWorkspace {
+  readonly path: string
+  /**
+   * `must-exist` for the target the Architect named; `will-be-created` for a
+   * worktree git makes later in this same activation.
+   */
+  readonly existence: 'must-exist' | 'will-be-created'
+  /** The hires that will work here. Empty for a target no hire uses. */
+  readonly agentIds: readonly string[]
+}
+
+/**
+ * Contract: every directory this plan's agents will work in, deduplicated,
+ * target first. Pure — it reads the plan and nothing else.
+ *
+ * Derived from the SAME plan object the activation spawns from, so the set of
+ * trusted directories and the set of directories actually used cannot drift.
+ * Computing it from the request, or previewing a second time, is exactly the
+ * two-code-paths mistake M8.5 already paid for.
+ *
+ * The target is always included, even when every hire is isolated away from it:
+ * ADR-0021's decision is that the activation records approval for its target,
+ * and narrowing that to "only when a hire lands there" is a separate decision
+ * from fixing the worktrees. Additive here, deliberately.
+ */
+export function plannedWorkspaces(
+  plan: ActivationPlan,
+  worktreePathFor: (agentId: string) => string
+): readonly PlannedWorkspace[] {
+  const inTarget = plan.hires
+    .filter((hire) => hire.isolation.effective !== 'worktree')
+    .map((hire) => hire.agentId)
+  const workspaces: PlannedWorkspace[] = [
+    { path: plan.targetPath, existence: 'must-exist', agentIds: inTarget }
+  ]
+  const seen = new Set<string>()
+  for (const hire of plan.hires) {
+    if (hire.isolation.effective !== 'worktree') continue
+    const worktree = worktreePathFor(hire.agentId)
+    // Two hires cannot share a worktree today (the path is keyed by agent id),
+    // but dedup here rather than trusting that: a duplicate would write the
+    // same key twice and log two grants for one directory.
+    if (seen.has(worktree)) continue
+    seen.add(worktree)
+    workspaces.push({
+      path: worktree,
+      existence: 'will-be-created',
+      agentIds: [hire.agentId]
+    })
+  }
+  return workspaces
+}
+
 export type ActivationPlanResult =
   | { readonly ok: true; readonly plan: ActivationPlan }
   | { readonly ok: false; readonly reasons: readonly string[] }

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { respawnBlockReason } from '../respawn'
+import type { BreakerStopStore } from './breaker-store'
 import {
   actionsFor,
   DEFAULT_THRESHOLDS,
@@ -13,7 +15,8 @@ import {
   type Rung,
   type SignalHit,
   type Span,
-  type TripSignal
+  type BreakerStop,
+  type BreakerStopsView
 } from '../../shared/breaker'
 
 /**
@@ -69,6 +72,8 @@ export interface BreakerEffects {
 }
 
 export interface BreakerOptions {
+  readonly stopStore?: BreakerStopStore
+  onPersistenceError?(detail: string): void
   readonly effects: BreakerEffects
   /**
    * Renders rung 1's corrective sentence from `prompts/watch/` (invariant §8).
@@ -111,14 +116,7 @@ interface AgentBreaker {
  * this survive a restart, and a shape that already round-trips through JSON is
  * the difference between wiring a file up and redesigning the register.
  */
-export interface BreakerStop {
-  readonly agentId: string
-  /** Epoch milliseconds the stop was decided. */
-  readonly at: number
-  readonly signals: readonly TripSignal[]
-  /** The numbers that caused it — the same detail the `breaker` log carries. */
-  readonly detail: readonly Readonly<Record<string, string | number>>[]
-}
+export type { BreakerStop } from '../../shared/breaker'
 
 export class Breaker {
   private readonly agents = new Map<string, AgentBreaker>()
@@ -128,9 +126,42 @@ export class Breaker {
    */
   private readonly stops = new Map<string, BreakerStop>()
   private readonly now: () => number
+  private storageError: string | null = null
+  private lastStopAt = -1
 
   constructor(private readonly options: BreakerOptions) {
     this.now = options.now ?? (() => Date.now())
+    try {
+      for (const stop of options.stopStore?.load() ?? []) {
+        this.stops.set(stop.agentId, stop)
+        this.lastStopAt = Math.max(this.lastStopAt, stop.at)
+      }
+    } catch (err) {
+      this.persistenceFailed(err)
+    }
+  }
+
+  private persistenceFailed(err: unknown): void {
+    this.storageError = `breaker stop storage unavailable; starts are blocked: ${String(err)}`
+    this.options.onPersistenceError?.(this.storageError)
+  }
+
+  private persist(stops: readonly BreakerStop[]): void {
+    if (this.storageError !== null) throw new Error(this.storageError)
+    try {
+      this.options.stopStore?.save(stops)
+    } catch (err) {
+      this.persistenceFailed(err)
+      throw err
+    }
+  }
+
+  respawnBlocked(agentId: string): string | null {
+    return this.storageError ?? respawnBlockReason(this.stopOf(agentId))
+  }
+
+  stopsView(): BreakerStopsView {
+    return { stops: this.stopped(), error: this.storageError }
   }
 
   private of(agentId: string): AgentBreaker {
@@ -301,12 +332,20 @@ export class Breaker {
       // The stop is recorded BEFORE it is performed. The process is about to
       // exit, `onChange` will call `forgetSession`, and a record written after
       // that race would be a record of a stop nobody can see (B11).
+      // Keep revisions distinct even after a clear or a backwards clock jump.
+      this.lastStopAt = Math.max(this.now(), this.lastStopAt + 1)
       this.stops.set(agentId, {
         agentId,
-        at: this.now(),
+        at: this.lastStopAt,
         signals: firing.map((hit) => hit.signal),
         detail: firing.map((hit) => hit.detail)
       })
+      try {
+        this.persist(this.stopped())
+      } catch {
+        // Still stop the process. The in-memory decision and global refusal
+        // remain in force, with the storage failure visible to the Architect.
+      }
       // Graceful first: the engine's own cancel key, then the process.
       this.options.effects.interrupt(agentId)
       this.options.effects.stop(agentId)
@@ -344,6 +383,8 @@ export class Breaker {
    * agent is finished" is the whole of B11.
    */
   forgetAgent(agentId: string): void {
+    if (this.stops.has(agentId))
+      this.persist(this.stopped().filter((stop) => stop.agentId !== agentId))
     this.agents.delete(agentId)
     this.stops.delete(agentId)
   }
@@ -375,8 +416,13 @@ export class Breaker {
    * Returns false when there was no stop to clear, so a caller can tell "done"
    * from "there was nothing there" instead of guessing.
    */
-  clearStop(agentId: string): boolean {
-    if (!this.stops.has(agentId)) return false
+  clearStop(agentId: string, expectedAt?: number): boolean {
+    const stop = this.stops.get(agentId)
+    if (!stop) return false
+    if (expectedAt !== undefined && expectedAt !== stop.at) {
+      throw new Error('the breaker stop changed; refresh and review it again')
+    }
+    this.persist(this.stopped().filter((entry) => entry.agentId !== agentId))
     this.stops.delete(agentId)
     // The ladder starts over with it: a lifted stop that left the agent at
     // rung 3 would be a stop that was not lifted.
@@ -385,7 +431,17 @@ export class Breaker {
       agent.rung = 0
       agent.rungAt = this.now()
     }
+    this.options.effects.pauseDeliveries(agentId, false)
+    this.options.effects.constrainBudget(agentId, false)
     this.options.effects.avatar(agentId, { kind: 'breaker-recover' })
+    this.options.onLogEvent?.({
+      kind: 'breaker',
+      agentId,
+      rung: 0,
+      action: 'clear-stop',
+      stoppedAt: stop.at,
+      actor: 'architect'
+    })
     return true
   }
 

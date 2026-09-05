@@ -20,6 +20,7 @@ import type {
   NotificationKind,
   UsageFact,
   CostFact,
+  WorkspaceExistence,
   WorkspaceTrustResult
 } from './types'
 
@@ -433,6 +434,50 @@ export const CLAUDE_CONFIG_REL = '.claude.json'
 /** Contract: pure. The key Claude Code will actually match on for this directory. */
 export function claudeProjectKey(cwd: string): string {
   return path.resolve(cwd).split(path.sep).join('/')
+}
+
+/**
+ * Contract: the canonical project key for `cwd`, or why it could not be made.
+ * Reads the filesystem (`realpath`) and never throws.
+ *
+ * `must-exist` resolves the whole path, which is ADR-0021's junction guard: the
+ * record must name the directory that was actually approved, not a link that
+ * can be repointed at another one afterwards.
+ *
+ * `will-be-created` resolves the PARENT and appends the leaf, because the leaf
+ * is a worktree git has not made yet (M8.7). The guard is not weakened where it
+ * matters: the parent is `<home>/worktrees`, which the harness creates and
+ * owns, and the leaf is a name the harness derives from an agent id — neither
+ * is a path a repository or a target can influence. A leaf that already exists
+ * and is a real directory resolves to the same key either way.
+ */
+function resolveProjectKey(
+  cwd: string,
+  existence: WorkspaceExistence
+): { readonly ok: true; readonly key: string } | { readonly ok: false; readonly because: string } {
+  const reason = (err: unknown): string =>
+    err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err)
+  if (existence === 'must-exist') {
+    try {
+      return { ok: true, key: claudeProjectKey(fs.realpathSync.native(cwd)) }
+    } catch (err) {
+      return { ok: false, because: `target does not resolve: ${reason(err)}` }
+    }
+  }
+  const absolute = path.resolve(cwd)
+  const parent = path.dirname(absolute)
+  if (parent === absolute) {
+    // A filesystem root has no parent to resolve, and no worktree is ever one.
+    return { ok: false, because: 'workspace does not resolve: it has no parent directory' }
+  }
+  try {
+    return {
+      ok: true,
+      key: claudeProjectKey(path.join(fs.realpathSync.native(parent), path.basename(absolute)))
+    }
+  } catch (err) {
+    return { ok: false, because: `workspace parent does not resolve: ${reason(err)}` }
+  }
 }
 
 /**
@@ -935,21 +980,13 @@ export class ClaudeAdapter implements EngineAdapter {
    * drop the key. The failure is visible rather than dangerous — the dialog
    * returns and the agent parks — but it is a race this cannot close from here.
    */
-  trustWorkspace(cwd: string): WorkspaceTrustResult {
+  trustWorkspace(cwd: string, existence: WorkspaceExistence = 'must-exist'): WorkspaceTrustResult {
     const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
     if (home.length === 0) return { ok: false, because: 'no home directory to write the record in' }
     const configPath = path.join(home, CLAUDE_CONFIG_REL)
-    let canonical: string
-    try {
-      canonical = claudeProjectKey(fs.realpathSync.native(cwd))
-    } catch (err) {
-      return {
-        ok: false,
-        because: `target does not resolve: ${
-          err instanceof Error ? err.message.split('\n')[0] : String(err)
-        }`
-      }
-    }
+    const resolved = resolveProjectKey(cwd, existence)
+    if (!resolved.ok) return resolved
+    const canonical = resolved.key
     let config: Record<string, unknown> = {}
     if (fs.existsSync(configPath)) {
       try {

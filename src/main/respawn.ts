@@ -89,6 +89,9 @@ export class RespawnLadder {
   /** The in-flight backoff-then-respawn chain, or null when nothing is queued. */
   private pending: Promise<void> | null = null
   private stopped = false
+  private generation = 0
+  private attempting = false
+  private attemptExit: { exitCode: number | null } | null = null
   /**
    * True while something outside the ladder owns this agent's return — the
    * provider capacity watch, today.
@@ -122,6 +125,10 @@ export class RespawnLadder {
    * the next real crash gets.
    */
   noteStarted(): void {
+    this.generation += 1
+    this.pending = null
+    this.attempting = false
+    this.attemptExit = null
     this.attempts = 0
     this.runningSince = this.now()
   }
@@ -184,7 +191,7 @@ export class RespawnLadder {
     this.heldExit = null
     if (exit === null || this.stopped || this.pending !== null) return
     this.options.onEvent?.({ event: 'released', attempt: this.attempts, exitCode: exit.exitCode })
-    this.pending = this.waitThenRespawn(0)
+    this.pending = this.waitThenRespawn(0, exit.exitCode, false)
   }
 
   /** Resolves once no attempt is queued. For shutdown, and for tests. */
@@ -195,11 +202,20 @@ export class RespawnLadder {
   /** Cancels any queued attempt. Called at shutdown; safe to call twice. */
   stop(): void {
     this.stopped = true
+    this.generation += 1
     this.pending = null
+    this.attempting = false
+    this.attemptExit = null
+    this.held = false
+    this.heldExit = null
   }
 
   private schedule(exitCode: number | null): void {
-    if (this.stopped || this.pending !== null) return
+    if (this.stopped) return
+    if (this.pending !== null) {
+      if (this.attempting) this.attemptExit = { exitCode }
+      return
+    }
     if (this.held) {
       // Remembered, not charged. `release` brings the agent back.
       this.heldExit = { exitCode }
@@ -230,39 +246,61 @@ export class RespawnLadder {
       waitMs: step.waitMs,
       exitCode
     })
-    this.pending = this.waitThenRespawn(step.waitMs)
+    this.pending = this.waitThenRespawn(step.waitMs, exitCode, true)
   }
 
-  private async waitThenRespawn(waitMs: number): Promise<void> {
+  private async waitThenRespawn(
+    waitMs: number,
+    exitCode: number | null,
+    charged: boolean
+  ): Promise<void> {
+    const generation = this.generation
     await this.delay(waitMs)
-    // Cleared BEFORE the attempt, not after: a failed attempt schedules the
-    // next rung from inside `attempt`, and a `finally` here would drop that
-    // one on the floor.
+    // A cancelled wait must never erase or revive a newer generation's work.
+    if (generation !== this.generation || this.stopped) return
+    if (this.runningSince !== null) {
+      // A manual respawn may have won the backoff race. It is already up.
+      if (charged) this.attempts -= 1
+      this.pending = null
+      return
+    }
+    if (this.held) {
+      if (charged) this.attempts -= 1
+      this.pending = null
+      this.schedule(exitCode)
+      return
+    }
+    this.attempting = true
+    const retry = await this.attempt(generation)
+    if (generation !== this.generation) return
+    const next = this.attemptExit ?? retry
+    this.attemptExit = null
+    this.attempting = false
     this.pending = null
-    if (this.stopped) return
-    await this.attempt()
+    if (next !== null) this.schedule(next.exitCode)
   }
 
-  private async attempt(): Promise<void> {
-    if (this.stopped) return
+  private async attempt(generation: number): Promise<{ exitCode: number | null } | null> {
     // Asked again, after the wait. A two-minute backoff is long enough for the
     // breaker to stop this agent, and respawning into a stop it had already
     // earned is the cycle M8.6 exists to end.
     const veto = this.options.blocked?.() ?? null
     if (veto !== null) {
       this.options.onEvent?.({ event: 'blocked', because: veto, exitCode: null })
-      return
+      return null
     }
     try {
       const outcome = await this.options.respawn()
+      if (generation !== this.generation) return null
       this.options.onEvent?.({ event: 'respawned', attempt: this.attempts })
-      if (outcome.stillDown) this.schedule(outcome.exitCode)
+      return outcome.stillDown ? { exitCode: outcome.exitCode } : null
     } catch (err) {
+      if (generation !== this.generation) return null
       this.options.onAttemptFailed?.(
         this.attempts,
         err instanceof Error ? err.message : String(err)
       )
-      this.schedule(null)
+      return { exitCode: null }
     }
   }
 }
@@ -322,6 +360,10 @@ export class CrewSurvival {
    * activation, where a declared ladder would race the kill that is undoing it.
    */
   declare(agentId: string, policy: ExitPolicy): void {
+    if (policy !== 'respawn') {
+      this.ladders.get(agentId)?.stop()
+      this.ladders.delete(agentId)
+    }
     this.declared.set(agentId, policy)
   }
 

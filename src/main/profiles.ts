@@ -315,6 +315,21 @@ export interface ProfileActivationOptions {
   /** Kills one agent, on deactivation or on an unwind. */
   kill(agentId: string): void
   /**
+   * The plan is settled and NOTHING has been hired yet (M8.7).
+   *
+   * The seam exists for work that must happen after the activation is known to
+   * be going ahead but before any process exists — today, writing the engine's
+   * workspace trust for the target AND for the worktrees this activation is
+   * about to create (ADR-0021). It takes the plan rather than the request so
+   * the directories trusted are the ones the hires below actually use; deriving
+   * them a second time is the drift M8.5 already paid for.
+   *
+   * It cannot refuse. ADR-0021 makes a failed trust write a visible degradation
+   * rather than a refusal, and that stands: an unreadable `~/.claude.json` is
+   * the Architect's file, not a reason the company may not start.
+   */
+  beforeHires?(plan: ActivationPlan): void
+  /**
    * One hire is up and the instance is live (M8.6). Carries the whole planned
    * hire rather than an id and a policy, so a consumer that later needs the
    * isolation row or the budget does not need a second seam — and so this one
@@ -403,6 +418,12 @@ export class ProfileActivations {
     const planned = await this.preview(request)
     if (!planned.ok) return { ok: false, reasons: planned.reasons }
     const { plan } = planned
+
+    // Before the first process, after the plan is fixed: the engine's trust
+    // record has to name every directory these hires will work in, or an
+    // isolated one meets the first-run dialog with no session and no hook
+    // (ADR-0021, M8.7).
+    this.options.beforeHires?.(plan)
 
     const spawned: string[] = []
     for (const hire of plan.hires) {

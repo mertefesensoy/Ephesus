@@ -43,7 +43,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 
 | Module | Owns | Key ADR |
 |---|---|---|
-| `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts` | 0009 |
+| `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts`. `claude.ts` alone implements `trustWorkspace` (ADR-0021/0025) — the engine's own per-workspace trust record is a Claude Code fact, and core never learns what a project key looks like | 0009, 0021, 0025 |
 | `agents.ts` | `AgentManager`: spawn ordering (probe → token → identity → settings → process), FR-1.6 install offer, exit unwind (settings restored, token revoked) | 0009, 0010 |
 | `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; PATH resolution for spawn plans (`which.ts`); the redaction filter on outbound streams, wired in `pty-stream.ts` (split out so it is testable without node-pty) | 0014, 0010 |
 | `avatars.ts` | `AvatarDirector`: hook events → §6 avatar snapshots, the walk clock (`arrive`) and the §6 timers | 0002 |
@@ -188,6 +188,23 @@ Defined normatively in ADR-0009. Runtime notes:
   made is deliberately not pre-checked — the create is the truth, and a screen
   that says "ok" before a `git worktree add` that fails is two code paths that
   can disagree (the M8.5 lesson).
+- **Isolation moves the agent, so the engine's workspace trust must follow it**
+  (ADR-0025, M8.7). Claude Code asks once per working directory whether a human
+  trusts it, keyed on the exact resolved path, and it asks BEFORE a session
+  exists — so no hook fires and a parked agent reports nothing. ADR-0021 answers
+  that at activation with the target; once M8.6 made isolation the default, the
+  target was no longer where any hire worked. `ProfileActivations` therefore
+  calls `beforeHires(plan)` after the plan is fixed and before the first
+  process, and `index.ts` trusts every directory in
+  `plannedWorkspaces(plan, worktreePathFor)`: the target (`must-exist`, resolved
+  through `realpath` in full) and one entry per isolated hire
+  (`will-be-created`, whose leaf git has not made yet, so the PARENT is resolved
+  and the leaf appended — the parent is `<home>/worktrees`, which the harness
+  owns). Both the trusted set and the spawned set come from the one plan object;
+  a second derivation would put the record at a path nothing reads, and the only
+  symptom of that is an agent that hangs. Trust is still written from an
+  activation and nowhere else — never from spawn, respawn or a wake (ADR-0021,
+  unchanged).
 - **A hire also declares what happens when it dies** (`onExit: "offer" | "respawn"`,
   same two layers, default `offer` = SDD §10's own word). Both fields are
   additive and optional on `hireTemplateSchema` and `profileDocumentSchema`, so
@@ -413,6 +430,7 @@ odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(mem
           // never writes the ledger, which is hers (FR-5.2, UC-05 step 4)
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
+          breakerStops() clearBreakerStop(agentId, expectedAt)
 harbor:   repos() bridgeStatus()
           hireExport(profile, hire) profileExport(name)
           importInspect(blob) importInstall(blob)
@@ -637,8 +655,13 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
   stop is performed, since the process is about to exit and the exit forgets
   the session. `forgetSession` (what an exit calls) drops the spans and the
   rung; `forgetAgent` (decommissioning) drops the stop too; `clearStop` is the
-  Architect's, and returns the agent to rung 0. The record is serializable and
-  single-owner on purpose, so M8.8 can persist it without redesigning it.
+  Architect's, and returns the agent to rung 0, releasing delivery and budget
+  constraints. Stops now persist in app-local `breaker-stops.json` (schema 1)
+  through atomic replacement before stopping. Both initial hires and respawns
+  refuse a standing stop. Unreadable storage blocks starts and is surfaced.
+  Watch lists stops even without live cards; `clearBreakerStop(agentId, expectedAt)`
+  validates the reviewed decision, persists removal and refreshes the offer
+  without emitting another lifecycle exit. Clearing never itself spawns an agent.
 - **Telemetry**: every tool call becomes a span (agent, tool, duration, outcome) →
   waterfall UI; spans are local-only (NFR-10).
 - **Company mode** (ADR-0018): `directed`/`improving` lives in `config.json`
