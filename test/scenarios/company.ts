@@ -189,8 +189,10 @@ export interface Company {
   runTurn(agentId: string, steps: readonly unknown[]): Promise<string>
   /** Files currently in an agent's inbox. */
   inbox(agentId: string): readonly string[]
-  /** Files an agent has consumed. */
+  /** Files an agent has consumed AND proven it read (settled at a Stop). */
   done(agentId: string): readonly string[]
+  /** Files handed to a session that has not yet proven it read them. */
+  inflight(agentId: string): readonly string[]
   /** Reads a message file from an inbox. */
   readInbox(agentId: string, name: string): Message
   close(): Promise<void>
@@ -766,6 +768,11 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
             .filter((n) => n.endsWith('.json'))
             .sort()
         : []
+    },
+
+    inflight(agentId) {
+      const dir = path.join(hermes.mailboxDir(agentId), 'inbox', '.inflight')
+      return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
     },
 
     done(agentId) {

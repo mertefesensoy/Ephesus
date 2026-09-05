@@ -36,9 +36,13 @@ describe('S-WAKE', () => {
     // Five more passes after the hand-over: still one nudge.
     for (let i = 0; i < 5; i += 1) await company.hermes.wakeCheck()
     expect(nudges).toEqual(['agent.b'])
-    // Hand-over consumption: the nudge carried the mail, the file is archived.
+    // Hand-over consumption: the nudge carried the mail, so it has left the
+    // inbox. It is IN FLIGHT, not archived — the agent has been handed it but
+    // has not yet finished a turn holding it, and a session that died here used
+    // to lose the message entirely.
     expect(company.inbox('agent.b')).toEqual([])
-    expect(company.done('agent.b')).toHaveLength(1)
+    expect(company.inflight('agent.b')).toHaveLength(1)
+    expect(company.done('agent.b')).toEqual([])
 
     expect(company.agora.readLog().filter((e) => e['event'] === 'wake')).toHaveLength(1)
   })
@@ -91,7 +95,7 @@ describe('S-WAKE', () => {
 
     const first = await company.hermes.consumeInbox('agent.b')
     expect(first.map((m) => m.id)).toEqual([sent.id])
-    expect(company.done('agent.b')).toEqual([`${sent.id}.json`])
+    expect(company.inflight('agent.b')).toEqual([`${sent.id}.json`])
     expect(company.hermes.readCursor('agent.b').lastProcessed).toBe(sent.id)
 
     // A crash-and-replay puts the same file back in the inbox.
@@ -103,6 +107,10 @@ describe('S-WAKE', () => {
 
     expect(await company.hermes.consumeInbox('agent.b')).toEqual([])
     expect(company.inbox('agent.b')).toEqual([])
-    expect(company.done('agent.b')).toHaveLength(1)
+    // Still exactly one copy, and still in flight: the duplicate was dropped
+    // against `.inflight/` as well as `.done/`, which is what stops a second
+    // wake handing the same message to a session that already has it.
+    expect(company.inflight('agent.b')).toHaveLength(1)
+    expect(company.done('agent.b')).toEqual([])
   })
 })

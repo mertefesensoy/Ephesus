@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Agora } from '../../src/main/agora'
-import { DONE_DIR, Hermes } from '../../src/main/hermes'
+import { DONE_DIR, INFLIGHT_DIR, Hermes } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import { DEFAULT_PACE_THRESHOLDS, type Pace } from '../../src/shared/pacing'
@@ -52,6 +52,7 @@ interface Rig {
   send(to: string): Message
   inbox(agentId: string): readonly string[]
   done(agentId: string): readonly string[]
+  inflight(agentId: string): readonly string[]
   readonly nudges: string[]
   readonly deferrals: { agentId: string; pace: Pace; pendingMail: number }[]
 }
@@ -126,6 +127,12 @@ async function rig(options: { slowWakeGapMs?: number } = {}): Promise<Rig> {
     done(agentId) {
       const dir = path.join(agora.agentDir(agentId), 'inbox', DONE_DIR)
       return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
+    },
+    // Handed to a session that has not yet proven it read it: the state
+    // `consumeInbox` now leaves mail in, until a Stop settles it.
+    inflight(agentId) {
+      const dir = path.join(agora.agentDir(agentId), 'inbox', INFLIGHT_DIR)
+      return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
     }
   }
 }
@@ -162,7 +169,7 @@ describe('the pace gates the inbox wake path (wakeCheck)', () => {
     // And the message is still sitting in the inbox, unconsumed. Deferring is
     // not dropping.
     expect(r.inbox('agent.b')).toHaveLength(1)
-    expect(r.done('agent.b')).toHaveLength(1) // only the first wake's message
+    expect(r.inflight('agent.b')).toHaveLength(1) // only the first wake's message
   })
 
   it('delivers the deferred mail once the gap has passed', async () => {
@@ -185,7 +192,7 @@ describe('the pace gates the inbox wake path (wakeCheck)', () => {
     r.advance(gap)
     expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
     expect(r.inbox('agent.b')).toHaveLength(0)
-    expect(r.done('agent.b')).toHaveLength(2)
+    expect(r.inflight('agent.b')).toHaveLength(2)
   })
 
   it('holds until the window resets, then marches forward', async () => {
@@ -219,7 +226,7 @@ describe('the pace gates the stop-hook wake path (decideOnStop)', () => {
 
     const reply = await r.hermes.decideOnStop('agent.b', { stop_hook_active: false })
     expect(reply?.decision).toBe('block')
-    expect(r.done('agent.b')).toHaveLength(1)
+    expect(r.inflight('agent.b')).toHaveLength(1)
   })
 
   it('lets the turn end instead of buying another one while slow', async () => {

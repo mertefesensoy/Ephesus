@@ -2067,6 +2067,21 @@ async function boot(): Promise<void> {
         `agents/teardown:${agentId}`,
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    // The session died holding mail it was handed but never proved it read, so
+    // the mail goes back to the inbox and the next wake redelivers it (NFR-6).
+    // Measured before this existed: 21 of 79 wakes on this machine killed the
+    // agent, and every one of those messages was archived as read.
+    onExited: (agentId) => {
+      const returned = hermes?.returnInflight(agentId) ?? 0
+      if (returned > 0) {
+        reportDegradation(
+          `hermes/mail-returned:${agentId}`,
+          `${agentId} exited holding ${String(returned)} handed-over message(s) — ` +
+            'they are back in its inbox and will be redelivered, but the turn that was ' +
+            'supposed to act on them never happened'
+        )
+      }
+    },
     // A ghost that was parked did not crash. Asked rather than inferred from
     // the exit code, because a provider refusal and a crash look identical at
     // the pty seam — and the difference is whether a human needs to do anything.

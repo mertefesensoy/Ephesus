@@ -7,6 +7,7 @@ import { composeMessage, makeMessageId, type Message } from '../../src/shared/me
 import { Agora } from '../../src/main/agora'
 import {
   DONE_DIR,
+  INFLIGHT_DIR,
   Hermes,
   REJECTED_DIR,
   type HermesFaultPoint,
@@ -50,6 +51,7 @@ interface Rig {
   inbox(agentId: string): readonly string[]
   outbox(agentId: string): readonly string[]
   done(agentId: string): readonly string[]
+  inflight(agentId: string): readonly string[]
 }
 
 async function rig(
@@ -107,6 +109,10 @@ async function rig(
     },
     done(agentId) {
       const dir = path.join(agora.agentDir(agentId), 'inbox', DONE_DIR)
+      return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
+    },
+    inflight(agentId) {
+      const dir = path.join(agora.agentDir(agentId), 'inbox', INFLIGHT_DIR)
       return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
     }
   }
@@ -477,7 +483,7 @@ describe('Hermes — a message the router will not carry', () => {
 })
 
 describe('Hermes — inbox consumption is idempotent (ADR-0003, FR-3.6)', () => {
-  it('consumes mail once and moves it to .done/', async () => {
+  it('consumes mail once and holds it IN-FLIGHT until the session proves it read it', async () => {
     const r = await rig()
     const sent = message()
     r.send('agent.a', sent)
@@ -487,8 +493,15 @@ describe('Hermes — inbox consumption is idempotent (ADR-0003, FR-3.6)', () => 
 
     expect(consumed.map((m) => m.id)).toEqual([sent.id])
     expect(r.inbox('agent.b')).toEqual([])
-    expect(r.done('agent.b')).toEqual([`${sent.id}.json`])
+    // NOT done yet: handed to a session that has not finished a turn with it.
+    // Archiving here is the defect the one-hour run found — a session that then
+    // died lost the message, recorded as delivered and read.
+    expect(r.inflight('agent.b')).toEqual([`${sent.id}.json`])
+    expect(r.done('agent.b')).toEqual([])
     expect(r.hermes.readCursor('agent.b').lastProcessed).toBe(sent.id)
+
+    // …and it is not pending, so it cannot re-block a Stop (ADR-0003, M2).
+    expect(r.hermes.hasPendingMail('agent.b')).toBe(false)
   })
 
   it('returns nothing on a second call — no double-processing', async () => {
@@ -1167,5 +1180,147 @@ describe('Hermes — mail arriving just after a nudge still gets one (M7.7)', ()
     // Not idle: skipped, and NOT recorded as told.
     expect(await r.hermes.wakeCheck()).toEqual([])
     expect(nudges).toEqual([])
+  })
+})
+/**
+ * Found by the real one-hour run on 2026-09-05, not by a test.
+ *
+ * Hermes archived mail to `inbox/.done/` in the same act that handed it to the
+ * session. A session that died before acting therefore lost the message —
+ * recorded as delivered, recorded as read, never acted on. On the Architect's
+ * own machine **21 of 79 wakes killed the agent**, and because every incident is
+ * routed to the orchestrator first, one death there stopped the whole chain.
+ *
+ * The constraint these cases must respect: mail must never read as PENDING
+ * again while the session lives. Consuming later was tried and reverted at the
+ * M2 close-out (ADR-0003) because handled mail then re-blocked every Stop until
+ * the cap. That is why the fix is a third state and not a moved rename.
+ */
+describe('Hermes — mail handed to a session that dies is not lost', () => {
+  it('returns in-flight mail to the inbox when the session exits', async () => {
+    const r = await rig()
+    const sent = message()
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+    expect(r.inflight('agent.b')).toEqual([`${sent.id}.json`])
+
+    // The session dies without ever reaching a Stop.
+    const returned = r.hermes.returnInflight('agent.b')
+
+    expect(returned).toBe(1)
+    expect(r.inbox('agent.b')).toEqual([`${sent.id}.json`])
+    expect(r.inflight('agent.b')).toEqual([])
+    expect(r.done('agent.b')).toEqual([])
+    // Pending again, so the next wake announces it.
+    expect(r.hermes.hasPendingMail('agent.b')).toBe(true)
+  })
+
+  it('the returned message is redelivered intact, and only once', async () => {
+    const r = await rig()
+    const sent = message()
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+    r.hermes.returnInflight('agent.b')
+
+    const again = await r.hermes.consumeInbox('agent.b')
+
+    expect(again.map((m) => m.id)).toEqual([sent.id])
+    expect(again[0]?.body).toBe(sent.body)
+    // A second consume hands nothing: it is in-flight, not pending.
+    expect((await r.hermes.consumeInbox('agent.b')).map((m) => m.id)).toEqual([])
+  })
+
+  /**
+   * The regression that matters most: this is the behaviour the M2 verdict
+   * bought, and the reason the fix could not simply consume later.
+   */
+  it('settles at the Stop, and handled mail never re-blocks', async () => {
+    const r = await rig()
+    const sent = message()
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+
+    const settled = r.hermes.settleInflight('agent.b')
+
+    expect(settled).toBe(1)
+    expect(r.done('agent.b')).toEqual([`${sent.id}.json`])
+    expect(r.inflight('agent.b')).toEqual([])
+    expect(r.inbox('agent.b')).toEqual([])
+    expect(r.hermes.hasPendingMail('agent.b')).toBe(false)
+  })
+
+  /** In-flight is not pending even before it settles — the M2 property. */
+  it('mail in flight does not count as pending', async () => {
+    const r = await rig()
+    r.send('agent.a', message())
+    await r.hermes.sweep()
+    expect(r.hermes.hasPendingMail('agent.b')).toBe(true)
+
+    await r.hermes.consumeInbox('agent.b')
+
+    expect(r.hermes.hasPendingMail('agent.b')).toBe(false)
+  })
+
+  it('a settled message is never handed over again', async () => {
+    const r = await rig()
+    const sent = message()
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+    r.hermes.settleInflight('agent.b')
+
+    // A redelivery of the same id after settling is a no-op (ADR-0003).
+    r.send('agent.a', sent)
+    await r.hermes.sweep()
+
+    expect((await r.hermes.consumeInbox('agent.b')).map((m) => m.id)).toEqual([])
+    expect(r.done('agent.b')).toEqual([`${sent.id}.json`])
+  })
+
+  it('both transitions are no-ops for an agent that was never handed anything', async () => {
+    const r = await rig()
+    expect(r.hermes.returnInflight('agent.b')).toBe(0)
+    expect(r.hermes.settleInflight('agent.b')).toBe(0)
+  })
+
+  it('returns every in-flight message, not just the first', async () => {
+    const r = await rig()
+    const one = message()
+    const two = message()
+    r.send('agent.a', one)
+    r.send('agent.a', two)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+
+    expect(r.hermes.returnInflight('agent.b')).toBe(2)
+    expect([...r.inbox('agent.b')].sort()).toEqual([`${one.id}.json`, `${two.id}.json`].sort())
+  })
+
+  /**
+   * The Stop hook settles what the PREVIOUS turn held before handing over this
+   * turn's mail. Settling afterwards would archive the mail the block is about
+   * to hand over, and a session that then died would lose it — the same defect,
+   * moved a few lines down.
+   */
+  it('a Stop settles the previous hand-over, not the one it is making', async () => {
+    const r = await rig({ blockCap: 10 })
+    const first = message()
+    r.send('agent.a', first)
+    await r.hermes.sweep()
+    await r.hermes.consumeInbox('agent.b')
+
+    // New mail arrives while the first is still in flight.
+    const second = message()
+    r.send('agent.a', second)
+    await r.hermes.sweep()
+
+    await r.hermes.decideOnStop('agent.b', {})
+
+    // The first settled; the second is in flight, handed over by this Stop.
+    expect(r.done('agent.b')).toEqual([`${first.id}.json`])
+    expect(r.inflight('agent.b')).toEqual([`${second.id}.json`])
   })
 })

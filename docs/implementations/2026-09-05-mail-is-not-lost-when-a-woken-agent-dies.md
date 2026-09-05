@@ -1,6 +1,6 @@
 # Mail is not lost when a woken agent dies
 
-**Status: PLAN, written before any code.** Found by the real one-hour test run
+**Status: BUILT.** The plan below was written before any code. Found by the real one-hour test run
 on 2026-09-05, not by a test.
 
 ## Problem
@@ -74,10 +74,11 @@ Add **in-flight** (`inbox/.inflight/`) between them.
   hook, which is the first moment the agent has demonstrably held the content
   across a completed turn.
 - `returnInflight(agentId)` moves `.inflight/` → `inbox/`. Called when the
-  agent's process exits, and at boot for anything a killed harness left behind.
-  The message becomes pending again and is redelivered on the next wake — which
-  is NFR-6's at-least-once delivery with idempotent consumption, finally true of
-  the hand-over path as well as of the write path.
+  agent's process exits. The message becomes pending again and is redelivered on
+  the next wake — NFR-6's at-least-once delivery, finally true of the hand-over
+  path as well as of the write path.
+  *(The plan also said "and at boot for anything a killed harness left behind".
+  That was wrong, and building it showed why — see the next section.)*
 - Idempotency is unchanged and extended: a message id already in `.done/` is
   dropped as before, and `.inflight/` is checked too so nothing is handed twice.
 
@@ -103,18 +104,66 @@ back, or it is lost for a different reason.
 defect and is recorded as owed below. It must not gate this: the loss is worse
 than the crash, because a crash is visible in the log and the loss is not.
 
+## The distinction that kept S-BLACKOUT true
+
+Writing the fix surfaced a conflict the plan had not seen. S-BLACKOUT records
+*"does not re-consume mail the dead harness had already handed over"* — and a
+blanket "return in-flight mail" would have reversed it, risking the
+double-processing SRS §6 criterion 6 forbids on mail that may genuinely have
+been acted on.
+
+**Two deaths are not the same death**, and the fix now says so:
+
+| death | what the harness knows | what happens to in-flight mail |
+|---|---|---|
+| the AGENT exits, harness alive | it *observed* the session end without finishing | **returned** to the inbox and redelivered |
+| the HARNESS is killed | nothing about what that session did | **settled** to `.done/`, exactly as before |
+
+The second rule lives in Hermes's **constructor**, not in `boot()`: a new Hermes
+is a new harness, and the scenario suites build one directly to model a restart —
+which is precisely the case the rule exists for. Putting it in `boot()` left
+S-BLACKOUT failing, and that failure was right.
+
+So the M2 close-out verdict (ADR-0003) is narrowed, not overturned. The
+redelivery applies only where the harness has a fact instead of a guess.
+
 ## Verification
 
-`PENDING`. The bar:
+```
+typecheck    green (all four projects)
+lint         green
+invariants   ok — reachability 173/181
+tests        3785 passed / 8 skipped (3793) across 199 files
+             (3777 before this fix — +8 cases)
+```
+
+**7 mutations, all killed**, each reverted. The first restores the original
+defect exactly — `consumeInbox` renaming into `.done/` — and dies to six cases.
+The others cover the exit that does not return, the Stop that never settles, the
+Stop settling *after* its own hand-over (the defect moved four lines down),
+in-flight counting as pending (which would re-create the M2 pathology), the
+missing idempotency check, and a drain that moves only the first message.
+
+**The existing suite caught the contract change in four files** — hermes,
+pacing-wakes, S-WAKE and S-BLACKOUT — which is the seam working. Each was
+updated to assert the new location, and in every case the *behavioural*
+assertion it existed for was left untouched: no message is handed twice, no
+message is re-consumed after a harness death, a deferred wake still leaves the
+mail where it is.
+
+The bar this was written against:
 
 - A message handed over and then followed by an agent exit is **back in the
   inbox**, and `hasPendingMail` is true again.
 - A message handed over and followed by a Stop is in `.done/`, and
   `hasPendingMail` is false — the M2 pathology stays fixed. This is the
   regression that matters most; it is the reason the current code is what it is.
-- Boot returns leftover in-flight mail from a killed harness.
+- A NEW harness SETTLES leftover in-flight mail rather than returning it, so
+  S-BLACKOUT's no-re-consume requirement still holds.
 - The same message is never handed to a session twice.
 - A mutation pass over each new guard.
+
+All met.
 
 ## Owed, recorded not built
 

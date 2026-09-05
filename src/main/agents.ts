@@ -228,6 +228,20 @@ export interface AgentManagerOptions {
    */
   onExitError?(agentId: string, err: unknown): void
   /**
+   * This agent's process is gone. Raised for EVERY exit, before any respawn
+   * decision, so a consumer can undo what it had staked on the session being
+   * alive.
+   *
+   * Hermes is the caller that made it necessary: mail handed to a session is
+   * held in-flight until that session proves it read it, and a process that
+   * exits never will. It is a separate seam from `onLogEvent`'s `exit` row
+   * because that one is a record and this one is an action — and it fires on
+   * the exit rather than on a respawn because a respawn may never come (an
+   * agent whose bundle says `offer`, one a breaker stopped, one whose ladder
+   * is exhausted), and its mail must come back regardless.
+   */
+  onExited?(agentId: string): void
+  /**
    * Extra standing context appended to an agent's `identity.md`, supplied by
    * whoever hired them.
    *
@@ -1009,6 +1023,16 @@ export class AgentManager {
   private async handleExit(agentId: string, exitCode: number): Promise<void> {
     const agent = this.agents.get(agentId)
     if (!agent) return
+
+    // The session is gone, so anything staked on it being alive is void. Raised
+    // FIRST and outside the `installing` branch below, because that branch
+    // returns without unwinding and mail handed to the dead session would sit
+    // in-flight forever. A consumer that throws must not cost the unwind.
+    try {
+      this.options.onExited?.(agentId)
+    } catch (err) {
+      this.options.onExitError?.(agentId, err)
+    }
 
     if (agent.card.lifecycle === 'installing') {
       const version = await this.probe(agent.adapter.binary())

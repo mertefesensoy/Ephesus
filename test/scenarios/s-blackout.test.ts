@@ -201,6 +201,15 @@ async function restartOver(home: string): Promise<Company> {
             .sort()
         : []
     },
+    inflight: (agentId) => {
+      const dir = path.join(hermes.mailboxDir(agentId), 'inbox', '.inflight')
+      return fs.existsSync(dir)
+        ? fs
+            .readdirSync(dir)
+            .filter((n) => n.endsWith('.json'))
+            .sort()
+        : []
+    },
     done: (agentId) => {
       const dir = path.join(hermes.mailboxDir(agentId), 'inbox', '.done')
       return fs.existsSync(dir)
@@ -280,7 +289,8 @@ describe('S-BLACKOUT — killed mid-delivery', () => {
     // And the recipient consumes it exactly once.
     expect(await restarted.hermes.consumeInbox('agent.b')).toHaveLength(1)
     expect(await restarted.hermes.consumeInbox('agent.b')).toHaveLength(0)
-    expect(restarted.done('agent.b')).toEqual([`${sent.id}.json`])
+    // Handed over once, and in flight until this session proves it read it.
+    expect(restarted.inflight('agent.b')).toEqual([`${sent.id}.json`])
   })
 
   it('does not re-consume mail the dead harness had already handed over', async () => {
@@ -296,12 +306,20 @@ describe('S-BLACKOUT — killed mid-delivery', () => {
     await company.runTurn('agent.a', [sendStep(sent)])
     await company.hermes.sweep()
 
-    // The agent got the mail; the harness died before finishing the turn.
+    // The mail was handed over; the harness died before finishing the turn, so
+    // it is IN FLIGHT rather than archived.
     await expect(company.hermes.consumeInbox('agent.b')).rejects.toThrow(/blackout/)
-    expect(company.done('agent.b')).toEqual([`${sent.id}.json`])
+    expect(company.inflight('agent.b')).toEqual([`${sent.id}.json`])
 
+    // The requirement this case exists for is unchanged: a NEW harness cannot
+    // know what the dead one's session did with what it was handed, so it
+    // settles the in-flight mail rather than redelivering it. Guessing wrong
+    // the other way would double-process work that may have been done
+    // (§6 criterion 6). The redelivery this fix adds is only for the death the
+    // harness OBSERVES — an agent exiting while the harness is alive.
     const restarted = await restartOver(company.home)
     expect(await restarted.hermes.consumeInbox('agent.b')).toEqual([])
+    expect(restarted.done('agent.b')).toEqual([`${sent.id}.json`])
   })
 })
 
