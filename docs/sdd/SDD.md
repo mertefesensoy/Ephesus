@@ -147,6 +147,17 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  ADR-0004 gives exactly one working copy. A clean
                              #  one is removed when the agent exits; a dirty one
                              #  is kept and reported — `--force` is never used
+  engines/<engine>/<agent>/  # the engine's PRIVATE per-agent install (ADR-0026):
+                             #  its settings, transcripts, trust record and
+                             #  onboarding state. One per agent and never shared
+                             #  — the engine rewrites its config file wholesale,
+                             #  and a crew is the concurrent case. Credentials
+                             #  are NOT here: they are borrowed from the
+                             #  Architect's own config directory
+  tools/                     # tool directories the COMPANY ships, granted to a
+                             #  hire by name (M8.7b). Architect-editable, and
+                             #  shared across bundles for the same reason
+                             #  prompts/ is
   index/                     # MemPalace store root (Library layer 2 + company archive,
                              #  ADR-0016) and `fts.sqlite`, the SQLite FTS5 keyword
                              #  rung below it. All derived state — disposable and
