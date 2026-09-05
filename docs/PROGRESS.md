@@ -5300,8 +5300,14 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `restoreCompany` after `activations` and `gates` exist but BEFORE the
       Harbor's first ingest — which reads `watchedRepos` off the live set, so
       restoring later would leave the first ingest of every restart watching
-      nothing. Docs: the M8.8 implementation doc, NFR-5, SRS §6 criterion 6,
-      ADR-0012. **Floors deliberately NOT ratcheted** (`boot` now measures 20.75%
+      nothing. Docs: **ADR-0027 (new, normative — what survives a restart and what
+      deliberately does not)**, SRS NFR-5 (AMENDED: it named only
+      roster/ledger/memory and the coordination state was the half that did not
+      restore), SDD §2/§4.8/§7.9/§10/§12, TEST-STRATEGY S-BLACKOUT (amended: a
+      scenario that restarts holding nothing cannot fail the way production
+      does), ENGINEERING-STANDARDS §7 (a new coverage subsystem row costs a CI
+      round-trip; never invent the other platform’s number), and the M8.8
+      implementation doc. **Floors deliberately NOT ratcheted** (`boot` now measures 20.75%
       lines against a 17.03% floor because covered modules joined it; a raise
       needs three corroborating runs of one tree). Owed, recorded not built:
       `--resume` and the auto-respawn it unlocks; an explicit Architect release

@@ -49,6 +49,13 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
 
 - **S-BLACKOUT** (SRS 6.6): kill main mid-delivery / mid-commit at injected fault
   points; restart; assert zero loss, zero double-processing, committer reconcile.
+  **Amended M8.8 (ADR-0027):** the restart must happen with the company's
+  coordination state LIVE — an activation, an open gate and a fired trigger —
+  and not only with data in flight. Every case written before M8.8 restarted a
+  company that was holding *nothing* (`liveAgents: () => []`, a fresh deny-all
+  `GateManager`), so "restore exactly" was asserted over an empty set and passed
+  for the life of the project while a restart silently un-hired the company.
+  A scenario that restarts holding nothing cannot fail the way production does.
 - **S-LIVELOCK**: two fake agents scripted to ping-pong; assert hop-cap diversion to
   Artemis at exactly the cap, log records, no delivery loop.
 - **S-BOUNCE**: mail to archived/missing agent; assert `refuse` bounce + log, sender

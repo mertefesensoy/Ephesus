@@ -51,6 +51,9 @@ code, found by reading it rather than by trusting the list.
   those. The register recorded "breaker rungs" as lost wholesale; that is half
   right, and the half matters.
 
+**The decisions below are recorded normatively in [ADR-0027](../adr/ADR-0027-what-survives-a-restart.md);
+this doc records how they were implemented and what it cost to prove.**
+
 ## Architect decisions (2026-09-05)
 
 Both were put with their alternatives and their costs before any code was written.
@@ -244,7 +247,10 @@ corroborating runs of the same tree and is its own exercise.
 
 ## Related docs
 
-- `docs/srs/SRS.md` — NFR-5, NFR-9, NFR-13, §6 criterion 6 (the blackout test)
+- `docs/adr/ADR-0027-what-survives-a-restart.md` — **the normative record** for every decision here
+- `docs/srs/SRS.md` — NFR-5 (amended by this package), NFR-9, NFR-13, §6 criterion 6
+- `docs/sdd/SDD.md` §2, §4.8 (the record schemas), §7.9 (the boot replay), §10, §12
+- `docs/TEST-STRATEGY.md` — S-BLACKOUT, amended to restart with the coordination state live
 - `docs/adr/ADR-0012-mission-profiles.md` · `ADR-0011` (the breaker ladder)
 - `docs/sdd/SDD.md` §4.1, §4.2, §4.3, §9
 - `docs/implementations/2026-09-05-durable-breaker-stops.md` — the store precedent
