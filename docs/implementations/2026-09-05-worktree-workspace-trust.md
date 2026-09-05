@@ -100,6 +100,37 @@ unresolved. A test proves the two modes produce the **same key** for the same
 directory once it exists — the property that makes the record findable at all —
 and another proves a symlinked parent still resolves through.
 
+## Also fixed: the ladders were disarmed after the unwind, not before
+
+A second audit finding, in the same package and also mine. M8.6 registered
+`crew.stop()` among the quit's `steps` with this comment:
+
+> Before the unwind, not after: a ladder still armed treats the shutdown's own
+> kills as crashes and respawns the company it is tearing down.
+
+The comment states the intent exactly. The code did the opposite:
+`QuitSequence.execute` runs closing → **unwind** → `steps`, so `steps` is the
+last phase and every ladder was armed while the unwind killed the agents it was
+watching.
+
+Nothing caught it because **no test related the phase a step is registered in to
+the phase it actually runs in** — the ordering test asserted
+`ask → closing → unwind → stops`, and the crew step was simply one of the stops.
+
+`QuitSequence` gained a `disarm()` seam that runs between closing time and the
+unwind, isolated exactly as `steps` is: a ladder that will not disarm is
+reported and stepped over, because it must not cost the unwind its settings
+restores. It carries its own degradation cause (`shutdown/disarm:<name>`) so a
+wedged ladder does not read as a wedged teardown stop.
+
+`Artemis.stop()` went into the same phase. It had **zero production callers** —
+FR-5.4's ladder brought the orchestrator back on every exit, including the one
+the quit itself performs.
+
+Five mutations; the three semantic ones killed, including the original defect.
+The two survivors were deliberate no-op rewrites, included as live-anchor
+controls after CRLF/LF drift silently skipped five mutations earlier in the day.
+
 ## Design decisions
 
 | Decision | Alternatives rejected |

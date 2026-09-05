@@ -5085,7 +5085,16 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       widens an accepted security decision), SDD §1.1 `engines/` row and §3, the
       M8.7 trust implementation doc. OWED, RECORDED NOT FIXED: no profile has been
       activated against a real repository in the shipped app under these rules, so
-      the end-to-end claim rests on the key-equality test rather than observation
+      SECOND CLEARANCE, same audit: the quit's DISARM
+      phase. M8.6 registered `crew.stop()` among the quit's `steps` with a
+      comment reading "Before the unwind, not after"; `QuitSequence.execute`
+      runs closing → unwind → `steps`, so `steps` is LAST and every ladder was
+      armed while the unwind killed the agents it watched. Nothing caught it
+      because no test related the phase a step is REGISTERED in to the phase it
+      RUNS in. `disarm()` now runs between closing time and the unwind, isolated
+      like `steps` and with its own degradation cause; `Artemis.stop()` joined
+      it, having had zero production callers. 5 tests, 3 semantic mutations
+      killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
       — M7's exit, still open.
 
 - [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents

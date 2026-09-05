@@ -2875,13 +2875,21 @@ const quit = new QuitSequence({
   },
   closing: () => closingTime,
   agents: () => agentManager,
+  // Disarmed BEFORE the agent unwind (M8.7). A ladder still armed reads the
+  // unwind's own kills as crashes and brings the company back up as it is
+  // being torn down — which is what `steps` below actually did, despite its
+  // comment, because `steps` runs after the unwind.
+  disarm: () => [
+    { name: 'crew-survival', run: () => crew?.stop() },
+    // Her ladder had no production caller at all until now: FR-5.4 brought the
+    // orchestrator back on every exit, including the one the quit performs.
+    { name: 'orchestrator-ladder', run: () => artemis?.stop() }
+  ],
   steps: () => [
     { name: 'avatars', run: () => avatarDirector.stop() },
     { name: 'hermes', run: () => hermes?.stop() },
     { name: 'scheduler', run: () => scheduler.stop() },
-    // Before the unwind, not after: a ladder still armed treats the shutdown's
-    // own kills as crashes and respawns the company it is tearing down.
-    { name: 'crew-survival', run: () => crew?.stop() },
+
     {
       name: 'company-token',
       run: () => {
