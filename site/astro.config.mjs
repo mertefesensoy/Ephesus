@@ -6,6 +6,9 @@ import { defineConfig } from 'astro/config'
 export default defineConfig({
   site: 'https://ephesushq.com',
   output: 'static',
-  build: { format: 'directory' },
+  // vercel.json sets trailingSlash:false, so the canonical URLs Astro emits must
+  // match that or every page has a canonical pointing at a URL that redirects.
+  trailingSlash: 'never',
+  build: { format: 'file' },
   devToolbar: { enabled: false }
 })
