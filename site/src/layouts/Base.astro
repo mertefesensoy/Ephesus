@@ -17,7 +17,17 @@ const path = Astro.url.pathname.replace(/\/$/, '') || '/'
 // The trailing slash is stripped because vercel.json sets trailingSlash:false.
 // A canonical that points at a URL which redirects is a canonical that argues
 // with the server.
-const clean = Astro.url.pathname.replace(/\/+$/, '') || '/'
+// Two normalisations, and both are needed for the canonical to name the URL the
+// server actually serves:
+//
+//   .html   build.format is 'file', so the built path is /compare.html — but
+//           vercel.json sets cleanUrls, which serves /compare and REDIRECTS
+//           /compare.html to it. A canonical pointing at the .html form points
+//           at a redirect, and Google follows canonicals.
+//   slash   vercel.json also sets trailingSlash:false.
+//
+// The root is the exception: it stays "/" so it matches the sitemap entry.
+const clean = Astro.url.pathname.replace(/\.html$/, '').replace(/\/+$/, '') || '/'
 const canonical = new URL(clean, Astro.site).href
 const ogImage = new URL('/img/social-card.png', Astro.site).href
 const siteHome = new URL('/', Astro.site).href

@@ -13,7 +13,10 @@ export const GET: APIRoute = async ({ site }) => {
     .sort((a, b) => b.valueOf() - a.valueOf())[0]
 
   const iso = (d: Date) => d.toISOString().split('T')[0]
-  const abs = (p: string) => new URL(p, site).href.replace(/\/$/, '') || new URL('/', site).href
+  // The root keeps its trailing slash so it matches the canonical the home page
+  // emits; everything else drops it, matching vercel.json's trailingSlash:false.
+  const abs = (p: string) =>
+    p === '/' ? new URL('/', site).href : new URL(p, site).href.replace(/\/$/, '')
 
   // lastmod is maintained BY HAND, and that is deliberate.
   //
