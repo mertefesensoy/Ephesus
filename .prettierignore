@@ -11,3 +11,7 @@ LICENSE
 
 # Machine-written by scripts/check-coverage.cjs --update (M8.0); its JSON.stringify layout is canonical.
 scripts/coverage-floors.json
+
+# The project website is a separate workspace with its own toolchain.
+# Prettier here owns the application only.
+site/

@@ -1,0 +1,203 @@
+---
+import Base from '../layouts/Base.astro'
+
+const subsystems = [
+  {
+    name: 'Artemis',
+    city: 'Patron deity',
+    what: 'The orchestrator, and the one agent you talk to. She decomposes intent into self-contained task specs, checks the roster, assigns work, adjudicates between agents, and escalates only what genuinely needs you. What she may decide without asking is not a matter of taste — it is declared in a file, and anything outside it queues for your signature.'
+  },
+  {
+    name: 'Hermes',
+    city: 'The messenger',
+    what: 'The routing layer. Agents write only into their own outbox; the harness delivers into recipients’ inboxes. Messages are speech acts rather than free text, which is what makes anti-livelock rules possible: a request, an answer and a refusal are different things the router can reason about.'
+  },
+  {
+    name: 'The Agora',
+    city: 'The marketplace',
+    what: 'Shared coordination on disk — roster, blackboard, task ledger, append-only event log. It is a git repository with exactly one committer: the main process. Agents write plain files and never run git, which is why there are no index.lock wars.'
+  },
+  {
+    name: 'The Library',
+    city: 'Library of Celsus',
+    what: 'Memory. Per-agent markdown plus semantic recall over the company archive, with reflection and condensation so it never grows without bound. An agent that has been running for weeks does not carry weeks of transcript.'
+  },
+  {
+    name: 'The Odeon',
+    city: 'Council theatre',
+    what: 'Accountability made mechanical. Decision memos queue for your verdict, milestone reviews archive as slide decks, briefings are compiled from facts before they are narrated, and meetings enforce turn order and file their own minutes. A task that owes a deck cannot be closed until the deck exists.'
+  },
+  {
+    name: 'The Terraces',
+    city: 'Terrace houses',
+    what: 'The two-dimensional floor. Every agent is an avatar at a desk. Walking means a tool class is in use and the destination names which. An envelope in flight is a message, coloured by speech act. Waving at the Watch post means a gate is open. Watchability as observability.'
+  },
+  {
+    name: 'The Watch',
+    city: 'City walls',
+    what: 'Safety. Human approval gates, spend budgets read from a durable ledger rather than an in-memory counter, a three-rung circuit breaker that steers before it constrains and constrains before it stops, and a secret broker that injects credentials as environment variables and never returns them over IPC.'
+  },
+  {
+    name: 'The Gymnasium',
+    city: 'Training grounds',
+    what: 'The self-improvement loop, and the company’s primary standing mission. Proposals rise from the company’s own operating records, must carry a falsifiable success metric before a human ever sees them, pass the same gate machinery as any other change, and are measured after they land. Rejections and rollbacks stay in the ledger too.'
+  },
+  {
+    name: 'The Stoa',
+    city: 'Colonnade of scholars',
+    what: 'Research. Studies external repositories you register by URL, at a pinned commit, read-only and secret-free by construction. Every finding must cite a path at that commit or the whole brief is refused before it reaches you.'
+  },
+  {
+    name: 'The Harbor',
+    city: 'The port',
+    what: 'Everything in and out — GitHub ingestion, incidents, chat bridges, the company’s own git identity. An instance watching no repository still hires its crew, but it says so as a visible degradation rather than sitting silent.'
+  },
+  {
+    name: 'The Herald',
+    city: 'Town crier',
+    what: 'The voice interface: a spoken, understated chief-of-staff presence with wake word, barge-in and approvals by voice. Built and tested, deliberately unwired — and the repository records that as a decision rather than leaving it as a mystery.'
+  }
+]
+
+const invariants = [
+  ['Strict TypeScript', 'No <code>any</code> outside a boundary type wrapped by a validator.'],
+  ['The renderer is untrusted', 'No Node APIs in renderer code, ever. Context isolation on, sandbox on, every mutation through a typed IPC handler that validates in main.'],
+  ['Atomic writes', 'Anything another process reads is written temp-file-then-rename. A bare write onto a live path is a bug.'],
+  ['Single committer', 'Only the main process runs git in the Agora.'],
+  ['Append-only means append-only', 'The event log, the cost ledger and the Odeon archives are never rewritten or compacted in place.'],
+  ['Secrets are write-only', 'No IPC returns a secret value. Secrets reach agents only as declared environment variables.'],
+  ['Every degradation is visible', 'Missing keys, missing index, schema drift, heuristic-grade engines — a visible UI state, never a silent fallback.'],
+  ['Prompt text is config', 'No LLM-facing prose as string literals in code. It lives in <code>prompts/</code> and is loaded.'],
+  ['Cost comes from the ledger', 'Never from an in-memory counter, so the restart-reset bug class is impossible by construction.'],
+  ['Watched content is data', 'Anything read from a registered source is untrusted input. Embedded directives are reported as findings, never followed.']
+]
+---
+
+<Base
+  title="The City — Ephesus"
+  description="Every subsystem of Ephesus is named for the part of the ancient city that did the same job. Artemis, Hermes, the Agora, the Library, the Odeon, the Watch, the Gymnasium, the Stoa.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">The architecture</span>
+      <h1>The City</h1>
+      <p class="lede">
+        Ephesus was a working city: a harbour that moved goods in and out, an agora where business
+        was coordinated, the Library of Celsus that held its knowledge, an odeon where the council
+        met and heard reports, and the Temple of Artemis watching over all of it. Every subsystem
+        here is named for the part of the city that does the same job.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">How work moves</span>
+      <h2>You talk to one agent. The company does the rest.</h2>
+      <p>
+        You describe intent to Artemis — by text, or by voice once the Herald is wired. She
+        decomposes it and assigns self-contained task specs. Agents collaborate through Hermes over
+        the Agora, which is plain files in a local git repository. When an agent finishes a turn, a
+        stop-hook drains its inbox, so mail never waits for a human to notice it.
+      </p>
+      <p>
+        The company reports back on its own initiative: decision memos queue for your sign-off,
+        milestone reviews archive as slide decks, and Artemis briefs you on schedule or on demand.
+        Everything is watchable on the floor while it happens.
+      </p>
+      <figure>
+        <img src="/img/floor.png" alt="Four agents at their desks on the Terraces floor, with a live agent terminal alongside" width="1280" height="773" loading="lazy" />
+        <figcaption>
+          Four hired agents at their desks, one live in a real terminal. A development build: the
+          floor is drawing procedural tiles because the licensed sprite sheets are deliberately kept
+          out of the repository.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The subsystems</span>
+      <h2>Eleven parts of one city</h2>
+      <div class="sublist">
+        {subsystems.map((s) => (
+          <article class="sub">
+            <div class="subhead">
+              <h3>{s.name}</h3>
+              <span>{s.city}</span>
+            </div>
+            <p>{s.what}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Accountability</span>
+      <h2>The company argues in front of you</h2>
+      <p>
+        Agents do not merely do work — they account for it. A non-trivial decision becomes a memo
+        with what, why, blast radius and rollback, and it waits for a verdict. Artemis countersigns
+        within her delegated classes; everything else queues for you, and a rejection reverses the
+        action rather than merely noting disapproval.
+      </p>
+      <div class="grid g2">
+        <figure>
+          <img src="/img/odeon.png" alt="A meeting in progress in the Odeon panel, with turn order enforced" width="1583" height="922" loading="lazy" />
+          <figcaption>A meeting in the Odeon. Turn order is enforced — an answer given early is held, not lost — and the minutes file themselves.</figcaption>
+        </figure>
+        <figure>
+          <img src="/img/gate.png" alt="An open approval gate awaiting the architect's decision" width="1280" height="773" loading="lazy" />
+          <figcaption>An open gate. Every item shows what, why, blast radius and rollback before the approve and deny controls appear.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">The rules</span>
+      <h2>Invariants, not preferences</h2>
+      <p class="lede" style="margin-bottom:26px">
+        Violating one of these is a defect even when everything appears to work. They are checked
+        against every diff before it is committed, and several are enforced mechanically in CI.
+      </p>
+      <div class="scroll">
+        <table>
+          <tbody>
+            {invariants.map(([name, body]) => (
+              <tr><td style="width:230px">{name}</td><td set:html={body} /></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div class="btnrow">
+        <a class="btn" href="https://github.com/mertefesensoy/Ephesus/tree/main/docs">Read the design suite</a>
+        <a class="btn" href="/record">The build record</a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .sublist { display: grid; gap: 0; border: 2px solid var(--ink); background: #FBF9F4; }
+    .sub { padding: 22px 24px; border-bottom: 1px solid var(--paper-3); }
+    .sub:last-child { border-bottom: 0; }
+    .subhead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+    .subhead h3 { margin: 0; color: var(--terracotta); font-size: 18px; }
+    .subhead span {
+      font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em;
+      text-transform: uppercase; color: var(--ink-3);
+    }
+    .sub p { margin: 0; max-width: 78ch; font-size: 16px; }
+    figure { margin: 28px 0 0; }
+    figure img { display: block; width: 100%; height: auto; border: 2px solid var(--ink); box-shadow: var(--shadow); }
+    figcaption {
+      font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink-3);
+      margin-top: 12px; max-width: 62ch;
+    }
+  </style>
+</Base>

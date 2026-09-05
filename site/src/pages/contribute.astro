@@ -1,0 +1,162 @@
+---
+import Base from '../layouts/Base.astro'
+
+const issues = [
+  { n: 8, title: 'Build and run on macOS, report the first thing that breaks', tag: 'good first issue', note: 'No codebase knowledge needed. Currently the highest-value contribution available.' },
+  { n: 9, title: 'Build and run on Linux, report the first thing that breaks', tag: 'good first issue', note: 'CI runs the suite on Ubuntu, but nothing has ever launched the app there.' },
+  { n: 7, title: 'Add an engines field to package.json', tag: 'good first issue', note: 'Small and self-contained. .nvmrc says Node 20; nothing enforces it.' },
+  { n: 10, title: 'Add tests for shims/eph-usage.mjs', tag: 'good first issue', note: 'The friendliest module to test — dependency-free Node, no Electron, no React.' },
+  { n: 11, title: 'Add tests for src/renderer/src/fonts.ts', tag: 'good first issue', note: 'A degradation path: it reports a missing pixel face visibly. Nothing proves the report fires.' },
+  { n: 12, title: 'Add tests for src/renderer/src/floor/vfx-art.ts', tag: 'good first issue', note: 'The effects are specified normatively, so the right answer is written down.' },
+  { n: 13, title: 'Raise coverage of the panels subsystem', tag: 'help wanted', note: 'The weakest subsystem at roughly 30% lines. The work is deciding how to fake the preload bridge.' }
+]
+
+const dod = [
+  'Typecheck, lint and the test suite pass locally and in CI',
+  'New behaviour has tests at the right level; every fixed bug has a regression test',
+  'Evidence is attached to the pull request — the output, not the claim',
+  'Docs updated in the same PR: design document if the design changed, a new decision record if policy demanded one',
+  'Degradation paths implemented and visible, never silent',
+  'No new lint-boundary violations, no schema without a version, no stray hex colours',
+  'The seam is tested, or its absence is recorded with the reason'
+]
+---
+
+<Base
+  title="Contribute — Ephesus"
+  description="Ephesus is pre-alpha and builds from source. Here is what a fresh clone actually gives you, the rules that are unusual, and seven issues you could pick up today.">
+
+  <section class="pagehead">
+    <div class="wrap">
+      <span class="eyebrow">Help wanted</span>
+      <h1>Contribute</h1>
+      <p class="lede">
+        Ephesus is early, opinionated about how work is done, and both of those are on purpose.
+        This page tells you exactly what you are walking into so you can decide whether it is
+        for you.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Read this first</span>
+      <h2>There is no installer, and that is the honest answer</h2>
+      <p>
+        Signed builds are a planned milestone and have not shipped. If you are here to <em>use</em>
+        Ephesus — not yet. Star the repository and come back.
+      </p>
+      <p>
+        If you are here to <em>build</em> it, everything below applies and you are very welcome.
+        What exists today is real and runs: the Electron shell, the terminal vertical, the 2D floor,
+        real agent CLIs under management, the Agora, the Odeon, the Stoa and the Gymnasium loop.
+        What it cannot yet do is survive being packaged and handed to a stranger.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Getting it running</span>
+      <h2>What a fresh clone gives you</h2>
+      <p>
+        You need <strong>Node 20</strong>, a toolchain that can compile native modules
+        (<code>node-pty</code> and <code>better-sqlite3</code> build on install), and at least one
+        agent CLI on your <code>PATH</code> if you want to drive real agents. The app runs without
+        one — it says it has no engine rather than pretending to work.
+      </p>
+      <pre><code>git clone https://github.com/mertefesensoy/Ephesus.git
+cd Ephesus
+npm install
+npm run dev</code></pre>
+      <p>
+        Then confirm your checkout is healthy. All three must be green on a fresh clone; if they
+        are not, that is a bug and we want the issue.
+      </p>
+      <pre><code>npm run typecheck &amp;&amp; npm run lint &amp;&amp; npm test</code></pre>
+      <div class="callout">
+        <h3>What will be missing, on purpose</h3>
+        <p>
+          The floor’s sprite sheets are commercially licensed and are <strong>not in this
+          repository</strong> — only our own index files are. Without them the floor reports a
+          visible missing-tileset state rather than crashing, which is the same rule the whole app
+          follows: every degradation is visible, never silent. You can develop everything else
+          against that.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Before you open a PR</span>
+      <h2>The rules that surprise people</h2>
+      <ol class="numbered">
+        <li><b>The docs are the source of truth, not the code.</b> When they disagree, the code is wrong. Precedence is design document, then decision records, then specification, then README.</li>
+        <li><b>Accepted decision records are append-only.</b> Never edit one — supersede it. CI enforces this on every pull request.</li>
+        <li><b>The invariants are non-negotiable.</b> Violating one is a defect even when everything appears to work.</li>
+        <li><b>No new dependencies without a decision memo.</b> Open an issue before you write the import.</li>
+        <li><b>A wiring seam with no test is a defect, not a gap.</b> Your evidence names the production call path — file and line — or records that there is none.</li>
+        <li><b>No AI attribution anywhere in the tree.</b> No agent, session or model name in commits, code, comments or docs. CI has a tripwire for it.</li>
+      </ol>
+      <h3 style="margin-top:34px">Definition of done</h3>
+      <ul class="dod">{dod.map((d) => <li>{d}</li>)}</ul>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <span class="eyebrow">Where to start</span>
+      <h2>Seven issues you could pick up today</h2>
+      <p class="lede" style="margin-bottom:26px">
+        Every one is grounded in something checkable — the untested-module list in the coverage
+        record, or a field genuinely absent from <code>package.json</code>. None of them dissolve
+        when you open the file.
+      </p>
+      <div class="ilist">
+        {issues.map((i) => (
+          <a class="issue" href={`https://github.com/mertefesensoy/Ephesus/issues/${i.n}`}>
+            <div class="inum">#{i.n}</div>
+            <div>
+              <h3>{i.title}<span class={i.tag === 'help wanted' ? 'tag hw' : 'tag'}>{i.tag}</span></h3>
+              <p>{i.note}</p>
+            </div>
+          </a>
+        ))}
+      </div>
+      <div class="btnrow">
+        <a class="btn solid" href="https://github.com/mertefesensoy/Ephesus/blob/main/CONTRIBUTING.md">Read CONTRIBUTING</a>
+        <a class="btn" href="https://github.com/mertefesensoy/Ephesus/issues">All issues</a>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .pagehead { padding: 62px 0 44px; border-bottom: 1px solid var(--paper-3); }
+    .callout { border: 2px solid var(--ink); border-left-width: 6px; border-left-color: var(--gold); background: #FBF9F4; padding: 20px 22px; margin: 26px 0 0; }
+    .callout h3 { margin: 0 0 8px; font-size: 16px; }
+    .callout p { margin: 0; font-size: 16px; }
+    .numbered { padding-left: 0; list-style: none; counter-reset: r; max-width: 76ch; }
+    .numbered li { counter-increment: r; position: relative; padding: 12px 0 12px 46px; border-bottom: 1px solid var(--paper-3); font-size: 16.5px; }
+    .numbered li::before {
+      content: counter(r); position: absolute; left: 0; top: 12px;
+      font-family: var(--pixel); font-size: 11px; color: var(--terracotta);
+    }
+    .dod { padding-left: 0; list-style: none; max-width: 76ch; }
+    .dod li { padding: 9px 0 9px 26px; position: relative; font-size: 16px; border-bottom: 1px solid var(--paper-3); }
+    .dod li::before { content: ""; position: absolute; left: 0; top: 18px; width: 10px; height: 10px; background: var(--olive); }
+    .ilist { border: 2px solid var(--ink); background: #FBF9F4; }
+    .issue { display: grid; grid-template-columns: 74px 1fr; gap: 14px; padding: 18px 22px; border-bottom: 1px solid var(--paper-3); border-left: 0; border-right: 0; border-top: 0; color: var(--ink); }
+    .issue:last-child { border-bottom: 0; }
+    .issue:hover { background: var(--paper-2); color: var(--ink); }
+    .inum { font-family: var(--mono); font-size: 14px; color: var(--ink-3); padding-top: 2px; }
+    .issue h3 { margin: 0 0 4px; font-size: 16.5px; }
+    .issue p { margin: 0; font-size: 15px; color: var(--ink-3); max-width: 70ch; }
+    .tag {
+      display: inline-block; font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
+      text-transform: uppercase; background: var(--olive); color: #FBF9F4;
+      padding: 3px 7px; margin-left: 10px; vertical-align: middle;
+    }
+    .tag.hw { background: var(--aegean); }
+  </style>
+</Base>
