@@ -154,7 +154,9 @@ it is how the next session knows where to resume).
 > M8 package's evidence names its production call path, file and line, or
 > records that there is none (ENGINEERING-STANDARDS §6.7, GYM-006).
 >
-> **Resume at M8.7.** (M8.0–M8.6 are ticked; the tree runs every hire in its own
+> **Resume at M8.7b.** (M8.0–M8.6 and M8.7a are ticked; every hire now runs its
+> OWN engine install and the harness is the only author of the hooks that
+> install runs — ADR-0026; the tree runs every hire in its own
 > worktree as of M8.6, so the "own working tree" clause below is now the history
 > of why M8 exists rather than the current state.) The plan is in `docs/PROGRESS.md` under
 > *"M8 — The company you can leave running"*, derived from the 2026-09-02 MVP

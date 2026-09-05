@@ -46,6 +46,7 @@ function rig(): { adapter: EngineAdapter; cfg: AgentSpawnConfig; cwd: string } {
       hookToken: 'gemini-token',
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
+      engineConfigDir: path.join(root, 'engine-config'),
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},

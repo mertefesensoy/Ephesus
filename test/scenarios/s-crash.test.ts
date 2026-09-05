@@ -19,6 +19,7 @@ import { composeMessage, makeMessageId } from '../../src/shared/message'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { ProcessSpawner } from '../fakes/process-spawner'
 import { removeTempDir } from '../tmpdir'
+import { engineConfigDir } from '../../src/main/engines/engine-home'
 
 /**
  * **S-CRASH** (TEST-STRATEGY §3): "SIGKILL a fake agent mid-task; ghost →
@@ -131,6 +132,10 @@ async function startRig(options: { resumable?: boolean } = {}): Promise<Rig> {
     hookServer,
     spawner,
     prompts,
+    // ADR-0026: the real resolver, rooted in this test's own temp home, so a
+    // spawn here isolates exactly the way a spawn in the app does.
+    engineConfigDirFor: (engineId, agentId) =>
+      engineConfigDir(path.join(home, 'engines'), engineId, agentId),
     agoraRoot: agora.pathOf(),
     memory: {
       seed: (agentId) => library.seed(agentId),

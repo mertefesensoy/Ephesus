@@ -20,6 +20,7 @@ import type {
   NotificationKind,
   UsageFact,
   CostFact,
+  EngineConfigDirResult,
   WorkspaceExistence,
   WorkspaceTrustResult
 } from './types'
@@ -48,13 +49,20 @@ import type {
  * non-ASCII `ü` all collapse to a dash; `-`, digits and letter case survive.
  * (An underscore is unattested in that corpus; this rule maps it to a dash.)
  *
+ * **The directory it hangs off is a PARAMETER, not `$HOME`.** Since M8.7 each
+ * agent runs against its own `CLAUDE_CONFIG_DIR`, and the engine puts
+ * `projects/` inside whichever directory that is — confirmed by asking the
+ * engine itself, which reports `projectsDirectory` under the isolated dir. A
+ * reader still computing `$HOME/.claude/projects` would find nothing, report a
+ * permanent zero, and `budgets.foldOne` would still say `'engine'`: the same
+ * silent under-reporting the slug rule above is pinned to observation to avoid.
+ *
  * `path.resolve` runs first because the engine slugs the ABSOLUTE cwd — a
  * relative one would otherwise slug to a different, non-existent directory.
  */
-export function claudeTranscriptDir(cwd: string): string {
-  const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
+export function claudeTranscriptDir(configDir: string, cwd: string): string {
   const slug = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, '-')
-  return path.join(home, '.claude', 'projects', slug)
+  return path.join(configDir, CLAUDE_PROJECTS_REL, slug)
 }
 
 /**
@@ -72,7 +80,7 @@ export function claudeTranscriptDir(cwd: string): string {
  * "not reported" (invariant §7).
  */
 const claudeTranscripts: TranscriptReader = {
-  transcriptDir: (cfg) => claudeTranscriptDir(cfg.cwd),
+  transcriptDir: (cfg) => claudeTranscriptDir(cfg.engineConfigDir, cfg.cwd),
   limitOf: claudeCapacityLimit,
   read: async (filePath) => {
     // Read asynchronously and catch ENOENT rather than pre-checking: this runs
@@ -431,6 +439,117 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
  */
 export const CLAUDE_CONFIG_REL = '.claude.json'
 
+/** Where the engine keeps session transcripts inside a config directory. */
+export const CLAUDE_PROJECTS_REL = 'projects'
+
+/**
+ * The settings file the harness hands the engine with `--settings` (M8.7).
+ *
+ * It lives in the agent's OWN config directory, so nothing is written into the
+ * Architect's checkout or the agent's worktree any more. That retires the whole
+ * backup/restore/reference-count dance ADR-0009's settings hygiene needed when
+ * this file had to be `<cwd>/.claude/settings.local.json` — a shared file two
+ * agents in one repository fought over, which is what the reference counting in
+ * `settings-install.ts` was there to survive.
+ */
+export const CLAUDE_HARNESS_SETTINGS_REL = 'eph-settings.json'
+
+/**
+ * The Architect's OWN engine config directory — the one holding the
+ * credentials every hire borrows (ADR-0026 decision 3).
+ *
+ * Isolation without this is a company that cannot start: measured on this
+ * machine, `CLAUDE_CONFIG_DIR=<fresh> claude auth status` reports
+ * `loggedIn:false`, so every hire would meet a login prompt before any session
+ * and therefore with no hook to report it — the same shape as the trust dialog
+ * ADR-0021 exists to close. Adding `CLAUDE_SECURESTORAGE_CONFIG_DIR` pointing
+ * here reports `loggedIn:true` with the config directory still isolated.
+ *
+ * Contract: pure given `env`. Honours an Architect who already runs the engine
+ * against a non-default config directory, because THEIR credentials are there,
+ * not in `~/.claude`. Returns the empty string when there is no home to name;
+ * the engine reads that as `<homedir>/.claude`, which is the right fallback and
+ * is why an empty value is still exported rather than omitted — omitting the
+ * variable entirely would send the engine back to the ISOLATED directory, where
+ * there are no credentials at all.
+ */
+/**
+ * Contract: the harness's settings file for one spawn. Pure.
+ *
+ * One function, because the path is produced in `spawnArgs` (as the value of
+ * `--settings`) and again in `settingsInjections` (as the file to write). Two
+ * expressions computing it would be a flag pointing at a file nothing wrote —
+ * the agent would start with none of the harness's hooks and every lifecycle
+ * event would simply never arrive, which reads as a quiet agent, not a bug.
+ */
+function harnessSettingsPath(cfg: AgentSpawnConfig): string {
+  return path.join(cfg.engineConfigDir, CLAUDE_HARNESS_SETTINGS_REL)
+}
+
+export function claudeCredentialsDir(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string {
+  const explicit = env['CLAUDE_CONFIG_DIR']
+  if (explicit !== undefined && explicit.length > 0) return explicit
+  const home = env['HOME'] ?? env['USERPROFILE'] ?? ''
+  return home.length === 0 ? '' : path.join(home, '.claude')
+}
+
+/**
+ * Makes a fresh, harness-owned config directory usable by an unattended agent.
+ *
+ * A config directory the engine has never seen starts at onboarding — the
+ * engine's own startup takes that branch on `!hasCompletedOnboarding` — and
+ * onboarding is an interactive first-run flow that happens BEFORE any session,
+ * so no hook fires for it and nothing in the harness could see the agent
+ * parked on it. That is the identical failure mode as the workspace trust
+ * dialog (ADR-0021), arriving from the direction isolation opened, which is why
+ * seeding is done here rather than left to be discovered on a live run.
+ *
+ * Contract: idempotent, atomic (invariant §3), and additive — an existing
+ * `.claude.json` keeps every key it has, including the trust records
+ * `trustWorkspace` writes into the same file. Returns the files it created so
+ * the caller can say so out loud (M8.4's rule: a file the harness requires,
+ * creates itself and never names is the setup cliff).
+ */
+export function prepareClaudeConfigDir(configDir: string): EngineConfigDirResult {
+  if (configDir.length === 0) return { ok: false, because: 'no engine config directory' }
+  const configPath = path.join(configDir, CLAUDE_CONFIG_REL)
+  let config: Record<string, unknown> = {}
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return { ok: false, because: `${CLAUDE_CONFIG_REL} is not a JSON object` }
+      }
+      config = parsed as Record<string, unknown>
+    } catch (err) {
+      return {
+        ok: false,
+        because: `${CLAUDE_CONFIG_REL} unreadable, refusing to overwrite it: ${
+          err instanceof Error ? err.message.split('\n')[0] : String(err)
+        }`
+      }
+    }
+  }
+  if (config['hasCompletedOnboarding'] === true) return { ok: true, seeded: [] }
+  try {
+    fs.mkdirSync(configDir, { recursive: true })
+    writeFileAtomic(
+      configPath,
+      `${JSON.stringify({ ...config, hasCompletedOnboarding: true }, null, 2)}\n`
+    )
+  } catch (err) {
+    return {
+      ok: false,
+      because: `could not seed ${CLAUDE_CONFIG_REL}: ${
+        err instanceof Error ? err.message.split('\n')[0] : String(err)
+      }`
+    }
+  }
+  return { ok: true, seeded: [configPath] }
+}
+
 /** Contract: pure. The key Claude Code will actually match on for this directory. */
 export function claudeProjectKey(cwd: string): string {
   return path.resolve(cwd).split(path.sep).join('/')
@@ -664,7 +783,9 @@ function isHarnessStatusLine(entry: unknown, shimPath: string | undefined): bool
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
-  cfg?: AgentSpawnConfig
+  cfg?: AgentSpawnConfig,
+  /** What to call the file in a refusal. Named so the message cannot point at a file we are not touching. */
+  label: string = CLAUDE_SETTINGS_REL
 ): string {
   let base: Record<string, unknown> = {}
   if (existing !== null && existing.trim().length > 0) {
@@ -673,16 +794,14 @@ export function mergeClaudeSettings(
       parsed = JSON.parse(existing)
     } catch (err) {
       throw new Error(
-        `claude: ${CLAUDE_SETTINGS_REL} is not valid JSON, refusing to overwrite it: ${
+        `claude: ${label} is not valid JSON, refusing to overwrite it: ${
           err instanceof Error ? err.message.split('\n')[0] : String(err)
         }`,
         { cause: err }
       )
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error(
-        `claude: ${CLAUDE_SETTINGS_REL} is not a JSON object, refusing to overwrite it`
-      )
+      throw new Error(`claude: ${label} is not a JSON object, refusing to overwrite it`)
     }
     base = { ...(parsed as Record<string, unknown>) }
   }
@@ -874,6 +993,23 @@ export class ClaudeAdapter implements EngineAdapter {
         'claude',
         '--permission-mode',
         claudePermissionMode(cfg.autonomy),
+        // ADR-0026. `--setting-sources=` loads NO user, project or local
+        // settings, so the only hooks that can fire are the ones in the file
+        // named next — the harness's. Without it a target repository's own
+        // Stop hook can answer `{"decision":"block"}` and continue an agent
+        // outside the harness's decision: uncounted by the block cap, invisible
+        // to the breaker's stop-loop signal, unaffected by pacing. Measured,
+        // not assumed: with the flag only the harness's hook fires; without it
+        // the repository's and the user's fire too.
+        //
+        // The ATTACHED empty value is deliberate. A bare `''` argv element is
+        // one Windows command-line composition may drop on the way to conpty,
+        // and a dropped lockdown flag is a check that cannot fail — this
+        // codebase's recurring defect. `--setting-sources=` is one non-empty
+        // token and cannot vanish that way.
+        '--setting-sources=',
+        '--settings',
+        harnessSettingsPath(cfg),
         '--append-system-prompt',
         identity
       ],
@@ -881,6 +1017,11 @@ export class ClaudeAdapter implements EngineAdapter {
       env: {
         ...baseAgentEnv(),
         ...cfg.envGrants,
+        // ADR-0026: the agent's OWN engine install. This is what stops it
+        // inheriting the Architect's memory file, plugins, skills, MCP servers
+        // and hooks. `projects/` moves with it, which is why the transcript
+        // reader is handed the same directory rather than recomputing $HOME.
+        ...this.engineEnv(cfg),
         // The company authors, the agent co-authors itself (ADR-0022). Set as
         // environment rather than repo config so nothing is written into the
         // Architect's checkout, and absent entirely when no App is configured —
@@ -980,10 +1121,20 @@ export class ClaudeAdapter implements EngineAdapter {
    * drop the key. The failure is visible rather than dangerous — the dialog
    * returns and the agent parks — but it is a race this cannot close from here.
    */
-  trustWorkspace(cwd: string, existence: WorkspaceExistence = 'must-exist'): WorkspaceTrustResult {
-    const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
-    if (home.length === 0) return { ok: false, because: 'no home directory to write the record in' }
-    const configPath = path.join(home, CLAUDE_CONFIG_REL)
+  trustWorkspace(
+    configDir: string,
+    cwd: string,
+    existence: WorkspaceExistence = 'must-exist'
+  ): WorkspaceTrustResult {
+    // The record goes in the agent's OWN config directory, because that is the
+    // only file the agent's engine will read. Writing the Architect's
+    // `~/.claude.json` here — which is what this did before M8.7 — would record
+    // consent in a file no isolated agent opens, and the only symptom would be
+    // the trust dialog reappearing: a hung agent, again.
+    if (configDir.length === 0) {
+      return { ok: false, because: 'no engine config directory to write the record in' }
+    }
+    const configPath = path.join(configDir, CLAUDE_CONFIG_REL)
     const resolved = resolveProjectKey(cwd, existence)
     if (!resolved.ok) return resolved
     const canonical = resolved.key
@@ -1047,11 +1198,56 @@ export class ClaudeAdapter implements EngineAdapter {
     resumeArgs: (sessionId) => ['--resume', sessionId]
   }
 
+  /**
+   * The two variables that point this engine at ONE agent's private install.
+   *
+   * One expression with two consumers — the spawn and the auth probe — rather
+   * than two that agree today. A probe that asked about a different directory
+   * than the spawn uses would answer about the wrong install and be right about
+   * nothing, silently.
+   */
+  private engineEnv(cfg: AgentSpawnConfig): Readonly<Record<string, string>> {
+    return {
+      // ADR-0026: the agent's own engine install — its memory file, plugins,
+      // skills, MCP servers, hooks and `projects/` transcripts all move here.
+      CLAUDE_CONFIG_DIR: cfg.engineConfigDir,
+      // ...but NOT its own credentials: the company borrows the Architect's
+      // session (decision 3). Always exported, empty value included — see
+      // `claudeCredentialsDir`, where omitting it is the failure case.
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeCredentialsDir()
+    }
+  }
+
+  probeEnv(cfg: AgentSpawnConfig): Readonly<Record<string, string>> {
+    return this.engineEnv(cfg)
+  }
+
+  /** ADR-0026. See `prepareClaudeConfigDir`. */
+  prepareConfigDir(configDir: string): EngineConfigDirResult {
+    return prepareClaudeConfigDir(configDir)
+  }
+
   readonly transcripts: TranscriptReader = claudeTranscripts
 
+  /**
+   * The harness's settings for one agent, in that agent's OWN config directory
+   * (ADR-0026).
+   *
+   * It used to be `<cwd>/.claude/settings.local.json` — inside the Architect's
+   * checkout, backed up, reference-counted between agents sharing a repository,
+   * and restored on the way out. None of that is needed once the file is
+   * per-agent and outside every checkout, and all of it was risk: the rule an
+   * adapter is most likely to get subtly wrong is the one that modifies
+   * somebody else's repository.
+   */
   private settingsInjections(cfg: AgentSpawnConfig): readonly SettingsInjection[] {
-    const settingsPath = path.join(cfg.cwd, CLAUDE_SETTINGS_REL)
+    const settingsPath = harnessSettingsPath(cfg)
     const existing = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf8') : null
-    return [{ path: settingsPath, contents: mergeClaudeSettings(existing, this.deps, cfg) }]
+    return [
+      {
+        path: settingsPath,
+        contents: mergeClaudeSettings(existing, this.deps, cfg, CLAUDE_HARNESS_SETTINGS_REL)
+      }
+    ]
   }
 }

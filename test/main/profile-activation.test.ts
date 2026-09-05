@@ -8,6 +8,7 @@ import type { SpawnRequest } from '../../src/shared/agents'
 import { GATE_SCHEMA_VERSION, type AutonomyLevel, type GatePolicy } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
 import {
+  plannedTrustGrants,
   plannedWorkspaces,
   watchedRepos,
   type ActivationPlan
@@ -1165,6 +1166,74 @@ describe('every directory an activation will work in gets trusted (M8.7)', () =>
     expect(isolated).toHaveLength(4)
     for (const hire of isolated) {
       expect(spaces.some((s) => s.path === wtFor(hire.agentId))).toBe(true)
+    }
+  })
+
+  /**
+   * ADR-0026 gave every agent its own engine config directory, and the trust
+   * record lives in that directory. "Trust this path" stopped being a complete
+   * instruction the day that landed: the other half is whose engine to tell,
+   * and nothing in `plannedWorkspaces` said it.
+   */
+  it('names the agent whose engine is being told, for every directory', async () => {
+    const r = rig()
+    const plan = await planFor(r, { hires: ['oncall', 'deps'] })
+    const grants = plannedTrustGrants(plan, wtFor)
+    const oncall = 'agent.crew-myapp-oncall'
+    const deps = 'agent.crew-myapp-deps'
+
+    // Each isolated hire's own worktree, granted to that hire and nobody else.
+    expect(grants).toContainEqual({
+      agentId: oncall,
+      path: wtFor(oncall),
+      existence: 'will-be-created'
+    })
+    expect(grants).toContainEqual({
+      agentId: deps,
+      path: wtFor(deps),
+      existence: 'will-be-created'
+    })
+    expect(grants.filter((g) => g.path === wtFor(oncall)).map((g) => g.agentId)).toEqual([oncall])
+
+    // ...and the target, for EVERY hire. That preserves ADR-0021's decision
+    // unchanged - the activation records approval for the target the Architect
+    // named - which used to happen for free because one file served every
+    // agent. Narrowing it to "only the hires that land there" would be a new
+    // decision taken silently in the commit that split the file.
+    expect(
+      grants
+        .filter((g) => g.path === r.targetDir)
+        .map((g) => g.agentId)
+        .sort()
+    ).toEqual([deps, oncall].sort())
+  })
+
+  it('grants each (agent, directory) pair exactly once', async () => {
+    // A duplicate would write the same key twice and log two grants for one
+    // directory, which reads as two decisions where there was one.
+    const r = rig()
+    const plan = await planFor(r, { hires: ['oncall', 'deps'], isolation: 'target' })
+    const grants = plannedTrustGrants(plan, wtFor)
+    const keys = grants.map((g) => `${g.agentId} ${g.path}`)
+
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(grants.every((g) => g.path === r.targetDir)).toBe(true)
+  })
+
+  it('covers every hire even when none of them works in the target', async () => {
+    // The all-isolated case: nobody's working directory IS the target, and the
+    // target's entry names no agents at all - so with one config file per agent
+    // it would have been recorded in nobody's.
+    const r = rig()
+    const plan = await planFor(r, { hires: ['a', 'b', 'c'] })
+    const grants = plannedTrustGrants(plan, wtFor)
+
+    expect(plannedWorkspaces(plan, wtFor)[0]?.agentIds).toEqual([])
+    for (const hire of plan.hires) {
+      expect(grants.some((g) => g.agentId === hire.agentId && g.path === r.targetDir)).toBe(true)
+      expect(grants.some((g) => g.agentId === hire.agentId && g.path === wtFor(hire.agentId))).toBe(
+        true
+      )
     }
   })
 

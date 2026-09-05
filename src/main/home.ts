@@ -4,13 +4,21 @@ import { defaultConfig, parseConfig, type EphConfig } from '../shared/config'
 import { shippedGatePolicy } from '../shared/gates'
 import { shippedAuthority } from '../shared/authority'
 import { writeFileAtomic } from './fsx'
+import { ENGINES_DIR } from './engines/engine-home'
 
 /**
  * The harness home (SDD §2): `~/.ephesus/`. M0.5 creates the top-level
  * directories plus `config.json`; deeper structure (agora repo contents,
  * odeon/, agents/) arrives with the milestones that own it.
  */
-export const HOME_DIRS = ['prompts', 'profiles', 'agora', 'index', 'worktrees'] as const
+export const HOME_DIRS = [
+  'prompts',
+  'profiles',
+  'agora',
+  'index',
+  'worktrees',
+  ENGINES_DIR
+] as const
 
 export interface HarnessHome {
   readonly root: string

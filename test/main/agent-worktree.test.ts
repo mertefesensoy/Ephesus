@@ -13,6 +13,7 @@ import type { AgentCard } from '../../src/shared/agents'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { ProcessSpawner } from '../fakes/process-spawner'
 import { removeTempDir } from '../tmpdir'
+import { engineConfigDir } from '../../src/main/engines/engine-home'
 
 /**
  * The lifecycle half of worktree isolation (SRS UC-01 alternate 2a): a spawn
@@ -89,6 +90,10 @@ async function startRig(options: { readonly isolationConfigured?: boolean } = {}
     hookServer,
     spawner,
     prompts,
+    // ADR-0026: the real resolver, rooted in this test's own temp home, so a
+    // spawn here isolates exactly the way a spawn in the app does.
+    engineConfigDirFor: (engineId, agentId) =>
+      engineConfigDir(path.join(home, 'engines'), engineId, agentId),
     agoraRoot,
     // Omitted entirely when the test is about a harness that cannot isolate:
     // an optional seam left unwired is a real deployment, not a hypothetical.

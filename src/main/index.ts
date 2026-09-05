@@ -35,7 +35,8 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { plannedWorkspaces, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
+import { plannedTrustGrants, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
+import { ENGINES_DIR, engineConfigDir } from './engines/engine-home'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
@@ -711,6 +712,13 @@ async function boot(): Promise<void> {
    */
   const worktreesRoot = (): string => path.join(home.root, 'worktrees')
   const worktreePathFor = (agentId: string): string => path.join(worktreesRoot(), agentId)
+
+  // ADR-0026. One expression names an engine's private per-agent directory, for
+  // the same reason `worktreePathFor` is one: `index.ts` carried three copies of
+  // the worktree root until M8.7 and a trusted path one character off is a
+  // record nothing reads whose only symptom is a hung agent.
+  const engineConfigDirFor = (engineId: string, agentId: string): string =>
+    engineConfigDir(path.join(home.root, ENGINES_DIR), engineId, agentId)
   db = new AppDb(home.dbPath)
   // A stored ledger row that fails validation on read is dropped and reported,
   // never repaired — the ledger is append-only (invariant §5).
@@ -1919,6 +1927,7 @@ async function boot(): Promise<void> {
      * a short timeout, and a failure that resolves rather than throws — the
      * manager reads an unanswerable probe as trusted, not as logged out.
      */
+    engineConfigDirFor,
     authProbe: (command) =>
       new Promise((resolve) => {
         const useShell = process.platform === 'win32'
@@ -2135,10 +2144,22 @@ async function boot(): Promise<void> {
     // activation is about to create. `plannedWorkspaces` reads the plan the
     // hires spawn from, so the trusted set cannot drift from the used set.
     beforeHires: (plan) => {
-      for (const workspace of plannedWorkspaces(plan, worktreePathFor)) {
+      for (const grant of plannedTrustGrants(plan, worktreePathFor)) {
         for (const adapter of engines.list()) {
           if (!adapter.trustWorkspace) continue
-          const trusted = adapter.trustWorkspace(workspace.path, workspace.existence)
+          // ADR-0026 made the record per-agent: it lives in the agent's own
+          // engine config directory, so "trust this path" is only half an
+          // instruction now and the other half is whose engine to tell.
+          const configDir = engineConfigDirFor(adapter.id, grant.agentId)
+          const prepared = adapter.prepareConfigDir?.(configDir)
+          if (prepared !== undefined && !prepared.ok) {
+            reportDegradation(
+              `profiles/engine-config:${adapter.id}`,
+              `${adapter.id}: ${grant.agentId}'s config directory unusable — ${prepared.because}`
+            )
+            continue
+          }
+          const trusted = adapter.trustWorkspace(configDir, grant.path, grant.existence)
           agora?.appendLog({
             kind: 'profile',
             event: 'workspace-trusted',
@@ -2146,8 +2167,8 @@ async function boot(): Promise<void> {
             target: plan.targetRef,
             // Which agents this directory is for, so a reader can tell the
             // target's grant from a worktree's without re-deriving the paths.
-            agents: [...workspace.agentIds],
-            existence: workspace.existence,
+            agents: [grant.agentId],
+            existence: grant.existence,
             ...(trusted.ok
               ? { granted: !trusted.alreadyTrusted, path: trusted.path }
               : { granted: false, because: trusted.because })
@@ -2155,10 +2176,8 @@ async function boot(): Promise<void> {
           if (!trusted.ok) {
             reportDegradation(
               `profiles/workspace-trust:${adapter.id}`,
-              `${adapter.id}: ${workspace.path} not trusted — ${trusted.because}` +
-                (workspace.agentIds.length > 0
-                  ? ` — ${workspace.agentIds.join(', ')} will meet the engine's trust prompt and park`
-                  : '')
+              `${adapter.id}: ${grant.path} not trusted for ${grant.agentId} — ` +
+                `${trusted.because} — it will meet the engine's trust prompt and park`
             )
           }
         }

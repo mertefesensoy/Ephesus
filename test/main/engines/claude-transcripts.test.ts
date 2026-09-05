@@ -175,10 +175,15 @@ describe('the adapter’s reader', () => {
         }
       : { cwd: '/home/user/ephesus', slug: '-home-user-ephesus' }
 
-  it('points at the engine’s own project directory', () => {
-    const dir = claudeTranscriptDir(golden.cwd)
+  it('points at the engine’s own project directory, inside the AGENT’s config dir', () => {
+    // ADR-0026: `projects/` moves with `CLAUDE_CONFIG_DIR`. Asserting against
+    // an isolated directory rather than `$HOME` is the point — a reader still
+    // computing `$HOME/.claude/projects` finds nothing and folds a silent zero.
+    const configDir = path.join(path.parse(process.cwd()).root, 'eph-engines', 'agent.mason')
+    const dir = claudeTranscriptDir(configDir, golden.cwd)
     expect(path.isAbsolute(dir)).toBe(true)
-    expect(dir.endsWith(path.join('.claude', 'projects', golden.slug))).toBe(true)
+    expect(dir).toBe(path.join(configDir, 'projects', golden.slug))
+    expect(dir.startsWith(configDir)).toBe(true)
   })
 
   it('slugs every character the engine slugs, not just the separators', () => {
@@ -187,7 +192,7 @@ describe('the adapter’s reader', () => {
     // path the reader pointed at a directory that does not exist — and the
     // budget folded a permanent, silent zero rather than failing loudly.
     const root = path.parse(process.cwd()).root
-    const slug = (cwd: string): string => path.basename(claudeTranscriptDir(cwd))
+    const slug = (cwd: string): string => path.basename(claudeTranscriptDir(root, cwd))
     expect(slug(path.join(root, 'Masaüstü', 'ephesus'))).toContain('Masa-st--ephesus')
     expect(slug(path.join(root, 'IBM Z Project'))).toContain('IBM-Z-Project')
     // Stated as an invariant too, so a later rule change cannot quietly let a

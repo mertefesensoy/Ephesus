@@ -5097,20 +5097,73 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
       — M7's exit, still open.
 
-- [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
-      inherit the Architect's personal engine install: no isolated config
-      directory, so each session starts at a measured 64.8–67.4k tokens of which
-      Ephesus owns about 5%. That is the "91.4% of the day re-reading context"
-      measurement, explained. The correctness half is worse than the cost half:
-      six Stop hooks fire per turn, five of them the Architect's own, any of
-      which can block outside the harness's own decision — uncounted by the block
-      cap, invisible to the breaker's stop-loop signal, and unaffected by pacing.
-      *Docs: ADR-0009 (adapters own engine specifics), ADR-0013, NFR-12.
-      Tests: the spawn environment carries the isolated config; a foreign Stop
-      hook cannot change the harness's continuation decision. Risk: the token
-      floor was measured on a machine with an unusually large personal config —
-      the COST claim is machine-specific, the CONTROL claim is not. Do not sell
-      this package on the cost number alone.*
+- [x] **M8.7a Engine isolation, and whose autonomy hinge it is** — B13, first
+      half. Every hire now runs its OWN engine install: one config directory per
+      agent under `~/.ephesus/engines/<engine>/<agent>/`, the Architect's
+      credentials borrowed rather than copied, and the harness as the **only**
+      author of the hooks that install runs. Built on the CONTROL claim, not the
+      cost one — the 64.8–67.4k token floor was measured on a machine with an
+      unusually large personal config, but six Stop hooks per turn of which five
+      were foreign is not machine-specific, and any of them could answer
+      `{"decision":"block"}` outside the harness's decision: uncounted by the
+      block cap, invisible to the breaker's stop-loop signal, unaffected by
+      pacing. THIS repository is an instance — `.claude/settings.json` here ships
+      a Stop hook that blocks on a red typecheck, and the company's standing
+      mission points crews here first.
+      *Evidence: ground truth established by EXECUTION before any code —
+      `CLAUDE_CONFIG_DIR=<fresh> claude auth status` reports `loggedIn:false`
+      (isolation alone parks every hire on a login prompt), adding
+      `CLAUDE_SECURESTORAGE_CONFIG_DIR` reports `loggedIn:true` with the config
+      still isolated, and `projectsDirectory` moves with the config dir. The
+      obvious mechanism — `CLAUDE_CODE_MANAGED_SETTINGS_PATH` +
+      `allowManagedHooksOnly` — is INERT in this host mode (tested in both its
+      directory and file forms; foreign hooks still fired), so the lockdown is
+      two CLI flags: `--setting-sources=` and `--settings <harness file>`.
+      END-TO-END on the adapter's REAL composed spawn plan (bundled with esbuild
+      and executed): harness hook fired, repository hook did NOT. REFUTATION
+      CONTROL, the identical plan with exactly that one flag removed: repository
+      hook fired — the defect reproduced, so the check can fail. Gate: typecheck,
+      zero-warning lint, invariants (reachability 168/176), **3678 passed / 8
+      skipped** across 193 files, coverage floors ok with none lowered. 14 new
+      isolation tests. Docs: ADR-0026 (extends ADR-0013, narrows ADR-0009's
+      settings hygiene; ADR-0025 was also missing from the ADR index and was
+      added), the M8.7a implementation doc. Branch
+      `feature/m8-7-engine-isolation`.*
+      **Four Architect decisions, taken 2026-09-05, do not re-litigate:** one
+      config dir PER AGENT (not per company — the engine rewrites its config file
+      wholesale and a crew is the concurrent case); LOCKDOWN (not isolation-only,
+      which would have sounded like it closed the hole); SHARED credentials (an
+      agent runs as the same OS user and can read the credentials file anyway, so
+      a separate one buys accounting, not containment); and the harness
+      RE-SUPPLIES a curated tool set per profile.
+      **Consequences recorded, not discovered:** a target repository's hooks no
+      longer run for hired agents (here: `on-stop-check.sh`, `post-edit.sh`); its
+      `.mcp.json` no longer reaches an agent (and neither does the `Pending
+      approval` gate that came with it); the settings file left every checkout,
+      so `settings-install.ts`'s hardest case cannot arise. **Noticed, not
+      fixed:** the engine warns that the mailbox grant's `Write(<dir>/**)` rule
+      "is not matched by file permission checks — only `Edit(...)`" — predates
+      this package, owed to whoever next touches `mailboxPermissions`.
+
+- [ ] **M8.7b The harness re-supplies the tools, by name** — B13, second half.
+      The lockdown also hides a target repository's own skills and subagents from
+      a hired agent (MEASURED: `zebrafish-audit` and `zebrafish-checker` visible
+      without it, invisible with it). The Architect's decision is that the
+      company decides what its agents run with, by name: the hire template gains
+      an optional `tools` block (agents, plugin directories), composed at
+      activation the way `isolation` is, shown on the activation screen, and
+      handed over as `--agents` / `--plugin-dir` — both documented flags, and the
+      CLI's own help names them as the way to provide context when settings
+      sources are off. A path escaping the harness and target roots is REFUSED,
+      not clamped.
+      *Until this lands, a crew working in THIS repository cannot reach
+      `doc-guardian`, `spec-verifier`, or the `/build-package` family — which is
+      the recursive-improvement profile's own toolbox (ADR-0019).*
+      *Docs: ADR-0026 §Consequences (already normative on this point), ADR-0012.
+      Tests: a hire with no `tools` passes neither flag; a granted agent reaches
+      the argv; an escaping path is refused with the path named. Risk: `--agents`
+      takes JSON on the command line — the same argv-composition hazard the
+      `--setting-sources=` note records, so it needs a length and quoting case.*
 
 - [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
       is one in-memory map with no boot replay, so a restart silently un-hires

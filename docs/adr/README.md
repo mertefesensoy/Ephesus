@@ -30,6 +30,8 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0022](./ADR-0022-company-identity-is-a-github-app.md) | The company identity is a GitHub App, not a machine user | accepted |
 | [ADR-0023](./ADR-0023-usage-aware-pacing.md) | Pace the company against the account's usage window, not a fixed budget | accepted |
 | [ADR-0024](./ADR-0024-claude-only-for-the-mvp.md) | The MVP ships one engine, and says so | accepted |
+| [ADR-0025](./ADR-0025-workspace-trust-covers-the-worktrees-an-activation-creates.md) | Workspace trust covers the worktrees an activation creates | accepted |
+| [ADR-0026](./ADR-0026-engine-isolation-and-the-harness-as-sole-hook-author.md) | Engine isolation, and the harness as the only hook author | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):

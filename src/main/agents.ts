@@ -160,16 +160,31 @@ export interface AgentManagerOptions {
   readonly prompts: PromptStore
   /** `<harness home>/agora` — where agent directories and PROTOCOL.md live (SDD §2). */
   readonly agoraRoot: string
+
+  /**
+   * The engine's PRIVATE config directory for one agent (ADR-0026).
+   *
+   * REQUIRED, and deliberately not defaulted: an absent resolver would mean a
+   * spawn that quietly inherits the Architect's own engine install — the exact
+   * state M8.7 exists to end — and it would look identical to a working one.
+   * M8.6 set the precedent for the whole class: a spawn that cannot be isolated
+   * is refused, not downgraded.
+   */
+  engineConfigDirFor(engineId: string, agentId: string): string
   readonly probe?: VersionProber
   /**
    * Runs the adapter's authentication probe (M8.4). Injected for the same
    * reason `probe` is: the lifecycle rules are testable without a CLI.
    * Absent means no engine is asked, which is the pre-M8.4 behaviour.
    */
-  authProbe?(command: {
-    readonly command: string
-    readonly args: readonly string[]
-  }): Promise<{ readonly stdout: string; readonly exitCode: number }>
+  authProbe?(
+    command: {
+      readonly command: string
+      readonly args: readonly string[]
+    },
+    /** The agent's own engine environment (ADR-0026), so the probe answers for it. */
+    env: Readonly<Record<string, string>>
+  ): Promise<{ readonly stdout: string; readonly exitCode: number }>
   /**
    * The autonomy this agent runs at — the profile's level composed against the
    * global ceiling (FR-11.1, ADR-0012), or the ceiling alone for an agent on no
@@ -534,7 +549,7 @@ export class AgentManager {
     // prompt, sat there for the rest of the day and reported `running` with a
     // confidently idle avatar on the floor. The probe is the adapter's, because
     // only the adapter knows what "logged in" means for its own CLI (ADR-0009).
-    const auth = await this.checkAuth(adapter)
+    const auth = await this.checkAuth(adapter, this.require(request.agentId).cfg)
     if (auth !== null && !auth.ok) {
       this.update(request.agentId, { lifecycle: 'needs-login', fixCommand: auth.login })
       this.options.onExitError?.(
@@ -555,12 +570,20 @@ export class AgentManager {
    * turn every engine without a probe into a company that will not start.
    */
   private async checkAuth(
-    adapter: EngineAdapter
+    adapter: EngineAdapter,
+    cfg: AgentSpawnConfig
   ): Promise<{ readonly ok: boolean; readonly login: string } | null> {
+    // In the AGENT's environment, not the harness's (ADR-0026). Today the two
+    // answer alike only because the company borrows the Architect's
+    // credentials; the moment that decision changes, a probe run here would
+    // report the Architect's session for an agent that has none, and the agent
+    // would spawn `running` onto a login prompt — the failure M8.4's probe was
+    // added to prevent, reintroduced from the other side.
+    const env = adapter.probeEnv?.(cfg) ?? {}
     const probe = adapter.binary().authProbe
     if (probe === undefined) return null
     try {
-      const result = await this.options.authProbe?.(probe.command)
+      const result = await this.options.authProbe?.(probe.command, env)
       if (result === undefined) return null
       const answer = probe.authenticated(result.stdout, result.exitCode)
       // Could-not-establish is trusted, never refused: see the contract on
@@ -664,6 +687,11 @@ export class AgentManager {
       hookToken: randomBytes(32).toString('hex'),
       hookEndpoint: this.options.hookServer.endpoint() ?? '',
       cwd: request.cwd,
+      // ADR-0026. Resolved here, once, and carried on the config so that every
+      // consumer — the spawn's environment, the transcript reader, the trust
+      // record, the auth probe — reads the SAME directory instead of four
+      // expressions that agree until one of them is edited.
+      engineConfigDir: this.options.engineConfigDirFor(request.engine, request.agentId),
       commitIdentity: this.options.commitIdentity?.() ?? null,
       // `manual` when nobody has an opinion: an agent on no profile does not
       // get latitude by default (FR-11.1's conservative default).
@@ -911,6 +939,15 @@ export class AgentManager {
       // Throws when identity/protocol are unreadable — before anything is
       // written into the Architect's repo.
       agent.adapter.injectIdentity(agent.cfg)
+
+      // ADR-0026: a config directory the engine has never seen starts at its
+      // onboarding flow, which runs BEFORE any session and therefore fires no
+      // hook — nothing here could see the agent parked on it. Refuse rather
+      // than spawn into that: the catch below unwinds what is already installed.
+      const prepared = agent.adapter.prepareConfigDir?.(agent.cfg.engineConfigDir)
+      if (prepared !== undefined && !prepared.ok) {
+        throw new Error(`engine config directory unusable: ${prepared.because}`)
+      }
 
       const hookPlan = agent.adapter.wireHooks(agent.cfg)
       await hookPlan.install()

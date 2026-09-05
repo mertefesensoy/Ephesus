@@ -61,6 +61,7 @@ function budgeted(
     hookToken: 'scenario-token',
     hookEndpoint: company.hookServer.endpoint() ?? '',
     cwd,
+    engineConfigDir: path.join(company.home, 'engine-config', agentId),
     commitIdentity: null,
     ghTokenCommand: '',
     envGrants: {},

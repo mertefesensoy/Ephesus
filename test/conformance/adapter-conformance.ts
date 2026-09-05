@@ -29,9 +29,20 @@ export interface ConformanceSubject {
   /** Built fresh per case, so no case can leak state into another. */
   make(): EngineAdapter
   /**
-   * Files this adapter is expected to write into the agent's cwd, relative to
-   * it. Every one must be a local/gitignored variant (ADR-0009).
+   * Where this adapter's settings files live.
+   *
+   * `cwd` is ADR-0009's original answer and still the right one for an engine
+   * that only reads settings out of the project it is run in; every file must
+   * then be a local/gitignored variant, because it is landing in somebody
+   * else's repository.
+   *
+   * `engineConfigDir` is ADR-0026's: the adapter has a private, harness-owned
+   * directory per agent, so it writes there and the Architect's checkout is
+   * never touched at all. That is a STRONGER hygiene claim, and the cases below
+   * check it as one rather than reusing the weaker rule.
    */
+  readonly settingsRoot: 'cwd' | 'engineConfigDir'
+  /** Files this adapter is expected to write, relative to `settingsRoot`. */
   readonly settingsRel: readonly string[]
   /** True when the adapter is expected to wire every harness hook event. */
   readonly wiresEveryEvent: boolean
@@ -95,6 +106,7 @@ export function conformanceRig(): ConformanceRig {
       hookToken: 'conformance-token',
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
+      engineConfigDir: path.join(root, 'engine-config'),
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},
@@ -256,18 +268,31 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
       })
     })
 
+    /** The directory this adapter's settings are relative to. */
+    const settingsRootOf = (rig: {
+      readonly cwd: string
+      readonly cfg: AgentSpawnConfig
+    }): string => (subject.settingsRoot === 'cwd' ? rig.cwd : rig.cfg.engineConfigDir)
+
     describe('settings-file hygiene (TEST-STRATEGY §5)', () => {
-      it('writes only local variants, and only inside the agent cwd', () => {
+      it('writes only inside the root it declares, and only variants it may own', () => {
         const rig = conformanceRig()
+        const root = settingsRootOf(rig)
         const plan = subject.make().wireHooks(rig.cfg)
 
-        expect(plan.injections.map((i) => path.relative(rig.cwd, i.path))).toEqual([
+        expect(plan.injections.map((i) => path.relative(root, i.path))).toEqual([
           ...subject.settingsRel
         ])
         for (const injection of plan.injections) {
-          const relative = path.relative(rig.cwd, injection.path)
-          expect(relative.startsWith('..')).toBe(false)
-          expect(path.basename(injection.path)).toContain('.local.')
+          expect(path.relative(root, injection.path).startsWith('..')).toBe(false)
+          // Inside somebody else's repository, only a gitignored variant is
+          // ours to write. Inside our OWN per-agent directory the whole
+          // directory is ours, so that rule has nothing left to protect.
+          if (subject.settingsRoot === 'cwd') {
+            expect(path.basename(injection.path)).toContain('.local.')
+          } else {
+            expect(path.relative(rig.cwd, injection.path).startsWith('..')).toBe(true)
+          }
         }
       })
 
@@ -284,7 +309,7 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
         'backs up a pre-existing file and restores it byte-for-byte',
         async () => {
           const rig = conformanceRig()
-          const target = path.join(rig.cwd, subject.settingsRel[0] ?? '')
+          const target = path.join(settingsRootOf(rig), subject.settingsRel[0] ?? '')
           const original = '{\r\n  "mine": true\r\n}\r\n'
           fs.mkdirSync(path.dirname(target), { recursive: true })
           fs.writeFileSync(target, original, 'utf8')
@@ -301,15 +326,25 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
 
       it('leaves the agent cwd exactly as it found it', async () => {
         const rig = conformanceRig()
+        const root = settingsRootOf(rig)
         const plan = subject.make().wireHooks(rig.cfg)
         const before = fs.readdirSync(rig.cwd)
+        const rootBefore = fs.existsSync(root) ? fs.readdirSync(root) : []
 
         await plan.install()
-        // Both halves are claims the suite checks: an installer must actually
-        // install, and an adapter that declares no settings must actually write
-        // nothing — "wrote nothing" is not taken on trust either.
-        if (installsSettings) expect(fs.readdirSync(rig.cwd)).not.toEqual(before)
-        else expect(fs.readdirSync(rig.cwd)).toEqual(before)
+        // Three claims, all checked rather than trusted: an installer must
+        // actually install SOMEWHERE; an adapter declaring no settings must
+        // write nothing; and an adapter writing into its own per-agent
+        // directory must leave the Architect's checkout untouched THROUGHOUT,
+        // not merely put it back afterwards. The last is the ADR-0026 upgrade —
+        // a repository that is never written to cannot be restored wrongly.
+        if (!installsSettings) expect(fs.readdirSync(rig.cwd)).toEqual(before)
+        else if (subject.settingsRoot === 'cwd') {
+          expect(fs.readdirSync(rig.cwd)).not.toEqual(before)
+        } else {
+          expect(fs.readdirSync(rig.cwd)).toEqual(before)
+          expect(fs.readdirSync(root)).not.toEqual(rootBefore)
+        }
 
         await plan.uninstall()
         expect(fs.readdirSync(rig.cwd)).toEqual(before)

@@ -43,7 +43,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 
 | Module | Owns | Key ADR |
 |---|---|---|
-| `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts`. `claude.ts` alone implements `trustWorkspace` (ADR-0021/0025) — the engine's own per-workspace trust record is a Claude Code fact, and core never learns what a project key looks like | 0009, 0021, 0025 |
+| `engines/` | `EngineAdapter` registry: `claude.ts` (reference), `codex.ts`, `gemini.ts`, `grok.ts`, `opencode.ts`, `custom.ts`, plus `engine-home.ts` — the one engine-AGNOSTIC function naming an engine's private per-agent config directory (ADR-0026). `claude.ts` alone implements `trustWorkspace` (ADR-0021/0025) and `prepareConfigDir` (ADR-0026) — the engine's own per-workspace trust record is a Claude Code fact, and core never learns what a project key looks like | 0009, 0021, 0025, 0026 |
 | `agents.ts` | `AgentManager`: spawn ordering (probe → token → identity → settings → process), FR-1.6 install offer, exit unwind (settings restored, token revoked) | 0009, 0010 |
 | `pty.ts` | `PtyManager`: spawn/write/resize/interrupt/kill/resume; PATH resolution for spawn plans (`which.ts`); the redaction filter on outbound streams, wired in `pty-stream.ts` (split out so it is testable without node-pty) | 0014, 0010 |
 | `avatars.ts` | `AvatarDirector`: hook events → §6 avatar snapshots, the walk clock (`arrive`) and the §6 timers | 0002 |
@@ -168,9 +168,27 @@ Defined normatively in ADR-0009. Runtime notes:
 - `SpawnPlan` composes: argv, cwd (target repo or worktree — a spawn requesting
   `worktree: true` has its cwd replaced by an isolated checkout before anything
   is written, so grants, settings install and transcripts all follow it), env = base ∪ role-declared
-  secret grants (ADR-0010) ∪ `EPH_AGENT_ID`/`EPH_HOOK_TOKEN`, and settings injection
-  (e.g. writing hook shims into `<cwd>/.claude/settings.local.json`, backed up, with
-  uninstall).
+  secret grants (ADR-0010) ∪ `EPH_AGENT_ID`/`EPH_HOOK_TOKEN` ∪ the engine-isolation
+  pair (ADR-0026), and settings injection.
+- **Engine isolation (M8.7a, ADR-0026).** Every hire runs its own engine
+  install. `AgentSpawnConfig.engineConfigDir` names it —
+  `~/.ephesus/engines/<engineId>/<agentId>/`, produced by the single function
+  `engineConfigDir` — and the Claude adapter exports `CLAUDE_CONFIG_DIR` (that
+  directory) and `CLAUDE_SECURESTORAGE_CONFIG_DIR` (the Architect's real config
+  directory, so the credentials are borrowed rather than absent). Everything the
+  engine keeps per agent moves with it, so the transcript reader, the workspace
+  trust record and the auth probe all read `engineConfigDir` rather than
+  recomputing `$HOME`.
+  The harness is the only hook author: argv carries `--setting-sources=` (no
+  user, project or local settings are loaded) and `--settings
+  <configDir>/eph-settings.json`. The settings file therefore lives OUTSIDE
+  every checkout — ADR-0009's "write only a local variant into the agent's cwd,
+  backed up, restored on uninstall" is narrowed to adapters that still write
+  into a cwd, and the conformance suite splits the two cases on `settingsRoot`.
+  A config directory the engine has never seen is prepared first
+  (`prepareConfigDir`, which records the onboarding the Architect already
+  completed); one that cannot be prepared REFUSES the spawn.
+
 - **Who asks for `worktree: true` (M8.6, `src/shared/isolation.ts`).** A bare
   `agents.spawn` (UC-01, where the Architect typed the working directory and
   confirmed one agent) keeps the schema's optional-false default. A PROFILE

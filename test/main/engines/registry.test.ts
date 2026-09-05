@@ -44,6 +44,7 @@ const spawnConfig: AgentSpawnConfig = {
   hookToken: 'token-abc',
   hookEndpoint: '/tmp/eph/events.sock',
   cwd: '/tmp/eph/repo',
+  engineConfigDir: '/tmp/eph/engine-config',
   commitIdentity: null,
   ghTokenCommand: '',
   envGrants: { GH_TOKEN: 'granted' },
