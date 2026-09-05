@@ -5,16 +5,16 @@ const updated = '5 September 2026'
 
 <Base
   title="Privacy — what this site collects"
-  description="What ephesushq.com collects, what it does not, and how analytics is configured. No cookies are set unless you consent, and nothing is sold or shared.">
+  description="What ephesushq.com collects and what it does not: two cookieless analytics services, no consent banner because nothing is stored on your device, nothing sold.">
 
   <section class="pagehead">
     <div class="wrap narrow">
       <span class="eyebrow">Privacy</span>
       <h1>What this site collects</h1>
       <p class="lede">
-        Short version: no cookies are set, no account exists, nothing is sold, and the only third
-        party involved is Google Analytics — configured so that it stores nothing on your device
-        unless you consent, which this site never asks you to do.
+        Short version: <strong>no cookies are set</strong>, no account exists, nothing is sold, and
+        two analytics services count visits without identifying you — Vercel Web Analytics, which is
+        cookieless by design, and Google Analytics, configured to store nothing on your device.
       </p>
       <p class="updated">Last updated {updated}</p>
     </div>
@@ -24,8 +24,28 @@ const updated = '5 September 2026'
     <div class="wrap narrow">
       <h2>Analytics</h2>
       <p>
-        This site uses Google Analytics 4 to count page views and see where visitors arrive from.
-        It runs with <strong>Google Consent Mode v2, with every storage type denied by default</strong>:
+        Two services count visits here, and <strong>neither writes a cookie or builds a profile of
+        you</strong>.
+      </p>
+
+      <h3>Vercel Web Analytics</h3>
+      <p>
+        Provided by the host that serves this site. It is <strong>cookieless by design rather than
+        by configuration</strong>: it sets nothing on your device, assigns you no identifier, and
+        cannot follow you between sites or between visits. It records that a page was requested,
+        which page referred it, and a coarse country — and derives a per-day hash from request
+        headers that is discarded daily and cannot be reversed to identify you.
+      </p>
+      <p>
+        It is here because the Google tag below, configured as it is, reports almost nothing: with
+        no identifier to work from, Google estimates visits through behavioural modelling, and that
+        modelling needs roughly a thousand consented events a day before it activates. This site
+        does not reach that, so a second, simpler counter does the job the first one cannot.
+      </p>
+
+      <h3>Google Analytics 4</h3>
+      <p>
+        Runs with <strong>Google Consent Mode v2, with every storage type denied by default</strong>:
       </p>
       <pre><code>ad_storage            denied
 ad_user_data          denied
@@ -39,8 +59,9 @@ analytics_storage     denied</code></pre>
         storage.
       </p>
       <p>
-        That is why there is no consent banner. A banner exists to ask permission to store things on
-        your device, and this site does not store anything on your device.
+        <strong>That is why there is no consent banner.</strong> A banner exists to ask permission to
+        store things on your device. Neither service stores anything on your device, so there is
+        nothing to ask you for.
       </p>
 
       <h2>What is not collected</h2>
@@ -49,15 +70,17 @@ analytics_storage     denied</code></pre>
         <li>No contact form, newsletter, or email capture.</li>
         <li>No advertising, remarketing, or cross-site tracking.</li>
         <li>No session recording, heatmaps, or scroll tracking.</li>
-        <li>No data is ever sold, rented, or shared with anyone beyond the processors named here.</li>
+        <li>No data is ever sold, rented, or shared with anyone beyond the two analytics providers and the host named here.</li>
       </ul>
 
       <h2>Fonts and assets</h2>
       <p>
         All fonts are <strong>self-hosted on this domain</strong>. Loading a page here makes no
         request to Google Fonts, so no request from your browser reaches a font CDN and no IP
-        address is disclosed to one. Every image, stylesheet and script other than the analytics tag
-        is served from <code>ephesushq.com</code>.
+        address is disclosed to one. Every image, stylesheet and script is served from
+        <code>ephesushq.com</code> apart from the two analytics tags named above: Google&rsquo;s, which
+        loads from <code>googletagmanager.com</code>, and Vercel&rsquo;s, which loads from
+        <code>/_vercel/insights/</code> on this same domain.
       </p>
 
       <h2>Hosting</h2>

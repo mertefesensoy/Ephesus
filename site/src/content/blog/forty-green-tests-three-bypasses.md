@@ -1,5 +1,5 @@
 ---
-title: 'Forty green tests, nine killed mutants, and three ways past the gate'
+title: 'Forty green tests, nine killed mutants, three bypasses'
 date: 2026-09-03
 tag: 'method'
 reading: '5 min read'
