@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" role="img" aria-label="Ephesus">
+  <title>Ephesus — the column at 16</title>
+  <rect x="0" y="0" width="16" height="16" fill="#221A14"/>
+  <rect x="1" y="1" width="14" height="14" fill="#F4EDE0"/>
+  <rect x="3" y="2" width="10" height="1" fill="#E8A987"/>
+  <rect x="3" y="3" width="10" height="2" fill="#C4552D"/>
+  <rect x="4" y="5" width="8" height="1" fill="#4A3B2C"/>
+  <rect x="5" y="6" width="1" height="5" fill="#221A14"/>
+  <rect x="11" y="6" width="1" height="5" fill="#221A14"/>
+  <rect x="6" y="6" width="2" height="5" fill="#E7DCC6"/>
+  <rect x="8" y="6" width="1" height="5" fill="#4A3B2C"/>
+  <rect x="9" y="6" width="2" height="5" fill="#D3C4A5"/>
+  <rect x="4" y="11" width="8" height="1" fill="#E7DCC6"/>
+  <rect x="3" y="12" width="10" height="1" fill="#D3C4A5"/>
+  <rect x="3" y="13" width="10" height="1" fill="#4A3B2C"/>
+</svg>

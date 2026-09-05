@@ -1,0 +1,49 @@
+name: Documentation problem
+description: The docs are wrong, unclear, contradictory, or disagree with the code
+labels: ["documentation", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        In this project the documentation is the source of truth, so a documentation
+        problem is a first-class bug — not a chore. Confusion counts: if you could not
+        follow it, that is a finding about the writing.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem
+      options:
+        - "The docs and the code disagree"
+        - "Two documents contradict each other"
+        - "Something is unclear or I could not follow it"
+        - "Something is missing"
+        - "A link is broken or points somewhere wrong"
+        - "A typo or formatting problem"
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: File path and section, as precisely as you can.
+      placeholder: "docs/sdd/SDD.md section 7.8"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: If the docs and the code disagree, quote both and give the code path.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What it should say instead
+      description: Optional — a suggested wording is welcome but not required.
+    validations:
+      required: false

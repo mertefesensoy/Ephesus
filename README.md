@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./docs/brand/ephesus-128.svg" width="96" height="96" alt="">
+
 # Ephesus
 
 ### An agent company you govern as its architect
@@ -12,17 +14,69 @@ present their work to you.
 
 <p><em>Electron · React · TypeScript · Pixi.js · xterm.js · node-pty</em></p>
 
+[![CI](https://github.com/mertefesensoy/Ephesus/actions/workflows/ci.yml/badge.svg)](https://github.com/mertefesensoy/Ephesus/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2E6F8E.svg)](./LICENSE)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-C4552D.svg)](#status)
+[![Node 20](https://img.shields.io/badge/node-20-7A8B3D.svg)](./.nvmrc)
+
 </div>
 
 ---
 
-> [!NOTE]
-> **Inspired by [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin)** — the
-> "office of your clones" agent harness. Ephesus reuses its strongest architectural ideas
-> (two data planes, a file-based hive with a single git committer, the Stop-hook autonomy
-> loop) and re-imagines the product around a different thesis: *you are the architect of a
-> small company, and the company reports to you* — by voice, in briefings, in design
-> reviews, and in decision memos.
+![Four hired agents at their desks on the Terraces floor, with a live agent terminal on the right](./docs/demo/m3-floor-seats.png)
+
+<div align="center"><sub>A development build — four agents at their desks, one live in a real terminal. The floor is drawing procedural tiles here: the licensed sprite sheets are deliberately not in this repository.</sub></div>
+
+## Status
+
+**Pre-alpha. There are no releases and no installer** — signed builds are a planned
+milestone (M7b.5) and have not shipped. If you are here to *use* Ephesus, the honest
+answer is: not yet. If you are here to *build* it, everything runs from source today
+and [contributions are welcome](./CONTRIBUTING.md).
+
+What works right now: the Electron shell, real agent CLIs under management with
+memory and mailboxes, the 2D floor, the Agora, the Odeon, the Stoa and the Gymnasium
+self-improvement loop. The current milestone is **M8 — the company you can leave
+running**. Package-by-package state with evidence is in
+[`docs/PROGRESS.md`](./docs/PROGRESS.md); the narrative is under
+[Where the build stands](#where-the-build-stands).
+
+## Quick start
+
+You need **Node 20** ([`.nvmrc`](./.nvmrc)), a toolchain that can compile native
+modules (`node-pty` and `better-sqlite3` are built on install), and at least one
+agent CLI on your `PATH`.
+
+```bash
+git clone https://github.com/mertefesensoy/Ephesus.git
+cd Ephesus
+npm install     # patches node-pty, syncs the pixel fonts, rebuilds natives
+npm run dev     # the app, with hot reload
+```
+
+Then confirm the checkout is healthy:
+
+```bash
+npm run typecheck && npm run lint && npm test
+```
+
+All three must be green on a fresh clone. If they are not, that is a bug and we want
+the issue. The full story — which engine to install, the files created in
+`~/.ephesus/`, and what the shipped gate policy allows — is under
+[Setting it up](#setting-it-up).
+
+## Contributing
+
+Ephesus is documentation-first, and its rules are unusual on purpose: the docs are the
+source of truth, accepted ADRs are append-only, every pull request carries evidence,
+and **a wiring seam with no test is a defect rather than a gap**.
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) explains all of it, including exactly what you
+get from a first clone and what is deliberately missing from it.
+
+The single most useful contribution today: **clone it, run it on a machine that is not
+Windows, and open an issue about the first thing that goes wrong.**
+
+---
 
 ## Why "Ephesus"
 
@@ -80,25 +134,6 @@ What makes it different from its inspiration:
    rejections and rollbacks, kept in the [Gymnasium ledger](./docs/gymnasium/LEDGER.md).
    The loop starts *now*, during the build phase, and carries into the running system
    unchanged in shape.
-
-## Documentation map
-
-This repository is a complete, self-contained documentation suite. Read in this order:
-
-| Document | What it answers |
-|---|---|
-| [`docs/srs/SRS.md`](./docs/srs/SRS.md) | **Software Requirements Specification** — actors, use cases, functional requirements (FR-1…FR-11), non-functional requirements, acceptance criteria. *What must the system do?* |
-| [`docs/adr/`](./docs/adr/README.md) | **Architecture Decision Records** — 15 ADRs covering every load-bearing decision, each with context, options considered, and consequences. *Why is it built this way?* |
-| [`docs/sdd/SDD.md`](./docs/sdd/SDD.md) | **Software Design Description** — component architecture, data models, on-disk formats, message schema, IPC contracts, sequence flows. *How is it built?* |
-| [`docs/design/UI-DESIGN.md`](./docs/design/UI-DESIGN.md) | **Visual & interaction design** — design tokens, the floor, panels, typography, motion rules. |
-| [`docs/design/VOICE-DESIGN.md`](./docs/design/VOICE-DESIGN.md) | **Voice & conversation design** — the Herald's persona, wake word, barge-in, briefing scripts, error behavior. |
-| [`docs/ENGINEERING-STANDARDS.md`](./docs/ENGINEERING-STANDARDS.md) | Coding standards, repo conventions, review rules, security rules, definition of done. |
-| [`docs/TEST-STRATEGY.md`](./docs/TEST-STRATEGY.md) | Test pyramid, what gets unit/integration/E2E coverage, agent-behavior evals, CI gates. |
-| [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md) | Phased implementation plan (M0–M7) with exit criteria, risk register, and build order. |
-| [`BUILD-PROMPT.md`](./BUILD-PROMPT.md) | Ready-to-paste prompt that directs a coding agent to implement this design milestone by milestone, doc-grounded and verification-gated. |
-| [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
-| [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
-| [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
 
 ## How it works (one screen)
 
@@ -212,7 +247,26 @@ An instance that comes up watching nothing still hires its crew and arms its
 schedules — but it can ingest no CI run, issue or pull request, so it will raise
 no incident, and that shows up as a degradation rather than as silence.
 
-## Status
+## Documentation map
+
+This repository is a complete, self-contained documentation suite. Read in this order:
+
+| Document | What it answers |
+|---|---|
+| [`docs/srs/SRS.md`](./docs/srs/SRS.md) | **Software Requirements Specification** — actors, use cases, functional requirements (FR-1…FR-11), non-functional requirements, acceptance criteria. *What must the system do?* |
+| [`docs/adr/`](./docs/adr/README.md) | **Architecture Decision Records** — 15 ADRs covering every load-bearing decision, each with context, options considered, and consequences. *Why is it built this way?* |
+| [`docs/sdd/SDD.md`](./docs/sdd/SDD.md) | **Software Design Description** — component architecture, data models, on-disk formats, message schema, IPC contracts, sequence flows. *How is it built?* |
+| [`docs/design/UI-DESIGN.md`](./docs/design/UI-DESIGN.md) | **Visual & interaction design** — design tokens, the floor, panels, typography, motion rules. |
+| [`docs/design/VOICE-DESIGN.md`](./docs/design/VOICE-DESIGN.md) | **Voice & conversation design** — the Herald's persona, wake word, barge-in, briefing scripts, error behavior. |
+| [`docs/ENGINEERING-STANDARDS.md`](./docs/ENGINEERING-STANDARDS.md) | Coding standards, repo conventions, review rules, security rules, definition of done. |
+| [`docs/TEST-STRATEGY.md`](./docs/TEST-STRATEGY.md) | Test pyramid, what gets unit/integration/E2E coverage, agent-behavior evals, CI gates. |
+| [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md) | Phased implementation plan (M0–M7) with exit criteria, risk register, and build order. |
+| [`BUILD-PROMPT.md`](./BUILD-PROMPT.md) | Ready-to-paste prompt that directs a coding agent to implement this design milestone by milestone, doc-grounded and verification-gated. |
+| [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
+| [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
+| [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
+
+## Where the build stands
 
 **M8 in progress — the company you can leave running.** M6 and M7 landed the
 spoken company and the two outward missions; M8 is the hardening milestone that
@@ -320,3 +374,17 @@ Ephesus is an original work inspired by the MIT-licensed
 are reused with attribution (see each ADR's "Prior art" section); no upstream code or
 assets are vendored. The Jarvis-style voice is a *style* (a composed, understated British
 assistant persona), not a clone of any actor's voice or any studio's character.
+
+
+---
+
+
+> [!NOTE]
+> **Inspired by [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin)** — the
+> "office of your clones" agent harness. Ephesus reuses its strongest architectural ideas
+> (two data planes, a file-based hive with a single git committer, the Stop-hook autonomy
+> loop) and re-imagines the product around a different thesis: *you are the architect of a
+> small company, and the company reports to you* — by voice, in briefings, in design
+> reviews, and in decision memos.
+
+
