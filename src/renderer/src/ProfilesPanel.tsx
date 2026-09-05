@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { ProfileInstanceView, ProfileSummary } from '../../shared/profile-view'
 import type { ActivationPlan, ComposedAutonomy } from '../../shared/profile-activation'
+import { describeToolGrants } from '../../shared/engine-tools'
 
 /**
  * The Profiles tab — the activation desk (ADR-0012, FR-9.1/9.4, UI-DESIGN §4).
@@ -244,6 +245,29 @@ export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElem
           </li>
         ))}
       </ul>
+
+      {/*
+        M8.7b, ADR-0026. The engine loads no settings source but the harness's,
+        so a target repository cannot hand an agent skills or subagents on its
+        own. Anything listed here reaches the crew because THIS bundle named it,
+        and a granted directory is read by the agent as instructions - which is
+        exactly why it belongs on the screen the Architect reads before saying
+        yes, rather than in a file they would have to go looking for.
+      */}
+      {plan.hires.some((hire) => hire.tools.length > 0) && (
+        <>
+          <p style={heading}>Tools the company grants them</p>
+          <ul style={{ margin: '0 0 0 16px', padding: 0 }}>
+            {plan.hires
+              .filter((hire) => hire.tools.length > 0)
+              .map((hire) => (
+                <li key={hire.agentId} style={{ margin: '2px 0' }}>
+                  {hire.agentId} — {describeToolGrants(hire.tools).join(', ')}
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
 
       <p style={heading}>When one of them dies</p>
       <ul style={{ margin: '0 0 0 16px', padding: 0 }}>

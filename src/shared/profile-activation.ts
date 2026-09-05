@@ -26,6 +26,7 @@ import {
   type ComposedIsolation
 } from './isolation'
 import { DEFAULT_EXIT_POLICY, type ExitPolicy } from './respawn'
+import type { ToolGrant } from './engine-tools'
 import type { RepoDerivation } from './repo-remote'
 
 /**
@@ -245,6 +246,15 @@ export interface PlannedHire {
   readonly isolation: ComposedIsolation
   /** What happens when this agent's process ends (SDD §10). */
   readonly onExit: ExitPolicy
+  /**
+   * Tool directories this hire declared (M8.7b, ADR-0026).
+   *
+   * Carried as DECLARED -- root plus relative path -- not as resolved absolute
+   * directories. The activation screen renders the declaration because the
+   * declaration is what the Architect is being asked to approve, and resolving
+   * one needs a filesystem this pure module may not touch.
+   */
+  readonly tools: readonly ToolGrant[]
 }
 
 /**
@@ -514,6 +524,10 @@ export function activationPlan(
       hireRef: `${hire.name}@${String(hire.version)}`,
       isolation,
       onExit: hire.onExit ?? bundle.document.onExit ?? DEFAULT_EXIT_POLICY,
+      // Declared, never defaulted to something: a hire that names no tools gets
+      // none. ADR-0026 made a repository unable to hand an agent skills and
+      // subagents on its own, and a default here would quietly hand them back.
+      tools: hire.tools ?? [],
       spawn: {
         agentId,
         // The name a person reads; the role stays the role. A hire that

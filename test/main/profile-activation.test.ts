@@ -49,6 +49,8 @@ interface BundleOptions {
   readonly repos?: readonly { id: string; remote: string }[]
   /** The profile document's isolation default (M8.6). */
   readonly isolation?: 'worktree' | 'target'
+  /** Tool directories every hire in this bundle declares (M8.7b). */
+  readonly tools?: readonly { root: 'target' | 'home'; path: string }[]
   /** Per-hire isolation, by hire name (M8.6). */
   readonly hireIsolation?: Readonly<Record<string, 'worktree' | 'target'>>
   readonly onExit?: 'offer' | 'respawn'
@@ -105,7 +107,8 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
         ...(options.hireIsolation?.[hire] === undefined
           ? {}
           : { isolation: options.hireIsolation[hire] }),
-        ...(options.hireOnExit?.[hire] === undefined ? {} : { onExit: options.hireOnExit[hire] })
+        ...(options.hireOnExit?.[hire] === undefined ? {} : { onExit: options.hireOnExit[hire] }),
+        ...(options.tools === undefined ? {} : { tools: [...options.tools] })
       })
     )
   }
@@ -143,6 +146,17 @@ function rig(options: RigOptions = {}) {
   const order: string[] = []
   const triggers = new Map<string, Trigger>()
   const logs: Record<string, unknown>[] = []
+  /**
+   * What the SPAWN PATH could see about each hire, captured while that hire was
+   * spawning. `AgentManager.spawnConfig` asks `autonomyFor` and `toolsFor`
+   * exactly then, so anything asserted after `activate()` returns is a
+   * different question.
+   */
+  const atSpawn: {
+    agentId: string
+    autonomy: AutonomyLevel | null
+    tools: { grants: readonly unknown[]; targetPath: string } | null
+  }[] = []
 
   const activations = new ProfileActivations({
     store: new ProfileStore(profiles, path.join(home, 'no-builtins')),
@@ -156,6 +170,14 @@ function rig(options: RigOptions = {}) {
       }
       spawned.push(request)
       order.push(`spawn:${request.agentId}`)
+      // What the SPAWN PATH would read, at the moment it reads it. Asking after
+      // activate() returns is a different question with a different answer, and
+      // the difference is the whole defect this records.
+      atSpawn.push({
+        agentId: request.agentId,
+        autonomy: activations.autonomyFor(request.agentId, 'tool-permission'),
+        tools: activations.toolsFor(request.agentId)
+      })
       return Promise.resolve({})
     },
     beforeHires: (plan) => {
@@ -182,6 +204,7 @@ function rig(options: RigOptions = {}) {
   })
 
   return {
+    atSpawn,
     activations,
     profiles,
     targetDir,
@@ -430,6 +453,111 @@ describe('triggers', () => {
       ok: false,
       reason: 'no active profile "nobody@repo:x"'
     })
+  })
+})
+
+/**
+ * ADR-0026 stopped the engine reading any settings source but the harness's, so
+ * a target repository can no longer hand a semi-trusted agent skills or
+ * subagents. This is the seam that gives them back without giving the
+ * repository the decision: a directory reaches an agent because a bundle the
+ * Architect read named it, and for no other reason.
+ */
+/**
+ * `AgentManager.spawnConfig` composes a hire's autonomy and its tool grants by
+ * asking this module -- DURING the spawn, because that is when the config is
+ * built. An activation that only became answerable after its last hire was up
+ * would answer null to every one of those questions, and every answer has a
+ * quiet default behind it: `manual` autonomy, and no tools.
+ *
+ * That is not a hypothesis. The instance used to be registered after the spawn
+ * loop, and these two cases failed before the registration moved.
+ */
+describe('a hire can be asked about while it is being hired', () => {
+  it('answers the COMPOSED autonomy to the spawn that is happening now', async () => {
+    // The visible symptom of the null: `claudePermissionMode` maps `manual` to
+    // `--permission-mode default`, so an Architect who granted a profile full
+    // autonomy goes on answering the engine's permission prompt every few
+    // minutes -- exactly the complaint `AgentSpawnConfig.autonomy` was added to
+    // answer at M7.7, unfixed for every agent that arrives through a profile.
+    const r = rig({ global: 'autonomous' })
+    writeBundle(r.profiles, 'skeleton-crew', { autonomyDefault: 'autonomous' })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    expect(r.atSpawn).toHaveLength(1)
+    expect(r.atSpawn[0]?.autonomy).toBe('autonomous')
+  })
+
+  it('answers the tool grants to the spawn that is happening now', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { tools: [{ root: 'target', path: '.claude' }] })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    expect(r.atSpawn[0]?.tools?.grants).toEqual([{ root: 'target', path: '.claude' }])
+  })
+
+  it('stops answering when the activation rolls back', async () => {
+    // The roll-back kills every agent already up, so an activation that failed
+    // must leave nothing behind that would answer for one of them.
+    const r = rig({ failOn: ['deps'] })
+    writeBundle(r.profiles, 'skeleton-crew', {
+      hires: ['oncall', 'deps'],
+      tools: [{ root: 'target', path: '.claude' }]
+    })
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+
+    expect(result.ok).toBe(false)
+    expect(r.activations.toolsFor('agent.skeleton-crew-myapp-oncall')).toBeNull()
+    expect(r.activations.autonomyFor('agent.skeleton-crew-myapp-oncall', 'spend')).toBeNull()
+  })
+})
+
+describe('toolsFor — what the company granted a live agent', () => {
+  it('answers the grants the hire declared, with the target they resolve against', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { tools: [{ root: 'target', path: '.claude' }] })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    const granted = r.activations.toolsFor('agent.skeleton-crew-myapp-oncall')
+    expect(granted?.grants).toEqual([{ root: 'target', path: '.claude' }])
+    // The target comes from the ACTIVATION, not from a second lookup: a grant
+    // rooted at a different directory than the one the crew was activated on
+    // would resolve somewhere nobody approved.
+    expect(granted?.targetPath).toBe(r.targetDir)
+  })
+
+  it('answers an empty list for a hire that declared none', async () => {
+    // Empty, not null: the agent IS on a profile, and that profile granted it
+    // nothing. Conflating the two would make "no tools" indistinguishable from
+    // "not ours", and only one of those is a reason to look elsewhere.
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew')
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    expect(r.activations.toolsFor('agent.skeleton-crew-myapp-oncall')).toEqual({
+      grants: [],
+      targetPath: r.targetDir
+    })
+  })
+
+  it('answers NULL for an agent no profile owns — never a default set', async () => {
+    const r = rig()
+    expect(r.activations.toolsFor('agent.mason')).toBeNull()
+  })
+
+  it('stops answering once its instance is deactivated', async () => {
+    // A deactivated instance still granting tools would be a directory reaching
+    // an agent because of a decision the Architect has since withdrawn.
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { tools: [{ root: 'home', path: 'company-tools' }] })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+    expect(r.activations.toolsFor('agent.skeleton-crew-myapp-oncall')).not.toBeNull()
+
+    r.activations.deactivate('skeleton-crew@repo:myapp')
+    expect(r.activations.toolsFor('agent.skeleton-crew-myapp-oncall')).toBeNull()
   })
 })
 

@@ -17,6 +17,7 @@ import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spa
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig } from '../../../src/main/engines'
 import { removeTempDir } from '../../tmpdir'
+import { NO_TOOLS } from '../../../src/shared/engine-tools'
 
 /**
  * Settings hygiene runs entirely inside temp cwds. Nothing here may touch the
@@ -79,6 +80,7 @@ function rig(): Rig {
       hookEndpoint: '/tmp/eph/events.sock',
       cwd,
       engineConfigDir,
+      tools: NO_TOOLS,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: { GH_TOKEN: 'granted-value' },

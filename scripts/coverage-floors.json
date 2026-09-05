@@ -61,7 +61,8 @@
         "src/shared/agents.ts",
         "src/shared/commands.ts",
         "src/main/respawn.ts",
-        "src/shared/respawn.ts"
+        "src/shared/respawn.ts",
+        "src/shared/engine-tools.ts"
       ]
     },
     "hermes": {

@@ -37,6 +37,8 @@ import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
 import { plannedTrustGrants, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
 import { ENGINES_DIR, engineConfigDir } from './engines/engine-home'
+import { TOOLS_DIR, resolveToolGrants } from './engines/tool-grants'
+import { NO_TOOLS } from '../shared/engine-tools'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
@@ -1928,6 +1930,38 @@ async function boot(): Promise<void> {
      * manager reads an unanswerable probe as trusted, not as logged out.
      */
     engineConfigDirFor,
+    /**
+     * M8.7b. The company decides what its agents run with, by name (ADR-0026).
+     *
+     * A refused set grants NOTHING rather than refusing the spawn: the grants
+     * were the bundle asking for something it may not have, and an agent
+     * without a skill is diminished, not dangerous. A grant that simply is not
+     * there is reported the way a missing secret grant is -- visible, never
+     * silent, because the symptom is otherwise an agent that does not use a
+     * tool and nobody can say why.
+     */
+    toolsFor: (agentId) => {
+      const declared = activations?.toolsFor(agentId)
+      if (!declared) return null
+      const resolved = resolveToolGrants(declared.grants, {
+        target: declared.targetPath,
+        home: path.join(home.root, TOOLS_DIR)
+      })
+      if (!resolved.ok) {
+        reportDegradation(
+          `agents/tool-grants:${agentId}`,
+          `${agentId}: ${resolved.because} - no tools granted`
+        )
+        return NO_TOOLS
+      }
+      if (resolved.tools.missing.length > 0) {
+        reportDegradation(
+          `agents/tool-grants:${agentId}`,
+          `${agentId}: granted tool directories are not there - ${resolved.tools.missing.join(', ')}`
+        )
+      }
+      return resolved.tools
+    },
     authProbe: (command) =>
       new Promise((resolve) => {
         const useShell = process.platform === 'win32'

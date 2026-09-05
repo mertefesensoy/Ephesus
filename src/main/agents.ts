@@ -8,6 +8,7 @@ import { assignSeat, type Seat } from '../shared/seats'
 import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan } from './engines'
 import type { EngineRegistry } from './engines'
 import { baseAgentEnv } from './engines/spawn-env'
+import { NO_TOOLS, type ResolvedTools } from '../shared/engine-tools'
 import type { HookServer } from './hooks'
 import type { PromptStore } from './prompts'
 import { writeFileAtomic } from './fsx'
@@ -171,6 +172,16 @@ export interface AgentManagerOptions {
    * is refused, not downgraded.
    */
   engineConfigDirFor(engineId: string, agentId: string): string
+  /**
+   * Tool directories this agent's hire declared, already resolved (M8.7b).
+   *
+   * Injected for the same reason `autonomyFor` is: the composition belongs to
+   * the profile layer, and a second opinion about it in the spawn path would
+   * eventually disagree with the first -- permissively. Absent, or null for an
+   * agent on no profile, means NO tools, which is the lockdown's default rather
+   * than an exception to it.
+   */
+  toolsFor?(agentId: string): ResolvedTools | null
   readonly probe?: VersionProber
   /**
    * Runs the adapter's authentication probe (M8.4). Injected for the same
@@ -692,6 +703,7 @@ export class AgentManager {
       // record, the auth probe — reads the SAME directory instead of four
       // expressions that agree until one of them is edited.
       engineConfigDir: this.options.engineConfigDirFor(request.engine, request.agentId),
+      tools: this.options.toolsFor?.(request.agentId) ?? NO_TOOLS,
       commitIdentity: this.options.commitIdentity?.() ?? null,
       // `manual` when nobody has an opinion: an agent on no profile does not
       // get latitude by default (FR-11.1's conservative default).

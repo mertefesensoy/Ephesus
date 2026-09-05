@@ -5,6 +5,7 @@ import { shippedGatePolicy } from '../shared/gates'
 import { shippedAuthority } from '../shared/authority'
 import { writeFileAtomic } from './fsx'
 import { ENGINES_DIR } from './engines/engine-home'
+import { TOOLS_DIR } from './engines/tool-grants'
 
 /**
  * The harness home (SDD §2): `~/.ephesus/`. M0.5 creates the top-level
@@ -17,7 +18,8 @@ export const HOME_DIRS = [
   'agora',
   'index',
   'worktrees',
-  ENGINES_DIR
+  ENGINES_DIR,
+  TOOLS_DIR
 ] as const
 
 export interface HarnessHome {

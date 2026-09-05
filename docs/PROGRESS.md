@@ -5145,25 +5145,50 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       "is not matched by file permission checks — only `Edit(...)`" — predates
       this package, owed to whoever next touches `mailboxPermissions`.
 
-- [ ] **M8.7b The harness re-supplies the tools, by name** — B13, second half.
-      The lockdown also hides a target repository's own skills and subagents from
-      a hired agent (MEASURED: `zebrafish-audit` and `zebrafish-checker` visible
-      without it, invisible with it). The Architect's decision is that the
-      company decides what its agents run with, by name: the hire template gains
-      an optional `tools` block (agents, plugin directories), composed at
-      activation the way `isolation` is, shown on the activation screen, and
-      handed over as `--agents` / `--plugin-dir` — both documented flags, and the
-      CLI's own help names them as the way to provide context when settings
-      sources are off. A path escaping the harness and target roots is REFUSED,
-      not clamped.
-      *Until this lands, a crew working in THIS repository cannot reach
-      `doc-guardian`, `spec-verifier`, or the `/build-package` family — which is
-      the recursive-improvement profile's own toolbox (ADR-0019).*
-      *Docs: ADR-0026 §Consequences (already normative on this point), ADR-0012.
-      Tests: a hire with no `tools` passes neither flag; a granted agent reaches
-      the argv; an escaping path is refused with the path named. Risk: `--agents`
-      takes JSON on the command line — the same argv-composition hazard the
-      `--setting-sources=` note records, so it needs a length and quoting case.*
+- [x] **M8.7b The harness re-supplies the tools, by name** - B13, second half.
+      The M8.7a lockdown also hides a target repository's own skills and
+      subagents from a hired agent (MEASURED). A hire template now declares
+      `tools` - a named root (`target`, or `home` for `~/.ephesus/tools/`) plus a
+      relative path - which the harness resolves and hands over as one
+      `--plugin-dir` per directory. ONE mechanism, not two: `--agents` is
+      deliberately unused, because a directory already carries skills, subagents
+      and commands together and two ways to say one thing is two code paths to
+      keep in step.
+      **REFUSES on escape, REPORTS on absence** - different failures. A path
+      outside its root is a bundle asking for what it may not have, so the WHOLE
+      set is refused (honouring seven of eight would be a security decision taken
+      by a loop); a directory simply not there is the `envGrants` case, so it is
+      a visible degradation. Containment is judged on REALPATHS with the root
+      resolved too - a string-prefix check passes every test written for it and
+      then fails on the OneDrive junction the harness home actually sits under.
+      *Evidence: the mechanism measured before the schema was designed -
+      `--plugin-dir` works under the lockdown AND accepts a directory with no
+      plugin manifest, which is what makes granting a repository's bare `.claude`
+      possible without asking the Architect to add one. END-TO-END through the
+      harness's own resolution (bundled with esbuild and executed): with the
+      grant the engine reports the repository's skill available, without it, not.
+      Gate: typecheck, zero-warning lint, invariants (reachability 170/178),
+      **3700 passed / 8 skipped** across 194 files, coverage floors ok with none
+      lowered. 15 new grant tests + 4 `toolsFor` + 3 spawn-window. Docs:
+      ADR-0026 clause note (the ADR named this owed and it landed the same day),
+      SDD 3, the M8.7b implementation doc.*
+      **A LIVE PRE-EXISTING DEFECT, found while wiring this and fixed here.**
+      `AgentManager.spawnConfig` asks `ProfileActivations` for a hire's autonomy
+      DURING the spawn, and the instance was registered only AFTER the spawn
+      loop - so the answer was always `null`, and `null` means `manual`, and
+      `claudePermissionMode` maps `manual` to `--permission-mode default`. **Every
+      agent that arrived through a profile spawned with the engine's permission
+      prompt fully armed, whatever autonomy the Architect had granted** - exactly
+      the complaint `AgentSpawnConfig.autonomy` was added at M7.7 to answer. The
+      suite was green either side of it because every test asked AFTER
+      `activate()` returned, which is a different question. Fixed with one seam:
+      an `activating` SET (two activations can overlap) held in a `finally` (a
+      flag cleared on the happy path leaks on every failure), and one private
+      `planFor` both callers read. The three tests that pin it FAILED on the old
+      code first - `expected null to be 'autonomous'`.
+      *OWED: the autonomy defect deserves a SCENARIO test asserting the spawn's
+      `--permission-mode`, not only a unit one; nothing reaps
+      `~/.ephesus/engines/<engine>/<agent>/` yet.*
 
 - [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
       is one in-memory map with no boot replay, so a restart silently un-hires

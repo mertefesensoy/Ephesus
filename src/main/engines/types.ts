@@ -1,4 +1,5 @@
 import type { CapacityLimit } from '../../shared/capacity'
+import type { ResolvedTools } from '../../shared/engine-tools'
 import type { EngineId, HookSupport } from '../../shared/engines'
 
 /**
@@ -90,6 +91,16 @@ export interface AgentSpawnConfig {
    * two halves that agree only until one of them moves.
    */
   readonly engineConfigDir: string
+  /**
+   * Tool directories this agent may load into its engine (M8.7b, ADR-0026).
+   *
+   * Already RESOLVED to absolute directories and already checked for
+   * containment, because the adapter's job is to turn a decision into flags,
+   * not to make one. An adapter that resolved paths would be a second place the
+   * "by name" rule is enforced, and the more permissive of two such places
+   * always wins in the end.
+   */
+  readonly tools: ResolvedTools
   /**
    * Role-declared secret grants, already resolved by the broker (ADR-0010).
    * Least-privilege: only what the hire template declares reaches this map.

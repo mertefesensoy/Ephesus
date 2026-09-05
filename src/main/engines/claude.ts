@@ -1010,6 +1010,10 @@ export class ClaudeAdapter implements EngineAdapter {
         '--setting-sources=',
         '--settings',
         harnessSettingsPath(cfg),
+        // M8.7b: the tools the company granted this hire BY NAME. A hire that
+        // declared none passes no flag at all, which is what an agent with no
+        // profile gets - the lockdown's default, not an exception to it.
+        ...cfg.tools.pluginDirs.flatMap((dir) => ['--plugin-dir', dir]),
         '--append-system-prompt',
         identity
       ],

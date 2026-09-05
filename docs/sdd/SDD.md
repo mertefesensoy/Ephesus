@@ -188,6 +188,17 @@ Defined normatively in ADR-0009. Runtime notes:
   A config directory the engine has never seen is prepared first
   (`prepareConfigDir`, which records the onboarding the Architect already
   completed); one that cannot be prepared REFUSES the spawn.
+  **Granted tools (M8.7b).** Because no settings source is read, a target
+  repository cannot hand an agent skills or subagents either. A hire template
+  declares `tools` — a named root (`target` or `home`, the latter being
+  `~/.ephesus/tools/`) plus a relative path — which
+  `main/engines/tool-grants.ts` resolves, REFUSING any path that escapes its
+  root and REPORTING one that is simply absent (the `envGrants` precedent,
+  ADR-0010). Each resolved directory reaches the engine as one `--plugin-dir`.
+  `ProfileActivations.toolsFor` and `autonomyFor` both answer from
+  `planFor(agentId)`, which covers a plan whose hires are being spawned right
+  now as well as a live instance — the spawn path asks both questions while
+  the spawn is in progress.
 
 - **Who asks for `worktree: true` (M8.6, `src/shared/isolation.ts`).** A bare
   `agents.spawn` (UC-01, where the Architect typed the working directory and

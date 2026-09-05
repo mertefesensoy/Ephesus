@@ -36,6 +36,13 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):
 
+- ADR-0026 Consequences, "That is owed, not built -- it is M8.7b, and until it
+  lands a crew working on this repository cannot reach `doc-guardian`,
+  `spec-verifier`, or the `/build-package` family" -- M8.7b LANDED the same day
+  (2026-09-05, `docs/implementations/2026-09-05-granted-tools.md`). A hire
+  template now declares `tools`, and the harness hands each granted directory
+  over as `--plugin-dir`. The rest of ADR-0026 stands as written.
+
 - ADR-0023 "writes each observation to `<home>/usage.json`" — as built, one
   report per agent at `<home>/usage/<agent>.json`. The account WINDOWS are
   account-wide and a single file served them, but the report also carries the

@@ -64,6 +64,7 @@ function plan(over: Partial<ActivationPlan> = {}): ActivationPlan {
           tightened: false,
           because: 'its own worktree of the target, declared by the profile'
         },
+        tools: [],
         onExit: 'respawn',
         spawn: {
           agentId: 'agent.skeleton-crew-myapp-ci-babysitter',

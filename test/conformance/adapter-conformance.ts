@@ -6,6 +6,7 @@ import { ENGINE_IDS, HOOK_SUPPORTS, HOOK_SUPPORT_RANK } from '../../src/shared/e
 import { HOOK_EVENTS } from '../../src/shared/hooks'
 import type { AgentSpawnConfig, EngineAdapter, UsageFact } from '../../src/main/engines'
 import { removeTempDir } from '../tmpdir'
+import { NO_TOOLS } from '../../src/shared/engine-tools'
 
 /**
  * The engine-adapter conformance suite (TEST-STRATEGY §5, NFR-12).
@@ -107,6 +108,7 @@ export function conformanceRig(): ConformanceRig {
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
       engineConfigDir: path.join(root, 'engine-config'),
+      tools: NO_TOOLS,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},

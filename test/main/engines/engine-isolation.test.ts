@@ -15,6 +15,7 @@ import { ENGINES_DIR, engineConfigDir } from '../../../src/main/engines/engine-h
 import { PromptStore } from '../../../src/main/prompts'
 import type { AgentSpawnConfig } from '../../../src/main/engines/types'
 import { removeTempDir } from '../../tmpdir'
+import { NO_TOOLS } from '../../../src/shared/engine-tools'
 
 const BUNDLED_PROMPTS = fileURLToPath(new URL('../../../prompts/', import.meta.url))
 const temps: string[] = []
@@ -53,6 +54,7 @@ function rig(agentId = 'agent.mason'): {
       hookEndpoint: path.join(root, 'events.sock'),
       cwd,
       engineConfigDir: engineConfigDir(path.join(root, ENGINES_DIR), 'claude', agentId),
+      tools: NO_TOOLS,
       commitIdentity: null,
       envGrants: {},
       identityPath: path.join(agora, 'identity.md'),
