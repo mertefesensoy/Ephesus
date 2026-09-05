@@ -3,13 +3,15 @@ import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
 import { commandSubmitSchema, type CommandState } from '../shared/commands'
-import type { BreakerState } from '../shared/breaker'
+import { clearBreakerStopSchema, type BreakerState } from '../shared/breaker'
+import type { Breaker } from './watch/breaker'
 import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import { gateApproveSchema, type OpenGate } from '../shared/gates'
 import { messageIdSchema, type Message } from '../shared/message'
 import {
   IpcChannels,
+  AGENTS_STATE_CHANNEL,
   type AgoraHealth,
   type AvatarUpdate,
   type ConfigSnapshot,
@@ -215,6 +217,7 @@ export interface IpcDeps {
   dismissFromHumanQueue(messageId: string): boolean
   /** Per-agent breaker state (ADR-0011). */
   breakerState(): readonly BreakerState[]
+  readonly breaker: Pick<Breaker, 'stopsView' | 'clearStop'>
   /** Who is waiting on provider capacity (`watch/capacity.ts`). */
   capacity(): CapacityView
   /** Mail waiting for one agent — UI-DESIGN §5.4's desk tray flag (ADR-0013). */
@@ -331,6 +334,16 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.watchHumanQueue, (): readonly Message[] => deps.humanQueue())
 
   ipcMain.handle(IpcChannels.watchBreaker, (): readonly BreakerState[] => deps.breakerState())
+  ipcMain.handle(IpcChannels.watchBreakerStops, () => deps.breaker.stopsView())
+  ipcMain.handle(IpcChannels.watchClearBreakerStop, (event, raw: unknown): boolean => {
+    const { agentId, expectedAt } = clearBreakerStopSchema.parse(raw)
+    const cleared = deps.breaker.clearStop(agentId, expectedAt)
+    if (cleared) {
+      const card = agents.refreshRespawnBlock(agentId)
+      if (card !== null) event.sender.send(AGENTS_STATE_CHANNEL, card)
+    }
+    return cleared
+  })
 
   ipcMain.handle(IpcChannels.watchCapacity, (): CapacityView => deps.capacity())
 
@@ -552,6 +565,10 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle(IpcChannels.agentsKill, (_ev, raw: unknown) => {
     agents.kill(agentIdPayloadSchema.parse(raw).agentId)
+  })
+
+  ipcMain.handle(IpcChannels.agentsRespawn, async (_ev, raw: unknown) => {
+    return agents.respawn(agentIdPayloadSchema.parse(raw).agentId)
   })
 
   ipcMain.handle(IpcChannels.agentsInterrupt, (_ev, raw: unknown) => {

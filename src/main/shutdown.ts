@@ -99,6 +99,19 @@ export interface QuitSequenceOptions {
   /** Read at run time: the company may not have finished booting. */
   closing(): ClosingSeam | null
   agents(): AgentsSeam | null
+  /**
+   * Disarmed BEFORE the agent unwind, in the order given (M8.7).
+   *
+   * The respawn ladders belong here and nowhere else. `steps()` runs AFTER the
+   * unwind, so a ladder stopped there is armed while the unwind kills the very
+   * agents it watches — it reads those kills as crashes and brings the company
+   * back up as it is being torn down. M8.6 put `crew.stop()` in `steps()` with
+   * a comment claiming it ran first; it did not.
+   *
+   * Isolated exactly as `steps` is: one that throws is reported and stepped
+   * over, because a ladder that will not disarm must not stop the unwind.
+   */
+  disarm?(): readonly QuitStep[]
   /** Stops, in the order they must happen. Read at run time for the same reason. */
   steps(): readonly QuitStep[]
   /** Visible degradation (invariant §7). Never throws back into the sequence. */
@@ -122,6 +135,8 @@ export interface QuitReport {
   readonly agentsUnwound: readonly string[]
   readonly agentsFailed: readonly string[]
   readonly agentsError: string | null
+  /** What the pre-unwind disarm did (M8.7). */
+  readonly disarmed: readonly StepOutcome[]
   readonly steps: readonly StepOutcome[]
 }
 
@@ -152,9 +167,13 @@ export class QuitSequence {
 
   private async execute(): Promise<QuitReport> {
     const closingPhase = await this.runClosing()
+    // Before the unwind, and this time actually before it: the ladders must be
+    // disarmed while the agents they watch are still alive, or the unwind's own
+    // kills are read as crashes.
+    const disarmed = await this.runPhase(this.disarmSteps(), 'disarm')
     const agentsPhase = await this.runAgents()
     const steps = await this.runSteps()
-    return { ...closingPhase, ...agentsPhase, steps }
+    return { ...closingPhase, ...agentsPhase, disarmed, steps }
   }
 
   private async runClosing(): Promise<
@@ -226,22 +245,40 @@ export class QuitSequence {
     }
   }
 
+  /** The ladders to disarm, or none — asking must never be why a quit stalls. */
+  private disarmSteps(): readonly QuitStep[] {
+    try {
+      return this.options.disarm?.() ?? []
+    } catch (err) {
+      this.options.onDegraded('shutdown/disarm', `could not assemble the disarm: ${detail(err)}`)
+      return []
+    }
+  }
+
   private async runSteps(): Promise<readonly StepOutcome[]> {
-    const outcomes: StepOutcome[] = []
     let steps: readonly QuitStep[]
     try {
       steps = this.options.steps()
     } catch (err) {
       this.options.onDegraded('shutdown/steps', `could not assemble the teardown: ${detail(err)}`)
-      return outcomes
+      return []
     }
+    return this.runPhase(steps, 'stop')
+  }
+
+  /** One isolated phase: every step runs, a failure is reported and stepped over. */
+  private async runPhase(
+    steps: readonly QuitStep[],
+    kind: 'disarm' | 'stop'
+  ): Promise<readonly StepOutcome[]> {
+    const outcomes: StepOutcome[] = []
     for (const step of steps) {
       try {
         await step.run()
         outcomes.push({ name: step.name, ok: true })
       } catch (err) {
         const message = detail(err)
-        this.options.onDegraded(`shutdown/stop:${step.name}`, `${step.name}: ${message}`)
+        this.options.onDegraded(`shutdown/${kind}:${step.name}`, `${step.name}: ${message}`)
         outcomes.push({ name: step.name, ok: false, error: message })
       }
     }

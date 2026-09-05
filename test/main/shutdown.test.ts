@@ -526,3 +526,175 @@ describe('the quit sequence — a destroyed window (the M8.1 defect)', () => {
     expect(degradations).toEqual([])
   })
 })
+/**
+ * M8.7 — the disarm phase, and the ordering nothing pinned.
+ *
+ * M8.6 put `crew.stop()` in `steps()` with a comment saying it ran "before the
+ * unwind, not after". It did not: `steps()` is the LAST phase. So every respawn
+ * ladder was armed while the unwind killed the agents it was watching, and read
+ * those kills as crashes. Nothing caught it because no test related the phase a
+ * step is registered in to the phase it actually runs in.
+ */
+describe('the ladders are disarmed before the unwind (M8.7)', () => {
+  it('runs disarm after closing time and before the unwind', async () => {
+    const order: string[] = []
+    const t = timeline()
+    const quit = new QuitSequence({
+      liveAgents: () => ['agent.mason'],
+      ask: () => {
+        order.push('ask')
+        return 'closing'
+      },
+      closing: () => ({
+        inProgress: () => false,
+        begin: async () => {
+          order.push('closing')
+          return { acked: ['agent.mason'], missing: [], timedOut: false }
+        }
+      }),
+      agents: () => ({
+        shutdown: async () => {
+          order.push('unwind')
+          return { unwound: ['agent.mason'], failed: [] }
+        }
+      }),
+      disarm: () => [
+        { name: 'crew-survival', run: () => void order.push('disarm:crew') },
+        {
+          name: 'orchestrator-ladder',
+          run: () => void order.push('disarm:artemis')
+        }
+      ],
+      steps: () => [t.step('ptys')],
+      onDegraded: () => undefined
+    })
+
+    const report = await quit.run()
+    // The load-bearing edge: BOTH ladders are down before `unwind` runs, so the
+    // kills it performs cannot be read as crashes.
+    expect([...order, ...t.seen]).toEqual([
+      'ask',
+      'closing',
+      'disarm:crew',
+      'disarm:artemis',
+      'unwind',
+      'ptys'
+    ])
+    expect(report.disarmed).toEqual([
+      { name: 'crew-survival', ok: true },
+      { name: 'orchestrator-ladder', ok: true }
+    ])
+  })
+
+  it('disarms even when there was no closing time to run', async () => {
+    // An empty floor skips straight to teardown (SDD §612), and a ladder can
+    // still be armed for an agent that exited moments ago.
+    const order: string[] = []
+    const quit = new QuitSequence({
+      liveAgents: () => [],
+      ask: () => 'now',
+      closing: () => null,
+      agents: () => ({
+        shutdown: async () => {
+          order.push('unwind')
+          return { unwound: [], failed: [] }
+        }
+      }),
+      disarm: () => [{ name: 'crew-survival', run: () => void order.push('disarm') }],
+      steps: () => [],
+      onDegraded: () => undefined
+    })
+
+    await quit.run()
+    expect(order).toEqual(['disarm', 'unwind'])
+  })
+
+  it('a ladder that will not disarm is reported and stepped over', async () => {
+    // Same isolation `steps` has: the unwind must still restore every settings
+    // file the harness wrote into somebody's repository.
+    const order: string[] = []
+    const degradations: { source: string; detail: string }[] = []
+    const quit = new QuitSequence({
+      liveAgents: () => [],
+      ask: () => 'now',
+      closing: () => null,
+      agents: () => ({
+        shutdown: async () => {
+          order.push('unwind')
+          return { unwound: [], failed: [] }
+        }
+      }),
+      disarm: () => [
+        {
+          name: 'crew-survival',
+          run: () => {
+            throw new Error('ladder wedged')
+          }
+        },
+        {
+          name: 'orchestrator-ladder',
+          run: () => void order.push('disarm:artemis')
+        }
+      ],
+      steps: () => [],
+      onDegraded: (source, detail) => degradations.push({ source, detail })
+    })
+
+    const report = await quit.run()
+    expect(order).toEqual(['disarm:artemis', 'unwind'])
+    expect(report.disarmed[0]).toEqual({
+      name: 'crew-survival',
+      ok: false,
+      error: 'ladder wedged'
+    })
+    // Its own cause, distinct from a teardown stop's, so a reader can tell a
+    // ladder that would not disarm from a pty that would not die.
+    expect(degradations[0]?.source).toBe('shutdown/disarm:crew-survival')
+  })
+
+  it('quits normally when nothing declares a disarm at all', async () => {
+    const order: string[] = []
+    const quit = new QuitSequence({
+      liveAgents: () => [],
+      ask: () => 'now',
+      closing: () => null,
+      agents: () => ({
+        shutdown: async () => {
+          order.push('unwind')
+          return { unwound: [], failed: [] }
+        }
+      }),
+      steps: () => [],
+      onDegraded: () => undefined
+    })
+
+    const report = await quit.run()
+    expect(order).toEqual(['unwind'])
+    expect(report.disarmed).toEqual([])
+  })
+
+  it('an assembly that throws does not stall the quit', async () => {
+    const order: string[] = []
+    const degradations: { source: string; detail: string }[] = []
+    const quit = new QuitSequence({
+      liveAgents: () => [],
+      ask: () => 'now',
+      closing: () => null,
+      agents: () => ({
+        shutdown: async () => {
+          order.push('unwind')
+          return { unwound: [], failed: [] }
+        }
+      }),
+      disarm: () => {
+        throw new Error('company half-built')
+      },
+      steps: () => [],
+      onDegraded: (source, detail) => degradations.push({ source, detail })
+    })
+
+    await quit.run()
+    expect(order).toEqual(['unwind'])
+    expect(degradations[0]?.source).toBe('shutdown/disarm')
+  })
+})

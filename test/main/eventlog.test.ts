@@ -26,7 +26,7 @@ function logFile(): string {
 }
 
 describe('log line format (SDD §4.3)', () => {
-  it('carries the twenty-six documented kinds', () => {
+  it('carries the twenty-seven documented kinds', () => {
     expect([...LOG_KINDS]).toEqual([
       'message',
       'delivery',
@@ -63,6 +63,7 @@ describe('log line format (SDD §4.3)', () => {
       // trip nor an `exit`, and a forensic reader who cannot tell the three
       // apart cannot reconstruct what the company did (NFR-13).
       'capacity',
+      'respawn',
       'error',
       // M8.2: a CONDITION the company is running under, distinct from `error`
       // (an event that happened) because only a condition can be cleared or

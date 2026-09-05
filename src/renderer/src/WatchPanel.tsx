@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { SecretsPanel } from './SecretsPanel'
-import type { BreakerState } from '../../shared/breaker'
+import type { BreakerState, BreakerStop, BreakerStopsView } from '../../shared/breaker'
 import type { AgentSpend } from '../../shared/cost'
 import { RUNG_NAMES } from '../../shared/breaker'
 import type { GateVerdict, OpenGate } from '../../shared/gates'
@@ -30,9 +30,16 @@ interface WatchState {
   readonly queue: readonly Message[]
   readonly spend: readonly AgentSpend[]
   readonly breaker: readonly BreakerState[]
+  readonly stops: BreakerStopsView
 }
 
-const EMPTY: WatchState = { gates: [], queue: [], spend: [], breaker: [] }
+const EMPTY: WatchState = {
+  gates: [],
+  queue: [],
+  spend: [],
+  breaker: [],
+  stops: { stops: [], error: null }
+}
 
 /**
  * UI-DESIGN §4 panel anatomy: "3-layer border (ink-900 2px → marble-50 1px
@@ -108,6 +115,51 @@ function tokens(spend: AgentSpend, which: 'sessionTotals' | 'cumulativeTotals'):
   return `${(totals.inTokens + totals.outTokens).toLocaleString()} tok`
 }
 
+export function BreakerStops({
+  view,
+  onClear
+}: {
+  view: BreakerStopsView
+  onClear(stop: BreakerStop): Promise<void>
+}): ReactElement {
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <section aria-label="Standing breaker stops">
+      <h2 style={heading}>STOPPED AGENTS</h2>
+      {view.error !== null && <p role="alert">{view.error}</p>}
+      {error !== null && <p role="alert">{error}</p>}
+      {view.stops.length === 0 && view.error === null && <p>No standing stops.</p>}
+      {view.stops.map((stop) => (
+        <article key={stop.agentId} style={{ marginBottom: '12px' }}>
+          <Field label="agent" value={stop.agentId} />
+          <Field label="stopped" value={new Date(stop.at).toLocaleString()} />
+          <Field label="reason" value={`rung 3 · ${stop.signals.join(', ')}`} />
+          <p>
+            Resolve the cause before clearing. Clearing permits a restart; it does not start the
+            agent. Use the agent card to restart, or activate its profile if it is no longer on the
+            floor.
+          </p>
+          <button
+            type="button"
+            style={control}
+            disabled={pending !== null || view.error !== null}
+            onClick={() => {
+              setPending(stop.agentId)
+              setError(null)
+              void onClear(stop)
+                .catch((err: unknown) => setError(String(err)))
+                .finally(() => setPending(null))
+            }}
+          >
+            {pending === stop.agentId ? 'Clearing…' : `Clear stop for ${stop.agentId}`}
+          </button>
+        </article>
+      ))}
+    </section>
+  )
+}
+
 export function WatchPanel(): ReactElement {
   const [state, setState] = useState<WatchState>(EMPTY)
   const [refusal, setRefusal] = useState<string | null>(null)
@@ -128,13 +180,14 @@ export function WatchPanel(): ReactElement {
       eph.watch.approvals(),
       eph.watch.humanQueue(),
       eph.watch.budgets(),
-      eph.watch.breakerState()
+      eph.watch.breakerState(),
+      eph.watch.breakerStops()
     ])
-      .then(([gates, queue, spend, breaker]) => {
+      .then(([gates, queue, spend, breaker, stops]) => {
         // A stale read must not re-show a gate main has already settled.
         if (mine !== generation.current) return
         setBridge(null)
-        setState({ gates, queue, spend, breaker })
+        setState({ gates, queue, spend, breaker, stops })
       })
       .catch((err: unknown) => {
         if (mine === generation.current) setBridge(String(err))
@@ -194,6 +247,17 @@ export function WatchPanel(): ReactElement {
           credential store nobody can reach is how five hires spent an evening
           spawning with `grantsMissing: ["GH_TOKEN"]`. */}
       <SecretsPanel />
+
+      <BreakerStops
+        view={state.stops}
+        onClear={async (stop) => {
+          if (!window.eph) throw new Error('Watch unavailable')
+          const cleared = await window.eph.watch.clearBreakerStop(stop.agentId, stop.at)
+          refresh()
+          if (!cleared)
+            throw new Error('This stop is no longer present; the list has been refreshed.')
+        }}
+      />
 
       <h2 style={heading}>SPEND</h2>
       {state.spend.length === 0 && (

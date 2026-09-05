@@ -1,8 +1,10 @@
 {
   "schemaVersion": 1,
   "name": "front-office",
-  "version": 1,
-  "target": { "kind": "repo" },
+  "version": 2,
+  "target": {
+    "kind": "repo"
+  },
   "autonomy": {
     "default": "supervised",
     "byKind": {
@@ -12,5 +14,7 @@
       "scope-change": "manual",
       "outbound": "manual"
     }
-  }
+  },
+  "isolation": "worktree",
+  "onExit": "offer"
 }

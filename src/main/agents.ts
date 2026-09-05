@@ -290,6 +290,16 @@ export interface AgentManagerOptions {
    * that cannot see a park must not claim one.
    */
   capacityParked?(agentId: string): boolean
+  /**
+   * A standing decision that this agent must not be brought back, or null
+   * (M8.6, B11 — today, the breaker's rung-3 stop).
+   *
+   * Asked HERE rather than at each caller because there are two respawn paths
+   * with different owners — the crew's ladder and the Architect accepting a
+   * respawn offer — and a guard on one of them is a guard on neither. The
+   * lifecycle owns "may this agent come back"; who asked is not its business.
+   */
+  respawnBlocked?(agentId: string): string | null
 }
 
 interface LiveAgent {
@@ -386,6 +396,20 @@ export class AgentManager {
     return agent.card
   }
 
+  refreshRespawnBlock(agentId: string): AgentCard | null {
+    const agent = this.agents.get(agentId)
+    if (!agent?.card.respawnOffer) return null
+    // This is an offer refresh, not another lifecycle exit for the ladders.
+    agent.card = {
+      ...agent.card,
+      respawnOffer: {
+        ...agent.card.respawnOffer,
+        blockedBecause: this.options.respawnBlocked?.(agentId) ?? null
+      }
+    }
+    return agent.card
+  }
+
   /**
    * Spawns one agent.
    *
@@ -400,6 +424,8 @@ export class AgentManager {
    * rolled back here rather than at some later cleanup that may never run.
    */
   async spawn(request: SpawnRequest): Promise<AgentCard> {
+    // Boot and profile activation must respect the same durable decision as respawn.
+    this.assertRespawnAllowed(request.agentId)
     const existing = this.agents.get(request.agentId)
     if (
       existing &&
@@ -430,10 +456,23 @@ export class AgentManager {
 
     // UC-01 alternate 2a. Before the process exists and before anything is
     // written into a repository: an isolated spawn works in its own checkout,
-    // so two agents in one repo cannot fight over a working copy. A failure
-    // here is visible and the spawn continues in the target repo — isolation is
-    // a nicety, and refusing to hire over it would be worse than saying so.
-    if (request.worktree === true) await this.isolate(request.agentId, request.cwd)
+    // so two agents in one repo cannot fight over a working copy.
+    //
+    // A failure here REFUSES the hire (M8.6). The id is released first, so the
+    // Architect can fix the repository and activate again without a phantom
+    // agent holding the name — a rollback at the one place that knows the
+    // claim was made, rather than at some later cleanup that may never run.
+    if (request.worktree === true) {
+      const refused = await this.isolate(request.agentId, request.cwd)
+      if (refused !== null) {
+        this.agents.delete(request.agentId)
+        this.options.onRosterChange?.(request.agentId, null)
+        this.options.onChange?.({ ...card, lifecycle: 'exited', exitCode: null })
+        throw new Error(
+          `agents: "${request.agentId}" asked for an isolated worktree and did not get one — ${refused}`
+        )
+      }
+    }
 
     const spec = adapter.binary()
     const version = await this.probe(spec)
@@ -779,13 +818,56 @@ export class AgentManager {
     if (this.options.spawner.has(agentId)) {
       throw new Error(`agents: "${agentId}" is still running; stop it before respawning`)
     }
+    if (agent.card.lifecycle !== 'exited') {
+      throw new Error(
+        `agents: "${agentId}" is ${agent.card.lifecycle}; only exited agents can respawn`
+      )
+    }
+    // Both respawn paths pass through here — the crew's ladder and the
+    // Architect accepting an offer — so a stop decided at rung 3 holds against
+    // both (B11). Refused with the reason rather than ignored: an offer that
+    // silently does nothing is worse than one that says why it cannot.
+    this.assertRespawnAllowed(agentId)
+    const previous = agent.card
     agent.cfg = { ...agent.cfg, hookToken: randomBytes(32).toString('hex') }
     this.update(agentId, { lifecycle: 'starting', exitCode: null, respawnOffer: null })
     // An isolated agent's clean worktree was removed when it died, so it needs
     // one again — on the same branch, which is why `branchFor` is stable and
     // `create` reuses an existing branch rather than failing on it.
-    if (agent.card.worktree !== null) await this.isolate(agentId, agent.targetRepo)
-    await this.start(agentId, { resume: true })
+    if (agent.card.worktree !== null) {
+      const refused = await this.isolate(agentId, agent.targetRepo)
+      if (refused !== null) {
+        // Back to `exited`, where it was: a respawn that cannot restore the
+        // isolation the agent had is not a respawn into the Architect's
+        // checkout, it is a respawn that did not happen.
+        this.update(agentId, {
+          lifecycle: 'exited',
+          exitCode: previous.exitCode,
+          respawnOffer: previous.respawnOffer
+        })
+        throw new Error(
+          `agents: "${agentId}" cannot be respawned without its worktree — ${refused}`
+        )
+      }
+    }
+    try {
+      await this.start(agentId, { resume: true })
+    } catch (err) {
+      // Failed setup is still the same exited agent. Preserve its memory offer
+      // without returning its tasks a second time, and refresh the standing stop.
+      this.update(agentId, {
+        lifecycle: 'exited',
+        exitCode: previous.exitCode,
+        respawnOffer:
+          previous.respawnOffer === null
+            ? null
+            : {
+                ...previous.respawnOffer,
+                blockedBecause: this.options.respawnBlocked?.(agentId) ?? null
+              }
+      })
+      throw err
+    }
     return this.card(agentId)
   }
 
@@ -798,6 +880,11 @@ export class AgentManager {
     const sessionId = agent.sessionIds.at(-1)
     if (sessionId === undefined || !agent.adapter.resume) return []
     return agent.adapter.resume.resumeArgs(sessionId)
+  }
+
+  private assertRespawnAllowed(agentId: string): void {
+    const blocked = this.options.respawnBlocked?.(agentId) ?? null
+    if (blocked !== null) throw new Error(`agents: "${agentId}" will not be respawned — ${blocked}`)
   }
 
   private async start(agentId: string, opts: { resume?: boolean } = {}): Promise<void> {
@@ -828,6 +915,10 @@ export class AgentManager {
       const hookPlan = agent.adapter.wireHooks(agent.cfg)
       await hookPlan.install()
       agent.hookPlan = hookPlan
+
+      // Setup awaited filesystem work. A stop decided during it must still
+      // prevent the process from existing; the catch unwinds the installed hooks.
+      this.assertRespawnAllowed(agentId)
 
       const plan = agent.adapter.spawnArgs(agent.cfg)
       const resumeArgs = opts.resume ? this.resumeArgsFor(agent) : []
@@ -890,21 +981,26 @@ export class AgentManager {
    *
    * Everything downstream follows the card's `cwd`: the spawn plan, the grants,
    * the settings install and the transcript directory all target the worktree
-   * rather than the Architect's own checkout. A worktree that cannot be made is
-   * reported and the spawn continues where it was going to — visible, and never
-   * a reason not to hire.
+   * rather than the Architect's own checkout.
+   *
+   * **A worktree that cannot be made REFUSES the spawn** (Architect decision,
+   * 2026-09-04). This used to log the failure and continue in the Architect's
+   * checkout, on the reasoning that "isolation is a nicety and refusing to hire
+   * over it would be worse than saying so". That reasoning is inverted: the
+   * fallback IS the harm. An agent that asked for isolation and silently got
+   * the Architect's working copy is precisely the outcome isolation was
+   * requested to prevent, and it is the silent degradation BUILD-PROMPT §3
+   * forbids — the Architect finds out from a log line, after the writes.
+   *
+   * Contract: resolves with `null` on success, or the reason it could not be
+   * done. Never throws; the caller decides what a refusal costs.
    */
-  private async isolate(agentId: string, repo: string): Promise<void> {
+  private async isolate(agentId: string, repo: string): Promise<string | null> {
     const worktrees = this.options.worktrees
     if (!worktrees) {
-      this.options.onGrantsMissing?.(agentId, [])
-      this.options.onLogEvent?.({
-        kind: 'spawn',
-        agentId,
-        worktree: null,
-        because: 'worktree isolation was requested but is not configured'
-      })
-      return
+      const because = 'worktree isolation was requested but is not configured'
+      this.options.onLogEvent?.({ kind: 'spawn', agentId, worktree: null, because })
+      return because
     }
     const outcome = await worktrees.create({
       repo,
@@ -913,8 +1009,7 @@ export class AgentManager {
     })
     if (!outcome.ok) {
       this.options.onLogEvent?.({ kind: 'spawn', agentId, worktree: null, because: outcome.reason })
-      this.options.onExitError?.(agentId, new Error(outcome.reason))
-      return
+      return outcome.reason
     }
     const info: WorktreeInfo = {
       path: outcome.path,
@@ -933,6 +1028,7 @@ export class AgentManager {
       // The repo the worktree came from, so a reader can find the branch.
       repo
     })
+    return null
   }
 
   /**
@@ -995,6 +1091,10 @@ export class AgentManager {
       this.options.onExitError?.(agentId, err)
     }
     const offer: RespawnOffer = {
+      // Asked at the moment the card is written, so the offer is honest the
+      // first time the Architect looks at it rather than at the moment they
+      // click (B11).
+      blockedBecause: this.options.respawnBlocked?.(agentId) ?? null,
       resumable: agent.adapter.resume !== undefined && agent.sessionIds.length > 0,
       memorySections: this.options.memory?.layer(agentId).facts.totalSections ?? 0,
       tasksReturned,
@@ -1012,7 +1112,8 @@ export class AgentManager {
       resumable: offer.resumable,
       memorySections: offer.memorySections,
       tasksReturned: [...tasksReturned],
-      waitingForCapacity: offer.waitingForCapacity
+      waitingForCapacity: offer.waitingForCapacity,
+      ...(offer.blockedBecause === null ? {} : { respawnBlocked: offer.blockedBecause })
     })
     return offer
   }

@@ -232,7 +232,7 @@ describe('recovery', () => {
     const { breaker } = rig()
     loop(breaker)
     breaker.evaluate('agent.mason')
-    breaker.forget('agent.mason')
+    breaker.forgetSession('agent.mason')
     expect(breaker.stateFor('agent.mason').rung).toBe(0)
     expect(breaker.spansFor('agent.mason')).toEqual([])
   })
@@ -384,5 +384,117 @@ describe('an agent that stops looping is not escalated on stale evidence', () =>
     tick(DEFAULT_THRESHOLDS.repeatWindowMs + 1)
     expect(breaker.evaluate('agent.mason')).toBe(0)
     expect(rec.stops).toEqual([])
+  })
+})
+
+/**
+ * B11 (M8.6). The measurement that produced this suite: over one 24.9M-token
+ * day the company climbed to rung 1 twenty-one times and completed exactly ONE
+ * rung-3 stop. The reason was not the ladder — it was that `forget` ran on
+ * every exit, including the exit rung 3 had just caused, so the stop erased
+ * the record of itself and the same runaway climbed again from zero.
+ */
+describe('a rung-3 stop outlives the process it stopped', () => {
+  /**
+   * Drives an agent all the way to rung 3 through the dwell.
+   *
+   * `loop` is re-run at every rung on purpose: an agent that STOPS looping
+   * ages out of the repetition window and recovers, which is correct and is
+   * asserted elsewhere. A genuinely stuck agent keeps calling.
+   */
+  function stopAt3(breaker: Breaker, tick: (ms?: number) => void): void {
+    loop(breaker)
+    expect(breaker.evaluate('agent.mason')).toBe(1)
+    tick(DWELL)
+    loop(breaker)
+    expect(breaker.evaluate('agent.mason')).toBe(2)
+    tick(DWELL)
+    loop(breaker)
+    expect(breaker.evaluate('agent.mason')).toBe(3)
+  }
+
+  it('records the stop with the signals that caused it', () => {
+    const { breaker, tick } = rig()
+    stopAt3(breaker, tick)
+    const stop = breaker.stopOf('agent.mason')
+    expect(stop).not.toBeNull()
+    expect(stop?.signals).toContain('repetition')
+    // The numbers travel with it: a stop a reader cannot explain later is a
+    // stop they will simply clear (NFR-13).
+    expect(stop?.detail.length).toBeGreaterThan(0)
+    expect(stop?.at).toBeGreaterThan(0)
+  })
+
+  it('survives the exit the stop itself caused', () => {
+    const { breaker, tick } = rig()
+    stopAt3(breaker, tick)
+    // Exactly what `onChange` does when the stopped process ends.
+    breaker.forgetSession('agent.mason')
+    expect(breaker.stopOf('agent.mason')).not.toBeNull()
+  })
+
+  it('drops the session state, so a respawn starts with no span history', () => {
+    const { breaker, tick } = rig()
+    stopAt3(breaker, tick)
+    breaker.forgetSession('agent.mason')
+    expect(breaker.spansFor('agent.mason')).toEqual([])
+    expect(breaker.stateFor('agent.mason').rung).toBe(0)
+  })
+
+  it('is not recorded for a rung that is not a stop', () => {
+    // Rungs 1 and 2 preserve the agent's work and its process; there is no
+    // decision to outlive anything.
+    const { breaker, tick } = rig()
+    loop(breaker)
+    expect(breaker.evaluate('agent.mason')).toBe(1)
+    tick(DWELL)
+    expect(breaker.evaluate('agent.mason')).toBe(2)
+    expect(breaker.stopOf('agent.mason')).toBeNull()
+  })
+
+  it('lists every standing stop for the Architect', () => {
+    const { breaker, tick } = rig()
+    stopAt3(breaker, tick)
+    expect(breaker.stopped().map((stop) => stop.agentId)).toEqual(['agent.mason'])
+  })
+})
+
+describe('lifting a stop is a human act', () => {
+  it('clears the record and puts the agent back at rung 0', () => {
+    const { breaker, rec, tick } = rig()
+    for (let i = 0; i < 3; i += 1) {
+      loop(breaker)
+      breaker.evaluate('agent.mason')
+      tick(DWELL)
+    }
+    expect(breaker.stateFor('agent.mason').rung).toBe(3)
+
+    expect(breaker.clearStop('agent.mason')).toBe(true)
+    expect(breaker.stopOf('agent.mason')).toBeNull()
+    // A lifted stop that left the agent at rung 3 would be a stop that was not
+    // lifted: the next evaluation would find `current >= 3` and hold there.
+    expect(breaker.stateFor('agent.mason').rung).toBe(0)
+    expect(rec.avatars.at(-1)).toBe('recover')
+    expect(rec.paused.at(-1)).toBe(false)
+    expect(rec.constrained.at(-1)).toBe(false)
+  })
+
+  it('says so when there was nothing to clear', () => {
+    const { breaker } = rig()
+    expect(breaker.clearStop('agent.nobody')).toBe(false)
+  })
+
+  it('forgetAgent takes the stop with it, unlike forgetSession', () => {
+    // Decommissioning, not exiting. The difference between the two verbs is
+    // the whole of B11, so it is asserted rather than assumed.
+    const { breaker, tick } = rig()
+    for (let i = 0; i < 3; i += 1) {
+      loop(breaker)
+      breaker.evaluate('agent.mason')
+      tick(DWELL)
+    }
+    expect(breaker.stopOf('agent.mason')).not.toBeNull()
+    breaker.forgetAgent('agent.mason')
+    expect(breaker.stopOf('agent.mason')).toBeNull()
   })
 })

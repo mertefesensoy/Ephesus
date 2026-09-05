@@ -20,7 +20,7 @@ import {
 import type { UsageSnapshot } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
-import type { BreakerState } from '../shared/breaker'
+import type { BreakerState, BreakerStopsView } from '../shared/breaker'
 import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
 import type { OpenGate } from '../shared/gates'
@@ -72,6 +72,8 @@ const eph: EphApi = {
     card: (agentId) =>
       ipcRenderer.invoke(IpcChannels.agentsCard, { agentId }) as Promise<AgentCard>,
     kill: (agentId) => ipcRenderer.invoke(IpcChannels.agentsKill, { agentId }) as Promise<void>,
+    respawn: (agentId) =>
+      ipcRenderer.invoke(IpcChannels.agentsRespawn, { agentId }) as Promise<AgentCard>,
     interrupt: (agentId) =>
       ipcRenderer.invoke(IpcChannels.agentsInterrupt, { agentId }) as Promise<void>,
     send: (agentId, text) =>
@@ -249,6 +251,13 @@ const eph: EphApi = {
       ipcRenderer.invoke(IpcChannels.watchDismiss, { messageId }) as Promise<boolean>,
     breakerState: () =>
       ipcRenderer.invoke(IpcChannels.watchBreaker) as Promise<readonly BreakerState[]>,
+    breakerStops: () =>
+      ipcRenderer.invoke(IpcChannels.watchBreakerStops) as Promise<BreakerStopsView>,
+    clearBreakerStop: (agentId, expectedAt) =>
+      ipcRenderer.invoke(IpcChannels.watchClearBreakerStop, {
+        agentId,
+        expectedAt
+      }) as Promise<boolean>,
     capacity: () => ipcRenderer.invoke(IpcChannels.watchCapacity) as Promise<CapacityView>,
     onCapacityChange: (cb) => {
       const listener = (): void => cb()

@@ -9,6 +9,8 @@ import {
   type AuthorityTable,
   type AuthorityVerdict
 } from '../shared/authority'
+import { DEFAULT_RESPAWN, type RespawnPolicy } from '../shared/respawn'
+import { RespawnLadder, type LadderEvent } from './respawn'
 import type { PromptStore } from './prompts'
 
 /**
@@ -70,28 +72,12 @@ export interface OrchestratorLifecycle {
 /**
  * How hard the harness tries to bring her back (FR-5.4).
  *
- * A crashed orchestrator that respawns instantly forever is a fork bomb with a
- * laurel wreath, so each attempt waits longer than the last and the ladder
- * ends. Ending is not silent: a company with no orchestrator is exactly the
- * state the Architect must be told about (invariant §7).
+ * The ladder itself moved to `shared/respawn.ts` at M8.6, when it stopped
+ * being hers alone: it had exactly one user while the crew died and stayed
+ * dead. Re-exported here because every reader of this file expects to find it,
+ * and because FR-5.4 is still the requirement it serves.
  */
-export interface RespawnPolicy {
-  readonly backoffMs: readonly number[]
-  /**
-   * How long she must stay up before the ladder resets.
-   *
-   * Without this the ladder can never be spent by the failure it exists to
-   * bound: a process that starts and immediately dies would reset the counter
-   * on every start, and the harness would respawn it forever. Coming back and
-   * *staying* back is what counts as recovery.
-   */
-  readonly stabilityMs: number
-}
-
-export const DEFAULT_RESPAWN: RespawnPolicy = {
-  backoffMs: [1_000, 2_000, 5_000, 15_000, 30_000],
-  stabilityMs: 60_000
-}
+export { DEFAULT_RESPAWN, type RespawnPolicy }
 
 export interface ArtemisOptions {
   readonly agents: OrchestratorLifecycle
@@ -110,6 +96,18 @@ export interface ArtemisOptions {
   /** Injected so tests do not sleep through a backoff ladder. */
   delay?(ms: number): Promise<void>
   readonly respawn?: RespawnPolicy
+  /**
+   * A standing decision that she must not be brought back, or null (M8.6).
+   *
+   * The orchestrator is not exempt from B11. A rung-3 stop against Artemis
+   * that her own ladder immediately undoes is the same cycle the crew had, and
+   * FR-14.5 already treats a rung-3 stop on her work as consequential enough
+   * to revert the company's mode. Asked here rather than only inside
+   * `AgentManager.respawn` so a blocked exit costs no rung: five refusals in a
+   * row would otherwise end the ladder and report "crashed 5 times" about an
+   * agent that never crashed.
+   */
+  respawnBlocked?(agentId: string): string | null
   readonly agentId?: string
   readonly dailyTokens?: number
 }
@@ -117,39 +115,102 @@ export interface ArtemisOptions {
 export class Artemis {
   private readonly agentId: string
   private readonly now: () => number
-  private readonly delay: (ms: number) => Promise<void>
-  private readonly policy: RespawnPolicy
-  /** Attempts since she was last seen running; reset by a healthy start. */
-  private attempts = 0
-  /** When she was last seen running, for the stability window. */
-  private runningSince: number | null = null
-  /** The in-flight backoff-then-respawn chain, or null when nothing is queued. */
-  private pending: Promise<void> | null = null
-  private stopped = false
+  /**
+   * FR-5.4's backoff ladder, now shared with the crew (`main/respawn.ts`).
+   *
+   * Artemis keeps the *policy* — what it means for the company to have no
+   * orchestrator — and the ladder keeps the arithmetic and the timers. The
+   * split is what let the crew get a ladder at all in M8.6 without a second
+   * copy of the pending-promise handoff this class paid for twice.
+   */
+  private readonly ladder: RespawnLadder
   /** True while a respawn is being built, so her brief says she was restarted. */
   private respawning = false
   private lastAuthorityWarning: string | null = null
-  /**
-   * True while the company is parked on provider capacity (`watch/capacity.ts`).
-   *
-   * The ladder below counts CRASHES, and it ends — deliberately, because an
-   * orchestrator that will not start is a fault a human has to see. A usage
-   * limit is not that fault. Restarting into it cannot succeed, so every rung it
-   * consumed would be a rung unavailable for the real crash later, and five
-   * refusals in a row would end the ladder and leave the company with no
-   * orchestrator over a condition guaranteed to clear on its own. So while this
-   * is set, an exit costs no rung — it is remembered instead, and served by
-   * `releaseForCapacity` when the provider comes back.
-   */
-  private capacityHeld = false
-  /** An exit that arrived during a hold, waiting for capacity to return. */
-  private heldExit: { exitCode: number | null } | null = null
 
   constructor(private readonly options: ArtemisOptions) {
     this.agentId = options.agentId ?? ARTEMIS_AGENT_ID
     this.now = options.now ?? (() => Date.now())
-    this.delay = options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
-    this.policy = options.respawn ?? DEFAULT_RESPAWN
+    this.ladder = new RespawnLadder({
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.delay ? { delay: options.delay } : {}),
+      policy: options.respawn ?? DEFAULT_RESPAWN,
+      respawn: () => this.respawnNow(),
+      ...(options.respawnBlocked
+        ? { blocked: () => options.respawnBlocked?.(this.agentId) ?? null }
+        : {}),
+      // A company with no orchestrator is exactly the state the Architect must
+      // find out about from the app rather than from silence, and the roster's
+      // `orchestratorId` must stop naming an agent that will not come back.
+      onExhausted: (detail) => {
+        this.reportDown(detail)
+        this.options.setOrchestrator?.(null)
+      },
+      onAttemptFailed: (attempt, detail) =>
+        this.reportDown(`respawn attempt ${String(attempt)} failed: ${detail}`),
+      onEvent: (event) => this.logLadder(event)
+    })
+  }
+
+  /**
+   * The ladder's vocabulary, in the orchestrator's own log words.
+   *
+   * The event NAMES predate the extraction and are load-bearing: they are what
+   * the book of record holds for every past run, and renaming them would make
+   * a year of history unreadable by whatever reads it next.
+   */
+  private logLadder(event: LadderEvent): void {
+    const base = { kind: 'orchestrator' as const, agentId: this.agentId }
+    switch (event.event) {
+      case 'scheduled':
+        this.options.onLogEvent?.({
+          ...base,
+          event: 'respawn-scheduled',
+          attempt: event.attempt,
+          waitMs: event.waitMs,
+          exitCode: event.exitCode
+        })
+        return
+      case 'respawned':
+        this.options.onLogEvent?.({ ...base, event: 'respawned', attempt: event.attempt })
+        return
+      case 'held':
+        this.options.onLogEvent?.({
+          ...base,
+          event: 'held-for-capacity',
+          attempt: event.attempt
+        })
+        return
+      case 'deferred':
+        this.options.onLogEvent?.({
+          ...base,
+          event: 'respawn-deferred-for-capacity',
+          attempt: event.attempt,
+          exitCode: event.exitCode
+        })
+        return
+      case 'released':
+        this.options.onLogEvent?.({
+          ...base,
+          event: 'respawn-after-capacity',
+          attempt: event.attempt,
+          exitCode: event.exitCode
+        })
+        return
+      case 'blocked':
+        this.options.onLogEvent?.({
+          ...base,
+          event: 'respawn-blocked',
+          because: event.because,
+          exitCode: event.exitCode
+        })
+        // A company with no orchestrator is the state the Architect must be
+        // told about, whatever the reason — a spent ladder and a standing stop
+        // leave exactly the same hole in the company (invariant §7).
+        this.reportDown(`will not be restarted — ${event.because}`)
+        this.options.setOrchestrator?.(null)
+        return
+    }
   }
 
   id(): string {
@@ -184,11 +245,10 @@ export class Artemis {
    * still drive their agents by hand. The degradation is reported.
    */
   async start(engine: SpawnRequest['engine']): Promise<AgentCard | null> {
-    this.stopped = false
+    this.ladder.resume()
     try {
       const card = await this.options.agents.spawn(this.hire(engine))
-      this.attempts = 0
-      this.runningSince = this.now()
+      this.ladder.noteStarted()
       this.options.setOrchestrator?.(this.agentId)
       this.options.onLogEvent?.({
         kind: 'orchestrator',
@@ -211,16 +271,11 @@ export class Artemis {
   noteCard(card: AgentCard): void {
     if (card.agentId !== this.agentId) return
     if (card.lifecycle === 'running') {
-      this.runningSince ??= this.now()
+      this.ladder.noteRunning()
       return
     }
     if (card.lifecycle !== 'exited') return
-    // Recovery is coming back and *staying* back. A respawn that dies on the
-    // way up does not buy another full ladder.
-    const upFor = this.runningSince === null ? 0 : this.now() - this.runningSince
-    if (upFor >= this.policy.stabilityMs) this.attempts = 0
-    this.runningSince = null
-    this.scheduleRespawn(card.exitCode)
+    this.ladder.noteExited(card.exitCode)
   }
 
   /**
@@ -229,14 +284,7 @@ export class Artemis {
    * Idempotent — the watch parks per agent and may say so more than once.
    */
   holdForCapacity(): void {
-    if (this.capacityHeld) return
-    this.capacityHeld = true
-    this.options.onLogEvent?.({
-      kind: 'orchestrator',
-      event: 'held-for-capacity',
-      agentId: this.agentId,
-      attempt: this.attempts
-    })
+    this.ladder.hold('capacity')
   }
 
   /**
@@ -244,93 +292,31 @@ export class Artemis {
    * charging it to the ladder: she did not crash, she was refused.
    */
   releaseForCapacity(): void {
-    if (!this.capacityHeld) return
-    this.capacityHeld = false
-    const held = this.heldExit
-    this.heldExit = null
-    if (held === null || this.stopped || this.pending) return
-    this.options.onLogEvent?.({
-      kind: 'orchestrator',
-      event: 'respawn-after-capacity',
-      agentId: this.agentId,
-      attempt: this.attempts,
-      exitCode: held.exitCode
-    })
-    this.pending = this.waitThenRespawn(0)
+    this.ladder.release()
   }
 
   /** True while the ladder is being held for capacity. For tests and the card. */
   heldForCapacity(): boolean {
-    return this.capacityHeld
-  }
-
-  private scheduleRespawn(exitCode: number | null): void {
-    if (this.stopped || this.pending) return
-    if (this.capacityHeld) {
-      // Remembered, not charged. `releaseForCapacity` brings her back.
-      this.heldExit = { exitCode }
-      this.options.onLogEvent?.({
-        kind: 'orchestrator',
-        event: 'respawn-deferred-for-capacity',
-        agentId: this.agentId,
-        attempt: this.attempts,
-        exitCode
-      })
-      return
-    }
-    const wait = this.policy.backoffMs[this.attempts]
-    if (wait === undefined) {
-      // The ladder is spent. Saying so is the point: an Architect whose
-      // orchestrator is gone must find out from the app, not from silence.
-      this.reportDown(
-        `crashed ${String(this.attempts)} times and will not be restarted again` +
-          `${exitCode === null ? '' : ` (last exit code ${String(exitCode)})`}`
-      )
-      this.options.setOrchestrator?.(null)
-      return
-    }
-    this.attempts += 1
-    this.options.onLogEvent?.({
-      kind: 'orchestrator',
-      event: 'respawn-scheduled',
-      agentId: this.agentId,
-      attempt: this.attempts,
-      waitMs: wait,
-      exitCode
-    })
-    this.pending = this.waitThenRespawn(wait)
-  }
-
-  private async waitThenRespawn(wait: number): Promise<void> {
-    await this.delay(wait)
-    // Cleared before the attempt, not after: a failed attempt schedules the
-    // next rung of the ladder from inside `respawnNow`, and a `finally` here
-    // would drop that one on the floor.
-    this.pending = null
-    if (this.stopped) return
-    await this.respawnNow()
+    return this.ladder.isHeld()
   }
 
   /** Resolves once no respawn is queued. For shutdown, and for tests. */
   async drained(): Promise<void> {
-    while (this.pending) await this.pending
+    await this.ladder.drained()
   }
 
-  private async respawnNow(): Promise<void> {
-    if (this.stopped) return
+  /**
+   * One attempt at bringing her back, as the ladder asks for it.
+   *
+   * `respawning` is set for the duration so `roleBrief` tells her she was
+   * restarted — the notice is part of the respawn, not decoration, and reading
+   * it from the same flag the spawn sets is what keeps the two from drifting.
+   */
+  private async respawnNow(): Promise<{ stillDown: boolean; exitCode: number | null }> {
     this.respawning = true
     try {
       const card = await this.options.agents.respawn(this.agentId)
-      this.options.onLogEvent?.({
-        kind: 'orchestrator',
-        event: 'respawned',
-        agentId: this.agentId,
-        attempt: this.attempts
-      })
-      if (card.lifecycle === 'exited') this.scheduleRespawn(card.exitCode)
-    } catch (err) {
-      this.reportDown(`respawn attempt ${String(this.attempts)} failed: ${reason(err)}`)
-      this.scheduleRespawn(null)
+      return { stillDown: card.lifecycle === 'exited', exitCode: card.exitCode }
     } finally {
       this.respawning = false
     }
@@ -438,8 +424,7 @@ export class Artemis {
 
   /** Cancels any pending respawn. Called at shutdown; safe to call twice. */
   stop(): void {
-    this.stopped = true
-    this.pending = null
+    this.ladder.stop()
   }
 
   private reportDown(detail: string): void {

@@ -52,11 +52,13 @@ describe('skeleton-crew ships as an ordinary ADR-0012 bundle', () => {
       name: 'skeleton-crew',
       source: 'builtin',
       valid: true,
-      // Bumped to 2 when the `verifier` hire was added. ADR-0012 makes the
-      // version a record rather than decoration ("profile versioning doubles as
-      // the performance-review changelog"), so a bundle that gains a hire and
-      // keeps its number is lying about what an Architect approved.
-      version: 2,
+      // Bumped to 2 when the `verifier` hire was added, and to 3 when the
+      // bundle declared its isolation and exit policy (M8.6). ADR-0012 makes
+      // the version a record rather than decoration ("profile versioning
+      // doubles as the performance-review changelog"), so a bundle that
+      // changes what its crew may do and keeps its number is lying about what
+      // an Architect approved.
+      version: 3,
       knownTargets: []
     })
   })
@@ -204,5 +206,53 @@ describe('skeleton-crew cannot grant itself latitude', () => {
     // theirs — which is the "buildable with a text editor" claim in the one
     // place it actually matters.
     expect(loaded.bundle.harbor.repos).toEqual([])
+  })
+})
+
+/**
+ * B10/B12 as SHIPPED (M8.6). The unit tests prove the composition; this proves
+ * the two bundles an Architect actually activates declare what they should.
+ *
+ * Asserted against the real files on disk rather than a fixture, because the
+ * defect being prevented is precisely a bundle that says nothing: for the whole
+ * production life of the profile spawn path, both bundles declared no
+ * isolation, so every hire ran git operations in the Architect's own checkout.
+ */
+describe('the shipped bundles say where their crew works, and what happens when it dies', () => {
+  it('isolates the skeleton crew and brings it back by itself', () => {
+    const loaded = builtinStore().load('skeleton-crew')
+    if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
+    // Unattended repository watching is the whole point of this profile: it
+    // must not touch the working copy, and it must survive the night.
+    expect(loaded.bundle.document.isolation).toBe('worktree')
+    expect(loaded.bundle.document.onExit).toBe('respawn')
+  })
+
+  it('isolates the front office but waits for the human it already waits for', () => {
+    const loaded = builtinStore().load('front-office')
+    if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
+    expect(loaded.bundle.document.isolation).toBe('worktree')
+    // Every gate in this profile is supervised or manual. A hire that died is
+    // waiting for the same person who was going to approve its work.
+    expect(loaded.bundle.document.onExit).toBe('offer')
+  })
+
+  it('plans every skeleton-crew hire into its own worktree', () => {
+    const loaded = builtinStore().load('skeleton-crew')
+    if (!loaded.ok) throw new Error(loaded.reasons.join('; '))
+    const planned = activationPlan(
+      loaded.bundle,
+      { kind: 'repo', id: 'myapp', path: '/repos/myapp' },
+      'autonomous',
+      () => [],
+      { ok: false, because: 'no remotes in this test' }
+    )
+    if (!planned.ok) throw new Error(planned.reasons.join('; '))
+    expect(planned.plan.hires).not.toHaveLength(0)
+    for (const hire of planned.plan.hires) {
+      expect(hire.spawn.worktree).toBe(true)
+      expect(hire.isolation.declaredFrom).toBe('profile')
+      expect(hire.onExit).toBe('respawn')
+    }
   })
 })

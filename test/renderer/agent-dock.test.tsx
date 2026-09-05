@@ -1,9 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentDock, dockRows, toneFor } from '../../src/renderer/src/AgentDock'
+import {
+  AgentDock,
+  DockCards,
+  dockRows,
+  respawnNote,
+  toneFor
+} from '../../src/renderer/src/AgentDock'
 import { strictestLevel } from '../../src/renderer/src/AutonomyBadge'
 import { spendLines } from '../../src/renderer/src/AgentPanel'
-import type { AgentCard } from '../../src/shared/agents'
+import type { AgentCard, RespawnOffer } from '../../src/shared/agents'
 
 function card(over: Partial<AgentCard> = {}): AgentCard {
   return {
@@ -297,4 +303,135 @@ describe('an agent that cannot start says why, and what fixes it', () => {
   // reaches the screen. `AgentDock` fetches its own cards over IPC and cannot
   // be handed one, so the seam worth asserting is this projection rather than
   // a second render that would only re-check React.
+})
+/**
+ * SDD §10's crash row, finally on the card (M8.6, B12).
+ *
+ * `AgentManager` has computed a `RespawnOffer` on every exit since M3. Until
+ * this package it had **zero references outside the main process**: nothing in
+ * the renderer read it and no IPC could act on it, so a crew agent that died
+ * overnight was a dead card with no way back. These assert the words, because
+ * the words are the feature — every clause is a fact the offer carries, and a
+ * promise the engine cannot keep would be the silent fallback invariant §7
+ * forbids, moved into the UI.
+ */
+function offer(over: Partial<RespawnOffer> = {}): RespawnOffer {
+  return {
+    blockedBecause: null,
+    resumable: false,
+    memorySections: 0,
+    tasksReturned: [],
+    waitingForCapacity: false,
+    ...over
+  }
+}
+
+function dead(over: Partial<AgentCard> = {}, offerOver: Partial<RespawnOffer> = {}): AgentCard {
+  return card({
+    lifecycle: 'exited',
+    exitCode: 1,
+    respawnOffer: offer(offerOver),
+    ...over
+  })
+}
+
+describe('a dead agent offers to come back', () => {
+  it('says nothing at all while the agent is alive', () => {
+    expect(respawnNote(card())).toBeNull()
+  })
+
+  it('says nothing when the exit produced no offer', () => {
+    // A spawn that threw before the process existed has no session to resume
+    // and no work to return; an offer there would be an invention.
+    expect(respawnNote(card({ lifecycle: 'exited', respawnOffer: null }))).toBeNull()
+  })
+
+  it('offers a fresh session when the engine cannot resume one', () => {
+    const note = respawnNote(dead({}, { resumable: false }))
+    expect(note?.text).toContain('starts a fresh session')
+    expect(note?.refusedBecause).toBeNull()
+  })
+
+  it('offers to resume only where the adapter and the event plane both agree', () => {
+    const note = respawnNote(dead({}, { resumable: true }))
+    expect(note?.text).toContain('resumes its session')
+  })
+
+  it('counts what is actually waiting, and stays quiet when nothing is', () => {
+    const rich = respawnNote(dead({}, { memorySections: 3, tasksReturned: ['t1', 't2'] }))
+    expect(rich?.text).toContain('3 memory section(s)')
+    expect(rich?.text).toContain('2 task(s)')
+
+    const bare = respawnNote(dead())
+    expect(bare?.text).not.toContain('memory section')
+    expect(bare?.text).not.toContain('task(s)')
+  })
+
+  it('reaches the dock row, which is what the Architect actually sees', () => {
+    const rows = dockRows([dead({}, { memorySections: 1 })], new Map())
+    expect(rows[0]?.offer?.text).toContain('bring back')
+  })
+})
+
+describe('an offer that cannot be accepted is a reason, not a button', () => {
+  it('refuses an agent the breaker stopped, and names the rung', () => {
+    // B11's other half. A control beside a rung-3 stop would be advertising a
+    // button that throws, and `AgentManager.respawn` refuses the same way.
+    const note = respawnNote(
+      dead({}, { blockedBecause: 'the breaker stopped it at rung 3 (burn-rate)' })
+    )
+    expect(note?.refusedBecause).toContain('rung 3')
+    expect(note?.text).toContain('will not be restarted')
+  })
+
+  it('refuses an agent the harness is already bringing back', () => {
+    // A capacity park is the harness's own return path; a button here would
+    // race it (`watch/capacity.ts`).
+    const note = respawnNote(dead({}, { waitingForCapacity: true }))
+    expect(note?.refusedBecause).not.toBeNull()
+    expect(note?.text).toContain('comes back by itself')
+  })
+
+  it('lets the block outrank a resumable session, because it does', () => {
+    const note = respawnNote(
+      dead(
+        {},
+        {
+          resumable: true,
+          memorySections: 9,
+          blockedBecause: 'stopped at rung 3'
+        }
+      )
+    )
+    expect(note?.text).not.toContain('resumes its session')
+    expect(note?.refusedBecause).toBe('stopped at rung 3')
+  })
+
+  it('renders a refusal as words and a live offer as a control', () => {
+    // Rendered, not projected: the branch under test is in the component, and
+    // a wiring seam with no test is a defect (M8's own rule).
+    const noop = (): void => undefined
+    const blocked = renderToStaticMarkup(
+      <DockCards
+        rows={dockRows([dead({}, { blockedBecause: 'stopped at rung 3' })], new Map())}
+        selected={null}
+        onSelect={noop}
+        onRespawn={noop}
+      />
+    )
+    expect(blocked).toContain('will not be restarted')
+    // One button — the card itself. No control for something that would throw.
+    expect(blocked.match(/<button/g)).toHaveLength(1)
+
+    const live = renderToStaticMarkup(
+      <DockCards
+        rows={dockRows([dead()], new Map())}
+        selected={null}
+        onSelect={noop}
+        onRespawn={noop}
+      />
+    )
+    expect(live).toContain('bring back')
+    expect(live.match(/<button/g)).toHaveLength(2)
+  })
 })

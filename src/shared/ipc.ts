@@ -54,7 +54,7 @@ import type { MemoVerdictName } from './memo'
 export type MemoQueueName = 'open' | 'decided' | 'all'
 import type { RecallResponse } from './recall'
 import type { Registry } from './registry'
-import type { BreakerState } from './breaker'
+import type { BreakerState, BreakerStopsView } from './breaker'
 import type { CapacityView } from './capacity'
 import type { AgentSpend } from './cost'
 import type { GateVerdict, OpenGate } from './gates'
@@ -76,6 +76,7 @@ export const IpcChannels = {
   agentsSpawn: 'agents:spawn',
   agentsCard: 'agents:card',
   agentsKill: 'agents:kill',
+  agentsRespawn: 'agents:respawn',
   agentsInterrupt: 'agents:interrupt',
   agentsSend: 'agents:send',
   avatarsList: 'avatars:list',
@@ -184,6 +185,8 @@ export const IpcChannels = {
   watchApprove: 'watch:approve',
   watchHumanQueue: 'watch:human-queue',
   watchBreaker: 'watch:breaker-state',
+  watchBreakerStops: 'watch:breaker-stops',
+  watchClearBreakerStop: 'watch:clear-breaker-stop',
   watchCapacity: 'watch:capacity',
   watchDismiss: 'watch:dismiss'
 } as const
@@ -327,6 +330,17 @@ export interface EphApi {
     spawn: (request: SpawnRequest) => Promise<AgentCard>
     card: (agentId: string) => Promise<AgentCard>
     kill: (agentId: string) => Promise<void>
+    /**
+     * Accepts the `respawnOffer` on an exited agent's card (SDD §10, M8.6).
+     *
+     * The offer has been computed on every exit since M3 and, until this
+     * channel existed, nothing in the renderer could read it and nothing could
+     * act on it: `respawnOffer` had zero references outside main. Rejects with
+     * the reason when the agent may not come back — a rung-3 breaker stop
+     * holds against a human accepting an offer exactly as it holds against the
+     * crew's ladder.
+     */
+    respawn: (agentId: string) => Promise<AgentCard>
     /** Writes the engine's cancel key into the agent's PTY (ADR-0009). */
     interrupt: (agentId: string) => Promise<void>
     /** Sends Architect text to the agent's PTY verbatim (FR-1.3). */
@@ -604,6 +618,8 @@ export interface EphApi {
      * which ADR-0011 requires on the agent card rather than hidden.
      */
     breakerState: () => Promise<readonly BreakerState[]>
+    breakerStops: () => Promise<BreakerStopsView>
+    clearBreakerStop: (agentId: string, expectedAt: number) => Promise<boolean>
     /**
      * Who is waiting on the provider, since when, and when the harness will ask
      * again (`src/shared/capacity.ts`).

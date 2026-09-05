@@ -22,6 +22,7 @@ import { sanitizeBounds } from '../shared/window-state'
 import { AgentManager } from './agents'
 import { Artemis, ARTEMIS_AGENT_ID } from './artemis'
 import { ExecGitRunner, Worktrees, readRemotes } from './git'
+import { createCrewSurvival, type CrewSurvival } from './respawn'
 import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
@@ -34,7 +35,7 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { targetRef, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
+import { plannedWorkspaces, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
@@ -85,6 +86,7 @@ import { PtyManager } from './pty'
 import { PASS_THROUGH } from './pty-stream'
 import { sweepInstalledSettings } from './settings-registry'
 import { Breaker } from './watch/breaker'
+import { FileBreakerStopStore } from './watch/breaker-store'
 import { BudgetWatcher } from './watch/budgets'
 import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
@@ -131,6 +133,11 @@ let stoa: Stoa | null = null
 // built before the AgentManager this needs, and the gate seam below reads
 // through the handle rather than capturing a value that does not exist yet.
 let activations: ProfileActivations | null = null
+/**
+ * The crew's backoff ladders (M8.6, B12). One per hire that declared
+ * `onExit: "respawn"`; nothing at all for the ones that did not.
+ */
+let crew: CrewSurvival | null = null
 // The targets already activated once (M7.9). Deliberately separate from
 // `activations`: that Map is what is RUNNING, this file is what has been TYPED,
 // and only the second is worth surviving a restart.
@@ -693,6 +700,17 @@ app
 
 async function boot(): Promise<void> {
   const home = initHome()
+  /**
+   * Where an isolated agent's checkout goes. ONE definition (M8.7).
+   *
+   * Three call sites computed this independently — the Stoa's refusal check,
+   * the lifecycle's `pathFor`, and now the workspace trust — and the trusted
+   * directory being one character different from the used directory is a
+   * failure nothing would report: the agent would simply meet the engine's
+   * trust dialog and park.
+   */
+  const worktreesRoot = (): string => path.join(home.root, 'worktrees')
+  const worktreePathFor = (agentId: string): string => path.join(worktreesRoot(), agentId)
   db = new AppDb(home.dbPath)
   // A stored ledger row that fails validation on read is dropped and reported,
   // never repaired — the ledger is append-only (invariant §5).
@@ -986,6 +1004,8 @@ async function boot(): Promise<void> {
   // The circuit breaker (ADR-0011). Constructed before anything can spawn, so
   // no tool event arrives with nowhere to go.
   breaker = new Breaker({
+    stopStore: new FileBreakerStopStore(path.join(home.root, 'breaker-stops.json')),
+    onPersistenceError: (detail) => reportDegradation('breaker/storage', detail),
     effects: {
       // GYM-002: hook boundary on `native` grade, queue-until-idle below it —
       // the choice and its record live in `watch/steer-notes.ts`.
@@ -1415,7 +1435,7 @@ async function boot(): Promise<void> {
     // repositories (ADR-0004, NFR-17). Both roots are passed so the refusal is
     // checked rather than assumed.
     scratchRoot: path.join(home.root, 'scratch'),
-    worktreesRoot: path.join(home.root, 'worktrees'),
+    worktreesRoot: worktreesRoot(),
     prompts: promptStore,
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
@@ -1921,6 +1941,10 @@ async function boot(): Promise<void> {
     // the exit code, because a provider refusal and a crash look identical at
     // the pty seam — and the difference is whether a human needs to do anything.
     capacityParked: (agentId) => capacityWatch?.parked(agentId) !== null,
+    // B11: a rung-3 stop outlives the process it stopped, and it holds against
+    // BOTH ways an agent can come back — the crew's ladder and the Architect
+    // accepting the offer on the card. Asked here so neither path can forget.
+    respawnBlocked: (agentId) => breaker?.respawnBlocked(agentId) ?? null,
     rosterBudget: (agentId) => {
       try {
         return agora?.registry().agents[agentId]?.budget?.dailyTokens ?? null
@@ -1960,7 +1984,7 @@ async function boot(): Promise<void> {
     // UC-01 alternate 2a. Every git call still happens in `git.ts` — this is
     // the narrow slice of it the lifecycle is allowed to ask for (ADR-0004).
     worktrees: {
-      pathFor: (agentId) => path.join(home.root, 'worktrees', agentId),
+      pathFor: worktreePathFor,
       // ENGINEERING-STANDARDS §2's agent branch convention, minus the `agent.`
       // id prefix so the branch reads `agent/mason` rather than `agent/agent.mason`.
       branchFor: (agentId) => `agent/${agentId.replace(/^agent\./, '')}`,
@@ -2007,9 +2031,17 @@ async function boot(): Promise<void> {
       // same card stream the UI reads, so nothing else has to agree about who
       // is running.
       artemis?.noteCard(card)
+      // The crew's ladders read the SAME stream, so the harness has one source
+      // of truth about who is running (FR-5.4's own shape, finally applied to
+      // the agents that were dying five times a day without it).
+      crew?.noteCard(card)
       if (card.lifecycle === 'exited') {
-        // A respawn starts at rung 0 with no span history.
-        breaker?.forget(card.agentId)
+        // A respawn starts at rung 0 with no span history — but NOT with a
+        // clean record. A rung-3 stop is a decision about the agent and it
+        // outlives the process it stopped (B11): forgetting it here is what
+        // made an exhausted budget cycle instead of stopping, 21 climbs to
+        // rung 1 against exactly one completed stop in a 24.9M-token day.
+        breaker?.forgetSession(card.agentId)
         // One last fold BEFORE the session is forgotten: usage written in the
         // seconds between the final tick and the exit would otherwise never be
         // folded, and this spawn is never `running` under that session again.
@@ -2051,6 +2083,23 @@ async function boot(): Promise<void> {
   // because it spawns through it, and after the scheduler because it arms
   // triggers on it. Every judgment it makes — the plan, the composed autonomy —
   // is `activationPlan`'s and was shown to the Architect before this ran.
+  // B12. Built before the activations, because activation is what declares a
+  // hire into it. One ladder per agent, created lazily and only for a hire
+  // whose bundle asked for one — an undeclared hire keeps SDD §10's offer.
+  // The decisions live in `respawn.ts`; what is here is only the wiring.
+  crew = createCrewSurvival({
+    respawn: (agentId) =>
+      agentManager?.respawn(agentId) ?? Promise.reject(new Error('agents: not started')),
+    breakerStop: (agentId) => breaker?.stopOf(agentId) ?? null,
+    log: (draft) => {
+      agora?.appendLog(draft)
+      agora?.commitSoon(
+        `respawn ${String(draft['event'] ?? 'event')} for ${String(draft['agentId'])}`
+      )
+    },
+    degrade: (cause, detail) => reportDegradation(cause, detail)
+  })
+
   activations = new ProfileActivations({
     store: profiles,
     globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
@@ -2080,6 +2129,45 @@ async function boot(): Promise<void> {
       return agentManager.spawn(request)
     },
     kill: (agentId) => agentManager?.kill(agentId),
+    // ADR-0021, extended for isolation by ADR-0025. The Architect's activation
+    // is the consent; this records it against every directory the activation's
+    // hires will actually work in — the target, and the worktrees this same
+    // activation is about to create. `plannedWorkspaces` reads the plan the
+    // hires spawn from, so the trusted set cannot drift from the used set.
+    beforeHires: (plan) => {
+      for (const workspace of plannedWorkspaces(plan, worktreePathFor)) {
+        for (const adapter of engines.list()) {
+          if (!adapter.trustWorkspace) continue
+          const trusted = adapter.trustWorkspace(workspace.path, workspace.existence)
+          agora?.appendLog({
+            kind: 'profile',
+            event: 'workspace-trusted',
+            engine: adapter.id,
+            target: plan.targetRef,
+            // Which agents this directory is for, so a reader can tell the
+            // target's grant from a worktree's without re-deriving the paths.
+            agents: [...workspace.agentIds],
+            existence: workspace.existence,
+            ...(trusted.ok
+              ? { granted: !trusted.alreadyTrusted, path: trusted.path }
+              : { granted: false, because: trusted.because })
+          })
+          if (!trusted.ok) {
+            reportDegradation(
+              `profiles/workspace-trust:${adapter.id}`,
+              `${adapter.id}: ${workspace.path} not trusted — ${trusted.because}` +
+                (workspace.agentIds.length > 0
+                  ? ` — ${workspace.agentIds.join(', ')} will meet the engine's trust prompt and park`
+                  : '')
+            )
+          }
+        }
+      }
+    },
+    // What the bundle declared about this hire's survival, carried from the
+    // plan the Architect was shown to the ladder that acts on it (M8.6).
+    onHired: (hire) => crew?.declare(hire.agentId, hire.onExit),
+    onReleased: (agentId) => crew?.release(agentId),
     addTrigger: (trigger) => scheduler.add(trigger),
     removeTrigger: (triggerId) => scheduler.remove(triggerId),
     targetExists: (target) => {
@@ -2282,6 +2370,10 @@ async function boot(): Promise<void> {
       // restarting into one cannot succeed — every rung it burned would be a
       // rung missing for the real crash later.
       artemis?.holdForCapacity()
+      // Same reasoning per crew agent: the capacity watch owns this return,
+      // and a ladder rung spent on a provider refusal is a rung missing for
+      // the real crash later.
+      crew?.hold(row.agentId, 'capacity')
     },
     onResume: (row) => {
       const text = capacityResumeText(row.limit.detail)
@@ -2353,6 +2445,9 @@ async function boot(): Promise<void> {
       // another agent is still refused would let the next exit spend a rung on
       // the same limit this hold exists to absorb.
       if (capacityWatch && !capacityWatch.anyParked()) artemis?.releaseForCapacity()
+      // Per agent, unlike the orchestrator's: this agent's park is cleared,
+      // and it is the only one whose ladder this clearance speaks for.
+      crew?.releaseHold(row.agentId)
     },
     onDegraded: (detail) => reportDegradation('capacity/watch', detail)
   })
@@ -2364,6 +2459,10 @@ async function boot(): Promise<void> {
     agents: agentManager,
     prompts,
     home: home.root,
+    // B11 applies to her too: a rung-3 stop her own ladder immediately undoes
+    // is the cycle this package exists to end, and FR-14.5 already treats a
+    // stop on her work as consequential enough to revert the company's mode.
+    respawnBlocked: (agentId) => breaker?.respawnBlocked(agentId) ?? null,
     // She runs in the Agora, because `board.md` is hers to scribe (SDD §2).
     cwd: agora.root,
     setOrchestrator: (agentId) => {
@@ -2401,6 +2500,7 @@ async function boot(): Promise<void> {
         .filter((card) => card.lifecycle !== 'exited')
         .map((card) => breaker?.stateFor(card.agentId))
         .filter((state): state is NonNullable<typeof state> => state !== undefined),
+    breaker,
     // Exited agents are INCLUDED: their cumulative figure is precisely what the
     // durable ledger exists to preserve, and hiding it behind a liveness filter
     // would put it out of reach of the only IPC that can show it (FR-11.2).
@@ -2568,30 +2668,10 @@ async function boot(): Promise<void> {
     // Remembered on success only: a chip that reproduces the Architect's own
     // failed attempt is worse than an empty form.
     profilesActivate: async (request) => {
-      // ADR-0021: the Architect's activation is the consent, and it is recorded
-      // in the engine's own trust store BEFORE the crew is hired — the prompt it
-      // answers appears before any session begins, so an agent that meets it has
-      // no hook to report with and simply parks forever. Logged either way:
-      // pre-trusting must never be a thing that happened quietly.
-      for (const adapter of engines.list()) {
-        if (!adapter.trustWorkspace) continue
-        const trusted = adapter.trustWorkspace(request.target.path)
-        agora?.appendLog({
-          kind: 'profile',
-          event: 'workspace-trusted',
-          engine: adapter.id,
-          target: targetRef(request.target),
-          ...(trusted.ok
-            ? { granted: !trusted.alreadyTrusted, path: trusted.path }
-            : { granted: false, because: trusted.because })
-        })
-        if (!trusted.ok) {
-          reportDegradation(
-            `profiles/workspace-trust:${adapter.id}`,
-            `${adapter.id}: workspace not trusted — ${trusted.because}`
-          )
-        }
-      }
+      // ADR-0021's pre-trust moved into the activation itself at M8.7, where the
+      // PLAN is known: an isolated hire works in a worktree, not in the target,
+      // and trusting only the target left it meeting the first-run dialog with
+      // no session and therefore no hook. See `beforeHires` below.
       const result = await (activations?.activate(request) ??
         Promise.resolve({ ok: false as const, reasons: ['profiles: not started'] }))
       if (result.ok) {
@@ -2795,10 +2875,21 @@ const quit = new QuitSequence({
   },
   closing: () => closingTime,
   agents: () => agentManager,
+  // Disarmed BEFORE the agent unwind (M8.7). A ladder still armed reads the
+  // unwind's own kills as crashes and brings the company back up as it is
+  // being torn down — which is what `steps` below actually did, despite its
+  // comment, because `steps` runs after the unwind.
+  disarm: () => [
+    { name: 'crew-survival', run: () => crew?.stop() },
+    // Her ladder had no production caller at all until now: FR-5.4 brought the
+    // orchestrator back on every exit, including the one the quit performs.
+    { name: 'orchestrator-ladder', run: () => artemis?.stop() }
+  ],
   steps: () => [
     { name: 'avatars', run: () => avatarDirector.stop() },
     { name: 'hermes', run: () => hermes?.stop() },
     { name: 'scheduler', run: () => scheduler.stop() },
+
     {
       name: 'company-token',
       run: () => {

@@ -58,6 +58,8 @@ export const DEGRADATION_SOURCES = [
   'odeon',
   'profiles',
   'renderer',
+  // A ladder that gave up, or an attempt that threw (M8.6).
+  'respawn',
   'scheduler',
   'secrets',
   'settings',

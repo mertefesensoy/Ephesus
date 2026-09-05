@@ -619,7 +619,8 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
    * difference stays a decision rather than becoming a drift: `liveAgents`
    * reads the mailboxes because a scenario company has no `AgentManager` (that
    * class needs a spawner, and its own per-agent isolation is proven directly
-   * in `agents.test.ts`), so `agents` is null here. Everything else — the
+   * in `agents.test.ts`), so `agents` is null here; and `disarm` is empty
+   * because this company arms no respawn ladder. Everything else — the
    * order, the offer, the isolation, the reporting — is the shipped object,
    * and the closing time it drives is wired through the same bridge production
    * sends through.
@@ -630,6 +631,12 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
     ask: () => options.quitAnswer ?? 'closing',
     closing: () => closing,
     agents: () => null,
+    // Named rather than omitted (M8.7): a scenario company hires nobody through
+    // an `AgentManager`, so it arms no respawn ladder and has none to disarm.
+    // Present and empty, so the phase the shipped object runs is visibly the
+    // phase this rig runs — an absent seam is how a rig starts drifting from
+    // production without anybody deciding that it should.
+    disarm: (): readonly QuitStep[] => [],
     steps: (): readonly QuitStep[] => [
       { name: 'budgets', run: () => budgets.stop() },
       { name: 'hermes', run: () => hermes.stop() },

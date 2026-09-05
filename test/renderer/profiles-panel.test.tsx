@@ -54,6 +54,17 @@ function plan(over: Partial<ActivationPlan> = {}): ActivationPlan {
         agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
         hire: 'ci-babysitter',
         hireRef: 'ci-babysitter@1',
+        isolation: {
+          hire: 'ci-babysitter',
+          agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
+          declared: 'worktree',
+          declaredFrom: 'profile',
+          effective: 'worktree',
+          relaxed: false,
+          tightened: false,
+          because: 'its own worktree of the target, declared by the profile'
+        },
+        onExit: 'respawn',
         spawn: {
           agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
           name: 'ci-babysitter',
@@ -61,7 +72,8 @@ function plan(over: Partial<ActivationPlan> = {}): ActivationPlan {
           engine: 'claude',
           cwd: '/repos/myapp',
           capabilities: ['ci'],
-          envGrants: ['GH_TOKEN']
+          envGrants: ['GH_TOKEN'],
+          worktree: true
         }
       }
     ],

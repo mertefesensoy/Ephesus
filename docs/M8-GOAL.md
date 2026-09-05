@@ -12,11 +12,15 @@ handover is worse than none.
 ## The prompt
 
 > Build milestone **M8 of Ephesus — "The company you can leave running"**.
-> Resume at **M8.1 (the quit path, and the rig that hid it)**. M8.0 landed on
-> 2026-09-02: the seam rule is mechanical (`scripts/reachability.cjs` inside
-> `check-invariants`, `scripts/check-coverage.cjs` over
-> `scripts/coverage-floors.json`), GYM-006 is on the ledger, and the DoD
-> command below is the new one.
+> Resume at **M8.7 (engine isolation, and whose autonomy hinge it is)**.
+> M8.0–M8.6 are ticked. The seam rule is mechanical (`scripts/reachability.cjs`
+> inside `check-invariants`, `scripts/check-coverage.cjs` over
+> `scripts/coverage-floors.json`), GYM-006 is on the ledger, and the DoD command
+> below is the new one. As of M8.6 every profile hire runs in its own git
+> worktree by default, a rung-3 breaker stop outlives the process it stopped,
+> and a crew agent either offers to come back or comes back by itself — so the
+> three sentences below about a company that cannot survive are now the reason
+> this milestone exists rather than a description of the tree.
 >
 > **FIRST, follow `BUILD-PROMPT.md` §2's reading protocol in full, every
 > session.** Do not skip it and do not substitute `docs/PROGRESS.md` for it.

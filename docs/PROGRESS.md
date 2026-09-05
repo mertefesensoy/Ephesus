@@ -4981,7 +4981,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `docs/implementations/2026-09-04-m8-5-mission-watches-repository.md`.
       Branch `feature/m8-5-mission-watches-repository`.*
 
-- [ ] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
+- [x] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
       path never requests worktree isolation (verified: zero `worktree`
       references in it), so every hire runs git operations and file edits
       concurrently in the Architect's own checkout — **the one item in the
@@ -4996,6 +4996,106 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       crew death surfaces a respawn offer. Risk: worktree-per-hire makes the
       orphaning in M8.1 real rather than vacuous — these two land together or the
       second creates the leak the first cleans up.*
+      *Evidence (2026-09-04): **four Architect decisions taken before a line was
+      written**, all recorded in DECISIONS-LOG. (1) Isolation is DECLARED in the
+      shape autonomy already uses — hire template → profile document → built-in
+      default, then the Architect's per-activation choice, then a clamp for a
+      target with no repository — and **the built-in default is `worktree`**,
+      because "declares nothing" described both shipped bundles for their entire
+      production life. `PlannedHire.spawn.worktree` is DERIVED from
+      `isolation.effective` in one expression, so the screen's sentence and the
+      spawn's flag are the same decision; asserted for every hire under every
+      choice. Both bundles now declare `isolation` and `onExit` and took a
+      version bump for it (ADR-0012 makes the version a record). (2) **A spawn
+      that cannot be isolated is REFUSED**, naming git's own reason and releasing
+      the claimed id — the old code logged and continued in the Architect's
+      checkout, calling isolation "a nicety", and that fallback IS the harm.
+      (3) **A rung-3 stop outlives the exit it caused** (`BreakerStop`, recorded
+      BEFORE the stop is performed, since `onChange` is about to call
+      `forgetSession`); `forget` became `forgetSession` / `forgetAgent` /
+      `clearStop`. Keeping the rung alone would have fixed NOTHING — spans go
+      with the process, so `nextRung(3, false)` returns 0 on the next sweep.
+      (4) The respawn offer is **rendered at last** (`RespawnOffer` had zero
+      references outside main since M3, so SDD §10's crash row had never once
+      been shown) with an `agents.respawn` IPC, AND a hire may declare
+      `onExit: "respawn"` for the ladder automatically. The ladder was EXTRACTED
+      from `artemis.ts` — one ladder, two callers — with her 653-line suite as
+      the regression net, green unchanged throughout. **Found while building,
+      not in the plan:** Artemis was exempt from her own stop; her ladder now
+      asks the same predicate, or rung 3 is a pause rather than a rung.
+      Gate: typecheck, lint, invariants (reachability 166/174) green; suite
+      **3616 passed / 8 skipped** across 190 files; coverage floors ok on win32
+      (17 subsystems, 23 untested modules) with **no floor lowered by hand** —
+      `artemis` and `engines` ROSE. The gate caught the first draft diluting
+      `boot` with untested wiring in `index.ts`, and the fix was M8.1's own
+      precedent: the decisions moved into `createCrewSurvival` /
+      `respawnBlockReason` where tests reach them. **REFUTED BEFORE CLOSE:**
+      28 mutations, **two survived the first pass and both were real** — the
+      rung-3 guard inside `AgentManager.respawn` (the path with no ladder: the
+      Architect pressing "bring it back") and `RespawnOffer.blockedBecause` were
+      each enforced only where something else already enforced them, which is a
+      check that cannot fail; four tests closed them and the second pass killed
+      28/28. **Production call path:** `activationPlan` → `ProfileActivations.activate`
+      → `AgentManager.spawn({ worktree })` → `git.ts` `Worktrees.create`;
+      `onChange` → `crew.noteCard` / `breaker.forgetSession`; `agents:respawn`
+      → `AgentManager.respawn` → `respawnBlocked`. Docs: SDD §1.1 (`respawn.ts`),
+      §3, §4.3 (the new `respawn` log kind), §9, §10 (three amended rows), the
+      M8.6 implementation doc. Owed, recorded not built: the demo half — no
+      profile has been activated on a real target repository in the shipped app
+      under these rules, which is M7's still-open exit criterion. Branch
+      `feature/m8-6-crew-isolation`.*
+
+      **POST-CLOSE DEFECT CLEARANCE (2026-09-05, ADR-0025).** An adversarial
+      audit of this package — 8 lenses, 58 findings — returned one that survived
+      every refuter, and it was M8.6's own doing: **isolation silently re-opened
+      the failure ADR-0021 exists to close.** ADR-0021 pre-trusts
+      `request.target.path` in Claude Code's own trust store; M8.6 then moved
+      every hire into `<home>/worktrees/<agentId>`, and the engine matches its
+      trust key on the exact resolved path — so no crew agent's real working
+      directory was ever trusted, every one met the first-run dialog (highlighted
+      default `No, exit`) BEFORE any session existed, and therefore with no hook
+      to report it. That is the live MUSAHIT parking failure, re-entered from the
+      other side. **No test could have caught it: nothing related the directory
+      the trust record NAMES to the directory the agent is spawned INTO** —
+      `claude-trust.test.ts` only ever passed a bare directory and no activation
+      test opened `.claude.json`. The same shape as the two defects M8.6's own
+      mutation pass found. Fixed at activation time, because ADR-0021 forbids the
+      obvious wiring by name ("never from spawn, respawn, or a wake", with
+      pre-trust-at-spawn listed as a rejected option): `ProfileActivations` gained
+      a `beforeHires(plan)` seam, and `plannedWorkspaces(plan, worktreePathFor)`
+      names the target plus one entry per isolated hire. **The anti-drift property
+      is the fix** — it reads the same plan object the hires spawn from and asks
+      the same path function the lifecycle spawns with, because a trusted path one
+      character off is a record nothing reads whose only symptom is a hung agent;
+      `index.ts` had three independent copies of the worktree root and now has
+      one. `realpath` cannot guard a directory git has not made, so
+      `WorkspaceExistence` makes the two cases explicit: `must-exist` (the
+      default, so every pre-existing caller is bit-identical) resolves the whole
+      path, `will-be-created` resolves the PARENT and appends the leaf — the
+      parent is harness-owned, so nothing an attacker controls is left unresolved,
+      and a test proves both modes produce the SAME key once the directory
+      exists. Tests: 6 (trust) + 7 (workspaces). **13 mutations, 13 killed**,
+      including the original blocker, a partial set, a `beforeHires` that never
+      runs, one that records consent for a refused plan, and a default flipped to
+      the weaker mode. **Method note, recorded because it cost two passes:** `src/**`
+      is CRLF, so a mutation anchored across a line boundary never applies and the
+      harness prints NOT-APPLIED, which reads like a mutation that ran — five of
+      ten silently did not run the first time, including the blocker's. Single-line
+      anchors only. Docs: ADR-0025 (extends 0021 — ADRs are append-only and this
+      widens an accepted security decision), SDD §1.1 `engines/` row and §3, the
+      M8.7 trust implementation doc. OWED, RECORDED NOT FIXED: no profile has been
+      activated against a real repository in the shipped app under these rules, so
+      SECOND CLEARANCE, same audit: the quit's DISARM
+      phase. M8.6 registered `crew.stop()` among the quit's `steps` with a
+      comment reading "Before the unwind, not after"; `QuitSequence.execute`
+      runs closing → unwind → `steps`, so `steps` is LAST and every ladder was
+      armed while the unwind killed the agents it watched. Nothing caught it
+      because no test related the phase a step is REGISTERED in to the phase it
+      RUNS in. `disarm()` now runs between closing time and the unwind, isolated
+      like `steps` and with its own degradation cause; `Artemis.stop()` joined
+      it, having had zero production callers. 5 tests, 3 semantic mutations
+      killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
+      — M7's exit, still open.
 
 - [ ] **M8.7 Engine isolation, and whose autonomy hinge it is** — B13. Agents
       inherit the Architect's personal engine install: no isolated config

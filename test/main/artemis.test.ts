@@ -13,6 +13,8 @@ import { EngineRegistry, type SpawnPlan } from '../../src/main/engines'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { MemorySettingsRegistry } from '../../src/main/settings-registry'
+import { respawnBlockReason } from '../../src/main/respawn'
+import { Breaker } from '../../src/main/watch/breaker'
 import { makeFakeAdapter } from '../fakes/fake-adapter'
 import { removeTempDir } from '../tmpdir'
 
@@ -83,7 +85,13 @@ interface Rig {
 }
 
 async function rig(
-  over: { backoffMs?: readonly number[]; stabilityMs?: number } = {}
+  over: {
+    backoffMs?: readonly number[]
+    stabilityMs?: number
+    /** A standing decision that she must not be brought back (M8.6, B11). */
+    blocked?: () => string | null
+    spawnBlocked?: () => string | null
+  } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-artemis-'))
   temps.push(home)
@@ -120,6 +128,7 @@ async function rig(
     prompts,
     agoraRoot,
     probe: async () => '1.0.0-fake',
+    ...(over.spawnBlocked ? { respawnBlocked: over.spawnBlocked } : {}),
     roleBrief: (card) => artemis?.roleBrief(card) ?? null,
     rosterSeats: () => new Map([...roster].map(([id, entry]) => [id, entry.seat])),
     onRosterChange: (agentId, entry) => {
@@ -144,7 +153,8 @@ async function rig(
     now: () => clock.ms,
     ...(over.backoffMs
       ? { respawn: { backoffMs: over.backoffMs, stabilityMs: over.stabilityMs ?? 60_000 } }
-      : {})
+      : {}),
+    ...(over.blocked ? { respawnBlocked: over.blocked } : {})
   })
 
   return {
@@ -649,5 +659,104 @@ describe('Artemis and the provider usage limit', () => {
       await r.settle()
     }
     expect(r.degradations.join(' ')).toMatch(/will not be restarted again/)
+  })
+})
+/**
+ * The orchestrator is not exempt from B11 (M8.6).
+ *
+ * FR-5.4 brings her back when she dies, and that ladder ran 46 times in one
+ * day. If the breaker stops her at rung 3 and the ladder immediately undoes
+ * it, rung 3 is not a rung — it is a pause. FR-14.5 already treats a rung-3
+ * stop on her work as consequential enough to revert the company's mode, so it
+ * must at least be consequential enough to keep her down.
+ */
+describe('a standing breaker stop holds against her ladder too', () => {
+  it('reports a blocked boot hire without creating a process or claiming the seat', async () => {
+    const r = await rig({ spawnBlocked: () => 'persisted rung 3 stop' })
+    expect(await r.artemis.start(ENGINE)).toBeNull()
+    expect(r.spawner.spawns).toEqual([])
+    expect(r.orchestratorId).toBeNull()
+    expect(r.degradations.join(' ')).toContain('persisted rung 3 stop')
+  })
+
+  it('keeps a real rung-3 decision through session cleanup and a capacity release', async () => {
+    const breaker = new Breaker({
+      now: () => 100_000,
+      budgetState: () => 'breached',
+      steerText: () => 'stop looping',
+      effects: {
+        steer: () => {},
+        pauseDeliveries: () => {},
+        constrainBudget: () => {},
+        interrupt: () => {},
+        stop: () => {},
+        returnTask: () => {},
+        avatar: () => {}
+      }
+    })
+    const r = await rig({
+      backoffMs: [1, 1],
+      blocked: () => respawnBlockReason(breaker.stopOf(ARTEMIS_AGENT_ID))
+    })
+    await r.artemis.start(ENGINE)
+    for (const rung of [1, 2, 3]) {
+      expect(breaker.forceEvaluate(ARTEMIS_AGENT_ID)).toBe(rung)
+    }
+    r.artemis.holdForCapacity()
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    breaker.forgetSession(ARTEMIS_AGENT_ID)
+    r.artemis.releaseForCapacity()
+    await r.settle()
+    expect(breaker.stopOf(ARTEMIS_AGENT_ID)).not.toBeNull()
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.orchestratorId).toBeNull()
+    expect(r.logs.some((entry) => entry['event'] === 'respawn-blocked')).toBe(true)
+  })
+
+  it('does not bring her back, and does not spend the ladder finding out', async () => {
+    const r = await rig({
+      backoffMs: [1, 1, 1],
+      blocked: () => 'the breaker stopped it at rung 3 (burn-rate)'
+    })
+    await r.artemis.start(ENGINE)
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+
+    // One spawn — the original. No respawn, and no ladder rung burned on a
+    // decision that will not change by waiting.
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.logs.some((entry) => entry['event'] === 'respawn-scheduled')).toBe(false)
+    const blocked = r.logs.find((entry) => entry['event'] === 'respawn-blocked')
+    expect(String(blocked?.['because'])).toContain('rung 3')
+  })
+
+  it('says the company has no orchestrator, rather than going quiet', async () => {
+    // A stopped orchestrator and a spent ladder leave exactly the same hole in
+    // the company, so they must be equally loud (invariant §7).
+    const r = await rig({ backoffMs: [1], blocked: () => 'stopped at rung 3' })
+    await r.artemis.start(ENGINE)
+    expect(r.orchestratorId).toBe(ARTEMIS_AGENT_ID)
+
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    expect(r.orchestratorId).toBeNull()
+    expect(r.degradations.some((detail) => detail.includes('will not be restarted'))).toBe(true)
+  })
+
+  it('brings her back normally once the stop is lifted', async () => {
+    let stop: string | null = 'stopped at rung 3'
+    const r = await rig({ backoffMs: [1], blocked: () => stop })
+    await r.artemis.start(ENGINE)
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    expect(r.spawner.spawns).toHaveLength(1)
+
+    // The Architect clears it and hires her again: a lifted stop must leave a
+    // full ladder behind it, not a spent one.
+    stop = null
+    await r.artemis.start(ENGINE)
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+    expect(r.spawner.spawns.length).toBeGreaterThanOrEqual(3)
   })
 })

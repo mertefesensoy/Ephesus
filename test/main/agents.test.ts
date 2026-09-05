@@ -96,6 +96,8 @@ interface RigOptions {
    * the manager has to trust rather than refuse.
    */
   readonly engine?: 'claude' | 'codex'
+  /** A standing decision that an agent must not be brought back (M8.6, B11). */
+  readonly respawnBlocked?: AgentManagerOptions['respawnBlocked']
 }
 
 async function rig(
@@ -133,6 +135,7 @@ async function rig(
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
     ...(extra.authProbe ? { authProbe: extra.authProbe } : {}),
+    ...(extra.respawnBlocked ? { respawnBlocked: extra.respawnBlocked } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -696,5 +699,119 @@ describe('AgentManager — an engine that is installed but logged out', () => {
     expect(card.lifecycle).toBe('running')
     expect(card.fixCommand).toBeNull()
     expect(asked).toBe(0)
+  })
+})
+/**
+ * B11's human half (M8.6).
+ *
+ * A rung-3 stop is enforced in THREE places, and the refutation pass found
+ * that only two of them were tested: the crew's ladder and Artemis's ladder
+ * each ask `blocked` before scheduling, so removing the guard inside
+ * `AgentManager.respawn` killed nothing. That guard is the one that covers the
+ * path with no ladder at all — **the Architect pressing "bring it back" on the
+ * card** — which is precisely the path SDD §10 specifies and the one M8.6
+ * built the IPC for. A rule enforced only where something else already
+ * enforces it is a check that cannot fail.
+ */
+describe('a stopped agent will not be respawned, whoever asks', () => {
+  it('refuses a fresh boot hire under a standing stop before claiming the id', async () => {
+    let blocked: string | null = 'persisted rung 3'
+    const r = await rig(async () => '2.1.195', undefined, { respawnBlocked: () => blocked })
+    await expect(r.manager.spawn(r.request)).rejects.toThrow('persisted rung 3')
+    expect(r.manager.list()).toEqual([])
+    expect(r.spawner.spawns).toEqual([])
+    blocked = null
+    await expect(r.manager.spawn(r.request)).resolves.toBeDefined()
+  })
+
+  it('refreshes a cleared offer without emitting another exit or starting a process', async () => {
+    let blocked: string | null = null
+    const r = await rig(async () => '2.1.195', undefined, { respawnBlocked: () => blocked })
+    await r.manager.spawn(r.request)
+    blocked = 'rung 3'
+    await r.spawner.exit('agent.mason', 1)
+    const changes = r.changes.length
+    blocked = null
+    expect(r.manager.refreshRespawnBlock('agent.mason')?.respawnOffer?.blockedBecause).toBeNull()
+    expect(r.changes).toHaveLength(changes)
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.manager.refreshRespawnBlock('agent.absent')).toBeNull()
+    await r.manager.respawn('agent.mason')
+    expect(r.manager.refreshRespawnBlock('agent.mason')).toBeNull()
+  })
+
+  it('rechecks a stop that arrives while respawn installs hooks', async () => {
+    let blocked: string | null = null
+    const r = await rig(async () => '2.1.195', undefined, {
+      respawnBlocked: () => blocked
+    })
+    await r.manager.spawn(r.request)
+    await r.spawner.exit('agent.mason', 1)
+    const respawn = r.manager.respawn('agent.mason')
+    blocked = 'stopped at rung 3 during setup'
+    await expect(respawn).rejects.toThrow('rung 3')
+    expect(r.spawner.spawns).toHaveLength(1)
+    expect(r.manager.card('agent.mason').lifecycle).toBe('exited')
+    expect(r.manager.card('agent.mason').respawnOffer?.blockedBecause).toBe(blocked)
+  })
+
+  it('refuses overlapping manual and automatic respawns before a process exists', async () => {
+    const r = await rig()
+    await r.manager.spawn(r.request)
+    await r.spawner.exit('agent.mason', 1)
+    const first = r.manager.respawn('agent.mason')
+    await expect(r.manager.respawn('agent.mason')).rejects.toThrow()
+    await first
+    expect(r.spawner.spawns).toHaveLength(2)
+  })
+
+  async function stopped(): Promise<{
+    manager: AgentManager
+    spawner: RecordingSpawner
+  }> {
+    let blocked = false
+    const r = await rig(async () => '2.1.195', undefined, {
+      respawnBlocked: (agentId) =>
+        blocked && agentId === 'agent.mason' ? 'the breaker stopped it at rung 3 (burn-rate)' : null
+    })
+    await r.manager.spawn(r.request)
+    blocked = true
+    await r.spawner.exit('agent.mason', 1)
+    return { manager: r.manager, spawner: r.spawner }
+  }
+
+  it('refuses the respawn, naming the rung', async () => {
+    const { manager } = await stopped()
+    await expect(manager.respawn('agent.mason')).rejects.toThrow(/will not be respawned/)
+    await expect(manager.respawn('agent.mason')).rejects.toThrow(/rung 3/)
+  })
+
+  it('starts no process, so the refusal is a fact rather than a message', async () => {
+    const { manager, spawner } = await stopped()
+    const before = spawner.spawns.length
+    await expect(manager.respawn('agent.mason')).rejects.toThrow()
+    expect(spawner.spawns).toHaveLength(before)
+    expect(manager.card('agent.mason').lifecycle).toBe('exited')
+  })
+
+  it('puts the refusal ON the offer, so the card never advertises a dead button', async () => {
+    // The second gap the refutation pass found: `blockedBecause` was filled by
+    // `AgentManager` and asserted only in hand-built fixtures, so a mutation
+    // hard-coding it to null killed nothing. The dock reads this field to
+    // decide between a control and a sentence.
+    const { manager } = await stopped()
+    const offer = manager.card('agent.mason').respawnOffer
+    expect(offer).not.toBeNull()
+    expect(offer?.blockedBecause).toContain('rung 3')
+  })
+
+  it('leaves the offer open when nothing is standing against the agent', async () => {
+    const r = await rig()
+    await r.manager.spawn(r.request)
+    await r.spawner.exit('agent.mason', 1)
+    expect(r.manager.card('agent.mason').respawnOffer?.blockedBecause).toBeNull()
+    // …and the respawn actually goes through, so the guard is not simply
+    // refusing everything.
+    await expect(r.manager.respawn('agent.mason')).resolves.toBeDefined()
   })
 })

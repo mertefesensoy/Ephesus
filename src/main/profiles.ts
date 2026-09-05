@@ -7,7 +7,8 @@ import {
   type ActivationPlan,
   type ActivationPlanResult,
   type ActivationRequest,
-  type ActivationTarget
+  type ActivationTarget,
+  type PlannedHire
 } from '../shared/profile-activation'
 import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
@@ -313,6 +314,30 @@ export interface ProfileActivationOptions {
   spawn(request: SpawnRequest): Promise<unknown>
   /** Kills one agent, on deactivation or on an unwind. */
   kill(agentId: string): void
+  /**
+   * The plan is settled and NOTHING has been hired yet (M8.7).
+   *
+   * The seam exists for work that must happen after the activation is known to
+   * be going ahead but before any process exists — today, writing the engine's
+   * workspace trust for the target AND for the worktrees this activation is
+   * about to create (ADR-0021). It takes the plan rather than the request so
+   * the directories trusted are the ones the hires below actually use; deriving
+   * them a second time is the drift M8.5 already paid for.
+   *
+   * It cannot refuse. ADR-0021 makes a failed trust write a visible degradation
+   * rather than a refusal, and that stands: an unreadable `~/.claude.json` is
+   * the Architect's file, not a reason the company may not start.
+   */
+  beforeHires?(plan: ActivationPlan): void
+  /**
+   * One hire is up and the instance is live (M8.6). Carries the whole planned
+   * hire rather than an id and a policy, so a consumer that later needs the
+   * isolation row or the budget does not need a second seam — and so this one
+   * cannot drift from the plan the Architect was shown.
+   */
+  onHired?(hire: PlannedHire): void
+  /** One agent is being torn down for good; cancel anything holding it. */
+  onReleased?(agentId: string): void
   /** Arms a schedule trigger. */
   addTrigger(trigger: Trigger): void
   /** Disarms one, by id. */
@@ -365,7 +390,8 @@ export class ProfileActivations {
       this.options.globalAutonomy(),
       (declared) => this.options.missingGrants?.(declared) ?? [],
       derived,
-      request.repos ?? []
+      request.repos ?? [],
+      request.isolation ?? 'as-declared'
     )
   }
 
@@ -392,6 +418,12 @@ export class ProfileActivations {
     const planned = await this.preview(request)
     if (!planned.ok) return { ok: false, reasons: planned.reasons }
     const { plan } = planned
+
+    // Before the first process, after the plan is fixed: the engine's trust
+    // record has to name every directory these hires will work in, or an
+    // isolated one meets the first-run dialog with no session and no hook
+    // (ADR-0021, M8.7).
+    this.options.beforeHires?.(plan)
 
     const spawned: string[] = []
     for (const hire of plan.hires) {
@@ -434,6 +466,11 @@ export class ProfileActivations {
       })
       armed.push(trigger.id)
     }
+
+    // Survival is declared only once every hire is up (M8.6, B12). Declaring
+    // inside the loop would arm a ladder for an agent the roll-back above is
+    // about to kill, and the ladder would faithfully bring it back.
+    for (const hire of plan.hires) this.options.onHired?.(hire)
 
     const instance: ProfileInstance = {
       instanceId,
@@ -487,6 +524,10 @@ export class ProfileActivations {
     const instance = this.live.get(instanceId)
     if (instance === undefined) return { ok: false, reason: `no active profile "${instanceId}"` }
     for (const triggerId of instance.armed) this.options.removeTrigger(triggerId)
+    // Released BEFORE the kill, for the same reason triggers are disarmed
+    // first: a hire whose ladder is still armed treats the kill that is
+    // deactivating it as a crash, and brings it straight back (M8.6).
+    for (const agentId of instance.agentIds) this.options.onReleased?.(agentId)
     for (const agentId of instance.agentIds) this.options.kill(agentId)
     this.live.delete(instanceId)
     // An instance that is gone is not an instance watching nothing (M8.5). Left

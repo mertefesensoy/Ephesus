@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
 import { GateManager } from '../../src/main/watch/gates'
+import type { Breaker } from '../../src/main/watch/breaker'
 import { ProfileStore } from '../../src/main/profiles'
 import { removeTempDir } from '../tmpdir'
 
@@ -37,6 +38,67 @@ afterEach(() => {
 
 const DENY_ALL: GatePolicy = { schemaVersion: GATE_SCHEMA_VERSION, autonomy: 'manual', rules: [] }
 
+describe('the Architect clears only the breaker stop they reviewed', () => {
+  it('pushes the refreshed card to the window without a lifecycle callback', async () => {
+    const card = {
+      agentId: 'agent.mason',
+      lifecycle: 'exited',
+      respawnOffer: { blockedBecause: null }
+    }
+    await rig({
+      breaker: { stopsView: () => ({ stops: [], error: null }), clearStop: () => true },
+      refreshRespawnBlock: () => card as never
+    })
+    const send = vi.fn()
+    handlers.get('watch:clear-breaker-stop')!(
+      { sender: { send } },
+      { agentId: 'agent.mason', expectedAt: 1 }
+    )
+    expect(send).toHaveBeenCalledWith('state:agents', card)
+  })
+
+  it('validates before clearing and refreshes the offer only after success', async () => {
+    const clearStop = vi.fn(() => true)
+    const refreshRespawnBlock = vi.fn(() => null)
+    const r = await rig({
+      breaker: { stopsView: () => ({ stops: [], error: null }), clearStop },
+      refreshRespawnBlock
+    })
+    for (const payload of [
+      { agentId: 'agent.mason' },
+      { agentId: 'agent.mason', expectedAt: -1 },
+      { agentId: 'agent.mason', expectedAt: 1, actor: 'architect' }
+    ]) {
+      await expect(r.call('watch:clear-breaker-stop', payload)).rejects.toThrow()
+    }
+    expect(clearStop).not.toHaveBeenCalled()
+    expect(
+      await r.call('watch:clear-breaker-stop', { agentId: 'agent.mason', expectedAt: 123 })
+    ).toBe(true)
+    expect(clearStop).toHaveBeenCalledWith('agent.mason', 123)
+    expect(refreshRespawnBlock).toHaveBeenCalledWith('agent.mason')
+  })
+
+  it('exposes persistent stops and propagates a refused clear without refreshing', async () => {
+    const view = { stops: [], error: 'storage unavailable' }
+    const refreshRespawnBlock = vi.fn(() => null)
+    const r = await rig({
+      breaker: {
+        stopsView: () => view,
+        clearStop: () => {
+          throw new Error('stop changed')
+        }
+      },
+      refreshRespawnBlock
+    })
+    expect(await r.call('watch:breaker-stops')).toEqual(view)
+    await expect(
+      r.call('watch:clear-breaker-stop', { agentId: 'agent.mason', expectedAt: 1 })
+    ).rejects.toThrow('stop changed')
+    expect(refreshRespawnBlock).not.toHaveBeenCalled()
+  })
+})
+
 const PACKAGING = {
   what: 'rm -rf build/',
   why: 'stale artifacts',
@@ -45,6 +107,8 @@ const PACKAGING = {
 }
 
 interface RigOptions {
+  readonly breaker?: Pick<Breaker, 'stopsView' | 'clearStop'>
+  readonly refreshRespawnBlock?: (agentId: string) => null
   /** Avatar snapshots the director would hand back, keyed by agent id. */
   readonly avatars?: Map<string, unknown>
   /** What `pendingMailFor` answers — UI-DESIGN §5.4's desk tray flag. */
@@ -68,7 +132,7 @@ async function rig(options: RigOptions = {}): Promise<{
   const gates = new GateManager({ policy: () => DENY_ALL, onLogEvent: (d) => logs.push(d) })
   registerIpc({
     ptyManager: {} as never,
-    agents: {} as never,
+    agents: { refreshRespawnBlock: options.refreshRespawnBlock ?? (() => null) } as never,
     avatars: { list: () => options.avatars ?? new Map() } as never,
     commands: { list: () => [] } as never,
     agora: {} as never,
@@ -84,6 +148,10 @@ async function rig(options: RigOptions = {}): Promise<{
     dismissFromHumanQueue: () => true,
     capacity: () => ({ parked: [], since: null, retryAt: null }),
     breakerState: () => [],
+    breaker: options.breaker ?? {
+      stopsView: () => ({ stops: [], error: null }),
+      clearStop: () => false
+    },
     pendingMailFor: options.pendingMail ?? ((): number => 0),
     hooksState: () => ({ endpoint: null, driftWarnings: [], failure: null }),
     agoraHealth: () => ({ fileWarnings: [], commitFailures: [], runtime: [] }),

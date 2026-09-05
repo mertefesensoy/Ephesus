@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import { badgeFor } from '../../shared/badges'
 import { emoteFrame } from '../../shared/emotes'
 import { emotesState } from './emotes'
-import type { AgentCard } from '../../shared/agents'
+import type { AgentCard, RespawnOffer } from '../../shared/agents'
 import type { AvatarUpdate } from '../../shared/ipc'
 import { costNoteOf, type AgentSpend } from '../../shared/cost'
 import { paceNoteOf, type PaceNote } from '../../shared/pacing'
@@ -24,6 +24,59 @@ import type { CapacityView, ParkedAgent } from '../../shared/capacity'
  * was "why is it like this" — a status you have to decode is not a status.
  * `badgeFor(phase).label` already carried the sentence; nothing rendered it.
  */
+
+/**
+ * What coming back would restore, or why it will not happen.
+ *
+ * A refusal and an offer are the same row on purpose: a card that showed a
+ * "bring it back" control beside a rung-3 breaker stop would be advertising a
+ * button that throws (B11).
+ */
+export interface RespawnNote {
+  /** What the Architect reads: what returning restores, or why it cannot. */
+  readonly text: string
+  /** A standing decision refusing it, or null when the offer stands. */
+  readonly refusedBecause: string | null
+}
+
+/**
+ * Contract: pure. The offer's sentence, or null when there is nothing to say.
+ *
+ * Every clause is a FACT the offer carries, never a hope: `resumable` is only
+ * true where the adapter has `resume` and the event plane saw a session, and
+ * `memorySections` counts dated sections that actually exist. Promising a
+ * resumed session for an engine without one would be the silent-fallback
+ * failure invariant §7 forbids, moved into the UI.
+ */
+export function respawnNote(card: {
+  readonly lifecycle: string
+  readonly respawnOffer: RespawnOffer | null
+}): RespawnNote | null {
+  const offer = card.respawnOffer
+  if (card.lifecycle !== 'exited' || offer === null) return null
+  if (offer.blockedBecause !== null) {
+    return {
+      text: `will not be restarted — ${offer.blockedBecause}`,
+      refusedBecause: offer.blockedBecause
+    }
+  }
+  if (offer.waitingForCapacity) {
+    // Not an offer to accept: the harness owns this return and pressing a
+    // button would race it (`watch/capacity.ts`).
+    return {
+      text: 'waiting for provider capacity — it comes back by itself',
+      refusedBecause: 'the harness is bringing it back when capacity returns'
+    }
+  }
+  const parts = [
+    offer.resumable ? 'resumes its session' : 'starts a fresh session',
+    ...(offer.memorySections > 0 ? [`${String(offer.memorySections)} memory section(s)`] : []),
+    ...(offer.tasksReturned.length > 0
+      ? [`${String(offer.tasksReturned.length)} task(s) went back to the board`]
+      : [])
+  ]
+  return { text: `bring back: ${parts.join(', ')}`, refusedBecause: null }
+}
 
 /** Contract: pure. What one card says, derived from the two live sources. */
 export interface DockRow {
@@ -59,6 +112,17 @@ export interface DockRow {
   readonly cost: string
   /** Provenance: live and provisional, or folded from the transcript and final. */
   readonly costTitle: string
+  /**
+   * The respawn offer on an exited agent's card, in words — or null.
+   *
+   * `AgentManager` has computed a `RespawnOffer` on every exit since M3, and
+   * until M8.6 it had **zero references outside the main process**: the dock
+   * showed a dead agent and no way to bring it back, which is why three crew
+   * agents that exited four, five and five times in one day simply stayed
+   * dead. SDD §10's crash row says "respawn offer on the agent card"; this is
+   * the card finally saying it.
+   */
+  readonly offer: RespawnNote | null
   /**
    * This agent's provider-capacity park, or null when nothing is blocking.
    *
@@ -146,7 +210,8 @@ export function dockRows(
               ? 'unbudgeted'
               : `${Math.round((money.budget.spent / (money.dailyTokens as number)) * 100).toString()}% of today`,
       cost: money === null ? 'cost not reported' : costNoteOf(money).text,
-      costTitle: money === null ? 'no spend recorded for this agent yet' : costNoteOf(money).title
+      costTitle: money === null ? 'no spend recorded for this agent yet' : costNoteOf(money).title,
+      offer: respawnNote(card)
     }
   })
 }
@@ -248,7 +313,158 @@ const card = {
   fontSize: '11px'
 } as const
 
+/**
+ * The offer control. Deliberately quiet: bringing an agent back is a normal
+ * act, not an alarm, and the card above it already carries the ghost state.
+ */
+const offerButton = {
+  background: 'var(--eph-parchment)',
+  border: '1px solid var(--eph-ink-300)',
+  color: 'var(--eph-ink-700)',
+  padding: '3px 6px',
+  cursor: 'pointer',
+  textAlign: 'left',
+  fontFamily: 'var(--eph-face-data)',
+  fontSize: '10px'
+} as const
+
+/** A refused offer: the reason, and no control to press. */
+const offerNote = {
+  color: 'var(--eph-wine)',
+  padding: '3px 6px',
+  fontFamily: 'var(--eph-face-data)',
+  fontSize: '10px'
+} as const
+
 const EMOTES = emotesState()
+
+/**
+ * The cards themselves. Presentational and exported, so a test can assert the
+ * screen actually SHOWS a respawn offer — and shows a refused one as words
+ * rather than as a button — instead of asserting that a projection returned
+ * one. The same reason `PlanView` is exported from `ProfilesPanel`.
+ *
+ * `AgentDock` fetches its own cards over IPC and cannot be handed any, which is
+ * exactly why the rendering half needs a seam of its own.
+ */
+export function DockCards({
+  rows,
+  selected,
+  onSelect,
+  onRespawn
+}: {
+  readonly rows: readonly DockRow[]
+  readonly selected: string | null
+  readonly onSelect: (agentId: string) => void
+  readonly onRespawn: (agentId: string) => void
+}): ReactElement {
+  return (
+    <div style={dock} aria-label="The company">
+      {rows.length === 0 && (
+        <span style={{ fontFamily: 'var(--eph-face-data)', color: 'var(--eph-ink-500)' }}>
+          nobody hired yet
+        </span>
+      )}
+      {rows.map((row) => (
+        <div key={row.agentId} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <button
+            type="button"
+            onClick={() => onSelect(row.agentId)}
+            aria-label={`${row.name}: ${row.status}`}
+            style={{
+              ...card,
+              outline: row.agentId === selected ? '2px solid var(--eph-status-working)' : 'none'
+            }}
+          >
+            <div style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>{row.name}</div>
+            <div style={{ color: 'var(--eph-ink-500)' }}>{row.role}</div>
+            <div
+              style={{
+                marginTop: '4px',
+                color: rowTone(row),
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {/* Beside the word, never instead of it (§8 double-encoding). The
+              icon is what a reader recognises; the word is what makes it
+              unambiguous, and the 3x5 glyph proved an icon alone is not
+              enough — somebody had to ask what a ring meant. */}
+              {emoteStyle(row.phase) === null ? (
+                <span aria-hidden="true">■</span>
+              ) : (
+                <span aria-hidden="true" style={emoteStyle(row.phase) ?? undefined} />
+              )}
+              <span>{row.status}</span>
+            </div>
+            {row.capacity !== null && (
+              <div style={{ color: 'var(--eph-status-blocked)' }} title={row.capacity.limit.detail}>
+                retry {new Date(row.capacity.retryAt).toLocaleTimeString()}
+              </div>
+            )}
+            {row.pendingMail > 0 && (
+              <div style={{ color: 'var(--eph-status-blocked)' }}>
+                {String(row.pendingMail)} waiting
+              </div>
+            )}
+            <div style={{ marginTop: '4px', color: 'var(--eph-ink-500)' }} title={row.spendNote}>
+              {row.spent === null ? (
+                row.spendNote
+              ) : (
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '100%',
+                    height: '4px',
+                    background: 'var(--eph-marble-200)',
+                    border: '1px solid var(--eph-ink-500)'
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      height: '100%',
+                      width: `${String(Math.round(row.spent * 100))}%`,
+                      background:
+                        row.spent >= 1 ? 'var(--eph-status-looping)' : 'var(--eph-status-working)'
+                    }}
+                  />
+                </span>
+              )}
+            </div>
+            {/* The money, beside the allowance bar rather than instead of it: one
+            is a ceiling reading, the other is the bill. `title` carries the
+            provenance — live and provisional, or folded and final. */}
+            <div style={{ color: 'var(--eph-ink-500)' }} title={row.costTitle}>
+              {row.cost}
+            </div>
+          </button>
+          {/* SDD §10's crash row, finally on the card. A refused offer renders
+          as the REASON and no control: an agent stopped at rung 3 is not
+          something a click should undo, and a disabled-looking button with
+          no explanation is how an Architect concludes the app is broken. */}
+          {row.offer !== null &&
+            (row.offer.refusedBecause === null ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onRespawn(row.agentId)
+                }}
+                style={offerButton}
+              >
+                {row.offer.text}
+              </button>
+            ) : (
+              <span style={offerNote} title={row.offer.refusedBecause}>
+                {row.offer.text}
+              </span>
+            ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export function AgentDock({
   selected,
@@ -257,6 +473,24 @@ export function AgentDock({
   readonly selected: string | null
   readonly onSelect: (agentId: string) => void
 }): ReactElement {
+  /**
+   * Accepting a respawn offer (SDD §10, M8.6).
+   *
+   * The card refreshes off the `state:agents` push the respawn produces, so
+   * nothing is set locally here — one source of truth about who is running,
+   * the same rule the orchestrator's own respawn follows. A refusal surfaces
+   * through the next card, which carries `blockedBecause`.
+   */
+  const onRespawn = useCallback(async (agentId: string): Promise<void> => {
+    try {
+      await window.eph?.agents.respawn(agentId)
+    } catch {
+      // The reason rides back on the card. Swallowing it HERE is not silence:
+      // a rejected respawn leaves the agent exited with its offer intact, and
+      // the offer is what explains itself.
+    }
+  }, [])
+
   const [cards, setCards] = useState<readonly AgentCard[]>([])
   const [phases, setPhases] = useState<ReadonlyMap<string, { phase: string; pendingMail: number }>>(
     new Map()
@@ -365,89 +599,14 @@ export function AgentDock({
           <span style={{ color: 'var(--eph-ink-500)' }}>{pace.detail}</span>
         </div>
       )}
-      <div style={dock} aria-label="The company">
-        {rows.length === 0 && (
-          <span style={{ fontFamily: 'var(--eph-face-data)', color: 'var(--eph-ink-500)' }}>
-            nobody hired yet
-          </span>
-        )}
-        {rows.map((row) => (
-          <button
-            key={row.agentId}
-            type="button"
-            onClick={() => onSelect(row.agentId)}
-            aria-label={`${row.name}: ${row.status}`}
-            style={{
-              ...card,
-              outline: row.agentId === selected ? '2px solid var(--eph-status-working)' : 'none'
-            }}
-          >
-            <div style={{ fontFamily: 'var(--eph-face-ui)', fontSize: '10px' }}>{row.name}</div>
-            <div style={{ color: 'var(--eph-ink-500)' }}>{row.role}</div>
-            <div
-              style={{
-                marginTop: '4px',
-                color: rowTone(row),
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-            >
-              {/* Beside the word, never instead of it (§8 double-encoding). The
-                icon is what a reader recognises; the word is what makes it
-                unambiguous, and the 3x5 glyph proved an icon alone is not
-                enough — somebody had to ask what a ring meant. */}
-              {emoteStyle(row.phase) === null ? (
-                <span aria-hidden="true">■</span>
-              ) : (
-                <span aria-hidden="true" style={emoteStyle(row.phase) ?? undefined} />
-              )}
-              <span>{row.status}</span>
-            </div>
-            {row.capacity !== null && (
-              <div style={{ color: 'var(--eph-status-blocked)' }} title={row.capacity.limit.detail}>
-                retry {new Date(row.capacity.retryAt).toLocaleTimeString()}
-              </div>
-            )}
-            {row.pendingMail > 0 && (
-              <div style={{ color: 'var(--eph-status-blocked)' }}>
-                {String(row.pendingMail)} waiting
-              </div>
-            )}
-            <div style={{ marginTop: '4px', color: 'var(--eph-ink-500)' }} title={row.spendNote}>
-              {row.spent === null ? (
-                row.spendNote
-              ) : (
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: '100%',
-                    height: '4px',
-                    background: 'var(--eph-marble-200)',
-                    border: '1px solid var(--eph-ink-500)'
-                  }}
-                >
-                  <span
-                    style={{
-                      display: 'block',
-                      height: '100%',
-                      width: `${String(Math.round(row.spent * 100))}%`,
-                      background:
-                        row.spent >= 1 ? 'var(--eph-status-looping)' : 'var(--eph-status-working)'
-                    }}
-                  />
-                </span>
-              )}
-            </div>
-            {/* The money, beside the allowance bar rather than instead of it: one
-              is a ceiling reading, the other is the bill. `title` carries the
-              provenance — live and provisional, or folded and final. */}
-            <div style={{ color: 'var(--eph-ink-500)' }} title={row.costTitle}>
-              {row.cost}
-            </div>
-          </button>
-        ))}
-      </div>
+      <DockCards
+        rows={rows}
+        selected={selected}
+        onSelect={onSelect}
+        onRespawn={(agentId) => {
+          void onRespawn(agentId)
+        }}
+      />
     </div>
   )
 }
