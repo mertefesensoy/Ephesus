@@ -397,6 +397,48 @@ const CLAUDE_TOOL_CLASS_PREFIXES: Readonly<Record<string, string>> = {
 const CLAUDE_CLASSIFY_KEY = 'tool'
 
 /**
+ * The ONLY two tool names Claude Code's file permission checks ever look up.
+ *
+ * This is not a style preference and not a subset chosen for brevity — it is
+ * the engine's matcher. Established by reading the shipped binary
+ * (`@anthropic-ai/claude-code` 2.1.252) rather than inferred from its docs,
+ * because a permission rule that silently grants nothing is exactly the class
+ * of defect that cannot be seen from the outside:
+ *
+ *  - the rule table is filtered by `ruleValue.toolName === n` — EXACT string
+ *    equality, no aliasing, no tool-family expansion;
+ *  - the only values `n` ever takes for a file check come from one switch:
+ *    `'edit' -> 'Edit'`, `'read' -> 'Read'`. There is no third case, and no
+ *    per-tool lookup anywhere on the path.
+ *
+ * So `Edit(<glob>)` is the rule that authorises EVERY file-editing tool —
+ * `Write`, `MultiEdit`, `NotebookEdit` included — and `Read(<glob>)` authorises
+ * every file-reading tool, `Glob` included. A `Write(<glob>)` rule is not a
+ * narrower grant than `Edit(<glob>)`; it is not a grant at all.
+ *
+ * The harness used to write seven rules here — `Read`, `Write`, `Edit`, `Glob`,
+ * `Grep`, `LS`, `NotebookEdit` — on the reasonable-looking assumption that a
+ * grant should name each tool it means to permit. Five of those seven were
+ * inert. Three measurements on a real agent settled it (see the implementation
+ * doc): with all seven the outbox write SUCCEEDED, because `Edit` happened to
+ * be among them; with the five inert ones ALONE the write was refused and no
+ * file appeared; with `Read` + `Edit` alone it succeeded and stderr was silent.
+ *
+ * That is why this is a correctness fix and not a tidy-up. The autonomy loop
+ * ADR-0013 depends on was never broken, but it was resting on one load-bearing
+ * rule hidden among four decoys and a fifth that looked like the real one.
+ * Anyone deduplicating that list would have deleted `Edit` as the redundant
+ * twin of `Write` and taken the outbox down — a failure that surfaces only on a
+ * live agent, never in a unit test. Two rules that are all load-bearing cannot
+ * be tidied into a broken state.
+ *
+ * `Grep` and `LS` were worse than inert: neither is in the engine's
+ * `filePatternTools` list, so they are dropped without even the warning the
+ * other three earn on every agent's stderr.
+ */
+export const CLAUDE_FILE_RULE_TOOLS: readonly string[] = ['Read', 'Edit']
+
+/**
  * Grants the agent access to its OWN mailbox, and nothing else.
  *
  * An agent's `agora/agents/<id>/` directory lives in the harness home, outside
@@ -413,11 +455,8 @@ const CLAUDE_CLASSIFY_KEY = 'tool'
 function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
   // Settings paths use forward slashes on every platform.
   const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
-  // Every file tool the agent needs to work its own mailbox: read a message,
-  // list what is waiting, write a reply, move a handled one aside.
-  const tools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'LS', 'NotebookEdit']
   return {
-    allow: tools.map((tool) => `${tool}(${agentDir}/**)`),
+    allow: CLAUDE_FILE_RULE_TOOLS.map((tool) => `${tool}(${agentDir}/**)`),
     additionalDirectories: [agentDir]
   }
 }
