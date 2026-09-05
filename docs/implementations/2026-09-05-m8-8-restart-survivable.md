@@ -260,6 +260,22 @@ tested modules is what M8.1 did with `shutdown.ts` and `ui-bridge.ts`.
 a 17.03% floor because well-covered modules joined it. A raise needs three
 corroborating runs of the same tree and is its own exercise.
 
+### The one branch with no test, recorded rather than hidden
+
+`index.ts`'s notes loop wraps `agora.appendLog` and reports a failure through
+the degradation channel instead. `EventLog.append` calls `fs.appendFileSync`,
+which throws on `EACCES`/`ENOSPC`, so the guard covers a real throw — checked,
+not assumed, which is the rule the defect above taught. Without it a full disk
+turns a *successful* restore into a dead app: the worst possible failure for a
+package whose whole purpose is surviving a restart.
+
+It has **no test**, and that is stated rather than glossed (ENGINEERING-STANDARDS
+§6.7: name the production call path or record that there is none). The path is
+`src/main/index.ts`, the notes loop of the replay block; it is not unit-testable
+because `boot()` is not, which is what the `boot` coverage row measures.
+`DegradationLog.append` is the same shape of untestable defensive branch, and
+swallows silently where this one at least stays visible.
+
 ## Owed, recorded not built
 
 - **`--resume` / engine session recovery**, and the auto-respawn it unlocks.

@@ -2385,7 +2385,22 @@ async function boot(): Promise<void> {
     })
     for (const note of replay.notes) {
       console.info(`restart: ${note}`)
-      agora.appendLog({ kind: 'profile', event: 'restored', detail: note })
+      // The restore has ALREADY happened in memory; this is the note about it.
+      // `appendLog` writes to disk and can throw, and a boot that died here
+      // would turn "the company came back and could not say so" into "the
+      // company did not come back" — the strictly worse of the two. Reported
+      // instead, through the one channel whose contract is that reporting
+      // cannot fail (M8.2).
+      try {
+        agora.appendLog({ kind: 'profile', event: 'restored', detail: note })
+      } catch (err) {
+        reportDegradation(
+          'restart/note-unlogged',
+          `the restart restored state but could not write it to the book of record: ${
+            err instanceof Error ? err.message : String(err)
+          } — "${note}"`
+        )
+      }
     }
     // Every loss is a condition the Architect can see and act on, never a
     // console line that scrolls away (invariant §7, M8.2).
