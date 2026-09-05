@@ -955,7 +955,7 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     // and a real TUI treats a multi-line block as a paste and stops to confirm
     // it. The archived path is what the agent needs; the content is a file it
     // can already read.
-    expect(reply?.reason).toContain('inbox/.done/')
+    expect(reply?.reason).toContain('inbox/.inflight/')
     expect(reply?.reason).not.toContain('\n')
     expect(r.hermes.pendingMailCount('agent.b')).toBe(0)
     expect(await r.hermes.decideOnStop('agent.b', {})).toBeNull()
@@ -1099,7 +1099,7 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     // TUI, which treats a multi-line block as a paste and halts for
     // confirmation — two freshly spawned agents died there before the hand-over
     // became a pointer.
-    expect(nudges[0]?.text).toContain('inbox/.done/')
+    expect(nudges[0]?.text).toContain('inbox/.inflight/')
     expect(nudges[0]?.text).toContain('.json')
     expect(nudges[0]?.text).not.toContain('\n')
     expect(r.hermes.pendingMailCount('agent.b')).toBe(0)

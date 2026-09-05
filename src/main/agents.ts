@@ -55,6 +55,14 @@ export interface AgentSpawner {
   has(id: string): boolean
   /** Fires when a pty exits; the manager unwinds the spawn from here. */
   onExit(cb: (id: string, exitCode: number) => void): void
+  /**
+   * The final readable output of the process that just died, or null.
+   *
+   * Optional because a spawner that keeps no terminal (the scenario suites
+   * drive a fake engine off disk) has nothing to offer, and a crash record
+   * without it is the old behaviour rather than a broken one.
+   */
+  lastWordsOf?(id: string): string | null
 }
 
 /**
@@ -1177,6 +1185,15 @@ export class AgentManager {
       // human needs to look at this".
       waitingForCapacity: this.options.capacityParked?.(agentId) ?? false
     }
+    // What the process actually said before it died. Recorded ONLY for an
+    // abnormal exit: a clean shutdown's last frame is the TUI's farewell and
+    // would put a line of noise in the book of record on every quit, while a
+    // crash without it is an exit code and a shrug — which is exactly where the
+    // 2026-09-05 one-hour run ran out of evidence.
+    const lastWords =
+      exitCode !== null && exitCode !== 0
+        ? (this.options.spawner.lastWordsOf?.(agentId) ?? null)
+        : null
     this.options.onLogEvent?.({
       kind: 'ghost',
       agentId,
@@ -1186,7 +1203,8 @@ export class AgentManager {
       memorySections: offer.memorySections,
       tasksReturned: [...tasksReturned],
       waitingForCapacity: offer.waitingForCapacity,
-      ...(offer.blockedBecause === null ? {} : { respawnBlocked: offer.blockedBecause })
+      ...(offer.blockedBecause === null ? {} : { respawnBlocked: offer.blockedBecause }),
+      ...(lastWords === null ? {} : { lastWords })
     })
     return offer
   }

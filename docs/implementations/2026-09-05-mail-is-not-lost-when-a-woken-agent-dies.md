@@ -165,15 +165,65 @@ The bar this was written against:
 
 All met.
 
-## Owed, recorded not built
+## And then the crash itself
 
-- **Why a woken session exits 1.** The engine runs fine with the harness's exact
-  command line, config directory, settings file, lockdown flags and cwd (exit 0
-  on a direct run), so it is specific to a live PTY session being written to.
-  Nothing currently keeps the agent's own stderr at exit, which is the first
-  thing that investigation needs.
+The plan said "not fixing the death itself" and listed it as owed. It is fixed,
+and the route to it is the point.
+
+**Nothing kept an agent's last output**, so a crash was an exit code and a shrug.
+`attachRedactedStream` now holds a bounded ring of the REDACTED stream and hands
+it over on exit; `AgentManager` puts it on the `ghost` row, but only for an
+abnormal exit — a clean quit's last frame is the TUI saying goodbye, and would
+put noise in the book of record on every shutdown.
+
+The first crash it caught answered the question outright:
+
+```
+Accessing workspace: C:Userssenso.ephesusagora
+Quick safety check: Is this a project you created or one you trust?
+  > No, exit     Yes, I trust this folder
+  Enter to confirm - Esc to cancel
+```
+
+**Artemis was sitting at the engine's workspace-trust dialog, and the wake
+answered it.** The default option is "No, exit"; a wake writes its text and then
+the submit key, and that Enter chose it. She exited 1 within a second of every
+wake — 13 times in this machine's log — and because every incident is routed to
+the orchestrator first, the whole chain stopped there.
+
+Why her and not the crew: ADR-0021/0025 write workspace trust for an
+**activation's** target and worktrees. Artemis belongs to no activation. She is
+hired at boot and works in the Agora (SDD §2, because `board.md` is hers to
+scribe), so nobody ever trusted that directory for her — and once M8.7a gave
+every agent its own engine config directory, hers began life with no trust
+record at all. The crew survived because their worktrees WERE granted.
+
+The fix grants it before she is hired, through the same adapter seam the
+activation uses, and reports a failure to grant rather than letting her meet the
+prompt silently.
+
+**Proven live**, on the same machine that produced the crash:
+
+```
+20:31:01  artemis | mail 2 -> DIED exit 1     (before the grant)
+20:41:48  artemis | mail 2 -> SURVIVED        (after it)
+```
+
+and her config now carries
+`"C:/Users/senso/.ephesus/agora" -> {"hasTrustDialogAccepted": true}`.
+
+## Owed, recorded not built
 - The wake path could report a death that follows a hand-over as its own
   degradation cause, so the pairing is visible without reading the log by hand.
+- **Two boot-wiring branches have no test** and say so here rather than
+  pretending otherwise (ENGINEERING-STANDARDS §6.7): the orchestrator's trust
+  grant and the notes loop's `appendLog` guard both live in `index.ts`, which
+  `boot()` makes unreachable from a unit test — the `boot` coverage row is what
+  measures that. `readableTail` and the last-words ring, which carry the actual
+  logic, ARE tested (10 cases, including a real terminal frame).
+- `readableTail` runs words together where a TUI spaced them with cursor
+  movement rather than spaces ("Accessingworkspace"). Legible enough to diagnose
+  from, and not worth reconstructing a terminal emulator for.
 
 ## Related
 

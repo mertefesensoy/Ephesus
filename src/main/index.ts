@@ -3038,8 +3038,53 @@ async function boot(): Promise<void> {
   // The engine she is hired on is the registry's first registered adapter, so
   // adding one never leaves this line naming an engine that is not there.
   const orchestratorEngine = engines.list()[0]?.id
-  if (orchestratorEngine) void artemis.start(orchestratorEngine)
-  else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
+  if (orchestratorEngine) {
+    // ADR-0021/0025, for the one agent they never covered.
+    //
+    // Trust was written for an ACTIVATION's target and the worktrees it
+    // creates. Artemis belongs to no activation: she is hired at boot and works
+    // in the Agora (SDD §2, because `board.md` is hers to scribe), so nobody
+    // ever trusted that directory for her. Since M8.7a gave every agent its own
+    // engine config directory, hers starts with no trust record at all.
+    //
+    // What that cost, measured on 2026-09-05: she came up at the engine's
+    // "Quick safety check: is this a project you trust?" dialog, whose default
+    // is "No, exit". A wake writes its text and then the submit key — and that
+    // Enter answered the dialog. She exited 1 within a second of EVERY wake,
+    // 13 times in this machine's log, and because every incident is routed to
+    // the orchestrator first, the whole chain stopped there. Her own last words
+    // are what finally said so.
+    for (const adapter of engines.list()) {
+      if (!adapter.trustWorkspace) continue
+      const configDir = engineConfigDirFor(adapter.id, artemis.id())
+      const prepared = adapter.prepareConfigDir?.(configDir)
+      if (prepared !== undefined && !prepared.ok) {
+        reportDegradation(
+          `artemis/engine-config:${adapter.id}`,
+          `${adapter.id}: the orchestrator's config directory is unusable — ${prepared.because}`
+        )
+        continue
+      }
+      const trusted = adapter.trustWorkspace(configDir, agora.root, 'must-exist')
+      agora.appendLog({
+        kind: 'orchestrator',
+        event: 'workspace-trusted',
+        engine: adapter.id,
+        agentId: artemis.id(),
+        path: agora.root,
+        ...(trusted.ok ? { alreadyTrusted: trusted.alreadyTrusted } : { because: trusted.because })
+      })
+      if (!trusted.ok) {
+        reportDegradation(
+          `artemis/workspace-trust:${adapter.id}`,
+          `${adapter.id}: ${agora.root} is not trusted for the orchestrator — ` +
+            `${trusted.because} — she will meet the engine's trust prompt and the ` +
+            'first wake will answer it with "No, exit"'
+        )
+      }
+    }
+    void artemis.start(orchestratorEngine)
+  } else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
 }
 
 /**

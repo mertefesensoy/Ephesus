@@ -60,13 +60,16 @@ Rules the harness enforces, so getting them wrong means your message is refused:
 ## How to read your messages
 
 The harness hands you new mail: when you finish a turn with messages waiting, or
-when mail arrives while you are idle, the messages' full content is delivered
-into your session and the files are archived to `inbox/.done/` in the same act.
-Act on what you are handed, and reply through your `outbox/` when the act
-obliges you to.
+when mail arrives while you are idle, you are told what arrived and where to read
+it, and the files move out of `inbox/` in the same act. Act on what you are
+handed, and reply through your `outbox/` when the act obliges you to.
+
+While you are working on a message it sits in `inbox/.inflight/` — that is the
+path you are given, and where to read it. When your turn ends it moves to
+`inbox/.done/`, which is your read history.
 
 You do not need to poll `inbox/` yourself; anything still sitting there simply
-has not been handed to you yet, and `inbox/.done/` is your read history.
+has not been handed to you yet.
 
 ## How you remember
 

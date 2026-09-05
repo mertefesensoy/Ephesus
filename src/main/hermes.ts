@@ -270,7 +270,13 @@ export function formatHandover(messages: readonly Message[]): string {
   // arrived and where it was archived; the agent reads its own files with the
   // tools it already has. Pushing kilobytes of JSON through a keyboard was
   // never the sound half of this design.
-  return messages.map((m) => `inbox/.done/${m.id}.json`).join(', ')
+  //
+  // `.inflight/` and not `.done/`: this is where the file IS for the whole
+  // window in which the agent acts on it. It only reaches `.done/` when the
+  // agent's turn ends and the Stop settles it, which is also what makes
+  // `.done/` an honest "read history" rather than a list of things that merely
+  // arrived. A pointer to where the file will be later is a pointer to nothing.
+  return messages.map((m) => `inbox/${INFLIGHT_DIR}/${m.id}.json`).join(', ')
 }
 
 export class Hermes {
