@@ -1,7 +1,14 @@
 # Ephesus — Software Design Description (SDD)
 
 **Version:** 1.0 · **Status:** Approved for implementation
-**Satisfies:** [SRS](../srs/SRS.md) FR-1…FR-12, NFR-1…NFR-16 · **Justified by:** [ADR-0001…0015](../adr/README.md)
+**Satisfies:** the [SRS](../srs/SRS.md) — §12 maps every FR to its design section,
+plus the NFRs whose design is a section rather than a property of the whole ·
+**Justified by:** the [accepted ADRs](../adr/README.md), cited per section
+
+*(Stated as ranges through M8.7 — "FR-1…FR-12, ADR-0001…0015" — which had been
+wrong since FR-13 and ADR-0016 landed and would go stale again on the next
+addition. A pointer to the index maintains itself; §12 carries the mapping that
+actually has to be kept true.)*
 
 This document describes *how* Ephesus is built: process architecture, module map, data
 models, on-disk formats, IPC contracts, state machines, and the key runtime sequences.
