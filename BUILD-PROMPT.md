@@ -154,16 +154,25 @@ it is how the next session knows where to resume).
 > M8 package's evidence names its production call path, file and line, or
 > records that there is none (ENGINEERING-STANDARDS §6.7, GYM-006).
 >
-> **Resume at M8.8.** (M8.0–M8.7b are ticked; every hire now runs its OWN engine
+> **Resume at M8.9.** (M8.0–M8.8 are ticked; every hire now runs its OWN engine
 > install, the harness is the only author of the hooks that install runs, and a
 > profile grants tool directories by name — ADR-0026; the tree runs every hire in its own
 > worktree as of M8.6, so the "own working tree" clause below is now the history
-> of why M8 exists rather than the current state.) The plan is in `docs/PROGRESS.md` under
+> of why M8 exists rather than the current state. **A restart is survivable as of
+> M8.8** — active mission instances, open gates with their settled verdicts, and
+> the trigger clock all come back, and what cannot be restored is reported rather
+> than silently absent. What does NOT come back is the crew: without engine
+> session recovery a respawned agent redoes in-flight work, so a restored
+> instance declares its crew `down` until the Architect reactivates it.
+> [ADR-0027](docs/adr/ADR-0027-what-survives-a-restart.md) is normative, and its
+> §5 records the three things deliberately NOT persisted — read it before
+> "fixing" them.) The plan is in `docs/PROGRESS.md` under
 > *"M8 — The company you can leave running"*, derived from the 2026-09-02 MVP
 > register. **M8 runs BEFORE M7b**, and the ordering is the plan's first claim:
 > M7b ships signed builds of a company that could not survive a restart, could
 > not say it had stopped, and ran every hire in the Architect's own working
-> tree. The last of those closed at M8.6; the restart is M8.8's.
+> tree. The first two of those closed at M8.6 and M8.8; what remains of the
+> clause is M8.9's "could not say it had stopped".
 >
 > **Two Architect decisions are SETTLED — do not re-litigate them.** The crew
 > may open pull requests unattended (2026-09-02, implemented in `610eb0a`), and

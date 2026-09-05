@@ -143,6 +143,20 @@ A change is done when:
    drops below its floor in `scripts/coverage-floors.json`. A wiring seam with no test
    is a defect, not a gap: a package's evidence names its production call path — file
    and line — or records that there is none. *(M8.0, GYM-006.)*
+
+   **A new subsystem row costs a CI round-trip, so budget it or reuse a row.**
+   `validateFloors` requires a floor for every subsystem on *every* recorded
+   platform, and the floors for a platform can only be measured **on** it. So a
+   new row cannot land from one machine: it needs the CI artifact from the other
+   platform to seed its block, exactly as M8.0 did. Adding new modules to an
+   existing row is the cheap path and is usually the honest one — M8.1 put
+   `shutdown.ts` and `ui-bridge.ts` in `boot`, and M8.8 put `restore.ts` and
+   `state-store.ts` there, because that row measures how true "index.ts holds no
+   logic of its own" is and moving logic out of it into tested modules is the
+   thing being measured. **Never invent the other platform's number to make a row
+   land** — a coverage figure without the condition it was measured under is not
+   evidence, which is the whole reason this file records conditions at all.
+   *(M8.8: a `restart` row was written and reverted for exactly this.)*
 8. **An engine adapter may not match on output this repository has never seen.**
    Every probe an adapter declares (`versionProbe`, `authProbe`) is backed by a
    capture from a real installation in `test/fixtures/engine-output/`, with its

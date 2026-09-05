@@ -475,3 +475,108 @@ export function checkVerdictChannel(
   }
   return { ok: true }
 }
+/**
+ * Open gates across a restart (M8.8).
+ *
+ * The gate is in memory; the BLOCK is durable. `tasks.json` carries
+ * `task.gates`, and `refuseDone` above will not let a task reach `done` while
+ * that array is non-empty — so a gate opened at 3am and unanswered at restart
+ * left its task blocked forever, with an empty approvals queue and no way back
+ * but hand-editing the book of record. That asymmetry is the defect; this
+ * record closes it.
+ *
+ * `settled` is kept as well as `open`, and it is not decoration: `decide`
+ * answers "was already approved" from it, which is what stops a repeated
+ * verdict from being processed twice (SRS §6 criterion 6). Without it a
+ * restart turns every settled gate back into "no open gate" — a different
+ * answer to the same question.
+ */
+export const SETTLED_GATE_LIMIT = 1000
+
+export const settledGateSchema = z.object({ id: gateIdSchema, verdict: gateVerdictSchema }).strict()
+
+export const gatesRecordSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    open: z.array(openGateSchema),
+    /**
+     * Bounded, newest kept. Gate ids are time-prefixed (`g-<iso>-<hex>`), so
+     * "newest" is a lexicographic sort and needs no second timestamp. The
+     * bound exists because this is the only part of the record that grows
+     * without limit, and an unbounded file is the M8.10 defect class arriving
+     * early; a thousand verdicts is far more than any agent retries against.
+     */
+    settled: z.array(settledGateSchema).max(SETTLED_GATE_LIMIT)
+  })
+  .strict()
+  .refine(
+    (value) => new Set(value.open.map((gate) => gate.id)).size === value.open.length,
+    'duplicate open gate id'
+  )
+  .refine(
+    (value) => new Set(value.settled.map((row) => row.id)).size === value.settled.length,
+    'duplicate settled gate id'
+  )
+export type GatesRecord = z.infer<typeof gatesRecordSchema>
+export const EMPTY_GATES: GatesRecord = {
+  schemaVersion: 1,
+  open: [],
+  settled: []
+}
+export const GATES_REL = 'gates.json'
+
+/** A durable block whose gate no longer exists anywhere. */
+export interface OrphanBlock {
+  readonly taskId: string
+  readonly gateId: string
+}
+
+export interface GateReconciliation {
+  /**
+   * Tasks held by a gate id that is in neither the open set nor the settled
+   * one. The task cannot reach `done` and nothing in the queue explains why.
+   */
+  readonly orphans: readonly OrphanBlock[]
+  /**
+   * Restored gates whose task no longer lists them — the block was released
+   * while the harness was down, or the task was deleted. Dropping them keeps
+   * the queue honest; keeping them would ask the Architect to rule on a hold
+   * that no longer holds anything.
+   */
+  readonly stale: readonly string[]
+}
+
+/**
+ * Contract: compares the restored gates against the durable blocks in
+ * `tasks.json`. Pure, total, no clock, no filesystem — so the disagreement
+ * this looks for is a table rather than an integration test nobody writes.
+ *
+ * It REPORTS; it never releases. Auto-clearing a block whose gate cannot be
+ * reconstructed would be a deny-by-default hole (NFR-9): the block is the only
+ * remaining evidence that something was held, and a harness that quietly drops
+ * it has approved an action no human ever saw.
+ *
+ * A gate with a null `taskId` blocks no task and is never stale — it is held
+ * against an agent, not against the ledger.
+ */
+export function reconcileGates(
+  restored: readonly OpenGate[],
+  settled: readonly { readonly id: string }[],
+  tasks: readonly { readonly id: string; readonly gates: readonly string[] }[]
+): GateReconciliation {
+  const known = new Set<string>([
+    ...restored.map((gate) => gate.id),
+    ...settled.map((row) => row.id)
+  ])
+  const blocked = new Set(tasks.flatMap((task) => task.gates))
+  const orphans: OrphanBlock[] = []
+  for (const task of tasks) {
+    for (const gateId of task.gates) {
+      if (!known.has(gateId)) orphans.push({ taskId: task.id, gateId })
+    }
+  }
+  const stale = restored
+    .filter((gate) => gate.taskId !== null && !blocked.has(gate.id))
+    .map((gate) => gate.id)
+  return { orphans, stale }
+}

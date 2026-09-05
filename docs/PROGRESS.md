@@ -5212,7 +5212,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       product code, this one is the toolchain, and only the second is fixed by
       re-running.*
 
-- [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
+- [x] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
       is one in-memory map with no boot replay, so a restart silently un-hires
       the company: the Harbor stops watching, every armed trigger is gone, no
       crew respawns, and profile autonomy stops composing into gates — with
@@ -5228,6 +5228,92 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       class was invisible. Risk: replay spawns fresh agents unless the session id
       is recovered; `--resume` is a follow-on and must be stated as owed, not
       quietly skipped.*
+      *Evidence (2026-09-05): **two Architect decisions shaped it** — per-subsystem
+      stores plus one replay module (not a single `session.json`, which would tie
+      fast-changing state to slow-changing state permanently and lose everything
+      to one corrupt file; not a rebuild from `log.jsonl`, which is a good
+      milestone but needs rotation that is M8.10 and unbuilt); and **restore the
+      activation without respawning the crew**, because without engine session
+      recovery a respawned agent re-reads its mailbox and redoes in-flight work,
+      which is the double-processing SRS §6 criterion 6 forbids.
+      **THE REGISTER WAS HALF WRONG, AND READING THE CODE IS WHAT SHOWED IT.**
+      Of the five items listed as lost, THREE are not, and each refutation is a
+      decision already recorded in the tree: incident correlation is in memory
+      *deliberately* (`incidents.ts` argues a restart SHOULD re-raise a
+      still-failing incident, because a duplicate is cheap and a dropped one is
+      the subsystem not working); capacity parks are DERIVED — `CapacityWatch`
+      re-reads each transcript tail every tick and re-parks from the same refusal
+      record, and it iterates LIVE agents, of which a restart has none; and
+      breaker rungs 1–2 are observations about a process's own turn spans, so
+      restoring one onto a fresh process would assert a condition untrue of it —
+      rung-3 STOPS are a standing decision about an identity, which is exactly
+      why M8.6 persisted those and only those. Building five stores would have
+      added state the tree already answers better. What was genuinely lost:
+      activations, open gates and their verdicts, and the trigger clock.
+      `ProfileInstance.crew` is the load-bearing addition and it is a FIELD
+      because two things depend on it and both are silent when wrong: an armed
+      schedule trigger wakes `trigger.agentId`, so arming one for an absent
+      agent is a wake into the void once per interval forever; and `activate`
+      refuses a duplicate, so without it the restore would block the very
+      reactivation that brings the crew back — replacing one stuck state with a
+      worse one. Gates restore their SETTLED half too, which is what stops a
+      repeated verdict being processed twice; `reconcileGates` names any task
+      held by a gate that came back from no record, and REPORTS rather than
+      releases, because auto-clearing would approve an action no human ever saw
+      (NFR-9). Checks: typecheck green; lint green; **invariants ok, reachability
+      170/178 → 173/181** — every new module loadable from the three entry
+      points, which is the wiring proof and not another M6; **3771 passed / 8
+      skipped (3779) across 199 files**, up 68 from the 3703/8 (3711) baseline at
+      `2dfb0c6` *in the Architect's main checkout with the art packs restored*;
+      `coverage floors ok (17 subsystems on win32; 22 untested modules, all
+      recorded)`. **32 mutations, every one killed or resolved, each reverted** —
+      and TWO of them found weaknesses in this package's own tests rather than in
+      its code: an assertion that the settled list is *sorted* was true whether
+      the bound kept the oldest or the newest and so could not fail, and the
+      `add` precedence mutant survived because it was EQUIVALENT — `tick` wrote
+      both copies of the clock to the same value, so no test could tell which one
+      `add` preferred. Two fields that can never disagree are one field with a
+      latent bug, so the duplicate was deleted rather than a test invented for an
+      unobservable difference. A **compile-time shape proof** pins every plan
+      schema against its interface (`test/**` is inside `tsconfig.node.json`, so
+      drift fails the BUILD, not a test run); it caught `crew` missing from the
+      schema while this was being written. The M8.0 seam rule fired once and was
+      right: the three new modules belonged to no subsystem and the suite refused
+      them until assigned — the same check that caught M8.7b twice. They went to
+      `boot` rather than a new `restart` row, which was written first and
+      reverted: `validateFloors` requires a floor per subsystem on every recorded
+      platform, so the row could not land without a **linux** number this machine
+      cannot measure, and inventing one is a figure without its condition.
+      **RUN, NOT ONLY TESTED:** `npm run dev` twice over the Architect's own
+      `~/.ephesus`. The first boot wrote `triggers.json` through the real store
+      (four real triggers: standup, retro, library.reflection, gym-metric-check);
+      the app was killed and started again, and the second boot restored them and
+      said so in the book of record —
+      `{"kind":"profile","event":"restored","detail":"restored the last-fired
+      clock for 4 trigger(s)","seq":1224}`. Boot → replay → restore → log entry,
+      in the shipped app rather than a rig. It does NOT close M7's exit, which
+      needs a real profile activated against a real target, but it does close the
+      question of whether this package's wiring works outside a test.
+      **Production call path:** `src/main/index.ts` builds the three
+      `JsonStateStore`s before any subsystem that writes to them, wires `persist`
+      into `Scheduler`, `GateManager` and `ProfileActivations`, and calls
+      `restoreCompany` after `activations` and `gates` exist but BEFORE the
+      Harbor's first ingest — which reads `watchedRepos` off the live set, so
+      restoring later would leave the first ingest of every restart watching
+      nothing. Docs: **ADR-0027 (new, normative — what survives a restart and what
+      deliberately does not)**, SRS NFR-5 (AMENDED: it named only
+      roster/ledger/memory and the coordination state was the half that did not
+      restore), SDD §2/§4.8/§7.9/§10/§12, TEST-STRATEGY S-BLACKOUT (amended: a
+      scenario that restarts holding nothing cannot fail the way production
+      does), ENGINEERING-STANDARDS §6.7 (a new coverage subsystem row costs a
+      CI round-trip; never invent the other platform’s number), and the M8.8
+      implementation doc. **Floors deliberately NOT ratcheted** (`boot` now measures 20.75%
+      lines against a 17.03% floor because covered modules joined it; a raise
+      needs three corroborating runs of one tree). Owed, recorded not built:
+      `--resume` and the auto-respawn it unlocks; an explicit Architect release
+      for a historical orphan block; the capacity retry `attempts` rung resets
+      across a restart (bounded, self-correcting). Branch
+      `feature/m8-8-restart-survivable`.*
 
 - [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
       `feature/usage-aware-pacing` (9d66df5), which is UNMERGED and conflicts

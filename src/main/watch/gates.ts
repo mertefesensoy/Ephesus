@@ -17,6 +17,7 @@ import {
   openGateSchema,
   parseGatePolicy,
   repeatBackRequired,
+  SETTLED_GATE_LIMIT,
   type AutonomyLevel,
   type GateDecision,
   type GateKind,
@@ -24,6 +25,7 @@ import {
   gatePackagingSchema,
   type GatePolicy,
   type GateRequest,
+  type GatesRecord,
   type GateVerdict,
   type OpenGate,
   type SourceChannel
@@ -55,6 +57,19 @@ export interface GateManagerOptions {
   onOpen?(gate: OpenGate): void
   /** Fired when a gate is settled, so the UI and the avatar can follow. */
   onSettled?(gate: OpenGate, verdict: GateVerdict): void
+  /**
+   * The held set changed; write it down so the next boot can restore it (M8.8).
+   *
+   * Injected, like everything else here, so the manager stays testable with no
+   * filesystem. Called after EVERY mutation of `open` or `settled` — a persist
+   * that covers only the open path would restore gates that were already
+   * answered, and re-ask the Architect a question they have answered.
+   *
+   * It cannot refuse. A gate that cannot be written down is still open in
+   * memory and its task is still blocked, which is the safe direction; main
+   * reports the write failure through the degradation channel.
+   */
+  persist?(record: GatesRecord): void
   /** Injected for deterministic ids and timestamps in tests. */
   now?(): Date
   /**
@@ -171,6 +186,7 @@ export class GateManager {
       openedAt: this.now().toISOString()
     })
     this.open.set(gate.id, gate)
+    this.persist()
     this.options.onLogEvent?.({
       kind: 'gate',
       event: 'opened',
@@ -253,6 +269,7 @@ export class GateManager {
 
     this.open.delete(gateId)
     this.settled.set(gateId, verdict)
+    this.persist()
     this.options.onLogEvent?.({
       kind: 'gate',
       event: verdict,
@@ -272,6 +289,59 @@ export class GateManager {
   /** The verdict a settled gate received, or null while it is still open. */
   verdictOf(gateId: string): GateVerdict | null {
     return this.settled.get(gateId) ?? null
+  }
+
+  /**
+   * Contract: puts previously-held gates back, so the approvals queue is not
+   * empty while `tasks.json` still says the tasks are blocked (M8.8). Returns
+   * how many of each came back.
+   *
+   * Restores `settled` as well as `open`, and that half is what keeps a
+   * verdict from being processed twice: `decide` distinguishes "was already
+   * approved" from "no open gate" using it, and a restart that dropped it
+   * would turn every answered gate back into an unknown one.
+   *
+   * Never re-fires `onOpen`. The restored gates are already in the queue the
+   * renderer reads on connect; replaying the notification would announce a
+   * three-hour-old hold as if it had just happened, and on the voice surface
+   * it would say so out loud.
+   *
+   * Refuses to displace anything already held: a gate opened during boot — the
+   * settings sweep can open one — outranks a record written before the restart.
+   */
+  restore(record: GatesRecord): { readonly open: number; readonly settled: number } {
+    let open = 0
+    for (const gate of record.open) {
+      if (this.open.has(gate.id) || this.settled.has(gate.id)) continue
+      this.open.set(gate.id, gate)
+      open += 1
+    }
+    let settled = 0
+    for (const row of record.settled) {
+      if (this.open.has(row.id) || this.settled.has(row.id)) continue
+      this.settled.set(row.id, row.verdict)
+      settled += 1
+    }
+    this.persist()
+    return { open, settled }
+  }
+
+  /**
+   * The single write-down point, called from every mutation of `open` and
+   * `settled` rather than from their callers -- a persist a caller can forget
+   * is a record that disagrees with memory exactly when it is read.
+   *
+   * `settled` is trimmed to the newest `SETTLED_GATE_LIMIT`. Gate ids are
+   * time-prefixed, so newest is a lexicographic sort; this is the only part of
+   * the record that grows without bound.
+   */
+  private persist(): void {
+    if (this.options.persist === undefined) return
+    const settled = [...this.settled.entries()]
+      .map(([id, verdict]) => ({ id, verdict }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .slice(-SETTLED_GATE_LIMIT)
+    this.options.persist({ schemaVersion: 1, open: [...this.list()], settled })
   }
 
   private mintId(): string {

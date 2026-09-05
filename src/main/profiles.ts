@@ -259,7 +259,26 @@ export interface ProfileInstance {
   readonly plan: ActivationPlan
   /** Agent ids actually spawned, in the order they came up. */
   readonly agentIds: readonly string[]
-  /** Scheduler trigger ids armed for this instance. */
+  /**
+   * Whether this instance's hires are running (M8.8).
+   *
+   * `down` is what a RESTORED instance is: the harness restarted, the plan
+   * came back, and the processes did not. It is a field rather than a
+   * derivation because two things depend on it and both are silent when wrong.
+   *
+   * Triggers are not armed while the crew is down. An armed schedule trigger
+   * wakes `trigger.agentId`, so arming one for an agent that does not exist
+   * produces a wake into the void once per interval, forever — a check that
+   * cannot fail, which is this codebase's recurring defect.
+   *
+   * And `activate` refuses a duplicate instance (FR-9.4), so without this a
+   * restored instance would block the very reactivation that brings its crew
+   * back: the restart would have replaced one stuck state with a worse one.
+   * A `down` instance is taken over by `activate`; a `live` one is still
+   * refused.
+   */
+  readonly crew: 'live' | 'down'
+  /** Scheduler trigger ids armed for this instance. Empty while `crew` is down. */
   readonly armed: readonly string[]
   /**
    * Event bindings this instance declares (`webhook`, `ci`, `health`).
@@ -349,6 +368,22 @@ export interface ProfileActivationOptions {
   onLogEvent?(draft: { kind: 'profile' } & Record<string, unknown>): void
   /** What an armed schedule trigger does when it fires. */
   onTriggerFired?(instanceId: string, triggerId: string, agentId: string, playbook: string): void
+  /**
+   * The live set changed; write it down so the next boot can restore it (M8.8).
+   *
+   * Injected rather than a store constructed here, for the reason everything
+   * else in these options is: this class must stay testable with no filesystem,
+   * and main owns where harness state lives. Called after EVERY mutation of
+   * `live` — activation, deactivation and restore — because a persist that
+   * covers only the happy path is a record that disagrees with memory exactly
+   * when it is read.
+   *
+   * It cannot refuse. A failed write is a visible degradation, reported by
+   * main; it is not a reason to fail an activation that has already spawned a
+   * crew, and rolling one back over a disk error would destroy working agents
+   * to protect a record of them.
+   */
+  persist?(instances: readonly ProfileInstance[]): void
 }
 
 /**
@@ -427,7 +462,11 @@ export class ProfileActivations {
    */
   async activate(request: ActivationRequest): Promise<ActivationResult> {
     const instanceId = instanceIdFor(request.profile, request.target)
-    if (this.live.has(instanceId)) {
+    // A restored instance whose crew is down is TAKEN OVER, not refused: it is
+    // a record of what was live, and reactivating it is how the Architect
+    // brings the crew back after a restart (M8.8). Refusing here would make the
+    // restore itself the thing that blocks recovery.
+    if (this.live.get(instanceId)?.crew === 'live') {
       return { ok: false, reasons: [`profile "${instanceId}" is already active`] }
     }
     if (!this.options.targetExists(request.target.path)) {
@@ -516,6 +555,7 @@ export class ProfileActivations {
       instanceId,
       plan,
       agentIds: spawned,
+      crew: 'live',
       armed,
       pendingEvents: plan.triggers
         .filter((trigger) => trigger.everyMs === null)
@@ -523,6 +563,7 @@ export class ProfileActivations {
       activatedAt: (this.options.now?.() ?? new Date()).toISOString()
     }
     this.live.set(instanceId, instance)
+    this.persist()
     this.options.onLogEvent?.({
       kind: 'profile',
       event: 'activated',
@@ -580,6 +621,7 @@ export class ProfileActivations {
     for (const agentId of instance.agentIds) this.options.onReleased?.(agentId)
     for (const agentId of instance.agentIds) this.options.kill(agentId)
     this.live.delete(instanceId)
+    this.persist()
     // An instance that is gone is not an instance watching nothing (M8.5). Left
     // standing, the condition would outlive the thing it described and the
     // health list would keep naming an instance that no longer exists.
@@ -624,6 +666,62 @@ export class ProfileActivations {
 
   autonomyFor(agentId: string, kind: GateKind): AutonomyLevel | null {
     return this.planFor(agentId)?.autonomy.find((row) => row.kind === kind)?.effective ?? null
+  }
+
+  /**
+   * Contract: puts previously-live instances back, with their crews DOWN, and
+   * returns one sentence per instance describing what did and did not come
+   * back (M8.8). Never spawns, never kills, never arms a trigger.
+   *
+   * What this restores is everything that does not need a process: `planFor`
+   * answers again, so tool grants (M8.7b) and composed autonomy (M7.2) work
+   * for a rehired agent; `watchedRepos` sees the instance, so the Harbor
+   * resumes ingesting; and the instance is on the panel instead of silently
+   * absent.
+   *
+   * What it deliberately does NOT restore is the crew. Without engine session
+   * recovery a respawned agent is amnesiac -- it re-reads its mailbox and
+   * redoes in-flight work -- which is the double-processing SRS §6 criterion 6
+   * forbids. Recorded as the Architect's decision of 2026-09-05; `--resume`
+   * makes it safe and is owed.
+   *
+   * Idempotent, and refuses to displace a LIVE instance: calling it twice, or
+   * after an activation, must not un-hire a running crew.
+   */
+  restore(instances: readonly ProfileInstance[]): readonly string[] {
+    const notes: string[] = []
+    for (const instance of instances) {
+      if (this.live.get(instance.instanceId)?.crew === 'live') {
+        notes.push(`${instance.instanceId} is already live — the record was not applied`)
+        continue
+      }
+      const schedules = instance.plan.triggers.filter((trigger) => trigger.everyMs !== null).length
+      this.live.set(instance.instanceId, {
+        ...instance,
+        crew: 'down',
+        // Nothing is armed while the crew is down, and the record must say so:
+        // a restored `armed` list naming triggers no scheduler holds is a
+        // disarm that would silently do nothing on the next deactivate.
+        armed: []
+      })
+      notes.push(
+        `${instance.instanceId} restored from ${instance.activatedAt} — ` +
+          `${String(instance.agentIds.length)} hire(s) are down and ` +
+          `${String(schedules)} schedule trigger(s) stay disarmed until it is reactivated`
+      )
+    }
+    this.persist()
+    return notes
+  }
+
+  /**
+   * The single write-down point. Private, and called from every mutation of
+   * `live` rather than from the callers of those mutations, because a persist
+   * a caller can forget is a record that disagrees with memory precisely when
+   * it is read -- at the next boot, with nothing to compare it against.
+   */
+  private persist(): void {
+    this.options.persist?.(this.instances())
   }
 
   /**

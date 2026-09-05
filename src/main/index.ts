@@ -27,7 +27,7 @@ import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
 import { ODEON_ENDPOINT } from '../shared/reserved'
-import type { OpenGate } from '../shared/gates'
+import type { GatesRecord, OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { Gymnasium } from './gymnasium'
@@ -35,7 +35,15 @@ import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
 import { GITHUB_APP_KEY_SECRET, GITHUB_TOKEN_GRANT } from '../shared/github-app'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../shared/gh-token'
-import { plannedTrustGrants, verifierAgentFor, watchedRepos } from '../shared/profile-activation'
+import {
+  plannedTrustGrants,
+  verifierAgentFor,
+  watchedRepos,
+  ACTIVATIONS_REL,
+  activationsRecordSchema,
+  EMPTY_ACTIVATIONS,
+  type ActivationsRecord
+} from '../shared/profile-activation'
 import { ENGINES_DIR, engineConfigDir } from './engines/engine-home'
 import { TOOLS_DIR, resolveToolGrants } from './engines/tool-grants'
 import { NO_TOOLS } from '../shared/engine-tools'
@@ -64,10 +72,18 @@ import { Library } from './library'
 import { RECALL_SCHEMA_VERSION } from '../shared/recall'
 import { ReflectionJob } from './reflection'
 import { Scheduler } from './scheduler'
+import { activationsRecord, blockedTasksFrom, restoreCompany } from './restore'
+import { JsonStateStore, type StateStore } from './state-store'
+import {
+  EMPTY_TRIGGERS,
+  TRIGGERS_REL,
+  triggersRecordSchema,
+  type TriggersRecord
+} from '../shared/restart'
 import { FtsIndex } from './library-fts'
 import { MEMPALACE_BINARY, MemPalaceIndex } from './library-mempalace'
 import { openFtsStore } from './library-fts-sqlite'
-import { Agora } from './agora'
+import { Agora, TASKS_REL } from './agora'
 import { AvatarDirector } from './avatars'
 import { ClosingTime } from './closing'
 import { QuitSequence, summarizeQuit } from './shutdown'
@@ -94,6 +110,7 @@ import { BudgetWatcher } from './watch/budgets'
 import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
 import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
+import { EMPTY_GATES, GATES_REL, gatesRecordSchema } from '../shared/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
@@ -165,11 +182,58 @@ let modes: CompanyModes | null = null
 let promptStore: PromptStore | null = null
 let library: Library | null = null
 let reflection: ReflectionJob | null = null
+/**
+ * The durable records a restart restores (M8.8).
+ *
+ * Assigned in `boot()` once the harness home is known, and read through the
+ * optional chain like every other subsystem here. Null means "before boot", and
+ * every writer below already tolerates that: a persist that cannot run yet is a
+ * record that is written on the next change, not a failure.
+ */
+let restartStores: {
+  readonly triggers: StateStore<TriggersRecord>
+  readonly activations: StateStore<ActivationsRecord>
+  readonly gates: StateStore<GatesRecord>
+} | null = null
+
+/**
+ * Writes one restart record, reporting a failed write rather than throwing.
+ *
+ * Every caller is inside a subsystem that has ALREADY done the thing being
+ * recorded — a gate is open, a crew is hired, a trigger has fired — so a write
+ * failure must never unwind it. Rolling back a live activation to protect a
+ * record of it would destroy working agents over a disk error. The safe
+ * direction is: keep the change, say the record is stale (invariant §7).
+ */
+function writeRestartRecord<T>(
+  store: StateStore<T> | undefined,
+  value: T,
+  what: 'triggers' | 'activations' | 'gates'
+): void {
+  if (store === undefined) return
+  const saved = store.save(value)
+  if (saved.ok) {
+    degradations.clear(`restart/${what}-unwritable`)
+    return
+  }
+  reportDegradation(
+    `restart/${what}-unwritable`,
+    `the ${what} record could not be written: ${saved.because} — ` +
+      'the company is running correctly now, but a restart will not restore this'
+  )
+}
+
 const scheduler = new Scheduler({
   onError: (triggerId, err) =>
     reportDegradation(
       `scheduler/trigger:${triggerId}`,
       `${triggerId} failed: ${err instanceof Error ? err.message : String(err)}`
+    ),
+  persist: (lastFired) =>
+    writeRestartRecord(
+      restartStores?.triggers,
+      { schemaVersion: 1, lastFired: { ...lastFired } },
+      'triggers'
     )
 })
 let hermes: Hermes | null = null
@@ -749,6 +813,26 @@ async function boot(): Promise<void> {
   // `list()`; written only by a successful activation below.
   knownTargets = new KnownTargets(path.join(home.root, KNOWN_TARGETS_REL))
   const knownTargetsWarning = knownTargets.warning()
+  // The durable records a restart restores (M8.8). Assigned before any
+  // subsystem that writes to them exists, so no change can happen in a window
+  // where the store is still null and the write is silently dropped.
+  restartStores = {
+    triggers: new JsonStateStore({
+      file: path.join(home.root, TRIGGERS_REL),
+      schema: triggersRecordSchema,
+      empty: EMPTY_TRIGGERS
+    }),
+    activations: new JsonStateStore({
+      file: path.join(home.root, ACTIVATIONS_REL),
+      schema: activationsRecordSchema,
+      empty: EMPTY_ACTIVATIONS
+    }),
+    gates: new JsonStateStore({
+      file: path.join(home.root, GATES_REL),
+      schema: gatesRecordSchema,
+      empty: EMPTY_GATES
+    })
+  }
   // Files the harness had to create for itself, named rather than done quietly
   // (M8.4): a config file that appears without being mentioned is one the
   // Architect never learns they can edit.
@@ -930,6 +1014,9 @@ async function boot(): Promise<void> {
     // (FR-11.1, SDD §9). Null for an agent no profile owns, which sends the
     // decision to the global policy alone — never to a permissive default.
     profileAutonomy: (agentId, kind) => activations?.autonomyFor(agentId, kind) ?? null,
+    // M8.8. The gate is in memory; the BLOCK is durable, so a gate that is not
+    // written down leaves its task held by nothing anyone can answer.
+    persist: (record) => writeRestartRecord(restartStores?.gates, record, 'gates'),
     onLogEvent: (draft) => {
       agora?.appendLog(draft)
       agora?.commitSoon(`gate ${String(draft['event'] ?? 'event')}`)
@@ -2221,6 +2308,9 @@ async function boot(): Promise<void> {
     // plan the Architect was shown to the ladder that acts on it (M8.6).
     onHired: (hire) => crew?.declare(hire.agentId, hire.onExit),
     onReleased: (agentId) => crew?.release(agentId),
+    // M8.8. Every mutation of the live set, so a restart knows what was hired.
+    persist: (instances) =>
+      writeRestartRecord(restartStores?.activations, activationsRecord(instances), 'activations'),
     addTrigger: (trigger) => scheduler.add(trigger),
     removeTrigger: (triggerId) => scheduler.remove(triggerId),
     targetExists: (target) => {
@@ -2271,6 +2361,53 @@ async function boot(): Promise<void> {
       )
     }
   })
+
+  // M8.8, and it runs HERE for a reason: after `activations` and `gates` exist,
+  // and before the Harbor's first ingest below, which reads `watchedRepos` off
+  // the live set. Restoring after that probe would leave the first ingest of
+  // every restart watching nothing.
+  //
+  // NFR-5 says "on restart, restore exactly", and everything this brings back
+  // is state no process is needed for. The crew itself is NOT respawned
+  // (Architect decision, 2026-09-05): without engine session recovery a
+  // respawned agent re-reads its mailbox and redoes in-flight work, which is
+  // the double-processing SRS §6 criterion 6 forbids. The floor shows the crew
+  // down; `--resume` makes the respawn safe and is owed.
+  if (restartStores !== null) {
+    const replay = restoreCompany(restartStores, {
+      restoreTriggers: (lastFired) => scheduler.restore(lastFired),
+      restoreActivations: (record) => activations?.restore(record.instances) ?? [],
+      restoreGates: (record) => gates?.restore(record) ?? { open: 0, settled: 0 },
+      openGates: () => gates?.list() ?? [],
+      // `Agora.tasks()` does NOT throw on a corrupt ledger, so the corruption
+      // is asked for by name rather than caught — see `blockedTasksFrom`.
+      blockedTasks: () => (agora === null ? null : blockedTasksFrom(agora, TASKS_REL))
+    })
+    for (const note of replay.notes) {
+      console.info(`restart: ${note}`)
+      // The restore has ALREADY happened in memory; this is the note about it.
+      // `appendLog` writes to disk and can throw, and a boot that died here
+      // would turn "the company came back and could not say so" into "the
+      // company did not come back" — the strictly worse of the two. Reported
+      // instead, through the one channel whose contract is that reporting
+      // cannot fail (M8.2).
+      try {
+        agora.appendLog({ kind: 'profile', event: 'restored', detail: note })
+      } catch (err) {
+        reportDegradation(
+          'restart/note-unlogged',
+          `the restart restored state but could not write it to the book of record: ${
+            err instanceof Error ? err.message : String(err)
+          } — "${note}"`
+        )
+      }
+    }
+    // Every loss is a condition the Architect can see and act on, never a
+    // console line that scrolls away (invariant §7, M8.2).
+    for (const problem of replay.problems) {
+      reportDegradation(problem.cause as DegradationCause, problem.detail)
+    }
+  }
 
   harbor = new GitHubHarbor({
     repos: () => watchedRepos(activations?.instances() ?? []),

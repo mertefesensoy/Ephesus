@@ -49,6 +49,20 @@ export interface SchedulerOptions {
   onError?(triggerId: string, err: unknown): void
   /** Raised each time a trigger actually fires, for the book of record. */
   onFired?(triggerId: string, at: Date): void
+  /**
+   * The last-fired clock changed; write it down so the next boot can seed it
+   * (M8.8).
+   *
+   * This is the one piece of scheduler state a restart cannot re-derive.
+   * Everything else about a trigger comes back with the activation that armed
+   * it; when it last fired is known only here, and losing it means every
+   * restored trigger is due immediately -- so a machine that reboots nightly
+   * runs its daily jobs twice, and one that crash-loops runs them every time.
+   *
+   * Called on fire and on removal, not on every tick: a tick that fires nothing
+   * changes nothing worth writing.
+   */
+  persist?(lastFired: Readonly<Record<string, number>>): void
 }
 
 /** 60 s: fine enough for a daily or hourly job, coarse enough to cost nothing. */
@@ -56,12 +70,29 @@ export const DEFAULT_TICK_MS = 60_000
 
 interface Registered {
   readonly trigger: Trigger
-  lastFiredMs: number | null
   running: boolean
 }
 
 export class Scheduler {
   private readonly triggers = new Map<string, Registered>()
+  /**
+   * When each trigger id last fired — the ONLY copy of that fact (M8.8).
+   *
+   * Keyed by id rather than held on the registration, for two reasons.
+   *
+   * The restore then has no ordering constraint on the rest of boot: seeding
+   * this before an activation arms anything and seeding it afterwards give the
+   * same answer, because `tick` reads it here. An ordering requirement between
+   * two boot steps is a rule that holds until someone moves a line, and nothing
+   * would report the day it stopped holding.
+   *
+   * And there is one clock rather than two that must agree. This began as a
+   * second copy beside `Registered.lastFiredMs`, which a mutation pass showed
+   * was unfalsifiable: `tick` wrote both to the same value, so no test could
+   * tell which one `add` preferred. Two fields that can never disagree are one
+   * field with a latent bug, and the surviving mutant was the evidence.
+   */
+  private readonly lastFired = new Map<string, number>()
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly now: () => Date
 
@@ -72,15 +103,37 @@ export class Scheduler {
   /** Registers a trigger. Re-adding the same id replaces it, keeping its clock. */
   add(trigger: Trigger): void {
     const existing = this.triggers.get(trigger.id)
-    this.triggers.set(trigger.id, {
-      trigger,
-      lastFiredMs: existing?.lastFiredMs ?? null,
-      running: existing?.running ?? false
-    })
+    this.triggers.set(trigger.id, { trigger, running: existing?.running ?? false })
   }
 
   remove(triggerId: string): void {
     this.triggers.delete(triggerId)
+    // Disarming is deliberate -- a deactivation, or a profile going away -- and
+    // its clock goes with it. Keeping it would grow the record with the ids of
+    // triggers that no longer exist, and would hand a stale last-fired to a
+    // profile the Architect later reactivates.
+    if (this.lastFired.delete(triggerId)) this.persist()
+  }
+
+  /**
+   * Contract: seeds the last-fired clock from a previous process (M8.8).
+   * Registered triggers take the value immediately; unregistered ids are held
+   * until something arms them.
+   *
+   * Never overrides a trigger that has already fired in this session.
+   */
+  restore(lastFired: Readonly<Record<string, number>>): number {
+    let restored = 0
+    for (const [id, at] of Object.entries(lastFired)) {
+      if (this.lastFired.has(id)) continue
+      this.lastFired.set(id, at)
+      restored += 1
+    }
+    return restored
+  }
+
+  private persist(): void {
+    this.options.persist?.(Object.fromEntries([...this.lastFired.entries()].sort()))
   }
 
   ids(): readonly string[] {
@@ -100,6 +153,8 @@ export class Scheduler {
     const at = this.now()
     const nowMs = at.getTime()
     const firings: Promise<void>[] = []
+    // A tick that fires nothing changes nothing worth writing down.
+    let fired = false
 
     for (const registered of this.triggers.values()) {
       if (registered.running) continue
@@ -107,13 +162,12 @@ export class Scheduler {
       // cadence that was forbidden for a week should fire when it is allowed
       // again, not sit out one more interval for having been asked while off.
       if (registered.trigger.enabled?.() === false) continue
-      if (
-        registered.lastFiredMs !== null &&
-        nowMs - registered.lastFiredMs < registered.trigger.everyMs
-      ) {
+      const lastFiredMs = this.lastFired.get(registered.trigger.id) ?? null
+      if (lastFiredMs !== null && nowMs - lastFiredMs < registered.trigger.everyMs) {
         continue
       }
-      registered.lastFiredMs = nowMs
+      this.lastFired.set(registered.trigger.id, nowMs)
+      fired = true
       registered.running = true
       this.options.onFired?.(registered.trigger.id, at)
       firings.push(
@@ -125,6 +179,11 @@ export class Scheduler {
           })
       )
     }
+    // Before the firings are awaited: the clock is stamped when the trigger
+    // becomes due, and a crash during a long run must not lose the fact that it
+    // started. Re-running a job is the cheaper failure; running it twice every
+    // boot because the write waited for it to finish is not.
+    if (fired) this.persist()
     await Promise.all(firings)
   }
 

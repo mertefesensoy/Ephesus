@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ProfileActivations, ProfileStore } from '../../src/main/profiles'
+import { ProfileActivations, ProfileStore, type ProfileInstance } from '../../src/main/profiles'
 import type { Trigger } from '../../src/main/scheduler'
 import type { SpawnRequest } from '../../src/shared/agents'
 import { GATE_SCHEMA_VERSION, type AutonomyLevel, type GatePolicy } from '../../src/shared/gates'
@@ -157,6 +157,7 @@ function rig(options: RigOptions = {}) {
     autonomy: AutonomyLevel | null
     tools: { grants: readonly unknown[]; targetPath: string } | null
   }[] = []
+  const persisted: (readonly ProfileInstance[])[] = []
 
   const activations = new ProfileActivations({
     store: new ProfileStore(profiles, path.join(home, 'no-builtins')),
@@ -200,7 +201,10 @@ function rig(options: RigOptions = {}) {
     removeTrigger: (id) => triggers.delete(id),
     targetExists: (p) => fs.existsSync(p) && fs.statSync(p).isDirectory(),
     now: () => new Date('2026-08-31T12:00:00.000Z'),
-    onLogEvent: (draft) => logs.push(draft)
+    onLogEvent: (draft) => logs.push(draft),
+    // Every write-down, in order — so a test can assert that the record was
+    // written at all, and that it matches memory at the moment it was written.
+    persist: (instances) => persisted.push(instances)
   })
 
   return {
@@ -214,7 +218,8 @@ function rig(options: RigOptions = {}) {
     logs,
     hired,
     released,
-    order
+    order,
+    persisted
   }
 }
 
@@ -1409,3 +1414,222 @@ describe('every directory an activation will work in gets trusted (M8.7)', () =>
     expect(r.order).not.toContain('beforeHires')
   })
 })
+/**
+ * M8.8. A restart abandons every process and rebuilds the harness over the same
+ * home, so what comes back is whatever was written down. These cases ask the
+ * question the way the restart asks it: activate, take the record that was
+ * persisted, and hand it to a SECOND `ProfileActivations` over the same
+ * bundles — never to the same object, which would still be holding the answers
+ * in memory and would pass whatever the record said.
+ */
+describe('restoring an activation across a restart', () => {
+  it('persists the live set on activation, and again on deactivation', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { hires: ['oncall'] })
+    await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+
+    expect(r.persisted).toHaveLength(1)
+    expect(r.persisted[0]?.map((i) => i.instanceId)).toEqual(['skeleton-crew@repo:myapp'])
+    expect(r.persisted[0]?.[0]?.crew).toBe('live')
+
+    r.activations.deactivate('skeleton-crew@repo:myapp')
+    expect(r.persisted).toHaveLength(2)
+    expect(r.persisted[1]).toEqual([])
+  })
+
+  it('brings the instance back with its crew DOWN, spawning nothing', () => {
+    const r = rig()
+
+    const notes = r.activations.restore([restorable(r.targetDir)])
+
+    expect(r.spawned).toEqual([])
+    expect(r.killed).toEqual([])
+    expect(r.activations.instances().map((i) => i.instanceId)).toEqual(['crew@repo:myapp'])
+    expect(r.activations.instances()[0]?.crew).toBe('down')
+    expect(notes[0]).toContain('restored from 2026-09-05T03:00:00.000Z')
+    expect(notes[0]).toContain('1 hire(s) are down')
+  })
+
+  /**
+   * An armed schedule trigger wakes `trigger.agentId`. The crew is down, so
+   * arming one produces a wake into the void once per interval, forever.
+   */
+  it('arms NO trigger while the crew is down, and clears the armed list', () => {
+    const r = rig()
+
+    const notes = r.activations.restore([restorable(r.targetDir)])
+
+    expect([...r.triggers.keys()]).toEqual([])
+    expect(r.activations.instances()[0]?.armed).toEqual([])
+    expect(notes[0]).toContain('1 schedule trigger(s) stay disarmed')
+  })
+
+  /**
+   * The seam M8.7 added. `AgentManager.spawnConfig` asks these two questions
+   * during a spawn, and `planFor` answers them by walking the live set — so a
+   * restored instance must answer for its agents, or a rehired agent silently
+   * gets `manual` autonomy and no tools.
+   */
+  it('answers autonomy and tool grants for a restored instance', () => {
+    const r = rig()
+    r.activations.restore([restorable(r.targetDir)])
+
+    expect(r.activations.autonomyFor('agent.crew-myapp-oncall', 'tool-permission')).toBe(
+      'autonomous'
+    )
+    expect(r.activations.toolsFor('agent.crew-myapp-oncall')).toEqual({
+      grants: [{ root: 'home', path: 'reviewer' }],
+      targetPath: r.targetDir
+    })
+  })
+
+  /** `watchedRepos` drives the Harbor's ingest — the watch that stopped. */
+  it('a restored instance is watched again', () => {
+    const r = rig()
+    r.activations.restore([restorable(r.targetDir)])
+    expect(watchedRepos(r.activations.instances())).toEqual(['owner/app'])
+  })
+
+  /**
+   * Without this the restore would replace one stuck state with a worse one:
+   * the instance is back, the crew is not, and `activate` refuses the
+   * duplicate that would have brought it back.
+   */
+  it('a restored instance can be reactivated, and that hires the crew', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    r.activations.restore([restorable(r.targetDir)])
+
+    const again = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+
+    expect(again.ok).toBe(true)
+    expect(r.spawned.map((s) => s.agentId)).toEqual(['agent.crew-myapp-oncall'])
+    expect(r.activations.instances()[0]?.crew).toBe('live')
+  })
+
+  it('still refuses to activate over a LIVE instance', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+
+    const again = await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+
+    expect(again.ok).toBe(false)
+    expect(again.ok === false && again.reasons[0]).toContain('already active')
+  })
+
+  /** Restoring must never un-hire a crew that is actually running. */
+  it('refuses to displace a live instance, and says so', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'crew', { hires: ['oncall'] })
+    await r.activations.activate({
+      profile: 'crew',
+      target: target(r.targetDir)
+    })
+
+    const notes = r.activations.restore([restorable(r.targetDir)])
+
+    expect(r.activations.instances()[0]?.crew).toBe('live')
+    expect(r.activations.instances()[0]?.agentIds).toEqual(['agent.crew-myapp-oncall'])
+    expect(notes[0]).toContain('already live')
+  })
+
+  it('is idempotent — restoring twice leaves one instance', () => {
+    const r = rig()
+    r.activations.restore([restorable(r.targetDir)])
+    r.activations.restore([restorable(r.targetDir)])
+    expect(r.activations.instances()).toHaveLength(1)
+  })
+
+  it('writes the restored set down, so a second restart sees it too', () => {
+    const r = rig()
+    r.activations.restore([restorable(r.targetDir)])
+    expect(r.persisted).toHaveLength(1)
+    expect(r.persisted[0]?.[0]?.crew).toBe('down')
+  })
+})
+
+/** One previously-live instance, shaped as the record on disk holds it. */
+function restorable(targetPath: string): ProfileInstance {
+  return {
+    instanceId: 'crew@repo:myapp',
+    plan: {
+      instanceId: 'crew@repo:myapp',
+      profile: 'crew',
+      profileVersion: 1,
+      targetRef: 'repo:myapp',
+      targetPath,
+      hires: [
+        {
+          agentId: 'agent.crew-myapp-oncall',
+          hire: 'oncall',
+          hireRef: 'oncall@1',
+          spawn: {
+            agentId: 'agent.crew-myapp-oncall',
+            name: 'Oncall',
+            role: 'oncall',
+            engine: 'claude',
+            cwd: targetPath,
+            capabilities: [],
+            envGrants: []
+          },
+          isolation: {
+            hire: 'oncall',
+            agentId: 'agent.crew-myapp-oncall',
+            declared: 'worktree',
+            declaredFrom: 'default',
+            effective: 'worktree',
+            relaxed: false,
+            tightened: false,
+            because: 'the bundle said nothing, so the default applies'
+          },
+          onExit: 'respawn',
+          tools: [{ root: 'home', path: 'reviewer' }]
+        }
+      ],
+      envGrants: [],
+      grantsUnavailable: [],
+      autonomy: [
+        {
+          kind: 'tool-permission',
+          global: 'autonomous',
+          requested: 'autonomous',
+          effective: 'autonomous',
+          clamped: false
+        }
+      ],
+      triggers: [
+        {
+          id: 'crew@repo:myapp/sweep',
+          when: 'every 30m',
+          everyMs: 1_800_000,
+          event: null,
+          agentId: 'agent.crew-myapp-oncall',
+          playbook: 'sweep.md'
+        }
+      ],
+      memoRequires: [],
+      repos: ['owner/app'],
+      reposFrom: 'target',
+      reposBecause: 'read from the target checkout',
+      playbooks: ['sweep.md']
+    },
+    agentIds: ['agent.crew-myapp-oncall'],
+    crew: 'live',
+    armed: ['crew@repo:myapp/sweep'],
+    pendingEvents: [],
+    activatedAt: '2026-09-05T03:00:00.000Z'
+  }
+}

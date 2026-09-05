@@ -1,7 +1,14 @@
 # Ephesus — Software Design Description (SDD)
 
 **Version:** 1.0 · **Status:** Approved for implementation
-**Satisfies:** [SRS](../srs/SRS.md) FR-1…FR-12, NFR-1…NFR-16 · **Justified by:** [ADR-0001…0015](../adr/README.md)
+**Satisfies:** the [SRS](../srs/SRS.md) — §12 maps every FR to its design section,
+plus the NFRs whose design is a section rather than a property of the whole ·
+**Justified by:** the [accepted ADRs](../adr/README.md), cited per section
+
+*(Stated as ranges through M8.7 — "FR-1…FR-12, ADR-0001…0015" — which had been
+wrong since FR-13 and ADR-0016 landed and would go stale again on the next
+addition. A pointer to the index maintains itself; §12 carries the mapping that
+actually has to be kept true.)*
 
 This document describes *how* Ephesus is built: process architecture, module map, data
 models, on-disk formats, IPC contracts, state machines, and the key runtime sequences.
@@ -62,19 +69,21 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `odeon.ts` | Briefing compiler, deck-gate on task close, memo policy engine + queues + verdict routing, meeting driver (turn-taking, minutes) | 0008 |
 | `herald/` | `seam.ts` (STT/TTS/Duplex interfaces), `policy.ts` (wake word, barge-in, repeat-back, failover), `elevenlabs.ts`, `openai-realtime.ts` | 0007 |
 | `harbor/` | `github.ts` (issues/PRs/CI via `gh`), `bridge.ts` (chat bridge), `webhooks.ts`, `hires.ts` (export/import) | — |
-| `watch/` | `gates.ts` (approval queue + policy), `budgets.ts` + `ledger.ts` (durable cost), `breaker.ts` (ladder), `telemetry.ts` (OTel spans, waterfall), `secrets.ts` + `cipher.ts` (write-only broker, OS-keychain seam) | 0011, 0010 |
-| `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning. Since M8.5 the activation preview is asynchronous, because it READS the target checkout's remotes rather than remembering them, and an instance that comes up watching no repository reports it (`onWatchesNothing`). The pure half — parsing a remote URL, and refusing to choose between a fork's two — is `shared/repo-remote.ts` | 0012 |
+| `watch/` | `gates.ts` (approval queue + policy; since M8.8 the open set AND the settled verdicts are durable, and `restore()` puts both back without re-announcing them — ADR-0027), `budgets.ts` + `ledger.ts` (durable cost), `breaker.ts` (ladder; rung-3 STOPS are durable via `breaker-store.ts`, rungs 1–2 deliberately are not — ADR-0027 §5), `telemetry.ts` (OTel spans, waterfall), `secrets.ts` + `cipher.ts` (write-only broker, OS-keychain seam) | 0011, 0010, 0027 |
+| `profiles.ts` | Profile load/validate/activate/instantiate; schema versioning. Since M8.5 the activation preview is asynchronous, because it READS the target checkout's remotes rather than remembering them, and an instance that comes up watching no repository reports it (`onWatchesNothing`). The pure half — parsing a remote URL, and refusing to choose between a fork's two — is `shared/repo-remote.ts`. Since M8.8 an instance carries `crew` (`live` | `down`) and `restore()` puts previously-live instances back with their crews DOWN (ADR-0027): it arms no triggers, and `activate` TAKES OVER a `down` instance rather than refusing it as a duplicate — otherwise the restore would block the reactivation that brings the crew back | 0012, 0027 |
 | `org.ts` | Departments, hire-template versioning, per-agent metrics, review/retro reports | — |
 | `gymnasium.ts` | Improvement-proposal validation (metric + rollback required), ledger accessors, gate classification, metric-check scheduling, rollback driver | 0015 |
 | `stoa.ts` | Watchlist accessors (Architect-only mutation, enforced in the handler like `gym.verdict`), researcher spawn plans (read-only checkout, no secret grants), brief validation (uncited finding ⇒ rejected pre-human), brief archive. The cadence tick itself is `stoa-cadence.ts` (a scheduler client, mode-gated — shipped body, exercised by the suites) | 0017, 0018 |
 | `modes.ts` | `CompanyModes` (ADR-0018): mode persistence through `config.json`'s atomic path, the §6.9 proof-gate check over the gym ledger + log (constants in `shared/mode.ts`), ledgered mode changes, the breaker's rung-3 revert (roles per `isImprovementRole`) | 0018 |
-| `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) with idempotent ticks — a trigger fires at most once per interval and is never re-entered while running. `reflection.ts` is its first client: it asks an agent to condense its own memory (ADR-0006 layer 3) and applies what the agent proposes back to the reserved `agent.library` endpoint — the harness never summarizes (ADR-0005) | 0006, 0005 |
+| `scheduler.ts` | Cron-like triggers (standups, reflection, reviews, profile triggers) with idempotent ticks — a trigger fires at most once per interval and is never re-entered while running. Since M8.8 the last-fired clock is keyed by trigger id INDEPENDENTLY of registration and is durable (ADR-0027, §4.8): it is the one piece of scheduler state a restart cannot re-derive, and losing it makes every restored trigger due immediately. It is also the ONLY copy of that fact — a second copy on the registration was removed when a mutation pass showed no test could tell which one `add` preferred. `reflection.ts` is its first client: it asks an agent to condense its own memory (ADR-0006 layer 3) and applies what the agent proposes back to the reserved `agent.library` endpoint — the harness never summarizes (ADR-0005) | 0006, 0005 |
 | `db.ts` | SQLite: app-local state (window bounds, command history) + cost ledger | 0004, 0011 |
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
 | `home.ts` | The harness home's shape: `HOME_DIRS`, creation, `config.json` load with a visible warning on a corrupt file, and the first-boot seeding of the files the harness requires — `gate-policy.json` and `authority.json`, written from schema-validated values, only when absent, and reported so the Architect learns they exist (M8.4) | — |
 | `fsx.ts` | `writeFileAtomic` — temp file + rename, the one write path for anything another process reads (invariant §3) | 0003 |
 | `degradations.ts` | The degradation channel (M8.2): one entry per CAUSE rather than per occurrence, the bounded ladder that decides what reaches `log.jsonl`, the clear, and the boot replay that marks a surviving condition as carried over. The model and the line the Architect reads are `shared/degradation.ts` | 0004 |
-| `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, and hands the quit to `shutdown.ts`. Holds no logic of its own | 0001 |
+| `state-store.ts` | `JsonStateStore<T>` — one mechanism for the app-local durable records a restart restores (ADR-0027): schema-validated on read AND before write, atomic through `fsx.ts`, and it distinguishes an ABSENT file (an ordinary first run) from a DAMAGED one (state exists that can no longer be read). Collapsing those two is how a restart that restored nothing looks healthy. `load` never throws, because boot runs before the window exists. `FileBreakerStopStore` is deliberately not migrated onto it — its `load` throws by design, which is a safety contract this class does not offer | 0027 |
+| `restore.ts` | The boot replay (ADR-0027): owns the ORDER the records come back in and what happens when one cannot be read — the two things no individual store can own. One damaged record costs its own subsystem and nothing else; every loss becomes a `restart/*` degradation naming its consequence. Also `activationsRecord`, the one place the live set is converted to its on-disk form | 0027, 0012 |
+| `index.ts` | Boot and wiring: constructs every module above, connects the two planes, registers IPC, calls the boot replay (§7.9), and hands the quit to `shutdown.ts`. Holds no logic of its own | 0001, 0027 |
 | `shutdown.ts` | The quit sequence (M8.1): closing time, then the agent unwind, then the stops, each phase isolated so one failure never skips the next; idempotent, Electron-free, and driven by the scenario suite as well as by `index.ts` | 0001 |
 | `ui-bridge.ts` | The one door from main to the renderer (M8.1): owns the window, forgets it when it closes, refuses to send to a destroyed one, and is the `PtySink` the terminal stream writes to. A `webContents.send` anywhere else fails `check-invariants` | 0001, 0014 |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
@@ -98,6 +107,16 @@ The hook socket is `0600` with a per-spawn token in each payload.
                              #  mode to gate-policy: a convenience that cannot be read must
                              #  not stop an activation). NOT a restore list — choosing one
                              #  fills the form and still goes through preview and activate
+  activations.json           # live mission instances, so a restart does not silently
+                             #  un-hire the company (ADR-0027, §4.8). Restored with each
+                             #  crew DOWN: the plan comes back, the processes do not
+  gates.json                 # open gates AND settled verdicts (§4.8). The gate was the
+                             #  half in memory while the BLOCK in tasks.json was durable,
+                             #  so an unanswered gate blocked its task forever
+  triggers.json              # trigger id -> last-fired epoch ms (§4.8). The one piece of
+                             #  scheduler state a restart cannot re-derive
+                             # All three: absent on a first run and silent about it;
+                             #  DAMAGED is reported and never read as absent
   events.sock                # hook socket (0600) — also answers `POST /recall`
                              #  for the agent-facing `eph-recall` CLI (ADR-0006
                              #  layer 2): one socket, one per-spawn token registry
@@ -442,6 +461,53 @@ immutable once archived; proposals cite them by id in their evidence refs.
 
 ---
 
+### 4.8 Restart records (app-local, ADR-0027)
+
+Three files under the harness home, each `JsonStateStore`-managed: a
+`schemaVersion`, an atomic temp+rename write, validation **before** writing as
+well as on reading, and three distinguishable load outcomes — absent (an
+ordinary first run), parsed, and damaged. Absent and damaged must never
+collapse into one another: absent says nothing, damaged means state exists that
+can no longer be read, and each has a different disclosed consequence.
+
+```jsonc
+// activations.json
+{ "schemaVersion": 1,
+  "instances": [{
+    "instanceId": "skeleton-crew@repo:myapp",
+    "plan": { /* the ActivationPlan verbatim — never re-derived (ADR-0027 §3) */ },
+    "agentIds": ["agent.skeleton-crew-myapp-oncall"],
+    "crew": "live" | "down",   // a RESTORED instance is always "down"
+    "armed": ["skeleton-crew@repo:myapp/sweep"],  // emptied while the crew is down
+    "pendingEvents": [{ "id": "…", "event": "ci" }],
+    "activatedAt": "2026-09-05T03:00:00.000Z" }] }
+
+// gates.json
+{ "schemaVersion": 1,
+  "open":    [ /* OpenGate, §9 */ ],
+  "settled": [{ "id": "g-…", "verdict": "approved" }] }   // bounded at 1000, newest kept
+
+// triggers.json
+{ "schemaVersion": 1, "lastFired": { "standup": 1788631795998 } }
+```
+
+**Why `settled` is kept and not just `open`:** `decide` answers "was already
+approved" out of it, which is what stops a repeated verdict being processed
+twice (§6 criterion 6). A restart that dropped it turned every answered gate
+back into "no open gate" — a different answer to the same question. Gate ids are
+time-prefixed, so the bound keeps the newest by a lexicographic sort.
+
+**What `crew` obliges the design to do** (the reasoning is ADR-0027 §2's; these
+are the two behaviours it binds): a restored instance arms no triggers, and
+`activate` takes over a `down` instance rather than refusing it as a duplicate
+(FR-9.4).
+
+**What is NOT here** is as load-bearing as what is: incident correlation,
+capacity parks and breaker rungs 1–2 are deliberately not persisted. See
+ADR-0027 §5 for the reasoning — the short form is *persist a decision about an
+identity; do not persist an observation about a process, nor state a live
+subsystem re-derives from a durable source.*
+
 ## 5. IPC contract (`window.eph`)
 
 Typed, promise-based, all validated in main. Grouped surface (abridged — the `.d.ts`
@@ -655,6 +721,58 @@ PR-and-review protected, so the host enforces what the harness promises.
 
 ---
 
+### 7.9 Boot replay (NFR-5, ADR-0027)
+
+What the company gets back when the process it was running in went away. The
+ORDER is the design; `restore.ts` owns it because no individual store can.
+
+```
+boot()
+  │  home, then the three JsonStateStores — BEFORE any subsystem that writes to
+  │  them, so no change happens in a window where the store is still null
+  ├─ agora.ensureRepo() → reconcile() → degradations.replay()        [M8.2]
+  ├─ construct gates, …, activations
+  │
+  └─ restoreCompany(stores, targets)
+       ① triggers   seed the last-fired clock. FIRST, so a restored trigger is
+       │            not due the instant something arms it. (The scheduler keys
+       │            the clock by id independently of registration, so this is a
+       │            preference and not a hard ordering rule — an ordering
+       │            requirement between two boot steps holds until someone
+       │            moves a line, and nothing reports the day it stops holding.)
+       ② activations put each instance back with crew = down. This is what makes
+       │            planFor answer again, so tool grants (ADR-0026) and composed
+       │            autonomy (FR-11.1) work for a rehired agent, and what puts
+       │            the instance back in watchedRepos for the Harbor.
+       ③ gates      open set + settled verdicts, WITHOUT re-firing onOpen — a
+       │            restored gate is already in the queue the renderer reads on
+       │            connect, and replaying the notification would announce a
+       │            three-hour-old hold as if it had just happened, out loud on
+       │            the voice surface.
+       ④ reconcile  restored gates vs. task.gates in tasks.json:
+       │              orphan → a task held by a gate in NO record. REPORTED by
+       │                       task id, never released (NFR-9 deny-by-default).
+       │              stale  → a restored gate no task holds any more. Dropped.
+       │
+       └─ RestoreReport { notes, problems, counts }
+            notes    → console + log.jsonl  {kind: profile, event: restored}
+            problems → reportDegradation('restart/…')                [M8.2]
+  │
+  └─ harbor = new GitHubHarbor(…); harbor.probe().then(ingest)
+       ↑ the replay runs BEFORE this: ingest reads watchedRepos off the live
+         set, so restoring later would leave the first ingest of every restart
+         watching nothing.
+```
+
+It never throws — boot runs before the window exists, and a throw here is a dead
+app rather than a degraded one (FR-5.4). Every store loads independently, so one
+damaged record costs its own subsystem and nothing else.
+
+**The crew is not respawned.** Without engine session recovery a respawned agent
+re-reads its mailbox and redoes in-flight work, which is the double-processing
+§6 criterion 6 forbids (ADR-0027 §2). `--resume` is owed; when it lands this
+becomes auto-respawn without changing the restore.
+
 ## 8. The Herald — component design (ADR-0007)
 
 ```
@@ -730,7 +848,7 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | Agent process crash | ghost → archive; ledger tasks back to `todo` with note (the note is a `task`/`returned` entry in `log.jsonl` — `tasks.json` carries no notes field); respawn offer on the agent card (`resumable` only where the adapter has `resume` *and* the event plane saw a session; `memorySections` from ADR-0006 layer 1). **Amended M8.6:** the offer is now RENDERED — it had zero references outside main until then, so a dead crew agent had no way back — and it carries `blockedBecause`, so a card never shows a control for a respawn that would be refused. A hire whose bundle declares `onExit: "respawn"` additionally gets a backoff ladder (`respawn.ts`, three rungs, five-minute stability window); the default stays `offer` |
 | Agent stopped by the breaker at rung 3 | The stop is a decision about the AGENT, not about the process: it is recorded before the stop is performed and outlives the exit it causes (M8.6, B11). It refuses every respawn path — the crew's ladder, the orchestrator's ladder, and the Architect accepting the offer — until a human clears it (`Breaker.clearStop`), which also returns the agent to rung 0. Before this, `forget` ran on every exit including the one rung 3 had just caused, so an exhausted budget cycled instead of stopping: 21 climbs to rung 1 against exactly one completed stop across a 24.9M-token day |
 | Worktree isolation requested and unavailable | The spawn is REFUSED, naming git's own reason, and the agent id is released so the Architect can fix the repository and activate again (M8.6, Architect decision 2026-09-04). It used to log the failure and continue in the Architect's own checkout; that fallback was the harm isolation is requested to prevent. Profile activation is all-or-nothing, so one refused hire refuses the instance rather than leaving a partial crew |
-| Harness crash | On start: committer reconciles uncommitted Agora files; cursors prevent re-processing; PTYs are gone — agents relisted as `ghost`, resumable ones offered |
+| Harness crash | On start: committer reconciles uncommitted Agora files; cursors prevent re-processing; PTYs are gone — agents relisted as `ghost`, resumable ones offered. **Amended M8.8 (ADR-0027):** the boot replay (§7.9) additionally restores the live coordination state that has no committed file — active mission instances, open gates *and their settled verdicts*, and the trigger last-fired clock. A restored instance comes back with its crew **down** and arms no triggers; the Architect rehires by reactivating it. A durable block in `tasks.json` whose gate is in no record is an ORPHAN: reported by task id, never released, because auto-clearing it would approve an action no human ever saw. Anything that cannot be read is a `restart/*` degradation naming its consequence — a record that is ABSENT is an ordinary first run and says nothing, a record that is DAMAGED says so |
 | Hook socket down | Engine shims fail-open (agent unaffected); floor freezes with a visible "events stale" banner, never invents motion |
 | Message to dead agent | bounce `refuse` + log (FR-3.4) |
 | Git lock contention | impossible by construction (single committer); stale locks from crashes cleaned at startup (ADR-0004) |
@@ -772,3 +890,4 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | FR-12 | §2, §7.6 (gymnasium.ts), ADR-0015 |
 | FR-13 | §2, §4.7, §7.7 (stoa.ts), ADR-0017 |
 | FR-14 | §9, §7.7 (watch/gates.ts, scheduler.ts), ADR-0018 |
+| NFR-5 | §2, §4.8, §7.9, §10 (restore.ts, state-store.ts), ADR-0027 |

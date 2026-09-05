@@ -60,6 +60,12 @@ export const DEGRADATION_SOURCES = [
   'renderer',
   // A ladder that gave up, or an attempt that threw (M8.6).
   'respawn',
+  // What the boot replay could not bring back, and what a record that cannot be
+  // written means for the NEXT restart (M8.8). Its own source rather than one
+  // slug per subsystem, because these conditions share a cause the Architect
+  // acts on as one thing: the durable state is damaged or unwritable, and the
+  // company is running on memory alone until it is repaired.
+  'restart',
   'scheduler',
   'secrets',
   'settings',
