@@ -5189,6 +5189,15 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       *OWED: the autonomy defect deserves a SCENARIO test asserting the spawn's
       `--permission-mode`, not only a unit one; nothing reaps
       `~/.ephesus/engines/<engine>/<agent>/` yet.*
+      *CI FLAKE, a NEW class, recorded so it is not re-diagnosed: run
+      `33965218754` on `05ba1f8` failed in the **Install** step, not the suite —
+      `npm ci` → `better-sqlite3` → `node-gyp rebuild` died with
+      `AssertionError: assert(!this.paused)` inside undici while downloading the
+      node headers. Nothing to do with the commit; `gh run rerun --failed`
+      passed. This is DISTINCT from the M8.0-era ubuntu flake owed to M8.9 (a
+      one-millisecond timing assertion in `pacing-wakes.test.ts`) — that one is
+      product code, this one is the toolchain, and only the second is fixed by
+      re-running.*
 
 - [ ] **M8.8 A restart is survivable** — B16, B17, D1, D7, D8. Activation state
       is one in-memory map with no boot replay, so a restart silently un-hires
