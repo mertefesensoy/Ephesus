@@ -147,6 +147,43 @@ describe('the plan is rendered as a disclosure', () => {
     expect(html).not.toContain('the broker cannot supply')
   })
 
+  it('names the tool directories the company would grant (M8.7b)', () => {
+    // ADR-0026 stopped the engine reading any settings source but the
+    // harness's, so nothing reaches a hire except what THIS bundle named. A
+    // granted directory is read by the agent as instructions, which is exactly
+    // why it belongs on the screen the Architect reads before saying yes rather
+    // than in a file they would have to go looking for.
+    const granted = plan()
+    const html = renderToStaticMarkup(
+      <PlanView
+        plan={{
+          ...granted,
+          hires: granted.hires.map((hire) => ({
+            ...hire,
+            tools: [
+              { root: 'target' as const, path: '.claude' },
+              { root: 'home' as const, path: 'company-tools' }
+            ]
+          }))
+        }}
+      />
+    )
+
+    expect(html).toContain('Tools the company grants them')
+    // The DECLARATION, not a resolved absolute path: the declaration is what is
+    // being approved, and the path is only its consequence.
+    expect(html).toContain('target:.claude')
+    expect(html).toContain('home:company-tools')
+  })
+
+  it('says nothing about tools when the bundle granted none', () => {
+    // The section must not appear empty. A heading over an empty list reads as
+    // "the company granted something and it is missing", which is a different
+    // and more alarming fact than "this profile grants no tools".
+    const html = renderToStaticMarkup(<PlanView plan={plan()} />)
+    expect(html).not.toContain('Tools the company grants them')
+  })
+
   it('shows a CLAMPED autonomy row, not just the effective level', () => {
     const html = renderToStaticMarkup(<AutonomyRow row={AUTONOMY[1] as ComposedAutonomy} />)
     // A profile that wanted `autonomous` and was cut back is a fact about the
