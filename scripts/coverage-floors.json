@@ -755,8 +755,8 @@
     },
     "linux": {
       "measured": {
-        "at": "2026-09-05T09:58:04.048Z",
-        "commit": "67dee18",
+        "at": "2026-09-05T10:05:43.672Z",
+        "commit": "7668beb",
         "ref": "feature/m8-6-crew-isolation",
         "tree": "ad63dcad160a",
         "platform": "linux",
@@ -997,22 +997,137 @@
                 "statements": 47.26
               }
             }
+          },
+          {
+            "at": "2026-09-05T10:05:43.672Z",
+            "commit": "7668beb",
+            "ref": "feature/m8-6-crew-isolation",
+            "tree": "ad63dcad160a",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-05T10:05:43.570Z",
+            "floors": {
+              "boot": {
+                "lines": 17.39,
+                "branches": 5.61,
+                "functions": 6.34,
+                "statements": 16.6
+              },
+              "engines": {
+                "lines": 95,
+                "branches": 86.08,
+                "functions": 90.76,
+                "statements": 92.62
+              },
+              "hermes": {
+                "lines": 98.45,
+                "branches": 87.31,
+                "functions": 97.56,
+                "statements": 95.73
+              },
+              "agora": {
+                "lines": 96.95,
+                "branches": 87.34,
+                "functions": 95.86,
+                "statements": 95.25
+              },
+              "artemis": {
+                "lines": 97.62,
+                "branches": 91.3,
+                "functions": 91.43,
+                "statements": 97.04
+              },
+              "library": {
+                "lines": 90.22,
+                "branches": 78.75,
+                "functions": 86.4,
+                "statements": 88.42
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 89.38,
+                "branches": 75.12,
+                "functions": 89.19,
+                "statements": 87.87
+              },
+              "watch": {
+                "lines": 96.12,
+                "branches": 86.97,
+                "functions": 89.82,
+                "statements": 94.79
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.24,
+                "branches": 92.27,
+                "functions": 93.2,
+                "statements": 95.66
+              },
+              "home": {
+                "lines": 51.76,
+                "branches": 40.63,
+                "functions": 33.33,
+                "statements": 51.58
+              },
+              "panels": {
+                "lines": 30.11,
+                "branches": 33.72,
+                "functions": 22.57,
+                "statements": 28.85
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
           }
         ]
       },
       "floors": {
         "boot": {
-          "lines": 16.79,
-          "branches": 5.02,
-          "functions": 6.01,
-          "statements": 15.93,
+          "lines": 17.39,
+          "branches": 5.61,
+          "functions": 6.34,
+          "statements": 16.6,
           "files": 7
         },
         "engines": {
-          "lines": 93.27,
-          "branches": 85.09,
-          "functions": 88.48,
-          "statements": 90.58,
+          "lines": 95,
+          "branches": 86.08,
+          "functions": 90.76,
+          "statements": 92.62,
           "files": 22
         },
         "hermes": {
@@ -1023,17 +1138,17 @@
           "files": 7
         },
         "agora": {
-          "lines": 96.86,
-          "branches": 87.1,
-          "functions": 95.83,
-          "statements": 95.12,
+          "lines": 96.95,
+          "branches": 87.34,
+          "functions": 95.86,
+          "statements": 95.25,
           "files": 11
         },
         "artemis": {
-          "lines": 97.26,
-          "branches": 89.53,
-          "functions": 87.88,
-          "statements": 93.98,
+          "lines": 97.62,
+          "branches": 91.3,
+          "functions": 91.43,
+          "statements": 97.04,
           "files": 2
         },
         "library": {
@@ -1058,17 +1173,17 @@
           "files": 15
         },
         "watch": {
-          "lines": 95.86,
-          "branches": 86.73,
-          "functions": 89.42,
-          "statements": 94.55,
+          "lines": 96.12,
+          "branches": 86.97,
+          "functions": 89.82,
+          "statements": 94.79,
           "files": 20
         },
         "terraces": {
-          "lines": 75.13,
-          "branches": 71.69,
-          "functions": 84.16,
-          "statements": 75.3,
+          "lines": 76.39,
+          "branches": 72.91,
+          "functions": 85.22,
+          "statements": 76.4,
           "files": 22
         },
         "gymnasium": {
@@ -1086,10 +1201,10 @@
           "files": 5
         },
         "company": {
-          "lines": 96.7,
-          "branches": 91.61,
-          "functions": 92.59,
-          "statements": 95.2,
+          "lines": 97.24,
+          "branches": 92.27,
+          "functions": 93.2,
+          "statements": 95.66,
           "files": 13
         },
         "home": {
@@ -1100,10 +1215,10 @@
           "files": 6
         },
         "panels": {
-          "lines": 23.07,
-          "branches": 26.1,
-          "functions": 17.47,
-          "statements": 22.31,
+          "lines": 30.11,
+          "branches": 33.72,
+          "functions": 22.57,
+          "statements": 28.85,
           "files": 24
         },
         "herald": {
