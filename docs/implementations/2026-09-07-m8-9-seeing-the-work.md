@@ -64,7 +64,7 @@ the application could show it.
 | `src/renderer/src/ProfilesPanel.tsx` | Mounts it |
 | `src/shared/ipc.ts`, `src/preload/index.ts`, `src/main/ipc.ts`, `src/main/index.ts` | `harbor:incidents` — one read channel |
 | `docs/sdd/SDD.md` | §5 gains `harbor: incidents()` with why there is no store |
-| `scripts/coverage-floors.json` | Three new modules assigned; the win32 record re-measured (2 of 3 corroborating runs — see §7) |
+| `scripts/coverage-floors.json` | Three new modules assigned; the win32 floors ratcheted (see §7) |
 | `test/main/hires-exchange.test.ts` | Its harbor tripwire gains a pinned read-only list |
 
 New tests: `test/main/incident-refusals.test.ts` (12) · `test/shared/parse-reasons.test.ts` (6) ·
@@ -257,16 +257,22 @@ it runs the real endpoint against a real `Agora` in a temp directory and folds w
   34.5% to 42.43%, branches from 40.26% to 44.57%, statements from 33.36% to 40.75%; `boot` lines
   rise from 20.63% to 26.69% on the App import graph.
 
-**Owed.** The win32 ratchet stands at **2 of 3** corroborating runs on tree `d2cddb05c4db`, so a
-plain `node scripts/check-coverage.cjs` still reports the record as stale-upward and the floors
-have not risen. That is a machine condition rather than a code one: free memory fell to **0.11 GB
-of 16.8 GB** during the session and vitest's forks began dying mid-run (`Worker exited
-unexpectedly`), after which no run could produce a report at all. The tree is green twice over —
-`212 files / 4014 passed / 0 failed / 8 skipped` at default parallelism and again at
-`--maxWorkers=4`, with byte-identical totals (8174/10625 lines), which is also the evidence that
-worker count does not move this measurement. One more
-`npm run test:coverage && node scripts/check-coverage.cjs --update` on this tree, with no
-production file touched, completes it.
+The win32 floors are **ratcheted on tree `d2cddb05c4db`** across three corroborating runs, rising
+only to their lowest: `panels` lines 34.5 → 42.43, branches 40.26 → 44.57, functions 27.35 →
+30.61, statements 33.36 → 40.75; `boot` lines 20.63 → 26.69, branches 8.59 → 16.57, functions
+8.19 → 12.75, statements 19.75 → 25.87; `stoa` statements 95.16 → 95.5. A plain
+`node scripts/check-coverage.cjs` is green.
+
+**A machine condition worth writing down**, because it cost an hour and looked exactly like a
+regression: free memory fell to **0.11 GB of 16.8 GB** partway through the session, vitest's
+forks began dying mid-run (`Worker exited unexpectedly`), and the suite reported first 15 and
+then 39 "failures" — none of which were real, and no coverage report was written at all. Two
+observations settled it without a code hunt: the same tree ran green at `--maxWorkers=4` with
+**byte-identical totals** (8174/10625 lines), which is also the evidence that worker count does
+not move this measurement; and the ordinary command succeeded again the moment free memory
+returned to 2.78 GB. Read `os.freemem()` before believing a suite that starts failing in
+batches — and do not run anything else during a corroborating run, which is how two of the three
+were lost the first time.
 
 ## 8. Related docs
 

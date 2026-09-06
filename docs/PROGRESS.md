@@ -5541,22 +5541,23 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       34.5 -> 42.43, branches 40.26 -> 44.57, statements 33.36 -> 40.75, and
       boot lines 20.63 -> 26.69 on the App import graph.*
 
-      ***OWED, and the one thing this package did not finish: the win32 ratchet
-      stands at 2 of 3 corroborating runs*** *on tree `d2cddb05c4db`
-      (`scripts/coverage-floors.json` -> `platforms.win32.candidate`), so a plain
-      `node scripts/check-coverage.cjs` still reports the record as stale-upward
-      and the floors have NOT risen. This is a machine condition, not a code
-      one: free memory fell from ~2 GB to **0.11 GB of 16.8 GB** over the
-      session and vitest's forks began dying mid-run ("Worker exited
-      unexpectedly"), so no further run could produce a report at all. The tree
-      itself is green — two full runs on it, `212 files / 4014 passed / 0
-      failed / 8 skipped`, one at default parallelism and one at
-      `--maxWorkers=4`, with byte-identical totals (8174/10625 lines), which is
-      also the evidence that worker count does not move this measurement.
-      **Next session: run `npm run test:coverage && node
-      scripts/check-coverage.cjs --update` ONCE on this tree, without touching a
-      production file, and the floors rise to the lowest of the three.** Do not
-      re-measure from a different tree, and do not lower a floor to get green.*
+      *The win32 floors are RATCHETED on tree `d2cddb05c4db`, three corroborating
+      runs, rising only to their lowest: panels lines 34.5 -> 42.43, branches
+      40.26 -> 44.57, functions 27.35 -> 30.61, statements 33.36 -> 40.75; boot
+      lines 20.63 -> 26.69, branches 8.59 -> 16.57, functions 8.19 -> 12.75,
+      statements 19.75 -> 25.87; stoa statements 95.16 -> 95.5. A plain
+      `node scripts/check-coverage.cjs` is green.*
+
+      ***A machine condition worth recording, because it cost an hour and looked
+      like a regression.*** *Free memory fell to **0.11 GB of 16.8 GB** partway
+      through the session and vitest's forks began dying mid-run ("Worker exited
+      unexpectedly"), producing runs with 15 and then 39 "failures" that were
+      nothing of the kind — no coverage report was written at all. Two things
+      settled it rather than a code hunt: the same tree ran green at
+      `--maxWorkers=4` with **byte-identical totals** (8174/10625 lines), which
+      is also the evidence that worker count does not move this measurement; and
+      the run succeeded normally once memory returned to 2.78 GB. **Read
+      `os.freemem()` before believing a suite that started failing in batches.***
 
 - [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
       read parses from byte zero: a synthetic overnight measured 28.4 MB and
