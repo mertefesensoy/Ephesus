@@ -1,0 +1,1 @@
+{{pendingTasks}} task(s) are assigned to you and unfinished: {{tasks}} — read them in the ledger, pick them up in order, and report through your `outbox/` when one is done or if you cannot make progress on it.

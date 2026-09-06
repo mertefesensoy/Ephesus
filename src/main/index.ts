@@ -26,6 +26,8 @@ import { createCrewSurvival, type CrewSurvival } from './respawn'
 import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
+import { decideRelaunch, describeRendererDeath } from '../shared/renderer-health'
+import { provesTurnRunning } from '../shared/hooks'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { GatesRecord, OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
@@ -109,8 +111,15 @@ import { FileBreakerStopStore } from './watch/breaker-store'
 import { BudgetWatcher } from './watch/budgets'
 import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
-import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
+import {
+  GateManager,
+  gatePolicyView,
+  loadGatePolicy,
+  saveGateCeilings,
+  wireGateChokePoints
+} from './watch/gates'
 import { EMPTY_GATES, GATES_REL, gatesRecordSchema } from '../shared/gates'
+import { DRAFTS_REL, draftsRecordSchema, EMPTY_DRAFTS, type DraftsRecord } from '../shared/outbound'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
@@ -194,6 +203,7 @@ let restartStores: {
   readonly triggers: StateStore<TriggersRecord>
   readonly activations: StateStore<ActivationsRecord>
   readonly gates: StateStore<GatesRecord>
+  readonly drafts: StateStore<DraftsRecord>
 } | null = null
 
 /**
@@ -208,7 +218,7 @@ let restartStores: {
 function writeRestartRecord<T>(
   store: StateStore<T> | undefined,
   value: T,
-  what: 'triggers' | 'activations' | 'gates'
+  what: 'triggers' | 'activations' | 'gates' | 'drafts'
 ): void {
   if (store === undefined) return
   const saved = store.save(value)
@@ -325,7 +335,17 @@ function reportDegradation(cause: DegradationCause, detail: string): void {
  */
 const commandQueue = new CommandQueue({
   sink: { write: (agentId, data) => ptyManager.write(agentId, data) },
-  onChange: (state: CommandState) => ui.send(COMMANDS_STATE_CHANNEL, state)
+  onChange: (state: CommandState) => ui.send(COMMANDS_STATE_CHANNEL, state),
+  // The text reached the agent's prompt box and no submit key would run it.
+  // Silent before 2026-09-06, which is how an on-call agent sat idle for
+  // eighteen minutes with two incidents assigned to it and nothing anywhere
+  // said so.
+  onUnaccepted: (agentId, attempts) =>
+    reportDegradation(
+      `commands/unaccepted:${agentId}`,
+      `${agentId} did not submit the text it was sent after ${String(attempts)} attempt(s) — ` +
+        `it is sitting in the agent's prompt box unrun`
+    )
 })
 
 /**
@@ -415,6 +435,11 @@ const hookServer = new HookServer({
     // no `stop` and would otherwise leave a timer that fires at an agent which
     // is no longer there.
     if (envelope.event === 'prompt-submitted') wakeClock?.began(envelope.agentId)
+
+    // The engine's own evidence that a turn is running, which is the only thing
+    // that stops the command queue pressing the submit key again. Which events
+    // count — and, just as much, which do not — is `provesTurnRunning`.
+    if (provesTurnRunning(envelope.event)) commandQueue.accepted(envelope.agentId)
     if (envelope.event === 'stop' || envelope.event === 'session-end') {
       wakeClock?.ended(envelope.agentId)
     }
@@ -709,6 +734,14 @@ function steerTemplateFor(hit: { signal: string; detail: Record<string, unknown>
   return hit.detail['source'] === 'stop-loop' ? 'stop-loop' : hit.signal
 }
 
+/**
+ * When each renderer death happened, so a crash LOOP can be told from a window
+ * that died once an hour. Session-lived on purpose: a relaunch ladder that
+ * survived a restart would refuse to open the very window the restart was meant
+ * to produce.
+ */
+const rendererDeaths: number[] = []
+
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
   const restored = sanitizeBounds(db?.getWindowBounds(), displays)
@@ -741,6 +774,54 @@ function createWindow(): void {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  /**
+   * The renderer died (2026-09-06). Until this handler existed nothing in the
+   * harness noticed: `UiBridge` cannot tell a dead renderer from a closing
+   * window, so every send became a silent no-op while main, the agents and the
+   * triggers all carried on. The Architect got a white window and no reason.
+   *
+   * `clean-exit` during the quit sequence is the window going away on purpose;
+   * anything else is a fault, and even a clean exit outside a quit is one.
+   */
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (quit.hasStarted() || quit.hasFinished()) return
+    rendererDeaths.push(Date.now())
+    const verdict = decideRelaunch(rendererDeaths, Date.now())
+    reportDegradation(
+      'renderer/gone',
+      `${describeRendererDeath(details.reason, details.exitCode)}${
+        verdict.relaunch ? ' — relaunching it' : `; ${verdict.because}`
+      }`
+    )
+    agora?.appendLog({
+      kind: 'degradation',
+      event: 'renderer-gone',
+      reason: details.reason,
+      exitCode: details.exitCode,
+      deathsInWindow: verdict.recent,
+      relaunched: verdict.relaunch
+    })
+    // The log is the only place this survives: the surface that would show it
+    // is the thing that just died.
+    if (!verdict.relaunch) return
+    if (win.isDestroyed()) createWindow()
+    else win.webContents.reload()
+  })
+
+  /**
+   * The renderer is alive but its JS thread is not answering — the shape this
+   * defect wore before it became a death. Reported rather than acted on: a busy
+   * renderer usually comes back, and killing one that was about to finish would
+   * turn a stall into a loss.
+   */
+  win.webContents.on('unresponsive', () => {
+    reportDegradation(
+      'renderer/unresponsive',
+      'the window stopped answering; the company is still running behind it'
+    )
+  })
+  win.webContents.on('responsive', () => degradations.clear('renderer/unresponsive'))
 
   ui.attach(win)
 
@@ -831,6 +912,11 @@ async function boot(): Promise<void> {
       file: path.join(home.root, GATES_REL),
       schema: gatesRecordSchema,
       empty: EMPTY_GATES
+    }),
+    drafts: new JsonStateStore({
+      file: path.join(home.root, DRAFTS_REL),
+      schema: draftsRecordSchema,
+      empty: EMPTY_DRAFTS
     })
   }
   // Files the harness had to create for itself, named rather than done quietly
@@ -1050,7 +1136,18 @@ async function boot(): Promise<void> {
       // for a gate that held no draft, so every other gate kind passes through
       // here untouched.
       if (gate.kind === 'outbound') {
-        void frontOffice?.onVerdict(gate.id, verdict === 'approved')
+        // The `false` is NOT discarded. It means the gate held no draft, which
+        // after ADR-0030 can only happen if the record was damaged or trimmed —
+        // and an approval the harness cannot honour must be a condition the
+        // Architect sees, not a comment that quietly never went out (§7).
+        void frontOffice?.onVerdict(gate.id, verdict === 'approved').then((handled) => {
+          if (handled) return
+          reportDegradation(
+            `restart/draftless-gate:${gate.id}`,
+            `gate ${gate.id} was ${verdict} but held no draft, so nothing was posted — ` +
+              'ask the agent to write the comment again'
+          )
+        })
       }
       ui.send(GATE_OPEN_CHANNEL, null)
     },
@@ -1750,6 +1847,7 @@ async function boot(): Promise<void> {
       })
       return outcome?.held === true ? outcome.gate.id : null
     },
+    persist: (record) => writeRestartRecord(restartStores?.drafts, record, 'drafts'),
     post: (permit) =>
       harbor?.postComment(permit) ?? Promise.resolve({ ok: false, because: 'no harbor' }),
     deliver: (message) => hermes?.deliverFromHarness(message),
@@ -1928,7 +2026,7 @@ async function boot(): Promise<void> {
     }),
     // ADR-0013's second branch, real at last (the M2 carried item): an agent
     // with assigned work keeps going even when its inbox is empty.
-    pendingTasksFor: (agentId) => ledger?.pendingFor(agentId) ?? 0,
+    pendingTaskIdsFor: (agentId) => ledger?.pendingIdsFor(agentId) ?? [],
     ...(envCap.cap === undefined ? {} : { blockCap: envCap.cap }),
     nudge: (agentId, text) => commandQueue.wake(agentId, text),
     /**
@@ -2067,6 +2165,24 @@ async function boot(): Promise<void> {
         `agents/teardown:${agentId}`,
         `teardown [${agentId}]: ${err instanceof Error ? err.message : String(err)}`
       ),
+    // The session died holding mail it was handed but never proved it read, so
+    // the mail goes back to the inbox and the next wake redelivers it (NFR-6).
+    // Measured before this existed: 21 of 79 wakes on this machine killed the
+    // agent, and every one of those messages was archived as read.
+    onExited: (agentId) => {
+      // Everything the router remembers telling this session, forgotten: mail it
+      // was handed but never proved it read, and any task nudge it was given.
+      // The replacement session was told none of it.
+      const returned = hermes?.forgetSession(agentId) ?? 0
+      if (returned > 0) {
+        reportDegradation(
+          `hermes/mail-returned:${agentId}`,
+          `${agentId} exited holding ${String(returned)} handed-over message(s) — ` +
+            'they are back in its inbox and will be redelivered, but the turn that was ' +
+            'supposed to act on them never happened'
+        )
+      }
+    },
     // A ghost that was parked did not crash. Asked rather than inferred from
     // the exit code, because a provider refusal and a crash look identical at
     // the pty seam — and the difference is whether a human needs to do anything.
@@ -2084,6 +2200,11 @@ async function boot(): Promise<void> {
         return null
       }
     },
+    // The company-wide ceiling, beside the autonomy ceiling it behaves like.
+    // Read per spawn, not captured at boot, so an Architect who sets it mid-run
+    // gets it on the next hire rather than after a restart. Absent means the
+    // company sets none (ADR-0029).
+    maxDailyTokens: () => loadGatePolicy(gatePolicyPath).policy.maxDailyTokens ?? null,
     // ADR-0005 "prompt as policy": Artemis's standing context is text she is
     // handed like any other hire's role brief. The lifecycle never reads it.
     roleBrief: (card) => artemis?.roleBrief(card) ?? null,
@@ -2378,6 +2499,11 @@ async function boot(): Promise<void> {
       restoreTriggers: (lastFired) => scheduler.restore(lastFired),
       restoreActivations: (record) => activations?.restore(record.instances) ?? [],
       restoreGates: (record) => gates?.restore(record) ?? { open: 0, settled: 0 },
+      restoreDrafts: (record) => frontOffice?.restore(record) ?? { filed: 0, held: 0 },
+      gatesHoldingADraft: () =>
+        (frontOffice?.pending() ?? []).flatMap((filed) =>
+          filed.gateId === null ? [] : [filed.gateId]
+        ),
       openGates: () => gates?.list() ?? [],
       // `Agora.tasks()` does NOT throw on a corrupt ledger, so the corruption
       // is asked for by name rather than caught — see `blockedTasksFrom`.
@@ -2649,6 +2775,8 @@ async function boot(): Promise<void> {
     agents: agentManager,
     prompts,
     home: home.root,
+    // The same company ceiling the hires are composed against (ADR-0029).
+    maxDailyTokens: () => loadGatePolicy(gatePolicyPath).policy.maxDailyTokens ?? null,
     // B11 applies to her too: a rung-3 stop her own ladder immediately undoes
     // is the cycle this package exists to end, and FR-14.5 already treats a
     // stop on her work as consequential enough to revert the company's mode.
@@ -2685,6 +2813,11 @@ async function boot(): Promise<void> {
     humanQueue: () => hermes?.humanQueue() ?? [],
     dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
     capacity: () => capacityWatch?.view() ?? { parked: [], since: null, retryAt: null },
+    // Read on every call, never cached: gate-policy.json is the truth and
+    // the settings panel writes it, so a snapshot here would show the
+    // Architect a ceiling that stopped being in force the moment they set it.
+    gatePolicyView: () => gatePolicyView(gatePolicyPath),
+    saveGateCeilings: (ceilings) => saveGateCeilings(gatePolicyPath, ceilings),
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')
@@ -3023,8 +3156,53 @@ async function boot(): Promise<void> {
   // The engine she is hired on is the registry's first registered adapter, so
   // adding one never leaves this line naming an engine that is not there.
   const orchestratorEngine = engines.list()[0]?.id
-  if (orchestratorEngine) void artemis.start(orchestratorEngine)
-  else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
+  if (orchestratorEngine) {
+    // ADR-0021/0025, for the one agent they never covered.
+    //
+    // Trust was written for an ACTIVATION's target and the worktrees it
+    // creates. Artemis belongs to no activation: she is hired at boot and works
+    // in the Agora (SDD §2, because `board.md` is hers to scribe), so nobody
+    // ever trusted that directory for her. Since M8.7a gave every agent its own
+    // engine config directory, hers starts with no trust record at all.
+    //
+    // What that cost, measured on 2026-09-05: she came up at the engine's
+    // "Quick safety check: is this a project you trust?" dialog, whose default
+    // is "No, exit". A wake writes its text and then the submit key — and that
+    // Enter answered the dialog. She exited 1 within a second of EVERY wake,
+    // 13 times in this machine's log, and because every incident is routed to
+    // the orchestrator first, the whole chain stopped there. Her own last words
+    // are what finally said so.
+    for (const adapter of engines.list()) {
+      if (!adapter.trustWorkspace) continue
+      const configDir = engineConfigDirFor(adapter.id, artemis.id())
+      const prepared = adapter.prepareConfigDir?.(configDir)
+      if (prepared !== undefined && !prepared.ok) {
+        reportDegradation(
+          `artemis/engine-config:${adapter.id}`,
+          `${adapter.id}: the orchestrator's config directory is unusable — ${prepared.because}`
+        )
+        continue
+      }
+      const trusted = adapter.trustWorkspace(configDir, agora.root, 'must-exist')
+      agora.appendLog({
+        kind: 'orchestrator',
+        event: 'workspace-trusted',
+        engine: adapter.id,
+        agentId: artemis.id(),
+        path: agora.root,
+        ...(trusted.ok ? { alreadyTrusted: trusted.alreadyTrusted } : { because: trusted.because })
+      })
+      if (!trusted.ok) {
+        reportDegradation(
+          `artemis/workspace-trust:${adapter.id}`,
+          `${adapter.id}: ${agora.root} is not trusted for the orchestrator — ` +
+            `${trusted.because} — she will meet the engine's trust prompt and the ` +
+            'first wake will answer it with "No, exit"'
+        )
+      }
+    }
+    void artemis.start(orchestratorEngine)
+  } else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
 }
 
 /**

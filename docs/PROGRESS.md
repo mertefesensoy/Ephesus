@@ -5045,6 +5045,36 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       under these rules, which is M7's still-open exit criterion. Branch
       `feature/m8-6-crew-isolation`.*
 
+      *AUDIT (2026-09-06, working toward a releasable MVP): **all four decisions
+      verified, three of them by PRODUCTION OBSERVATION rather than by test.**
+      (3) the durable rung-3 stop is real and load-bearing —
+      `~/.ephesus/breaker-stops.json` holds two, including
+      `agent.skeleton-crew-musahit-health-watcher`, and the log shows that stop
+      refusing a LATER reactivation: `"will not be respawned — the breaker
+      stopped it at rung 3 (burn-rate); clear the stop first"`. (4) crew agents
+      now respawn — `ci-babysitter` x5 and `verifier` x3 against the register's
+      own measurement of zero. (2) the isolation refusal releases the claimed id
+      before throwing, and Artemis takes `blocked` from the same predicate. It
+      also explains why one crew agent has an engine config and no worktree: it
+      was stopped at rung 3 and its worktree released — the feature working, not
+      a leak. **A finding was raised and then REFUTED by the evidence, recorded
+      because the method matters:** a survey of `log.jsonl` by `event` name found
+      no crew spawn row and concluded the book of record could not answer "did
+      this hire run in its own worktree or in the Architect's checkout". It can.
+      `kind: 'spawn'` rows carry no `event` field, so the survey could not see
+      them — there are 132 recording `cwd` for EVERY spawn and 51 more carrying
+      `worktree`, `branch`, `branchCreated` and the source repo. **Surveying by
+      one field and concluding absence is how a green audit reports a defect
+      that is not there.** What was real: `git worktree remove` unregistered
+      three worktrees and left their EMPTY directories behind, unknown to `git
+      worktree list`. Bounded — and only because `worktreePathIsVacant` learned
+      that same morning that an empty directory is vacant; before that the
+      residue of one activation refused the next for the same agent id.
+      `Worktrees.remove` now sweeps an empty leftover and REPORTS one that still
+      holds files, which it never deletes (the rule that keeps `--force` out of
+      that module). 5 mutations, all killed; the three real directories were
+      cleared from the Architect's home.*
+
       **POST-CLOSE DEFECT CLEARANCE (2026-09-05, ADR-0025).** An adversarial
       audit of this package — 8 lenses, 58 findings — returned one that survived
       every refuter, and it was M8.6's own doing: **isolation silently re-opened
@@ -5084,8 +5114,8 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       anchors only. Docs: ADR-0025 (extends 0021 — ADRs are append-only and this
       widens an accepted security decision), SDD §1.1 `engines/` row and §3, the
       M8.7 trust implementation doc. OWED, RECORDED NOT FIXED: no profile has been
-      activated against a real repository in the shipped app under these rules, so
-      SECOND CLEARANCE, same audit: the quit's DISARM
+      activated against a real repository in the shipped app under these rules.*
+      **SECOND CLEARANCE, same audit: the quit's DISARM
       phase. M8.6 registered `crew.stop()` among the quit's `steps` with a
       comment reading "Before the unwind, not after"; `QuitSequence.execute`
       runs closing → unwind → `steps`, so `steps` is LAST and every ladder was
@@ -5094,8 +5124,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       RUNS in. `disarm()` now runs between closing time and the unwind, isolated
       like `steps` and with its own degradation cause; `Artemis.stop()` joined
       it, having had zero production callers. 5 tests, 3 semantic mutations
-      killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
-      — M7's exit, still open.
+      killed (2 survivors were deliberate no-op anchor controls).**
 
 - [x] **M8.7a Engine isolation, and whose autonomy hinge it is** — B13, first
       half. Every hire now runs its OWN engine install: one config directory per
@@ -5144,6 +5173,32 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       fixed:** the engine warns that the mailbox grant's `Write(<dir>/**)` rule
       "is not matched by file permission checks — only `Edit(...)`" — predates
       this package, owed to whoever next touches `mailboxPermissions`.
+
+      *AUDIT (2026-09-06, working toward a releasable MVP): the trust half is now
+      confirmed BY OBSERVATION, which is what this block recorded as missing.
+      `~/.ephesus/engines/claude/agent.skeleton-crew-musahit-*/.claude.json`
+      carries two trusted keys per crew agent — the target repo AND that agent's
+      own `~/.ephesus/worktrees/<agentId>` — and those worktrees exist;
+      `agent.artemis`'s isolated config holds real `lastCost` and token counts,
+      so `CLAUDE_CONFIG_DIR` demonstrably took effect. In the other direction the
+      operator's own `~/.claude.json` has 111 project keys and NOT ONE agent
+      worktree among them, and both `trustWorkspace` call sites use per-agent
+      config dirs, so nothing writes trust into the shared config any more. The
+      lockdown flags are on the plan and `beforeHires` is wired with degradations
+      on both failure paths. **What the audit found instead: M8.7's two central
+      claims are CLAUDE-ONLY and nothing said so.** Proved by execution — the
+      `codex` and `gemini` adapters carry no autonomy signal anywhere in argv or
+      env and redirect no config directory, so the operator's own engine config
+      decided how much a hire asked while the app reported the composed ceiling.
+      Closed by ADR-0031: an adapter DECLARES whether it can enforce autonomy,
+      the declaration is conformance-checked in both directions, and a `manual`
+      or `supervised` hire on an engine that cannot is refused at spawn.
+      `autonomous` is allowed through, because an engine being stricter of its
+      own accord costs a stalled turn rather than an unpermitted action. 8
+      mutations, all killed. OWED, now visible rather than implied: real config
+      isolation and autonomy mapping for those two, which needs their flags
+      established by EXECUTION the way ADR-0026 established Claude's — never
+      guessed. Also repaired two spliced sentences in this block's own prose.*
 
 - [x] **M8.7b The harness re-supplies the tools, by name** - B13, second half.
       The M8.7a lockdown also hides a target repository's own skills and
@@ -5314,25 +5369,99 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       for a historical orphan block; the capacity retry `attempts` rung resets
       across a restart (bounded, self-correcting). Branch
       `feature/m8-8-restart-survivable`.*
+      *AUDIT (2026-09-06, working toward a releasable MVP): the package's own
+      scope holds up under execution — `restore.ts` 100% lines, `state-store.ts`
+      100%, `restart.ts` 100%; S-BLACKOUT really restarts over two lifetimes
+      against the real modules; all three subsystems persist from a PRIVATE
+      method so no caller can forget one; save failures are reported and cleared;
+      `restoreCompany` runs before the Harbor is constructed. All three
+      deliberate omissions still hold in today's code, and `hermes.paused` is a
+      fourth (driven only by the capacity watch, which is derived). **One seam it
+      did not consider:** `gates.json` restored an `outbound` gate and nothing
+      restored the DRAFT it held, so the Architect approved a normal-looking gate
+      and `onVerdict` returned a `false` that `index.ts` discarded — the comment
+      never left the machine, and nothing said so. M8.8 did not cause it but made
+      it reachable: before the restore the queue came back empty and the gate
+      could not be approved at all. Closed by ADR-0030 (a fourth record,
+      `drafts.json`) plus a boot reconcile that REPORTS a draftless gate and a
+      verdict-time degradation; the sweep is in
+      `docs/implementations/2026-09-06-outbound-draft-survives-restart.md`.
+      11 mutations, all killed; two of them changed the DESIGN rather than the
+      tests (`awaiting` exists because a survivor showed a decided draft came
+      back pending). `FrontOffice.held` was the only gate-keyed payload outside
+      `GateManager`, so this closes the class, not one instance.*
 
 - [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
-      `feature/usage-aware-pacing` (9d66df5), which is UNMERGED and conflicts
-      structurally with the capacity UI landed since. There is no incident
-      surface of any kind: the crew's actual work product — four CI incidents
-      triaged with severity and root cause on this machine — is unreachable from
-      the app. And a hung harness is indistinguishable from a healthy idle one:
-      the bridge check is one-shot at mount, every poll holds its last value on
-      failure, there is no heartbeat anywhere, and the pace verdict never reaches
-      the renderer at all.
-      *This package OWNS the pacing-UI merge rather than treating it as a
-      chore. The branch and the current dock both restructured the same JSX and
-      renamed a tone helper; a hand-splice was attempted on 2026-09-02 and
-      abandoned deliberately in favour of doing it here with tests.*
-      *Docs: UI-DESIGN §5, ADR-0023. Tests: renderer tests over the MERGED dock
-      (both the capacity row and the pace strip); a stale poll renders as stale
-      rather than as its last good value. Risk: the existing dock fixture was
-      cast `as never`, which hid a missing required field until it threw at
-      runtime — fixtures in this package must be typed.*
+      `feature/usage-aware-pacing` (9d66df5).
+      *Docs: UI-DESIGN §5, ADR-0023, SDD §4.3 (the incident log kinds this reads).
+      Tests: a stale poll renders as stale rather than as its last good value;
+      an incident refused is visible as a refusal, not as an absence. Risk: the
+      dock fixture is STILL cast `as never` in three places
+      (`test/renderer/agent-dock.test.tsx:93,175,221`), which is what hid a
+      missing required field until it threw at runtime — fixtures this package
+      touches must be typed.*
+
+      **SCOPE AUDIT (2026-09-06, before any of it was built).** The register was
+      written on 2026-09-02 and one of its three items has since landed. What
+      follows is the state a new session should start from; every claim below was
+      established by execution or by reading the Architect's own `log.jsonl`.
+
+      **(1) The pacing-UI merge — DONE, and the register is stale.** `9d66df5` is
+      reachable from HEAD and the content is there: `AgentDock.tsx` imports
+      `paceNoteOf`/`PaceNote`, calls `eph.watch.usage()`, and carries the capacity
+      row alongside the pace strip. The structural conflict this package existed
+      to own — the branch and the dock having restructured the same JSX — is
+      resolved, and `watch:usage` reaches the renderer, so *"the pace verdict
+      never reaches the renderer at all"* is no longer true. Both halves have
+      renderer tests (`spend-surface.test.tsx` for pace, `agent-dock.test.tsx` and
+      `capacity-visible.test.tsx` for capacity). **Owed from this item: nothing
+      but the `as never` fixtures above.**
+
+      **(2) B15, a hung harness vs a healthy idle one — PARTLY.** Fixed: the pace
+      verdict reaches the renderer (item 1); `StatusBadge` distinguishes `'error'`
+      from `0`; the strip shows `⚠ events stale — hook endpoint unavailable`.
+      **Still open, and this is the one that makes every other surface
+      trustworthy:** the bridge check is one-shot at mount —
+      `useEffect(…, [])` calls `eph.config.get()` exactly once, so **if main dies
+      after mount the strip reads `bridge: ready` forever** — and there is no
+      heartbeat anywhere in `src/`. Polls still hold their last value on failure;
+      that is deliberate (`/* held, not cleared — see the poll */`) but capacity
+      discloses no staleness, so held-and-current are indistinguishable there.
+
+      **(3) B14, the incident surface — NOT STARTED, and larger than a panel.**
+      There is no IPC channel (`incident` appears nowhere in `src/shared/ipc.ts`),
+      no `IpcDeps` method, and no panel. **There is also no durable store:**
+      `IncidentEndpoint` reaches the outside world only through `onLogEvent`, so
+      incidents exist solely as `log.jsonl` rows. A surface must either fold them
+      from the log or gain a store — decide that first, because it decides
+      everything else. ADR-0027's test applies: is this held, or derived?
+
+      **What the audit found by reading the data B14 would have shown, and what
+      makes this package worth more than a panel.** 68 incident rows across 8
+      event kinds on the Architect's machine. **21 triage attempts, 12 refused.**
+      Nine of those refusals are `agent.artemis` replying in prose — *"This is
+      th…", "Assigned t…", "Task opene…", "Opened and…", "Reassigned…"*. She is
+      doing exactly what `prompts/harbor/incident-body.md` asks (open the task,
+      assign it) and then writing back to `agent.harbor` to say so, which the same
+      prompt forbids by name and warns will bounce. It bounced nine times. **The
+      guard works; the refusal MESSAGE is what fails** — she is told `triage
+      report: not JSON — Unexpected token 'T'`, when the answer she needs is "you
+      were not asked to reply here". A parse error cannot teach the rule it is
+      enforcing. **And 3 of 6 root-cause verdicts were discarded** with `Too big:
+      expected string to have <=2000 characters` (`src/shared/root-cause.ts:141`),
+      so the verifier's reasoning was thrown away for length.
+
+      **Two live defects, independent of the panel and cheap:** the incident
+      endpoint should refuse a reply-from-the-wrong-sender with the sentence that
+      teaches the rule rather than with a JSON parse error; and a verdict over the
+      cap should be refused with the limit NAMED, or truncated with a marker —
+      silently losing a verifier's reasoning is the worst of the three options.
+      Both are prompt-surface and refusal-quality work (invariant §8), and neither
+      needs B14 to land first.
+
+      **Suggested order for the build session:** the two refusal defects (small,
+      stop live waste), then B15's heartbeat and re-checking bridge probe
+      (smaller than B14, and it is what makes the rest believable), then B14.
 
 - [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
       read parses from byte zero: a synthetic overnight measured 28.4 MB and
@@ -5491,3 +5620,55 @@ everything it composes must already work.
       SRS §6.7 booked with a date; signed builds on three OSes; PROGRESS + docs
       synced. **This is the v1 acceptance boundary** — after it the only gate
       left is §6.7's two-week run.
+
+---
+
+### The one-hour test reached a pull request (2026-09-06) — SRS §6.1's core clause MET
+
+The first run in which the Skeleton Crew, on a real repository, detected a CI
+failure, diagnosed it, fixed it, committed under the company identity, pushed
+and opened a pull request with no human in the loop:
+**https://github.com/mertefesensoy/MUSAHIT/pull/1** (`app/ephesus-crew`, 4 files,
++32 −24, MERGEABLE).
+
+The diagnosis was real work, not a retry: `ArcLinker.run()` computed its own
+`now` while the tests pinned fixture arcs to a hardcoded May-2026 constant, so
+once wall-clock passed NOW+30d — about 2026-06-22 — zero active arcs loaded and
+seven tests failed. Calendar-driven, not flaky, and the reason MUSAHIT's CI had
+never been green. Fixed with an optional `now=` that leaves the sole production
+caller untouched; 841 passed, 1 skipped.
+
+**§6.1 clause by clause, honestly:**
+
+| Clause | Verdict |
+|---|---|
+| detected the failure | **met** — Harbor ingested both runs; both tasks assigned |
+| fixed it or opened a fix PR | **met** — PR #1 |
+| filed the required memo if the fix crossed policy | **n/a, correctly** — the agent cited runbook step 5 as its authority for its own branch + PR, and stopped at the diagnosis on the one change that DID cross policy (the `article_id` primary-key remint), escalating instead |
+| the next briefing narrates the incident accurately from the log | **met** — Artemis rewrote `board.md` with file:line citations, hedged the unverified half ("verified locally by him, not yet by CI"), and listed three open Architect decisions |
+| zero un-gated destructive actions | **met** |
+
+**Qualification the run itself surfaced:** PR #1 is based on `main`, which
+carries no `.github/workflows/` (404; the workflow exists only on
+`ci/add-pytest-workflow`). The fix is correct and that PR can never demonstrate
+it. Artemis caught this and recommended closing #1 as superseded in favour of
+the crew's second branch, which is correctly based — the PR the expired GitHub
+token stopped it opening.
+
+**Five harness defects stood between the company and this**, each invisible until
+the one in front of it was fixed, all with mutation-proven tests and all on
+`fix/mail-lost-when-a-woken-agent-dies`. See
+`docs/implementations/2026-09-06-an-emptied-worktree-path-retired-the-agent.md`
+for the chain, including the two diagnoses this session got wrong and the
+correction to the claim above.
+
+**Open, and the Architect's:** Harbor's `awaiting` map does not survive a
+restart, so a crew holding a triage task loses its reporting channel permanently
+(defect #11 — ADR-0027 §5 reasoned about `raised` and never considered
+`awaiting`); the health-watcher's rung-3 breaker stop, whose condition has
+expired; and the three decisions Artemis queued on the board.
+
+This does NOT close **M7 exit** on its own — that asks for §6.1 demonstrated
+end to end, and the reporting channel was closed mid-run by defect #11. It is
+the first time the chain has reached a pull request, and it is recorded here so
+the next review starts from what happened rather than from the last verdict.

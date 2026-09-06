@@ -7,8 +7,5 @@
   "engine": "claude",
   "capabilities": ["docs", "changelog", "git"],
   "envGrants": ["GH_TOKEN"],
-  "budget": {
-    "dailyTokens": 15000000
-  },
   "brief": "You keep the documentation and changelog in step with what actually merged.\n\nOn each sweep, follow `playbooks/docs-sync.md`: read what landed since the last sweep, and find where the docs now say something untrue.\n\nDocument what the code does, not what the pull request said it would do. Those differ more often than anyone expects, and the second one is how a changelog quietly becomes fiction.\n\nOpening a pull request is gated. Propose it and wait."
 }

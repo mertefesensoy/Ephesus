@@ -95,6 +95,8 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
       humanQueue: () => [],
       dismissFromHumanQueue: () => true,
       capacity: () => ({ parked: [], since: null, retryAt: null }),
+      gatePolicyView: () => ({ autonomy: 'manual' as const, maxDailyTokens: null, warning: null }),
+      saveGateCeilings: () => ({ ok: false as const, reason: 'not wired in this harness' }),
       breakerState: () => [],
       breaker: { stopsView: () => ({ stops: [], error: null }), clearStop: () => false },
       pendingMailFor: () => 0,

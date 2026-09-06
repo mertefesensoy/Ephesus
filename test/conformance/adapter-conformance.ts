@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ENGINE_IDS, HOOK_SUPPORTS, HOOK_SUPPORT_RANK } from '../../src/shared/engines'
+import { assertAutonomyEnforceable } from '../../src/main/agents'
 import { HOOK_EVENTS } from '../../src/shared/hooks'
 import type { AgentSpawnConfig, EngineAdapter, UsageFact } from '../../src/main/engines'
 import { removeTempDir } from '../tmpdir'
@@ -275,6 +276,61 @@ export function runAdapterConformance(subject: ConformanceSubject): void {
       readonly cwd: string
       readonly cfg: AgentSpawnConfig
     }): string => (subject.settingsRoot === 'cwd' ? rig.cwd : rig.cfg.engineConfigDir)
+
+    describe('autonomy grade honesty (ADR-0031)', () => {
+      /**
+       * The declaration is checked in BOTH directions, because each is a
+       * different lie with a different victim.
+       *
+       * A `none` adapter that really does map autonomy under-sells itself and
+       * refuses hires that would have been fine. An `enforced` adapter that
+       * does NOT map it is the dangerous one: every surface in the app reports
+       * the ceiling the Watch composed while the process runs at whatever the
+       * operator's own engine config says. That second case is what the M8.7
+       * audit found in `codex` and `gemini` on 2026-09-06 — the field did not
+       * exist, so there was nothing to be honest or dishonest about.
+       */
+      // ONE rig, both levels: `conformanceRig()` mints a fresh temp directory
+      // per call, so two rigs differ in `--cd` and every plan would look
+      // autonomy-sensitive. The variable under test is the level and nothing else.
+      function plansByLevel(): { manual: string; autonomous: string } {
+        const rig = conformanceRig()
+        const adapter = subject.make()
+        const render = (level: AgentSpawnConfig['autonomy']): string => {
+          const plan = adapter.spawnArgs({ ...rig.cfg, autonomy: level })
+          return [...plan.argv, JSON.stringify(plan.env)].join(' ')
+        }
+        return { manual: render('manual'), autonomous: render('autonomous') }
+      }
+
+      it('matches the declared grade in both directions', () => {
+        const { manual, autonomous } = plansByLevel()
+        if (subject.make().autonomySupport === 'enforced') {
+          // Something in the plan has to carry the level, or "enforced" is a
+          // claim about the harness rather than about the process.
+          expect(manual).not.toBe(autonomous)
+        } else {
+          // And a `none` adapter must not be quietly mapping it, or the refusal
+          // in `assertAutonomyEnforceable` is costing hires for nothing.
+          expect(manual).toBe(autonomous)
+        }
+      })
+
+      it('refuses a ceiling it cannot enforce, and allows the one it can', () => {
+        const adapter = subject.make()
+        const strict = (): void => {
+          assertAutonomyEnforceable(adapter, 'manual')
+        }
+        if (adapter.autonomySupport === 'enforced') expect(strict).not.toThrow()
+        else expect(strict).toThrow(/cannot enforce/)
+        // `autonomous` is the loosest the Architect can ask for, so an engine
+        // being stricter of its own accord costs a stalled turn, not an
+        // unpermitted action — it is never refused.
+        expect(() => {
+          assertAutonomyEnforceable(adapter, 'autonomous')
+        }).not.toThrow()
+      })
+    })
 
     describe('settings-file hygiene (TEST-STRATEGY §5)', () => {
       it('writes only inside the root it declares, and only variants it may own', () => {

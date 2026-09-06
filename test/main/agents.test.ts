@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { spawnRequestSchema, type SpawnRequest } from '../../src/shared/agents'
 import {
   AgentManager,
+  assertAutonomyEnforceable,
   type AgentManagerOptions,
   type AgentSpawner,
   type VersionProber
@@ -108,6 +109,7 @@ interface RigOptions {
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
   readonly onLogEvent?: AgentManagerOptions['onLogEvent']
   readonly authProbe?: AgentManagerOptions['authProbe']
+  readonly maxDailyTokens?: AgentManagerOptions['maxDailyTokens']
   /**
    * Which engine the spawn names. Codex is registered too when it is asked
    * for, because its BinarySpec declares NO auth probe — which is the case
@@ -116,6 +118,8 @@ interface RigOptions {
   readonly engine?: 'claude' | 'codex'
   /** A standing decision that an agent must not be brought back (M8.6, B11). */
   readonly respawnBlocked?: AgentManagerOptions['respawnBlocked']
+  /** The composed ceiling this spawn runs at (ADR-0012, ADR-0031). */
+  readonly autonomyFor?: AgentManagerOptions['autonomyFor']
 }
 
 async function rig(
@@ -157,7 +161,9 @@ async function rig(
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
     ...(extra.authProbe ? { authProbe: extra.authProbe } : {}),
+    ...(extra.maxDailyTokens ? { maxDailyTokens: extra.maxDailyTokens } : {}),
     ...(extra.respawnBlocked ? { respawnBlocked: extra.respawnBlocked } : {}),
+    ...(extra.autonomyFor ? { autonomyFor: extra.autonomyFor } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -729,6 +735,10 @@ describe('AgentManager — an engine that is installed but logged out', () => {
     let asked = 0
     const started = await rig(async () => '0.9.0', undefined, {
       engine: 'codex',
+      // Codex declares `autonomySupport: 'none'` (ADR-0031), so a stricter
+      // ceiling refuses to spawn. This case is about the AUTH PROBE, and
+      // `autonomous` is the level codex is allowed to run at.
+      autonomyFor: () => 'autonomous',
       authProbe: async () => {
         asked += 1
         return { stdout: 'Not logged in', exitCode: 1 }
@@ -852,5 +862,87 @@ describe('a stopped agent will not be respawned, whoever asks', () => {
     // …and the respawn actually goes through, so the guard is not simply
     // refusing everything.
     await expect(r.manager.respawn('agent.mason')).resolves.toBeDefined()
+  })
+})
+
+/**
+ * ADR-0029 made unbudgeted the default, which is right for an Architect who is
+ * watching their own account and wrong to hand a stranger. The dial is how
+ * somebody installing Ephesus gets a ceiling without editing every hire file.
+ */
+describe('the default-ceiling dial (ADR-0029)', () => {
+  it('is unbudgeted when nothing names a ceiling', async () => {
+    const r = await rig()
+    const card = await r.manager.spawn(r.request)
+    expect(card.dailyTokens).toBeNull()
+  })
+
+  it('applies the company ceiling to a hire that declares none', async () => {
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn(r.request)
+    expect(card.dailyTokens).toBe(4_000_000)
+  })
+
+  it('CLAMPS a hire that declares more than the company allows', async () => {
+    // The half that makes it a limit rather than a suggestion.
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn({ ...r.request, budget: { dailyTokens: 11_000_000 } })
+    expect(card.dailyTokens).toBe(4_000_000)
+  })
+
+  it('leaves a hire that declares LESS alone', async () => {
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn({ ...r.request, budget: { dailyTokens: 1_000_000 } })
+    expect(card.dailyTokens).toBe(1_000_000)
+  })
+})
+
+/**
+ * ADR-0031, found by the M8.7 audit on 2026-09-06.
+ *
+ * M8.7a locked Claude down and mapped its `--permission-mode`. `codex` and
+ * `gemini` map nothing — no flag, no env — and neither redirects its config
+ * directory, so the OPERATOR'S own engine config decides how much the agent
+ * asks. A `manual` company could therefore run a codex hire under a
+ * `never-ask` policy while every surface in the app reported `manual`.
+ */
+describe('an engine that cannot enforce the ceiling does not get the hire', () => {
+  const none = { id: 'codex' as const, autonomySupport: 'none' as const }
+  const enforced = { id: 'claude' as const, autonomySupport: 'enforced' as const }
+
+  it('refuses the two levels that promise a human in the loop', () => {
+    for (const level of ['manual', 'supervised'] as const) {
+      expect(() => {
+        assertAutonomyEnforceable(none, level)
+      }).toThrow(/codex cannot enforce/)
+    }
+  })
+
+  it('allows the loosest level, because being stricter only stalls', () => {
+    // An engine that asks anyway costs a turn nobody answers — visible, and
+    // not an action the Architect refused. Refusing here would ban the engine
+    // outright rather than protect anything.
+    expect(() => {
+      assertAutonomyEnforceable(none, 'autonomous')
+    }).not.toThrow()
+  })
+
+  it('never stands between an enforcing engine and its hire', () => {
+    for (const level of ['manual', 'supervised', 'autonomous'] as const) {
+      expect(() => {
+        assertAutonomyEnforceable(enforced, level)
+      }).not.toThrow()
+    }
+  })
+
+  it('refuses at SPAWN, before a process exists', async () => {
+    // The seam, not just the rule: a hire that reaches `spawn` with a ceiling
+    // its engine cannot honour must not become a running agent.
+    const r = await rig(async () => '0.9.0', undefined, {
+      engine: 'codex',
+      autonomyFor: () => 'manual'
+    })
+    await expect(r.manager.spawn(r.request)).rejects.toThrow(/cannot enforce "manual"/)
+    expect(r.spawner.spawns).toHaveLength(0)
   })
 })

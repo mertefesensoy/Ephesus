@@ -136,7 +136,7 @@ function crewPlan(): ActivationPlan {
 }
 
 describe('the shipped profile names somebody to do the checking', () => {
-  it('gives the Skeleton Crew a verifier hire, with its own budget', () => {
+  it('gives the Skeleton Crew a verifier hire, unbudgeted like every other', () => {
     const loaded = new ProfileStore(
       path.join(tempHome(), 'profiles'),
       path.join(REPO, 'profiles')
@@ -145,10 +145,17 @@ describe('the shipped profile names somebody to do the checking', () => {
 
     const hire = loaded.bundle.hires.find((candidate) => candidate.name === VERIFIER_HIRE)
     expect(hire).toBeDefined()
-    // How the second opinion is PAID for, in a line the Architect reads on the
-    // activation screen before agreeing to it — rather than an unbudgeted agent
-    // turn charged to whoever happened to be nearby.
-    expect(hire?.budget?.dailyTokens).toBeGreaterThan(0)
+    // This used to assert a ceiling, on the reasoning that it is "how the second
+    // opinion is PAID for, in a line the Architect reads on the activation
+    // screen". ADR-0029 answers that differently: the spend is still counted and
+    // still shown — `watch.budgets()` reports the real totals against
+    // `unbudgeted` — it is simply no longer CAPPED, because a cap that fires on
+    // ordinary work stopped four of five agents mid-run on 2026-09-06.
+    //
+    // Asserted as absent rather than merely not-positive: a hire carrying a zero
+    // would read as an immediate breach, which is the failure the schema's own
+    // docblock warns about.
+    expect(hire?.budget).toBeUndefined()
     // It reads and reports. A verifier holding a credential would be a second
     // agent able to change the repository it is meant to be checking.
     expect(hire?.envGrants).toEqual([])

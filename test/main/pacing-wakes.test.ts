@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Agora } from '../../src/main/agora'
-import { DONE_DIR, Hermes } from '../../src/main/hermes'
+import { DONE_DIR, INFLIGHT_DIR, Hermes } from '../../src/main/hermes'
 import { PromptStore } from '../../src/main/prompts'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import { DEFAULT_PACE_THRESHOLDS, type Pace } from '../../src/shared/pacing'
@@ -52,11 +52,14 @@ interface Rig {
   send(to: string): Message
   inbox(agentId: string): readonly string[]
   done(agentId: string): readonly string[]
+  inflight(agentId: string): readonly string[]
   readonly nudges: string[]
   readonly deferrals: { agentId: string; pace: Pace; pendingMail: number }[]
 }
 
-async function rig(options: { slowWakeGapMs?: number } = {}): Promise<Rig> {
+async function rig(
+  options: { slowWakeGapMs?: number; tasks?: readonly string[] } = {}
+): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-pace-'))
   temps.push(home)
   const agora = new Agora({
@@ -79,6 +82,7 @@ async function rig(options: { slowWakeGapMs?: number } = {}): Promise<Rig> {
     pace: () => pace,
     ...(options.slowWakeGapMs === undefined ? {} : { slowWakeGapMs: options.slowWakeGapMs }),
     isIdle: () => true,
+    pendingTaskIdsFor: (agentId) => (agentId === 'agent.b' ? (options.tasks ?? []) : []),
     nudge: (agentId) => nudges.push(agentId),
     onWakeDeferred: (agentId, detail) =>
       deferrals.push({ agentId, pace: detail.pace, pendingMail: detail.pendingMail })
@@ -126,6 +130,12 @@ async function rig(options: { slowWakeGapMs?: number } = {}): Promise<Rig> {
     done(agentId) {
       const dir = path.join(agora.agentDir(agentId), 'inbox', DONE_DIR)
       return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
+    },
+    // Handed to a session that has not yet proven it read it: the state
+    // `consumeInbox` now leaves mail in, until a Stop settles it.
+    inflight(agentId) {
+      const dir = path.join(agora.agentDir(agentId), 'inbox', INFLIGHT_DIR)
+      return fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => n.endsWith('.json')) : []
     }
   }
 }
@@ -162,7 +172,7 @@ describe('the pace gates the inbox wake path (wakeCheck)', () => {
     // And the message is still sitting in the inbox, unconsumed. Deferring is
     // not dropping.
     expect(r.inbox('agent.b')).toHaveLength(1)
-    expect(r.done('agent.b')).toHaveLength(1) // only the first wake's message
+    expect(r.inflight('agent.b')).toHaveLength(1) // only the first wake's message
   })
 
   it('delivers the deferred mail once the gap has passed', async () => {
@@ -185,7 +195,7 @@ describe('the pace gates the inbox wake path (wakeCheck)', () => {
     r.advance(gap)
     expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
     expect(r.inbox('agent.b')).toHaveLength(0)
-    expect(r.done('agent.b')).toHaveLength(2)
+    expect(r.inflight('agent.b')).toHaveLength(2)
   })
 
   it('holds until the window resets, then marches forward', async () => {
@@ -211,6 +221,37 @@ describe('the pace gates the inbox wake path (wakeCheck)', () => {
   })
 })
 
+describe('the pace gates the task wake path (wakeCheck without mail)', () => {
+  /**
+   * The task path is a second way to write into an agent's session, so it is a
+   * second way to spend. It must answer to the pace exactly as the mail path
+   * does — a gate that only guards one of two doors is not a gate.
+   *
+   * Found by a mutation: deleting the pace check on the task path survived the
+   * whole suite, because every pacing case here sent MAIL.
+   */
+  it('a task nudge inside the slow gap is deferred and REPORTED', async () => {
+    const gap = 5 * 60_000
+    const r = await rig({ slowWakeGapMs: gap, tasks: ['t-1'] })
+    r.setPace('slow')
+
+    // Mail wakes it first, which starts the gap.
+    r.send('agent.b')
+    await r.hermes.sweep()
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
+
+    // Now only the task remains, inside the gap: it must not wake.
+    r.advance(60_000)
+    expect(await r.hermes.wakeCheck()).toEqual([])
+    expect(r.deferrals.map((d) => d.pace)).toEqual(['slow'])
+
+    // …and once the gap has passed, the task still earns its nudge. A deferral
+    // that quietly became a drop would be the worst outcome of pacing.
+    r.advance(gap)
+    expect(await r.hermes.wakeCheck()).toEqual(['agent.b'])
+  })
+})
+
 describe('the pace gates the stop-hook wake path (decideOnStop)', () => {
   it('blocks to hand over mail at full speed', async () => {
     const r = await rig()
@@ -219,7 +260,7 @@ describe('the pace gates the stop-hook wake path (decideOnStop)', () => {
 
     const reply = await r.hermes.decideOnStop('agent.b', { stop_hook_active: false })
     expect(reply?.decision).toBe('block')
-    expect(r.done('agent.b')).toHaveLength(1)
+    expect(r.inflight('agent.b')).toHaveLength(1)
   })
 
   it('lets the turn end instead of buying another one while slow', async () => {

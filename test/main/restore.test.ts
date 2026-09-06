@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Agora, TASKS_REL } from '../../src/main/agora'
 import { removeTempDir } from '../tmpdir'
+import { EMPTY_DRAFTS, type DraftsRecord } from '../../src/shared/outbound'
 import {
   blockedTasksFrom,
   restoreCompany,
@@ -65,6 +66,7 @@ function rig(
 ): { stores: RestoreStores; targets: RestoreTargets; order: string[]; held: OpenGate[] } {
   const order: string[] = []
   const held: OpenGate[] = []
+  const drafts: string[] = []
   const targets: RestoreTargets = {
     restoreTriggers: (lastFired) => {
       order.push('triggers')
@@ -79,6 +81,12 @@ function rig(
       held.push(...record.open)
       return { open: record.open.length, settled: record.settled.length }
     },
+    restoreDrafts: (record) => {
+      order.push('drafts')
+      drafts.push(...record.drafts.flatMap((d) => (d.gateId === null ? [] : [d.gateId])))
+      return { filed: record.drafts.length, held: drafts.length }
+    },
+    gatesHoldingADraft: () => drafts,
     openGates: () => held,
     blockedTasks: () => [],
     ...overrides
@@ -87,7 +95,8 @@ function rig(
     stores: {
       triggers: stores.triggers ?? absent<TriggersRecord>(EMPTY_TRIGGERS),
       activations: stores.activations ?? absent<ActivationsRecord>(EMPTY_ACTIVATIONS),
-      gates: stores.gates ?? absent<GatesRecord>(EMPTY_GATES)
+      gates: stores.gates ?? absent<GatesRecord>(EMPTY_GATES),
+      drafts: stores.drafts ?? absent<DraftsRecord>(EMPTY_DRAFTS)
     },
     targets,
     order,

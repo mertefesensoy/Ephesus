@@ -269,9 +269,26 @@ export function applyProposal(
  * tasks are blocked, stalled, in review or done.
  */
 export function pendingTasksFor(ledger: TaskLedger, agentId: string): number {
-  return ledger.tasks.filter(
-    (task) => task.assignee === agentId && PENDING_STATUSES.includes(task.status)
-  ).length
+  return pendingTaskIdsFor(ledger, agentId).length
+}
+
+/**
+ * Contract: the ids of this agent's pending tasks, in ledger order. Pure.
+ *
+ * The count above is this function's `length`, deliberately: the number the
+ * Stop hook blocks on and the set the wake watchdog announces must never
+ * disagree, and two expressions that have to stay equal is the M8.5 defect —
+ * cheaper not to create than to test.
+ *
+ * The watchdog needs the IDS and not a count, because a count cannot tell "the
+ * same two tasks, still waiting" from "a third one arrived". The first must
+ * stay silent and the second must not, or an assigned task becomes a metronome
+ * pointed at the agent least able to escape it.
+ */
+export function pendingTaskIdsFor(ledger: TaskLedger, agentId: string): readonly string[] {
+  return ledger.tasks
+    .filter((task) => task.assignee === agentId && PENDING_STATUSES.includes(task.status))
+    .map((task) => task.id)
 }
 
 /**

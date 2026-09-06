@@ -45,13 +45,35 @@ export class PtyManager implements AgentSpawner {
     return this.ptys.has(id)
   }
 
+  /**
+   * What each dead process last said, by id. Kept only until the next spawn
+   * under the same id reads it -- this is evidence for one death, not a log.
+   */
+  private readonly lastWords = new Map<string, string>()
+
+  /**
+   * Contract: the final readable output of the process that most recently died
+   * under this id, or null. Consumed by the lifecycle when it records the
+   * ghost, so a crash carries its own explanation instead of an exit code.
+   */
+  lastWordsOf(id: string): string | null {
+    const tail = this.lastWords.get(id)
+    return tail === undefined || tail.length === 0 ? null : tail
+  }
+
   private track(id: string, proc: pty.IPty): void {
     this.ptys.set(id, proc)
+    this.lastWords.delete(id)
     attachRedactedStream({
       id,
       source: proc,
       filter: this.options.redactor?.() ?? PASS_THROUGH,
       sink: () => this.sink,
+      // Recorded BEFORE the listeners below run, because the lifecycle reads it
+      // while handling that very exit.
+      onLastWords: (tail) => {
+        this.lastWords.set(id, tail)
+      },
       onExit: (exitCode) => {
         this.ptys.delete(id)
         for (const listener of this.exitListeners) listener(id, exitCode)

@@ -1,1 +1,1 @@
-{{pendingMail}} new message(s) arrived while you were idle and are archived at {{messages}} — read them there (they are no longer in `inbox/`), act on each, and reply through your `outbox/` to anything that asked you a question; if none needs action, say so where a reply is owed.
+{{pendingMail}} new message(s) arrived while you were idle and are at {{messages}} — read them there (they are no longer in `inbox/`), act on each, and reply through your `outbox/` to anything that asked you a question; if none needs action, say so where a reply is owed.

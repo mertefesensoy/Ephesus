@@ -7,7 +7,13 @@ import { clearBreakerStopSchema, type BreakerState } from '../shared/breaker'
 import type { Breaker } from './watch/breaker'
 import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
-import { gateApproveSchema, type OpenGate } from '../shared/gates'
+import {
+  gateApproveSchema,
+  gateCeilingsSchema,
+  type GateCeilings,
+  type GatePolicyView,
+  type OpenGate
+} from '../shared/gates'
 import { messageIdSchema, type Message } from '../shared/message'
 import {
   IpcChannels,
@@ -220,6 +226,14 @@ export interface IpcDeps {
   readonly breaker: Pick<Breaker, 'stopsView' | 'clearStop'>
   /** Who is waiting on provider capacity (`watch/capacity.ts`). */
   capacity(): CapacityView
+  /** The two company-wide ceilings as they stand on disk (ADR-0012, ADR-0029). */
+  gatePolicyView(): GatePolicyView
+  /** Patches those two ceilings. Refuses rather than replacing a policy it cannot read. */
+  saveGateCeilings(
+    ceilings: GateCeilings
+  ):
+    | { readonly ok: true; readonly view: GatePolicyView }
+    | { readonly ok: false; readonly reason: string }
   /** Mail waiting for one agent — UI-DESIGN §5.4's desk tray flag (ADR-0013). */
   pendingMailFor(agentId: string): number
   /** Event-plane health for the visible degradation states (FR-2.3, SDD §10). */
@@ -346,6 +360,21 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle(IpcChannels.watchCapacity, (): CapacityView => deps.capacity())
+
+  ipcMain.handle(IpcChannels.watchPolicy, (): GatePolicyView => deps.gatePolicyView())
+
+  // The ceilings are validated here like every other renderer payload, and the
+  // schema is the narrow one: a renderer cannot reach `rules` even by sending
+  // it, because `gateCeilingsSchema` is strict and would refuse the extra key.
+  ipcMain.handle(IpcChannels.watchSetPolicy, (_ev, raw: unknown) => {
+    const saved = deps.saveGateCeilings(gateCeilingsSchema.parse(raw))
+    // A refusal still returns the CURRENT ceilings, so a panel that could not
+    // save shows what is actually in force rather than the edit that failed —
+    // a control left displaying an unsaved value is invariant §7's failure.
+    return saved.ok
+      ? { ok: true, reason: null, view: saved.view }
+      : { ok: false, reason: saved.reason, view: deps.gatePolicyView() }
+  })
 
   ipcMain.handle(IpcChannels.watchDismiss, (_ev, raw: unknown): boolean =>
     deps.dismissFromHumanQueue(messageIdPayloadSchema.parse(raw).messageId)

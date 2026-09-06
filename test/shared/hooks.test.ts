@@ -5,7 +5,8 @@ import {
   HOOK_EVENTS,
   classifyHookEvent,
   hookEnvelopeSchema,
-  parseHookEnvelope
+  parseHookEnvelope,
+  provesTurnRunning
 } from '../../src/shared/hooks'
 
 const valid = {
@@ -98,5 +99,41 @@ describe('hook event classification (FR-2.3)', () => {
       'compact-end',
       'session-end'
     ])
+  })
+})
+
+/**
+ * Which events tell the command queue its submit key landed (2026-09-06).
+ *
+ * Written against the whole vocabulary rather than the three that answer true,
+ * because the exclusions are the part that carries risk: `session-start` too
+ * early restores the defect, `notification` too eager confirms a submit with
+ * the very dialog that ate it.
+ */
+describe('provesTurnRunning — the engine says a turn is under way', () => {
+  it('accepts exactly the three events that mean a turn is running', () => {
+    const proving = HOOK_EVENTS.filter((event) => provesTurnRunning(event))
+    expect([...proving]).toEqual(['prompt-submitted', 'pre-tool', 'post-tool'])
+  })
+
+  it('REFUSES session-start — a session exists long before its prompt takes a key', () => {
+    // This exclusion is the fix. An agent woken one second after spawn has a
+    // session and a prompt box that is still painting notices over itself.
+    expect(provesTurnRunning('session-start')).toBe(false)
+  })
+
+  it('REFUSES notification — that is the dialog that eats submit keys', () => {
+    expect(provesTurnRunning('notification')).toBe(false)
+  })
+
+  it('REFUSES stop — a turn ending does not say whose text ran', () => {
+    expect(provesTurnRunning('stop')).toBe(false)
+  })
+
+  it('answers false for a name this build does not know', () => {
+    // Schema drift stays addressable (FR-2.3) and is never read as evidence;
+    // the cost of being wrong in this direction is one spare keystroke.
+    expect(provesTurnRunning('some-future-event')).toBe(false)
+    expect(provesTurnRunning('')).toBe(false)
   })
 })

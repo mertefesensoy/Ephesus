@@ -23,7 +23,7 @@ import type { CommandState } from '../shared/commands'
 import type { BreakerState, BreakerStopsView } from '../shared/breaker'
 import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
-import type { OpenGate } from '../shared/gates'
+import type { GatePolicyView, OpenGate } from '../shared/gates'
 import type { Message } from '../shared/message'
 import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
@@ -259,6 +259,13 @@ const eph: EphApi = {
         expectedAt
       }) as Promise<boolean>,
     capacity: () => ipcRenderer.invoke(IpcChannels.watchCapacity) as Promise<CapacityView>,
+    policy: () => ipcRenderer.invoke(IpcChannels.watchPolicy) as Promise<GatePolicyView>,
+    setPolicy: (ceilings) =>
+      ipcRenderer.invoke(IpcChannels.watchSetPolicy, ceilings) as Promise<{
+        ok: boolean
+        reason: string | null
+        view: GatePolicyView
+      }>,
     onCapacityChange: (cb) => {
       const listener = (): void => cb()
       ipcRenderer.on(CAPACITY_STATE_CHANNEL, listener)

@@ -94,6 +94,15 @@ export class GeminiAdapter implements EngineAdapter {
 
   /** See the class comment: the grade this build can demonstrate is none. */
   readonly hooks = 'pty-heuristic' as const
+  /**
+   * ADR-0031. This adapter has no flag to map autonomy onto, so the engine's
+   * own configuration decides — and that configuration is the OPERATOR'S,
+   * not the harness's. Declaring `none` is what makes a `manual` or
+   * `supervised` hire refuse to spawn here rather than run at a level nobody
+   * chose. It becomes `enforced` when the flags are established by execution,
+   * the way ADR-0026 established Claude's — never by guessing them.
+   */
+  readonly autonomySupport = 'none' as const
 
   constructor(private readonly deps: GeminiAdapterDeps) {}
 

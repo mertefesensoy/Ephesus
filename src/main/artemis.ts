@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { composeBudget } from '../shared/cost'
 import path from 'node:path'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import {
@@ -43,7 +44,7 @@ export const ARTEMIS_CAPABILITIES: readonly string[] = [
   'chair'
 ]
 /**
- * The orchestrator's daily allowance.
+ * The orchestrator's daily allowance WHEN THE ARCHITECT SETS ONE.
  *
  * Raised from 2,000,000 after the 2026-09-01 live run, where she reached
  * `breached` on briefing work before the first incident arrived and stayed
@@ -51,11 +52,18 @@ export const ARTEMIS_CAPABILITIES: readonly string[] = [
  * shaped behaviour; it was a limit that fired immediately and permanently,
  * which is the same as having no signal at all.
  *
- * It stays a number rather than becoming unlimited on purpose: ADR-0011's
- * ladder (steer → constrain → stop) needs a ceiling to be a ladder, and an
- * orchestrator that cannot exhaust anything is one that can spend the
- * Architect's quota in a loop nobody is watching. The figure is a day's real
- * work with room over it, not an estimate of what she needs.
+ * It is no longer the DEFAULT (ADR-0029, 2026-09-06). This docblock used to
+ * argue the opposite — "it stays a number rather than becoming unlimited on
+ * purpose" — and the argument was answered by the thing it predicted going
+ * wrong in the other direction: on 2026-09-06 the same failure repeated at
+ * forty million. She breached mid-run and rung-3 stopped with five incidents
+ * unrouted, and because activation is all-or-nothing a stopped orchestrator
+ * takes the company with her. A ceiling that fires on ordinary work is not a
+ * ladder either; it is the 2026-09-01 failure with a bigger number.
+ *
+ * What that argument got right is kept: the ladder still needs a ceiling to BE
+ * a ladder. So the number survives, exported and unchanged, for an Architect
+ * who wants one — it is the default that moved, not the mechanism.
  */
 export const ARTEMIS_DAILY_TOKENS = 40_000_000
 
@@ -110,6 +118,12 @@ export interface ArtemisOptions {
   respawnBlocked?(agentId: string): string | null
   readonly agentId?: string
   readonly dailyTokens?: number
+  /**
+   * The company-wide ceiling (`gate-policy.json`), composed with any explicit
+   * `dailyTokens` the same way every hire's is: stricter wins, and a figure
+   * larger than the company allows is clamped down to it.
+   */
+  maxDailyTokens?(): number | null
 }
 
 export class Artemis {
@@ -233,7 +247,19 @@ export class Artemis {
       capabilities: [...ARTEMIS_CAPABILITIES],
       // ADR-0010: she holds no credentials. Orchestration is routing and text.
       envGrants: [],
-      budget: { dailyTokens: this.options.dailyTokens ?? ARTEMIS_DAILY_TOKENS }
+      // Unbudgeted unless the Architect names a figure (ADR-0029). Absent is
+      // not zero: `spendFor` reads a null ceiling as `unbudgeted`, which the
+      // breaker's burn-rate signal never fires on, while every OTHER signal —
+      // repeated calls, hop caps, pathology — and ADR-0023's wall-clock wake
+      // cap are untouched. Removing the spend ceiling is not removing the
+      // governor.
+      ...((): Record<string, unknown> => {
+        const ceiling = composeBudget(
+          this.options.dailyTokens ?? null,
+          this.options.maxDailyTokens?.() ?? null
+        ).effective
+        return ceiling === null ? {} : { budget: { dailyTokens: ceiling } }
+      })()
     }
   }
 

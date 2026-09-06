@@ -462,6 +462,47 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
 }
 
 /**
+ * The literal PROTOCOL.md tells an agent to run when its GitHub token expires.
+ *
+ * Kept as one exported constant because a rule that does not match the sentence
+ * the agent was given is a rule that grants nothing, and the two live in
+ * different files (`prompts/agora/PROTOCOL.md`, "run `$EPH_GH_TOKEN` for a
+ * fresh one").
+ */
+export const GH_TOKEN_REFRESH_COMMAND = '$EPH_GH_TOKEN'
+
+/**
+ * Lets the agent refresh the GitHub token the harness already gave it.
+ *
+ * `GH_TOKEN` is a GitHub App installation token and expires an hour after the
+ * spawn (ADR-0022), which is inside the length of one ordinary run. PROTOCOL.md
+ * accordingly tells an agent to run `$EPH_GH_TOKEN` after a 401 — and nothing
+ * granted permission to run it, so under `auto` the engine's classifier refused
+ * it and the agent had no way through. Found live on 2026-09-06: the on-call
+ * agent pushed its second fix branch, could not open the pull request, and
+ * escalated "GH token expired, and I could not refresh it" instead.
+ *
+ * The grant widens nothing. The shim mints the same scoped installation token
+ * the harness already put in this agent's environment at spawn; the only thing
+ * it adds is the ability to replace one that timed out. Withholding it does not
+ * make the agent less capable of reaching GitHub — it makes it capable for the
+ * first hour and silently blind afterwards, which is the worse of the two.
+ *
+ * EXACT rules, never a `:*` prefix. A prefix on a credential command would also
+ * admit whatever an injected suffix appended to it, and there is no suffix this
+ * command has any use for.
+ */
+function ghTokenPermissions(cfg: AgentSpawnConfig): readonly string[] {
+  if (cfg.ghTokenCommand.length === 0) return []
+  return [
+    `Bash(${GH_TOKEN_REFRESH_COMMAND})`,
+    // The same call with the variable already expanded, which is what an agent
+    // that resolves it before running lands on.
+    `Bash(${cfg.ghTokenCommand.split(path.sep).join('/')})`
+  ]
+}
+
+/**
  * Claude Code's own record of which working directories a human has approved:
  * `~/.claude.json` → `projects[<cwd>].hasTrustDialogAccepted`.
  *
@@ -819,6 +860,40 @@ function isHarnessStatusLine(entry: unknown, shimPath: string | undefined): bool
   return typeof command === 'string' && command.includes(shimPath)
 }
 
+/**
+ * The company signs its own work (ADR-0022): the commit author is the GitHub
+ * App, and nothing names the vendor whose model happened to write the diff.
+ *
+ * Left unset, the engine appends its own `Co-Authored-By: <model> <vendor
+ * address>` to every commit it makes and its own line to every PR body. That
+ * reached a real pull request on 2026-09-06 — MUSAHIT #1, authored correctly by
+ * `app/ephesus-crew` and trailed by a model name — which SRS §6 criterion 10
+ * forbids in the same sentence that requires the co-author trailer ("no
+ * Architect or vendor identity anywhere"). `scripts/check-attribution.cjs`
+ * scans this repository's history and could never have seen it: the offending
+ * commit is in the TARGET.
+ *
+ * Established against the shipped binary, not assumed. `attribution.commit` and
+ * `attribution.pr` are documented there as "Attribution text … Empty string
+ * hides attribution", and `sessionUrl` appends a claude.ai session link — an
+ * identity leak of its own, and a live URL in somebody else's repository.
+ * `includeCoAuthoredBy` is the same switch under the older name, marked
+ * "Deprecated: Use attribution instead"; it is set as well because the harness
+ * runs whatever engine build is on the machine (ADR-0028 pins nothing), and of
+ * all the rules in this codebase this is the one where a redundant belt costs
+ * less than a single point of failure. The two are one switch across versions,
+ * not two mechanisms that half-overlap.
+ *
+ * This OVERRIDES rather than merges, unlike hooks, permissions and the status
+ * line. Those are surfaces the Architect may legitimately be using; this is a
+ * company rule about what the company's name goes on. Their own
+ * `~/.claude/settings.json` is a different file and is never touched (ADR-0026).
+ */
+export const NO_VENDOR_ATTRIBUTION = {
+  attribution: { commit: '', pr: '', sessionUrl: false },
+  includeCoAuthoredBy: false
+} as const
+
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
@@ -879,11 +954,15 @@ export function mergeClaudeSettings(
     : priorStatusLine
   const withStatus = statusLine === undefined ? {} : { statusLine }
 
-  if (!cfg) return `${JSON.stringify({ ...base, ...withStatus, hooks: merged }, null, 2)}\n`
+  if (!cfg) {
+    return `${JSON.stringify({ ...base, ...withStatus, ...NO_VENDOR_ATTRIBUTION, hooks: merged }, null, 2)}\n`
+  }
 
-  // Merge the mailbox grant into whatever the Architect already allowed, never
-  // replacing their list.
+  // Merge the harness's own grants into whatever the Architect already allowed,
+  // never replacing their list: this agent's mailbox, and the one command that
+  // refreshes the credential the harness itself handed it.
   const grant = mailboxPermissions(cfg)
+  const tokenRules = ghTokenPermissions(cfg)
   const existingPermissions =
     typeof base['permissions'] === 'object' &&
     base['permissions'] !== null &&
@@ -901,18 +980,27 @@ export function mergeClaudeSettings(
   // plain append produced on every re-install.
   const mine = new Set([
     ...(grant['allow'] as unknown[]),
-    ...(grant['additionalDirectories'] as unknown[])
+    ...(grant['additionalDirectories'] as unknown[]),
+    ...tokenRules
   ])
   const permissions = {
     ...existingPermissions,
-    allow: [...priorAllow.filter((item) => !mine.has(item)), ...(grant['allow'] as unknown[])],
+    allow: [
+      ...priorAllow.filter((item) => !mine.has(item)),
+      ...(grant['allow'] as unknown[]),
+      ...tokenRules
+    ],
     additionalDirectories: [
       ...priorDirs.filter((item) => !mine.has(item)),
       ...(grant['additionalDirectories'] as unknown[])
     ]
   }
 
-  return `${JSON.stringify({ ...base, ...withStatus, hooks: merged, permissions }, null, 2)}\n`
+  return `${JSON.stringify(
+    { ...base, ...withStatus, ...NO_VENDOR_ATTRIBUTION, hooks: merged, permissions },
+    null,
+    2
+  )}\n`
 }
 
 /**
@@ -956,6 +1044,8 @@ export class ClaudeAdapter implements EngineAdapter {
    * the floor reflects what actually happened rather than a guess at it.
    */
   readonly hooks = 'native' as const
+  /** ADR-0031: every level reaches the engine as `--permission-mode`. */
+  readonly autonomySupport = 'enforced' as const
 
   constructor(private readonly deps: ClaudeAdapterDeps) {}
 
@@ -1257,7 +1347,14 @@ export class ClaudeAdapter implements EngineAdapter {
       // ...but NOT its own credentials: the company borrows the Architect's
       // session (decision 3). Always exported, empty value included — see
       // `claudeCredentialsDir`, where omitting it is the failure case.
-      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeCredentialsDir()
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeCredentialsDir(),
+      // The company does not upgrade itself mid-run. Up to 30 agents share one
+      // engine install, so a background self-update is many processes racing to
+      // replace the binary all of them are executing — and on Windows the loser
+      // gets `update_apply_exe_locked` and retries at every subsequent startup.
+      // The harness upgrades the engine deliberately, between runs, or not at
+      // all; an agent must never decide that for the company.
+      DISABLE_AUTOUPDATER: '1'
     }
   }
 

@@ -11,6 +11,7 @@ import { baseAgentEnv } from './engines/spawn-env'
 import { NO_TOOLS, type ResolvedTools } from '../shared/engine-tools'
 import type { HookServer } from './hooks'
 import type { PromptStore } from './prompts'
+import { composeBudget } from '../shared/cost'
 import { writeFileAtomic } from './fsx'
 
 /**
@@ -55,6 +56,14 @@ export interface AgentSpawner {
   has(id: string): boolean
   /** Fires when a pty exits; the manager unwinds the spawn from here. */
   onExit(cb: (id: string, exitCode: number) => void): void
+  /**
+   * The final readable output of the process that just died, or null.
+   *
+   * Optional because a spawner that keeps no terminal (the scenario suites
+   * drive a fake engine off disk) has nothing to offer, and a crash record
+   * without it is the old behaviour rather than a broken one.
+   */
+  lastWordsOf?(id: string): string | null
 }
 
 /**
@@ -98,7 +107,7 @@ export interface AgentWorktrees {
     repo: string,
     worktreePath: string
   ): Promise<
-    | { readonly removed: true }
+    | { readonly removed: true; readonly residue: string | null }
     | { readonly removed: false; readonly reason: string; readonly changes: readonly string[] }
   >
 }
@@ -228,6 +237,20 @@ export interface AgentManagerOptions {
    */
   onExitError?(agentId: string, err: unknown): void
   /**
+   * This agent's process is gone. Raised for EVERY exit, before any respawn
+   * decision, so a consumer can undo what it had staked on the session being
+   * alive.
+   *
+   * Hermes is the caller that made it necessary: mail handed to a session is
+   * held in-flight until that session proves it read it, and a process that
+   * exits never will. It is a separate seam from `onLogEvent`'s `exit` row
+   * because that one is a record and this one is an action — and it fires on
+   * the exit rather than on a respawn because a respawn may never come (an
+   * agent whose bundle says `offer`, one a breaker stopped, one whose ladder
+   * is exhausted), and its mail must come back regardless.
+   */
+  onExited?(agentId: string): void
+  /**
    * Extra standing context appended to an agent's `identity.md`, supplied by
    * whoever hired them.
    *
@@ -309,6 +332,18 @@ export interface AgentManagerOptions {
    */
   rosterBudget?(agentId: string): number | null
   /**
+   * The company-wide daily ceiling (`gate-policy.json`'s `maxDailyTokens`),
+   * or null when the Architect set none. Read per spawn rather than captured at
+   * boot, so changing it takes effect on the next hire without a restart.
+   *
+   * NOT a fallback — a CLAMP. `composeBudget` gives a hire that declared
+   * nothing this figure, and holds a hire that declared more down to it. The
+   * autonomy ceiling has behaved this way since ADR-0012; a budget ceiling that
+   * any profile could exceed would be a setting that looks like a limit and is
+   * not.
+   */
+  maxDailyTokens?(): number | null
+  /**
    * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
    *
    * Optional so the lifecycle stays constructible without the Watch — and when
@@ -362,6 +397,38 @@ interface LiveAgent {
 export interface AgentShutdownReport {
   readonly unwound: readonly string[]
   readonly failed: readonly { readonly agentId: string; readonly error: string }[]
+}
+
+/**
+ * Contract: throws when the engine cannot enforce the autonomy that was
+ * composed for this spawn (ADR-0031). Pure apart from the throw.
+ *
+ * ## Why this refuses rather than warns
+ *
+ * `autonomy` is a CEILING the Architect set and the Watch composed (ADR-0012).
+ * On an engine that declares `none`, nothing carries it to the process — the
+ * engine's own configuration decides, and that configuration is the operator's
+ * rather than the harness's. So a `manual` hire on such an engine runs at
+ * whatever the operator's config says while every surface in the app reports
+ * `manual`. That is invariant §7's failure in its worst form: a safety control
+ * displaying as applied.
+ *
+ * `autonomous` is the one level that is safe to allow through, because it is
+ * the loosest the Architect can ask for — an engine doing something stricter
+ * of its own accord costs a stalled turn, not an unpermitted action, and the
+ * stall is visible. Anything stricter is refused, which is the deny-by-default
+ * direction FR-11.1 requires a default to fail in.
+ */
+export function assertAutonomyEnforceable(
+  adapter: Pick<EngineAdapter, 'id' | 'autonomySupport'>,
+  autonomy: AgentSpawnConfig['autonomy']
+): void {
+  if (adapter.autonomySupport === 'enforced' || autonomy === 'autonomous') return
+  throw new Error(
+    `agents: ${adapter.id} cannot enforce "${autonomy}" autonomy, so this hire would run at ` +
+      `whatever ${adapter.id} is configured to do — raise the ceiling to "autonomous" if that is ` +
+      'what you intend, or hire on an engine that maps it'
+  )
 }
 
 export class AgentManager {
@@ -469,6 +536,7 @@ export class AgentManager {
     // second one's hook token would silently orphan the first agent's hooks —
     // observed live before this reservation existed.
     const cfg = this.spawnConfig(request)
+    assertAutonomyEnforceable(adapter, cfg.autonomy)
     const card = this.newCard(request, adapter, null)
     this.agents.set(request.agentId, {
       card,
@@ -791,8 +859,10 @@ export class AgentManager {
       ptyId: request.agentId,
       settingsWritten: [],
       envGrants: request.envGrants,
-      dailyTokens:
+      dailyTokens: composeBudget(
         request.budget?.dailyTokens ?? this.options.rosterBudget?.(request.agentId) ?? null,
+        this.options.maxDailyTokens?.() ?? null
+      ).effective,
       capabilities: request.capabilities,
       seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),
@@ -919,7 +989,50 @@ export class AgentManager {
   private resumeArgsFor(agent: LiveAgent): readonly string[] {
     const sessionId = agent.sessionIds.at(-1)
     if (sessionId === undefined || !agent.adapter.resume) return []
+    // A recorded session id is not proof the transcript still exists. When it
+    // does not, `--resume` is not a degraded start — it is a REFUSAL: the
+    // engine prints "No conversation found with session ID: …" and exits
+    // immediately, so the respawn ladder resumes into the same nothing and the
+    // agent is unspawnable until a human notices. Observed on 2026-09-06 after
+    // a transcript directory was cleared out from under two live agents, and
+    // reachable any time transcripts are rotated, pruned or tidied.
+    //
+    // Absent is not damaged (the M8.8 store's rule, applied to somebody else's
+    // file): a missing transcript means START FRESH, which is exactly what an
+    // engine with no resume support does anyway.
+    if (!this.transcriptExists(agent, sessionId)) {
+      this.options.onLogEvent?.({
+        // Part of a spawn, and the union's own vocabulary: the resume decision
+        // is made on the way into one, not as an event of its own.
+        kind: 'spawn',
+        event: 'resume-skipped',
+        agentId: agent.card.agentId,
+        because: 'the recorded session has no transcript; starting a fresh one'
+      })
+      return []
+    }
     return agent.adapter.resume.resumeArgs(sessionId)
+  }
+
+  /**
+   * Contract: whether this engine still holds the named session's transcript.
+   * Never throws — an adapter with no transcript reader answers `true`, because
+   * "we cannot check" must not become "we refuse to resume".
+   */
+  private transcriptExists(agent: LiveAgent, sessionId: string): boolean {
+    try {
+      // Inside the try, not outside it. `transcriptDir` is adapter code and can
+      // throw; while it sat above this block the documented "never throws" was
+      // false, and an adapter that blew up looking for its own transcript
+      // directory took the whole respawn with it — the exact opposite of the
+      // rule this function exists to state. `fs.existsSync` returns false rather
+      // than throwing, so the catch guarded almost nothing where it was.
+      const dir = agent.adapter.transcripts?.transcriptDir(agent.cfg)
+      if (dir === undefined) return true
+      return fs.existsSync(path.join(dir, `${sessionId}.jsonl`))
+    } catch {
+      return true
+    }
   }
 
   private assertRespawnAllowed(agentId: string): void {
@@ -1010,6 +1123,16 @@ export class AgentManager {
     const agent = this.agents.get(agentId)
     if (!agent) return
 
+    // The session is gone, so anything staked on it being alive is void. Raised
+    // FIRST and outside the `installing` branch below, because that branch
+    // returns without unwinding and mail handed to the dead session would sit
+    // in-flight forever. A consumer that throws must not cost the unwind.
+    try {
+      this.options.onExited?.(agentId)
+    } catch (err) {
+      this.options.onExitError?.(agentId, err)
+    }
+
     if (agent.card.lifecycle === 'installing') {
       const version = await this.probe(agent.adapter.binary())
       if (version === null) {
@@ -1097,8 +1220,19 @@ export class AgentManager {
       worktree: worktree.path,
       branch: worktree.branch,
       worktreeRemoved: outcome.removed,
-      ...(outcome.removed ? {} : { because: outcome.reason, changes: [...outcome.changes] })
+      ...(outcome.removed
+        ? outcome.residue === null
+          ? {}
+          : { residue: outcome.residue }
+        : { because: outcome.reason, changes: [...outcome.changes] })
     })
+    // A directory git unregistered and left behind is not a failed removal —
+    // the worktree IS gone — but it is not nothing either: unswept residue
+    // accumulates in the harness home, and it used to refuse the next
+    // activation for the same agent id. Reported, not silent (invariant §7).
+    if (outcome.removed && outcome.residue !== null) {
+      this.options.onExitError?.(agent.card.agentId, new Error(outcome.residue))
+    }
     if (!outcome.removed) {
       // Visible, not just logged: a working copy left behind with somebody's
       // uncommitted work in it is exactly the kind of thing that must be said
@@ -1153,6 +1287,15 @@ export class AgentManager {
       // human needs to look at this".
       waitingForCapacity: this.options.capacityParked?.(agentId) ?? false
     }
+    // What the process actually said before it died. Recorded ONLY for an
+    // abnormal exit: a clean shutdown's last frame is the TUI's farewell and
+    // would put a line of noise in the book of record on every quit, while a
+    // crash without it is an exit code and a shrug — which is exactly where the
+    // 2026-09-05 one-hour run ran out of evidence.
+    const lastWords =
+      exitCode !== null && exitCode !== 0
+        ? (this.options.spawner.lastWordsOf?.(agentId) ?? null)
+        : null
     this.options.onLogEvent?.({
       kind: 'ghost',
       agentId,
@@ -1162,7 +1305,8 @@ export class AgentManager {
       memorySections: offer.memorySections,
       tasksReturned: [...tasksReturned],
       waitingForCapacity: offer.waitingForCapacity,
-      ...(offer.blockedBecause === null ? {} : { respawnBlocked: offer.blockedBecause })
+      ...(offer.blockedBecause === null ? {} : { respawnBlocked: offer.blockedBecause }),
+      ...(lastWords === null ? {} : { lastWords })
     })
     return offer
   }

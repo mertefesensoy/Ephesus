@@ -18,6 +18,16 @@ import {
   watchedRepos
 } from '../../src/shared/profile-activation'
 import { EMPTY_TRIGGERS, TRIGGERS_REL, triggersRecordSchema } from '../../src/shared/restart'
+import {
+  DRAFTS_REL,
+  draftsRecordSchema,
+  EMPTY_DRAFTS,
+  type OutboundDraft,
+  type PostPermit
+} from '../../src/shared/outbound'
+import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
+import { HARBOR_ENDPOINT } from '../../src/shared/reserved'
+import { FrontOffice, OUTBOUND_SUBJECT } from '../../src/main/frontoffice'
 import { removeTempDir } from '../tmpdir'
 
 /** Homes made by the M8.8 restart cases below, cleaned with the rest. */
@@ -201,6 +211,15 @@ async function restartOver(home: string): Promise<Company> {
             .sort()
         : []
     },
+    inflight: (agentId) => {
+      const dir = path.join(hermes.mailboxDir(agentId), 'inbox', '.inflight')
+      return fs.existsSync(dir)
+        ? fs
+            .readdirSync(dir)
+            .filter((n) => n.endsWith('.json'))
+            .sort()
+        : []
+    },
     done: (agentId) => {
       const dir = path.join(hermes.mailboxDir(agentId), 'inbox', '.done')
       return fs.existsSync(dir)
@@ -280,7 +299,8 @@ describe('S-BLACKOUT — killed mid-delivery', () => {
     // And the recipient consumes it exactly once.
     expect(await restarted.hermes.consumeInbox('agent.b')).toHaveLength(1)
     expect(await restarted.hermes.consumeInbox('agent.b')).toHaveLength(0)
-    expect(restarted.done('agent.b')).toEqual([`${sent.id}.json`])
+    // Handed over once, and in flight until this session proves it read it.
+    expect(restarted.inflight('agent.b')).toEqual([`${sent.id}.json`])
   })
 
   it('does not re-consume mail the dead harness had already handed over', async () => {
@@ -296,12 +316,20 @@ describe('S-BLACKOUT — killed mid-delivery', () => {
     await company.runTurn('agent.a', [sendStep(sent)])
     await company.hermes.sweep()
 
-    // The agent got the mail; the harness died before finishing the turn.
+    // The mail was handed over; the harness died before finishing the turn, so
+    // it is IN FLIGHT rather than archived.
     await expect(company.hermes.consumeInbox('agent.b')).rejects.toThrow(/blackout/)
-    expect(company.done('agent.b')).toEqual([`${sent.id}.json`])
+    expect(company.inflight('agent.b')).toEqual([`${sent.id}.json`])
 
+    // The requirement this case exists for is unchanged: a NEW harness cannot
+    // know what the dead one's session did with what it was handed, so it
+    // settles the in-flight mail rather than redelivering it. Guessing wrong
+    // the other way would double-process work that may have been done
+    // (§6 criterion 6). The redelivery this fix adds is only for the death the
+    // harness OBSERVES — an agent exiting while the harness is alive.
     const restarted = await restartOver(company.home)
     expect(await restarted.hermes.consumeInbox('agent.b')).toEqual([])
+    expect(restarted.done('agent.b')).toEqual([`${sent.id}.json`])
   })
 })
 
@@ -411,6 +439,11 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
         file: path.join(home, GATES_REL),
         schema: gatesRecordSchema,
         empty: EMPTY_GATES
+      }),
+      drafts: new JsonStateStore({
+        file: path.join(home, DRAFTS_REL),
+        schema: draftsRecordSchema,
+        empty: EMPTY_DRAFTS
       })
     }
     const scheduler = new Scheduler({
@@ -438,7 +471,36 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
         stores.activations.save(activationsRecord(instances))
       }
     })
-    return { stores, scheduler, gates, activations }
+    // A REAL Front Office, wired to the real gates, because the draft an
+    // outbound gate holds is the half M8.8 restored without (ADR-0030).
+    const posted: PostPermit[] = []
+    const frontOffice = new FrontOffice({
+      outboundAutonomy: () => 'supervised',
+      openGate: (request) => {
+        const outcome = gates.submit({
+          kind: 'outbound',
+          agentId: request.agentId,
+          packaging: {
+            what: `comment on ${request.key}`,
+            why: 'the issue asked a question',
+            blastRadius: 'one public comment',
+            rollback: 'delete the comment'
+          }
+        })
+        return outcome.held ? outcome.gate.id : null
+      },
+      post: (permit) => {
+        posted.push(permit)
+        return Promise.resolve({ ok: true, because: null })
+      },
+      deliver: () => {},
+      onLogEvent: () => {},
+      persist: (record) => {
+        stores.drafts.save(record)
+      },
+      now: () => new Date(nowMs)
+    })
+    return { stores, scheduler, gates, activations, frontOffice, posted }
   }
 
   function home(): string {
@@ -488,6 +550,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => [{ id: 'task-1', gates: [gate.id] }]
     })
@@ -512,6 +577,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => [{ id: 'task-1', gates: ['g-2026-09-05t03-00-00-000z-deadbeef'] }]
     })
@@ -520,6 +588,97 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
     expect(report.counts.orphanBlocks).toBe(1)
     expect(report.problems[0]?.cause).toBe('restart/orphan-block:task-1')
     expect(report.problems[0]?.detail).toContain('cannot reach done')
+  })
+
+  /**
+   * ADR-0030, and the defect the M8.8 audit found on 2026-09-06.
+   *
+   * M8.8 restored the outbound GATE and nothing restored the draft it held.
+   * The Architect saw a gate whose packaging read correctly, approved it, and
+   * `onVerdict` found nothing to post: the gate settled as approved, the log
+   * recorded a verdict, and the comment never left the machine. The queue was
+   * empty before M8.8, so the restore is what made this reachable.
+   */
+  function outboundDraft(): OutboundDraft {
+    return {
+      schemaVersion: 1,
+      kind: 'outbound-draft',
+      repo: 'owner/app',
+      target: 'issue',
+      ref: 412,
+      body: 'Thanks for the report — I have opened a task to reproduce this.'
+    }
+  }
+
+  function draftMessage(nowMs: number): Message {
+    return composeMessage({
+      id: makeMessageId(new Date(nowMs), 'draft1'),
+      conversation: 'c-front-office',
+      in_reply_to: null,
+      from: 'agent.crew-myapp-oncall',
+      to: HARBOR_ENDPOINT,
+      act: 'inform',
+      subject: OUTBOUND_SUBJECT,
+      body: JSON.stringify(outboundDraft()),
+      hops: 1,
+      created_at: new Date(nowMs).toISOString()
+    })
+  }
+
+  it('an outbound gate open at the blackout can still be POSTED after the restart', async () => {
+    const dir = home()
+    const first = lifetime(dir)
+    await first.frontOffice.onDraft(draftMessage(HOUR))
+    const gateId = first.gates.list()[0]?.id
+    if (gateId === undefined) throw new Error('the draft should have opened a gate')
+    expect(first.posted).toHaveLength(0)
+
+    const second = lifetime(dir, HOUR + 60_000)
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+
+    expect(report.counts.drafts).toBe(1)
+    expect(report.counts.draftlessGates).toBe(0)
+    // The whole point: the Architect's approval reaches a real comment.
+    expect(await second.frontOffice.onVerdict(gateId, true)).toBe(true)
+    expect(second.posted).toHaveLength(1)
+    expect(second.posted[0]?.draft.body).toBe(outboundDraft().body)
+  })
+
+  it('a gate whose draft did NOT come back is reported, not silently approved', async () => {
+    const dir = home()
+    const first = lifetime(dir)
+    await first.frontOffice.onDraft(draftMessage(HOUR))
+    // The record is damaged in exactly the way that loses the words and keeps
+    // the gate — which is the state every restart was in before ADR-0030.
+    fs.writeFileSync(path.join(dir, DRAFTS_REL), '{ "schemaVersion": 1, "drafts": [] }', 'utf8')
+
+    const second = lifetime(dir, HOUR + 60_000)
+    const report = restoreCompany(second.stores, {
+      restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
+      restoreActivations: (record) => second.activations.restore(record.instances),
+      restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
+      openGates: () => second.gates.list(),
+      blockedTasks: () => []
+    })
+
+    expect(report.counts.draftlessGates).toBe(1)
+    const problem = report.problems.find((p) => p.cause.startsWith('restart/draftless-gate:'))
+    expect(problem?.detail).toContain('post nothing')
+    // Reported, never settled on the harness's own authority (NFR-9): the gate
+    // is still there for the Architect to deny.
+    expect(second.gates.list()).toHaveLength(1)
   })
 
   it('the activation is back, with its crew honestly down', async () => {
@@ -539,6 +698,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => []
     })
@@ -565,6 +727,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => []
     })
@@ -588,6 +753,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => []
     })
@@ -611,6 +779,9 @@ describe('S-BLACKOUT — killed holding an activation, a gate and a trigger cloc
       restoreTriggers: (lastFired) => second.scheduler.restore(lastFired),
       restoreActivations: (record) => second.activations.restore(record.instances),
       restoreGates: (record) => second.gates.restore(record),
+      restoreDrafts: (record) => second.frontOffice.restore(record),
+      gatesHoldingADraft: () =>
+        second.frontOffice.pending().flatMap((f) => (f.gateId === null ? [] : [f.gateId])),
       openGates: () => second.gates.list(),
       blockedTasks: () => []
     })

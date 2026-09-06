@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { FrontOffice, OUTBOUND_SUBJECT } from '../../src/main/frontoffice'
 import { HARBOR_ENDPOINT } from '../../src/shared/reserved'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
-import type { OutboundDraft, PostPermit } from '../../src/shared/outbound'
+import {
+  DRAFT_RECORD_TRIM,
+  draftsRecordSchema,
+  type DraftsRecord,
+  type OutboundDraft,
+  type PostPermit
+} from '../../src/shared/outbound'
 import type { AutonomyLevel } from '../../src/shared/gates'
 
 /**
@@ -233,5 +239,161 @@ describe('a failed send is reported, never silently swallowed', () => {
     const reply = delivered.at(-1)
     expect(reply?.act).toBe('refuse')
     expect(reply?.body).toMatch(/could not send/)
+  })
+})
+
+/**
+ * The restart record (ADR-0030), found by the M8.8 audit on 2026-09-06.
+ *
+ * `gates.json` brought an `outbound` gate back and nothing brought back the
+ * draft it held, so an approval posted nothing and said nothing.
+ */
+describe('the draft survives the restart that restores its gate', () => {
+  function persisting(): {
+    office: FrontOffice
+    posted: PostPermit[]
+    records: DraftsRecord[]
+  } {
+    const posted: PostPermit[] = []
+    const records: DraftsRecord[] = []
+    const office = new FrontOffice({
+      outboundAutonomy: () => 'supervised',
+      openGate: () => 'gate-1',
+      post: (permit) => {
+        posted.push(permit)
+        return Promise.resolve({ ok: true, because: null })
+      },
+      deliver: () => {},
+      onLogEvent: () => {},
+      persist: (record) => records.push(record),
+      now: () => new Date('2026-08-31T12:00:00.000Z')
+    })
+    return { office, posted, records }
+  }
+
+  it('writes the record when a draft is held, and again when the verdict lands', async () => {
+    const { office, records } = persisting()
+    await office.onDraft(draftMessage())
+    expect(records.at(-1)?.drafts).toHaveLength(1)
+    expect(records.at(-1)?.drafts[0]?.gateId).toBe('gate-1')
+
+    await office.onVerdict('gate-1', true)
+
+    // Still filed, and still carrying its gate id as history — but no longer
+    // AWAITING, which is the field a restore reads. Without it a decided
+    // draft comes back in `pending()` and rides the next standup as though
+    // the Architect had never answered.
+    expect(records.at(-1)?.drafts[0]).toMatchObject({ gateId: 'gate-1', awaiting: false })
+    expect(office.pending()).toHaveLength(0)
+
+    // And the record proves it across the restart, not just in memory.
+    const after = persisting()
+    const record = records.at(-1)
+    if (record === undefined) throw new Error('nothing was persisted')
+    expect(after.office.restore(record)).toEqual({ filed: 1, held: 0 })
+    expect(await after.office.onVerdict('gate-1', true)).toBe(false)
+    expect(after.posted).toEqual([])
+  })
+
+  it('posts the comment after a restart, which is the whole defect', async () => {
+    const first = persisting()
+    await first.office.onDraft(draftMessage())
+    const record = first.records.at(-1)
+    if (record === undefined) throw new Error('nothing was persisted')
+
+    const second = persisting()
+    expect(second.office.restore(record)).toEqual({ filed: 1, held: 1 })
+
+    expect(await second.office.onVerdict('gate-1', true)).toBe(true)
+    expect(second.posted).toHaveLength(1)
+    expect(second.posted[0]?.draft.body).toBe(DRAFT.body)
+  })
+
+  it('replaces what it holds rather than accumulating a second copy', async () => {
+    const { office, records } = persisting()
+    await office.onDraft(draftMessage())
+    const record = records.at(-1)
+    if (record === undefined) throw new Error('nothing was persisted')
+
+    office.restore(record)
+    office.restore(record)
+
+    // A restore that appended would double every draft in the panel and, worse,
+    // leave two rows claiming one gate.
+    expect(office.drafts()).toHaveLength(1)
+  })
+
+  it('records a hold that got no gate as awaiting NOBODY, and the schema agrees', async () => {
+    // The reply says "no gate could be opened", so there is nothing for the
+    // Architect to answer. A record claiming otherwise restores a draft that
+    // no verdict can ever reach — so the schema refuses to hold that shape at
+    // all, and `JsonStateStore.save` validates before it writes.
+    const records: DraftsRecord[] = []
+    const office = new FrontOffice({
+      outboundAutonomy: () => 'supervised',
+      openGate: () => null,
+      post: () => Promise.resolve({ ok: true, because: null }),
+      deliver: () => {},
+      onLogEvent: () => {},
+      persist: (record) => records.push(record),
+      now: () => new Date('2026-08-31T12:00:00.000Z')
+    })
+
+    await office.onDraft(draftMessage())
+
+    expect(records.at(-1)?.drafts[0]).toMatchObject({ gateId: null, awaiting: false })
+    const impossible = records.at(-1)?.drafts[0]
+    if (impossible === undefined) throw new Error('nothing was persisted')
+    expect(
+      draftsRecordSchema.safeParse({
+        schemaVersion: 1,
+        drafts: [{ ...impossible, awaiting: true }]
+      }).success
+    ).toBe(false)
+  })
+
+  it('never trims away a draft that is still waiting at a gate', async () => {
+    const posted: PostPermit[] = []
+    const records: DraftsRecord[] = []
+    let gateSeq = 0
+    const office = new FrontOffice({
+      // draft-only: files without a gate, so these are the trimmable ones.
+      outboundAutonomy: () => 'manual',
+      openGate: () => {
+        gateSeq += 1
+        return `gate-${String(gateSeq)}`
+      },
+      post: (permit) => {
+        posted.push(permit)
+        return Promise.resolve({ ok: true, because: null })
+      },
+      deliver: () => {},
+      onLogEvent: () => {},
+      persist: (record) => records.push(record),
+      now: () => new Date('2026-08-31T12:00:00.000Z')
+    })
+
+    // One held draft FIRST, so it is the oldest and the trim reaches it first.
+    const held = new FrontOffice({
+      outboundAutonomy: () => 'supervised',
+      openGate: () => 'gate-held',
+      post: () => Promise.resolve({ ok: true, because: null }),
+      deliver: () => {},
+      onLogEvent: () => {},
+      persist: () => {},
+      now: () => new Date('2026-08-31T12:00:00.000Z')
+    })
+    await held.onDraft(draftMessage())
+    const seed = held.pending()[0]
+    if (seed === undefined) throw new Error('expected a held draft')
+    office.restore({ schemaVersion: 1, drafts: [seed] })
+
+    for (let i = 0; i < DRAFT_RECORD_TRIM + 5; i += 1) await office.onDraft(draftMessage())
+
+    const last = records.at(-1)
+    expect(last?.drafts.length).toBeLessThanOrEqual(DRAFT_RECORD_TRIM)
+    // The oldest row is the one the trim would take first, and it is the one
+    // an Architect can still approve. Dropping it is the defect, not the trim.
+    expect(last?.drafts.some((d) => d.gateId === 'gate-held')).toBe(true)
   })
 })

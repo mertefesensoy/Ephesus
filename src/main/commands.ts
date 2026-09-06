@@ -23,6 +23,34 @@ export const SUBMIT_KEY = '\r'
 /** Gap between the text write and the submit key. Measured, not guessed. */
 export const SUBMIT_KEY_DELAY_MS = 150
 
+/**
+ * How long the engine gets to confirm a submit before the key is sent again.
+ *
+ * The submit key used to be fire-and-forget, and a TUI that did not act on it
+ * left the text sitting in the prompt box with the harness believing it had
+ * spoken. Observed on 2026-09-06: an agent woken one second after spawn took
+ * the nudge into its prompt, never submitted it, and sat idle with two tasks
+ * assigned — its transcript held four setup lines and no user message at all.
+ * The startup notices ("keep working from anywhere", auto-mode, `/rc
+ * connecting…`) were still painting, and one of them took the key.
+ *
+ * That is the same shape as the trust dialog that answered a wake with "No,
+ * exit" (2026-09-05): something in front of the prompt consumes the keystroke.
+ * Enumerating what can be in front of the prompt is a losing game — the engine
+ * adds notices between releases. Confirming the outcome is not.
+ */
+export const SUBMIT_CONFIRM_MS = 2_000
+
+/**
+ * How many submit keys one send may cost, the first included.
+ *
+ * Bounded because an unconfirmed submit must end in a report rather than in a
+ * key pressed forever. A resent key that was not needed lands on an empty
+ * prompt and does nothing, so the cost of over-trying is nil and the cost of
+ * under-trying is a silent agent.
+ */
+export const SUBMIT_ATTEMPTS = 4
+
 /** The slice of the PTY layer the queue needs. */
 export interface CommandSink {
   write(agentId: string, data: string): void
@@ -34,11 +62,30 @@ export interface CommandQueueOptions {
   onChange(state: CommandState): void
   /** Injected in tests so the two-write submit is deterministic. */
   schedule?: (fn: () => void, ms: number) => void
+  /**
+   * Every submit key was spent and the engine never reported the prompt.
+   *
+   * The text is in the agent's prompt box and nothing is going to run it. This
+   * is the one outcome that used to be indistinguishable from success, so it is
+   * reported rather than counted (invariant §7).
+   */
+  onUnaccepted?(agentId: string, attempts: number): void
 }
 
 export class CommandQueue {
   private readonly held = new Map<string, { text: string; reason: string }>()
   private readonly phases = new Map<string, AvatarSnapshot['phase']>()
+  /**
+   * Agents whose last send has not been confirmed: which send it was, and the
+   * keys it has cost.
+   *
+   * The generation is what makes a second send SUPERSEDE the first rather than
+   * race it. Without it two chains press at once against one shared counter,
+   * which spends the budget at double speed and reports a number belonging to
+   * neither send.
+   */
+  private readonly awaiting = new Map<string, { gen: number; attempts: number }>()
+  private generation = 0
   private readonly schedule: (fn: () => void, ms: number) => void
 
   constructor(private readonly options: CommandQueueOptions) {
@@ -57,6 +104,9 @@ export class CommandQueue {
 
   forget(agentId: string): void {
     this.phases.delete(agentId)
+    // The process is gone, so there is nothing left to press a key at and
+    // nothing to report: a dead agent did not decline its wake.
+    this.awaiting.delete(agentId)
     if (this.held.delete(agentId)) {
       this.options.onChange({ agentId, held: null, reason: null })
     }
@@ -147,8 +197,52 @@ export class CommandQueue {
     this.send(agentId, entry.text)
   }
 
+  /**
+   * The engine reported `prompt-submitted` for this agent: whatever was in the
+   * prompt box is now a turn, so nothing is owed.
+   *
+   * Contract: idempotent, and safe for an agent this queue never wrote to — an
+   * agent submits prompts of its own accord and every one of them arrives here.
+   */
+  accepted(agentId: string): void {
+    this.awaiting.delete(agentId)
+  }
+
   private send(agentId: string, text: string): void {
     this.options.sink.write(agentId, text)
-    this.schedule(() => this.options.sink.write(agentId, SUBMIT_KEY), SUBMIT_KEY_DELAY_MS)
+    const gen = ++this.generation
+    this.awaiting.set(agentId, { gen, attempts: 0 })
+    this.schedule(() => this.pressSubmit(agentId, gen), SUBMIT_KEY_DELAY_MS)
+  }
+
+  /**
+   * One submit key, and a check that it did something.
+   *
+   * The check is the point. A key written into a TUI that is painting a startup
+   * notice is consumed by the notice, and the only difference between that and
+   * a submitted prompt — from the harness's side — is an event that does not
+   * arrive. Re-pressing costs an empty prompt at worst.
+   */
+  private pressSubmit(agentId: string, gen: number): void {
+    const pending = this.awaiting.get(agentId)
+    // `accepted`, `forget`, or a newer send landed between the schedule and
+    // here. The first two mean the prompt is already a turn and a key now would
+    // be typing into somebody's answer; the third means this chain is stale.
+    if (pending === undefined || pending.gen !== gen) return
+    const spent = pending.attempts + 1
+    this.awaiting.set(agentId, { gen, attempts: spent })
+    this.options.sink.write(agentId, SUBMIT_KEY)
+    if (spent >= SUBMIT_ATTEMPTS) {
+      this.schedule(() => this.giveUp(agentId, gen, spent), SUBMIT_CONFIRM_MS)
+      return
+    }
+    this.schedule(() => this.pressSubmit(agentId, gen), SUBMIT_CONFIRM_MS)
+  }
+
+  private giveUp(agentId: string, gen: number, attempts: number): void {
+    const pending = this.awaiting.get(agentId)
+    if (pending === undefined || pending.gen !== gen) return
+    this.awaiting.delete(agentId)
+    this.options.onUnaccepted?.(agentId, attempts)
   }
 }

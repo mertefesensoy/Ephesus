@@ -57,20 +57,37 @@ export class ExecGitRunner implements GitRunner {
 
   run(cwd: string, args: readonly string[]): Promise<GitResult> {
     return new Promise((resolve) => {
-      execFile(
-        'git',
-        [...IDENTITY_ARGS, ...args],
-        { cwd, timeout: this.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          const code =
-            err && typeof (err as { code?: unknown }).code === 'number'
-              ? (err as { code: number }).code
-              : err
-                ? null
-                : 0
-          resolve({ ok: !err, stdout, stderr: stderr || (err ? err.message : ''), code })
-        }
-      )
+      // `execFile` REJECTS rather than calling back when the spawn itself
+      // cannot happen — a `cwd` that is not a directory throws `ENOTDIR`
+      // synchronously on POSIX, where Windows lets it through to the callback.
+      // Every caller here treats a `GitResult` as the answer and never catches,
+      // so a rejection escaped `Worktrees.create` on Linux and broke its
+      // "returns a reason" contract for a case that passed all day on win32:
+      // a file standing where a worktree goes. A runner that cannot run is a
+      // failed git command, not an exception.
+      try {
+        execFile(
+          'git',
+          [...IDENTITY_ARGS, ...args],
+          { cwd, timeout: this.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+          (err, stdout, stderr) => {
+            const code =
+              err && typeof (err as { code?: unknown }).code === 'number'
+                ? (err as { code: number }).code
+                : err
+                  ? null
+                  : 0
+            resolve({ ok: !err, stdout, stderr: stderr || (err ? err.message : ''), code })
+          }
+        )
+      } catch (err) {
+        resolve({
+          ok: false,
+          stdout: '',
+          stderr: describeError(err),
+          code: null
+        })
+      }
     })
   }
 }
@@ -118,7 +135,14 @@ export interface WorktreeState {
 }
 
 export type WorktreeRemoval =
-  | { readonly removed: true }
+  | {
+      readonly removed: true
+      /**
+       * Non-null when git unregistered the worktree but its directory
+       * survived, and this could not tidy it — a sentence for the Architect.
+       */
+      readonly residue: string | null
+    }
   | { readonly removed: false; readonly reason: string; readonly changes: readonly string[] }
 
 export interface WorktreesOptions {
@@ -128,6 +152,79 @@ export interface WorktreesOptions {
    * company's own repo is the one thing this class must never make.
    */
   readonly forbiddenRoot: string
+}
+
+/**
+ * Contract: pure. Whether `branch` belongs to the agent whose own branch is
+ * `own` — either it IS that branch, or it is a topic branch beneath it.
+ *
+ * The agent's branch is a NAMESPACE, not a single name. `agent/<id>` is where a
+ * respawn lands by default, but the runbook tells a hire to "push your own
+ * `agent/*` branch and open a pull request", and a hire doing exactly that ends
+ * up on `agent/<id>-<topic>`. Requiring the exact name read that as somebody
+ * else's checkout and refused the respawn — so an agent was punished for having
+ * done its job, and because activation is all-or-nothing it took the whole
+ * company down with it.
+ *
+ * Observed live on 2026-09-06: the dependency-updater opened three security
+ * pull requests, was left on `agent/…-dependency-updater-pytest-asyncio-14-compat`,
+ * and the next activation failed with "worktree refused: … already exists" on a
+ * clean checkout of the right repository.
+ *
+ * The separator is required, so `agent/mason-2` is Mason's and `agent/masonry`
+ * is not. Without it the namespace would leak into every id that merely starts
+ * with another's, which is exactly the confusion the prefix is meant to avoid.
+ */
+export function isAgentsOwnBranch(branch: string, own: string): boolean {
+  return branch === own || branch.startsWith(`${own}-`)
+}
+
+/** Whether a path may host a worktree, or the clause explaining why not. */
+export type VacancyVerdict =
+  { readonly vacant: true } | { readonly vacant: false; readonly because: string }
+
+/**
+ * Contract: pure inspection — reports whether `target` is an empty real
+ * directory. Reads the filesystem, changes nothing, never throws.
+ *
+ * This exists because the refusal it informs is permanent. `create` will not
+ * write into a path it cannot prove is the agent's own checkout, which is
+ * right — but a path that survived an unwind with its files already gone holds
+ * nobody's work, and refusing it retires the agent for good. On Windows that is
+ * the ordinary case rather than the exotic one: git deletes a worktree's
+ * contents and a held directory handle (OneDrive, a watcher, an open shell)
+ * leaves the empty directory standing.
+ *
+ * Nothing here deletes. `git worktree add` accepts an existing empty directory,
+ * so the harness never has to remove one — which is why this reports rather
+ * than clears: the module's promise not to destroy anything at the worktree
+ * path holds on the new route too, and there is no "could not remove it" state
+ * to get wrong.
+ *
+ * "Empty" carries the whole safety argument, so it is read literally: one entry
+ * of any kind, a file where a directory was expected, a link standing in for
+ * one (ADR-0021's junction guard — the checkout would land in a directory
+ * nobody approved), or a path that cannot be listed at all. Each keeps the
+ * refusal.
+ */
+export function worktreePathIsVacant(target: string): VacancyVerdict {
+  let entries: readonly string[]
+  try {
+    // lstat, not stat: a link here reads as a perfectly ordinary directory
+    // while redirecting the checkout somewhere the harness never approved.
+    if (!fs.lstatSync(target).isDirectory()) return { vacant: false, because: 'already exists' }
+    entries = fs.readdirSync(target)
+  } catch (err) {
+    // Uninspectable is not empty — the same safe direction `state` takes.
+    return {
+      vacant: false,
+      because: `already exists and could not be read: ${
+        err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err)
+      }`
+    }
+  }
+  if (entries.length > 0) return { vacant: false, because: 'already exists' }
+  return { vacant: true }
 }
 
 export class Worktrees {
@@ -168,13 +265,26 @@ export class Worktrees {
       // contradicted the card that still names it (M4 close-out audit).
       const head = await this.options.runner.run(target, ['rev-parse', '--abbrev-ref', 'HEAD'])
       const common = await this.options.runner.run(target, ['rev-parse', '--git-common-dir'])
+      const branch = head.ok ? head.stdout.trim() : ''
       const owned =
         head.ok &&
-        head.stdout.trim() === plan.branch &&
+        isAgentsOwnBranch(branch, plan.branch) &&
         common.ok &&
         path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
-      if (owned) return { ok: true, path: target, branch: plan.branch, created: false }
-      return { ok: false, reason: `worktree refused: "${plan.path}" already exists` }
+      // Reuse it WHERE IT STANDS: the branch it is on is where its work is, and
+      // moving it back would strand the commits the agent is about to push.
+      if (owned) return { ok: true, path: target, branch, created: false }
+      // Not the agent's checkout. Before refusing it forever, ask the only
+      // question the refusal is actually protecting: is there anything in
+      // there? An empty directory holds no work, and `worktree add` will use
+      // it as it stands.
+      const vacancy = worktreePathIsVacant(target)
+      if (!vacancy.vacant) {
+        return { ok: false, reason: `worktree refused: "${plan.path}" ${vacancy.because}` }
+      }
+      // git may still hold an administrative entry pointing at the path whose
+      // files are gone; without this, `worktree add` refuses it as registered.
+      await this.options.runner.run(repo, ['worktree', 'prune'])
     }
 
     const known = await this.options.runner.run(repo, [
@@ -219,7 +329,7 @@ export class Worktrees {
       // Already gone: prune the stale administrative entry so the next create
       // at the same path is not refused by git's own bookkeeping.
       await this.options.runner.run(repo, ['worktree', 'prune'])
-      return { removed: true }
+      return { removed: true, residue: null }
     }
     const state = await this.state(worktreePath)
     if (!state.clean) {
@@ -238,8 +348,49 @@ export class Worktrees {
       }
     }
     await this.options.runner.run(repo, ['worktree', 'prune'])
-    return { removed: true }
+    return { removed: true, residue: sweepEmptyResidue(worktreePath) }
   }
+}
+
+/**
+ * Contract: removes the directory git left behind, and ONLY when it is empty.
+ * Returns null when nothing was left or the residue was swept, a sentence when
+ * it could not be.
+ *
+ * `git worktree remove` usually deletes the directory along with the
+ * registration. On Windows it has been observed to unregister and leave an
+ * empty directory — three of them were sitting in `~/.ephesus/worktrees` on
+ * 2026-09-06, unknown to `git worktree list`. Left alone they accumulate, and
+ * until `worktreePathIsVacant` learned that an empty directory is vacant the
+ * residue of one activation REFUSED the next one for the same agent id.
+ *
+ * **Empty only, and that is the whole safety argument.** By this point git has
+ * said the worktree is gone and `state.clean` said there was nothing
+ * uncommitted, so an empty directory is bookkeeping. Anything still inside it
+ * is a file nobody accounted for, and deleting that would be precisely the
+ * "losing an agent's unpushed work to a tidy-up" this module refuses to do —
+ * which is why `--force` appears nowhere here either.
+ */
+function sweepEmptyResidue(worktreePath: string): string | null {
+  try {
+    if (!fs.existsSync(worktreePath)) return null
+    const entries = fs.readdirSync(worktreePath)
+    if (entries.length > 0) {
+      return `worktree "${worktreePath}" was removed but ${String(entries.length)} file(s) remain in its directory; left in place`
+    }
+    fs.rmdirSync(worktreePath)
+    return null
+  } catch (err) {
+    // One catch, one sentence. "Could not read it" and "could not delete it"
+    // were two branches saying the same actionable thing — the directory is
+    // still there and this could not tidy it — and only one of them was
+    // reachable from a test, which is a branch that exists to be uncovered.
+    return `worktree "${worktreePath}" was removed but its directory could not be tidied: ${describeError(err)}`
+  }
+}
+
+function describeError(err: unknown): string {
+  return err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err)
 }
 
 /**

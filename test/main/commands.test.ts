@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { initialAvatar, reduceAvatar, type AvatarSnapshot } from '../../src/shared/avatar'
 import type { CommandState } from '../../src/shared/commands'
-import { CommandQueue, SUBMIT_KEY } from '../../src/main/commands'
+import { CommandQueue, SUBMIT_ATTEMPTS, SUBMIT_KEY } from '../../src/main/commands'
 
 /**
  * The queue as main actually runs it: held text, the flush on idle, and the
@@ -14,26 +14,38 @@ interface Rig {
   readonly queue: CommandQueue
   readonly writes: { agentId: string; data: string }[]
   readonly changes: CommandState[]
+  readonly unaccepted: { agentId: string; attempts: number }[]
   /** Runs the scheduled submit-key writes. */
   drain(): void
+  /** Steps the confirm-and-retry chain, which schedules as it goes. */
+  drainAll(): void
   phase(snapshot: AvatarSnapshot): void
 }
 
 function rig(): Rig {
   const writes: { agentId: string; data: string }[] = []
   const changes: CommandState[] = []
+  const unaccepted: { agentId: string; attempts: number }[] = []
   const scheduled: (() => void)[] = []
   const queue = new CommandQueue({
     sink: { write: (agentId, data) => writes.push({ agentId, data }) },
     onChange: (state) => changes.push(state),
-    schedule: (fn) => scheduled.push(fn)
+    schedule: (fn) => scheduled.push(fn),
+    onUnaccepted: (agentId, attempts) => unaccepted.push({ agentId, attempts })
   })
+  const drain = (): void => {
+    for (const fn of scheduled.splice(0)) fn()
+  }
   return {
     queue,
     writes,
     changes,
-    drain() {
-      for (const fn of scheduled.splice(0)) fn()
+    unaccepted,
+    drain,
+    drainAll() {
+      // Bounded so a fix that never stops retrying hangs the test rather than
+      // the harness — 20 rounds is five times the attempt budget.
+      for (let i = 0; i < 20 && scheduled.length > 0; i++) drain()
     },
     phase(snapshot) {
       queue.observe('agent.mason', snapshot)
@@ -119,11 +131,13 @@ describe('CommandQueue — queue until idle', () => {
       { agentId: 'agent.mason', data: SUBMIT_KEY }
     ])
 
-    // Reaching idle must not send it a second time.
+    // Reaching idle must not send it a second time. Counted on the TEXT, not
+    // on every write: an unconfirmed submit key is legitimately pressed again
+    // (2026-09-06), and a total-write count would read that as a second flush.
     s = reduceAvatar(s, { kind: 'tick' }, T0 + 250)
     r.phase(s)
     r.drain()
-    expect(r.writes).toHaveLength(2)
+    expect(r.writes.filter((w) => w.data === 'and the changelog')).toHaveLength(1)
     expect(r.queue.state('agent.mason').held).toBeNull()
     expect(r.changes.at(-1)?.held).toBeNull()
   })
@@ -253,5 +267,144 @@ describe('CommandQueue — the harness wake ignores the floor', () => {
     // The nudge went; their words are still theirs to send when the agent is ready.
     expect(r.writes).toEqual([{ agentId: 'agent.mason', data: 'you have mail' }])
     expect(r.queue.state('agent.mason').held).toBe('architect text')
+  })
+})
+
+/**
+ * The submit key was fire-and-forget, and a TUI that did not act on it left the
+ * text in the prompt box with the harness believing it had spoken.
+ *
+ * Observed 2026-09-06 on the on-call agent: woken one second after spawn, it
+ * took the nudge into its prompt and never ran it. Its transcript held four
+ * setup lines and no user message; it sat `running` and idle for eighteen
+ * minutes with two incidents assigned to it, and nothing anywhere said so.
+ */
+describe('a submit is confirmed, not assumed (2026-09-06)', () => {
+  const submits = (r: Rig): number => r.writes.filter((w) => w.data === SUBMIT_KEY).length
+
+  it('presses the key again when the engine does not report the prompt', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+
+    r.drain()
+    expect(submits(r)).toBe(1)
+    r.drain()
+    expect(submits(r)).toBe(2)
+  })
+
+  it('stops the moment the engine confirms, and never types into the answer', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+    r.drain()
+    expect(submits(r)).toBe(1)
+
+    r.queue.accepted('agent.mason')
+    r.drainAll()
+
+    expect(submits(r)).toBe(1)
+    expect(r.unaccepted).toEqual([])
+  })
+
+  it('gives up after a bounded number of keys and REPORTS it', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+
+    r.drainAll()
+
+    expect(submits(r)).toBe(SUBMIT_ATTEMPTS)
+    expect(r.unaccepted).toEqual([{ agentId: 'agent.mason', attempts: SUBMIT_ATTEMPTS }])
+  })
+
+  it('reports once, not once per key', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+
+    r.drainAll()
+    r.drainAll()
+
+    expect(r.unaccepted).toHaveLength(1)
+  })
+
+  it('covers the Architect\u2019s text too — their words go unrun the same way', () => {
+    const r = rig()
+    r.phase(initialAvatar(T0))
+    r.queue.submit('agent.mason', 'do the thing')
+
+    r.drainAll()
+
+    expect(submits(r)).toBe(SUBMIT_ATTEMPTS)
+    expect(r.unaccepted).toEqual([{ agentId: 'agent.mason', attempts: SUBMIT_ATTEMPTS }])
+  })
+
+  it('says nothing about an agent that died before it could answer', () => {
+    // A dead agent did not decline its wake, and there is no prompt box left
+    // for the text to be sitting in.
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+    r.drain()
+
+    r.queue.forget('agent.mason')
+    r.drainAll()
+
+    expect(submits(r)).toBe(1)
+    expect(r.unaccepted).toEqual([])
+  })
+
+  it('is safe when an agent submits a prompt this queue never wrote to', () => {
+    // Every `prompt-submitted` in the company arrives here, including the ones
+    // an agent raised by itself.
+    const r = rig()
+    expect(() => r.queue.accepted('agent.nobody')).not.toThrow()
+  })
+
+  it('starts a fresh budget for each send rather than carrying the last one', () => {
+    const r = rig()
+    r.queue.wake('agent.mason', 'first')
+    r.drainAll()
+    expect(r.unaccepted).toHaveLength(1)
+
+    r.queue.wake('agent.mason', 'second')
+    r.drainAll()
+
+    expect(submits(r)).toBe(SUBMIT_ATTEMPTS * 2)
+    expect(r.unaccepted).toHaveLength(2)
+  })
+})
+
+/**
+ * The two cases a mutation pass found unpinned: both are about a send whose
+ * verdict has not landed yet being overtaken by something else.
+ */
+describe('a submit whose verdict is overtaken', () => {
+  const submits = (r: Rig): number => r.writes.filter((w) => w.data === SUBMIT_KEY).length
+
+  it('says nothing when the agent dies between the last key and the verdict', () => {
+    // `giveUp` is already scheduled at this point. Without its own check it
+    // would report a dead agent as one that declined its wake.
+    const r = rig()
+    r.queue.wake('agent.mason', 'you have mail')
+    for (let i = 0; i < SUBMIT_ATTEMPTS; i++) r.drain()
+    expect(submits(r)).toBe(SUBMIT_ATTEMPTS)
+    expect(r.unaccepted).toEqual([])
+
+    r.queue.forget('agent.mason')
+    r.drainAll()
+
+    expect(r.unaccepted).toEqual([])
+  })
+
+  it('gives a second send its own budget rather than the remains of the first', () => {
+    // Two nudges landing close together. The second is a fresh thing to say,
+    // and must not inherit keys the first already spent.
+    const r = rig()
+    r.queue.wake('agent.mason', 'first')
+    r.drain()
+    expect(submits(r)).toBe(1)
+
+    r.queue.wake('agent.mason', 'second')
+    r.drainAll()
+
+    expect(submits(r)).toBe(1 + SUBMIT_ATTEMPTS)
+    expect(r.unaccepted).toEqual([{ agentId: 'agent.mason', attempts: SUBMIT_ATTEMPTS }])
   })
 })

@@ -172,8 +172,17 @@ export interface HermesOptions {
   readonly prompts?: PromptStore
   /** Per-spawn cap on Stop-hook continuations (ADR-0013 guard 2). */
   readonly blockCap?: number
-  /** Unfinished tasks assigned to an agent; the ledger lands fully in M3. */
-  pendingTasksFor?(agentId: string): number
+  /**
+   * The ids of the unfinished tasks assigned to an agent.
+   *
+   * IDS and not a count, and one seam rather than two: `decideOnStop` blocks on
+   * `.length` of this, and `wakeCheck` announces the set. A count could not tell
+   * "the same two tasks, still waiting" from "a third one arrived" — the first
+   * must stay silent and the second must not — and a separate counting seam
+   * beside this one is two expressions that have to agree, which is the M8.5
+   * defect and cheaper never to create.
+   */
+  pendingTaskIdsFor?(agentId: string): readonly string[]
   /** Writes text into a live agent's session — how the watchdog nudges. */
   nudge?(agentId: string, text: string): void
   /** True when the agent has finished its turn and is waiting. */
@@ -231,6 +240,22 @@ export interface BounceRecord {
 /** Where a rejected file is parked: out of the outbox, still on disk, inspectable. */
 export const REJECTED_DIR = '.rejected'
 export const DONE_DIR = '.done'
+/**
+ * Mail handed to a session that is still alive, and not yet proven read.
+ *
+ * The third state between pending and done, and the whole of this fix. Before
+ * it, `consumeInbox` archived straight to `.done/` in the same act as the
+ * hand-over, so a session that died before acting lost the message: delivered,
+ * marked read, never acted on, and nothing said so. Measured on the Architect's
+ * own machine, **21 of 79 wakes killed the agent** — and every incident is
+ * routed to the orchestrator first, so one death there stopped the whole chain.
+ *
+ * In-flight is deliberately NOT pending: `hasPendingMail` reads `inbox/*.json`
+ * only, so handled mail still cannot re-block a Stop. That is what preserves
+ * the M2 close-out verdict (ADR-0003) this narrows rather than reverses —
+ * consuming later was tried, and it made the loop it was meant to prevent.
+ */
+export const INFLIGHT_DIR = '.inflight'
 
 /**
  * Serializes handed-over mail for a prompt surface's `{{messages}}` slot. Pure
@@ -254,7 +279,13 @@ export function formatHandover(messages: readonly Message[]): string {
   // arrived and where it was archived; the agent reads its own files with the
   // tools it already has. Pushing kilobytes of JSON through a keyboard was
   // never the sound half of this design.
-  return messages.map((m) => `inbox/.done/${m.id}.json`).join(', ')
+  //
+  // `.inflight/` and not `.done/`: this is where the file IS for the whole
+  // window in which the agent acts on it. It only reaches `.done/` when the
+  // agent's turn ends and the Stop settles it, which is also what makes
+  // `.done/` an honest "read history" rather than a list of things that merely
+  // arrived. A pointer to where the file will be later is a pointer to nothing.
+  return messages.map((m) => `inbox/${INFLIGHT_DIR}/${m.id}.json`).join(', ')
 }
 
 export class Hermes {
@@ -287,6 +318,14 @@ export class Hermes {
    * must wake it".
    */
   private readonly nudged = new Map<string, ReadonlySet<string>>()
+  /**
+   * Which TASK ids each agent has already been nudged for.
+   *
+   * The mail set's twin, and needed for the same reason: without it a `todo`
+   * that nobody picks up would nudge on every sweep, forever -- a metronome
+   * pointed at the agent least able to escape it.
+   */
+  private readonly nudgedTasks = new Map<string, ReadonlySet<string>>()
   /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
   private readonly heldLogged = new Set<string>()
   /** Diverted msgIds already logged and signalled — one divert, one record. */
@@ -301,7 +340,24 @@ export class Hermes {
    */
   private readonly lastWokeAt = new Map<string, number>()
 
-  constructor(private readonly options: HermesOptions) {}
+  constructor(private readonly options: HermesOptions) {
+    // Anything in-flight belongs to a session from a PREVIOUS harness: this
+    // object is new, so no session it knows about has been handed anything yet.
+    // Settling it here restores exactly the pre-fix behaviour across a harness
+    // death, which is S-BLACKOUT's recorded requirement ("does not re-consume
+    // mail the dead harness had already handed over") and the M2 close-out
+    // verdict (ADR-0003), both left as the Architect settled them.
+    //
+    // The fix's redelivery is for the OTHER death — an agent process that exits
+    // while the harness is alive to see it (`onExited`). There the harness has
+    // a fact rather than a guess, and the mail comes back. Here it has neither,
+    // and redelivering could double-process work that was actually done.
+    //
+    // In the constructor rather than in `start()` so a caller cannot forget it:
+    // the scenario suites build a Hermes directly to model a restart, and that
+    // IS the case this rule exists for.
+    for (const agentId of this.knownAgents()) this.settleInflight(agentId)
+  }
 
   private get now(): number {
     return this.options.now?.() ?? Date.now()
@@ -1043,6 +1099,15 @@ export class Hermes {
    * the next briefing will read it.
    */
   async decideOnStop(agentId: string, payload: unknown): Promise<StopReply | null> {
+    // The turn boundary, and therefore the proof. Reaching a Stop means this
+    // session received whatever it was last handed and finished a turn holding
+    // it, so anything still in-flight is genuinely read and settles to `.done/`.
+    //
+    // FIRST, before this Stop's own hand-over below: settling afterwards would
+    // archive the mail this very block is about to hand over, and a session that
+    // then died would lose it — which is the whole defect, moved four lines down.
+    this.settleInflight(agentId)
+
     const stopHookActive =
       typeof payload === 'object' &&
       payload !== null &&
@@ -1052,7 +1117,7 @@ export class Hermes {
       stopHookActive,
       blocksThisSession: this.blockCount(agentId),
       pendingMail: this.pendingMailCount(agentId),
-      pendingTasks: this.options.pendingTasksFor?.(agentId) ?? 0,
+      pendingTasks: this.options.pendingTaskIdsFor?.(agentId).length ?? 0,
       ...(this.options.blockCap === undefined ? {} : { blockCap: this.options.blockCap })
     }
 
@@ -1125,8 +1190,19 @@ export class Hermes {
       const pending = pendingFiles.length
       if (pending === 0) {
         this.nudged.delete(agentId)
+        // No mail is not the same as nothing to do. Work assigned to an agent
+        // that was ALREADY idle reaches it here or nowhere: `decideOnStop`
+        // handles the agent that finishes a turn holding tasks, and an idle
+        // agent never finishes one. Live on 2026-09-05 the orchestrator triaged
+        // two CI failures, created and assigned both tasks, and the on-call
+        // agent sat holding them with an empty inbox.
+        if (this.wakeForTasks(agentId)) woken.push(agentId)
         continue
       }
+      // Mail is the louder signal and its nudge already ends with "act on
+      // each", so an agent with both hears once and finds its tasks in the same
+      // turn. Two nudges in one tick would be two submissions into a TUI.
+      this.nudgedTasks.delete(agentId)
       // New mail is mail this agent has not been nudged for. Everything it was
       // already told about stays silent, however long it sits unread.
       const told = this.nudged.get(agentId) ?? new Set<string>()
@@ -1297,6 +1373,140 @@ export class Hermes {
     }
   }
 
+  /**
+   * Contract: the agent held this mail across a completed turn, so it is read.
+   * `.inflight/` → `.done/`. Returns how many settled.
+   *
+   * Called at the Stop hook, which is the first moment the session has
+   * demonstrably received the hand-over AND finished a turn with it. Anything
+   * earlier would settle mail the agent has not read yet; there is nothing
+   * later that still means "it got it".
+   */
+  settleInflight(agentId: string): number {
+    return this.drainInflight(agentId, DONE_DIR, 'settled')
+  }
+
+  /**
+   * Contract: this agent's session is gone. Everything the router remembers
+   * telling it is forgotten, so the next session is told again. Returns the
+   * messages that came back to the inbox.
+   *
+   * One call for the whole of "what did we say to a process that no longer
+   * exists", because the parts are not independent and a caller that
+   * remembered one would forget the other. Found live on 2026-09-06: a task
+   * nudge went to an agent the activation unwind killed a second later, and
+   * the replacement session was never nudged — `nudgedTasks` still held the
+   * announcement made to a process that never read it. Mail already had the
+   * answer (`returnInflight`); tasks did not.
+   */
+  forgetSession(agentId: string): number {
+    this.nudged.delete(agentId)
+    this.nudgedTasks.delete(agentId)
+    return this.returnInflight(agentId)
+  }
+
+  /**
+   * Contract: the session this mail was handed to is gone, so it was never
+   * read. `.inflight/` → `inbox/`, where it is pending again and the next wake
+   * redelivers it. Returns how many came back.
+   *
+   * Called when an agent's process exits — the exit is the fact. NOT on
+   * respawn: a respawn is a policy decision that may never come (`onExit:
+   * "offer"`, a breaker stop, an exhausted ladder), and mail must return even
+   * for an agent nobody brings back, or it is lost for a different reason.
+   *
+   * Also called at boot, for whatever a killed harness left in-flight.
+   */
+  returnInflight(agentId: string): number {
+    return this.drainInflight(agentId, null, 'returned')
+  }
+
+  /**
+   * The one mover, because the two directions differ only in destination and
+   * both must be crash-safe the same way: an atomic rename per message, never
+   * a read-then-write (invariant §3).
+   *
+   * Never throws. Both callers are on paths that must not fail — a Stop hook
+   * that rejects blocks the agent, and an exit handler that throws is an
+   * unhandled rejection in the lifecycle.
+   */
+  private drainInflight(agentId: string, into: string | null, event: string): number {
+    const inbox = path.join(this.mailboxDir(agentId), 'inbox')
+    const inflight = path.join(inbox, INFLIGHT_DIR)
+    if (!fs.existsSync(inflight)) return 0
+    const target = into === null ? inbox : path.join(inbox, into)
+    let moved = 0
+    try {
+      fs.mkdirSync(target, { recursive: true })
+      for (const name of fs.readdirSync(inflight).sort()) {
+        if (!name.endsWith('.json')) continue
+        try {
+          fs.renameSync(path.join(inflight, name), path.join(target, name))
+          moved += 1
+        } catch {
+          // One stuck file must not strand the rest.
+        }
+      }
+    } catch {
+      return moved
+    }
+    if (moved > 0) {
+      this.agora.appendLog({
+        kind: 'delivery',
+        to: agentId,
+        event,
+        count: moved
+      })
+    }
+    return moved
+  }
+
+  /**
+   * Contract: nudges an idle agent about work assigned to it, at most once per
+   * task, and returns whether it did. Never throws.
+   *
+   * The mail path's twin, and deliberately built from the same three gates in
+   * the same order — anything this one skipped would be a second, quieter set
+   * of wake rules, and the pace gate in particular exists to be unskippable
+   * (ADR-0023).
+   *
+   * `nudgedTasks` is updated only AFTER the pace allows the wake, so a deferred
+   * nudge is not recorded as announced: the same task must still earn its nudge
+   * once the company speeds up, or pacing would silently become dropping.
+   */
+  private wakeForTasks(agentId: string): boolean {
+    const ids = this.options.pendingTaskIdsFor?.(agentId) ?? []
+    if (ids.length === 0) {
+      this.nudgedTasks.delete(agentId)
+      return false
+    }
+    const told = this.nudgedTasks.get(agentId) ?? new Set<string>()
+    const unannounced = ids.filter((id) => !told.has(id))
+    if (unannounced.length === 0) return false
+    if (this.options.isIdle && !this.options.isIdle(agentId)) return false
+    if (!this.wakeAllowed(agentId, 0)) return false
+
+    this.nudgedTasks.set(agentId, new Set(ids))
+    this.noteWoken(agentId)
+    try {
+      this.options.nudge?.(
+        agentId,
+        this.render('task-nudge.md', {
+          tasks: ids.join(', '),
+          pendingTasks: String(ids.length)
+        })
+      )
+    } catch {
+      // One agent's nudge failing must not cost the agents after it theirs.
+      // Nothing is consumed on this path — the tasks are still in the ledger
+      // and `nudgedTasks` is reset so the next sweep tries again.
+      this.nudgedTasks.delete(agentId)
+      return false
+    }
+    this.agora.appendLog({ kind: 'hook', event: 'wake', agentId, pendingTasks: ids.length })
+    return true
+  }
+
   /** True when the agent has mail it has not consumed. Drives the wake watchdog. */
   hasPendingMail(agentId: string): boolean {
     const inbox = path.join(this.mailboxDir(agentId), 'inbox')
@@ -1308,6 +1518,10 @@ export class Hermes {
    * Consumes an agent's inbox. Contract: idempotent. A message already in
    * `.done/` is never returned twice, however often this is called and whatever
    * the cursor says — which is what makes replay after a crash safe.
+   *
+   * The messages move to `.inflight/`, not to `.done/`: they have been handed
+   * to a session, and whether that session survived to act on them is not known
+   * until it reaches a Stop (`settleInflight`) or exits (`returnInflight`).
    */
   async consumeInbox(agentId: string): Promise<readonly Message[]> {
     await this.options.faults?.('before-consume')
@@ -1315,14 +1529,18 @@ export class Hermes {
     if (!fs.existsSync(inbox)) return []
 
     const done = path.join(inbox, DONE_DIR)
+    const inflight = path.join(inbox, INFLIGHT_DIR)
     fs.mkdirSync(done, { recursive: true })
+    fs.mkdirSync(inflight, { recursive: true })
 
     const consumed: Message[] = []
     for (const name of fs.readdirSync(inbox).sort()) {
       if (!name.endsWith('.json')) continue
       const file = path.join(inbox, name)
-      if (fs.existsSync(path.join(done, name))) {
+      if (fs.existsSync(path.join(done, name)) || fs.existsSync(path.join(inflight, name))) {
         // Already consumed: a redelivery of the same id is a no-op (ADR-0003).
+        // `.inflight/` counts too — mail in a live session has been handed over
+        // exactly once and must not be handed again by a second wake.
         fs.rmSync(file, { force: true })
         continue
       }
@@ -1335,7 +1553,7 @@ export class Hermes {
           this.reject(file, `inbox: ${parsed.reason}`, null)
           continue
         }
-        fs.renameSync(file, path.join(done, name))
+        fs.renameSync(file, path.join(inflight, name))
         consumed.push(parsed.message)
       } catch (err) {
         this.reject(file, `inbox: ${err instanceof Error ? err.message : 'unreadable'}`, null)

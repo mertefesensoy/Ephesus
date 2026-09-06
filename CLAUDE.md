@@ -29,6 +29,7 @@ never edit an accepted ADR; supersede it.
 | Why decisions were made | `docs/adr/` |
 | Architecture, data models, IPC, sequences | `docs/sdd/SDD.md` |
 | Coding/security rules, Definition of Done | `docs/ENGINEERING-STANDARDS.md` |
+| Trust boundaries, what each control stops, residual risks | `docs/THREAT-MODEL.md` |
 | What tests are owed | `docs/TEST-STRATEGY.md` |
 | Build order and current state | `docs/IMPLEMENTATION.md` + `docs/PROGRESS.md` |
 | Claude Code automation in this repo | `docs/AUTOMATION.md` |
