@@ -107,6 +107,8 @@ ephesus/docs/                                             # this suite; ADRs app
 
 ## 5. Security rules (non-negotiable)
 
+The boundaries these rules defend, what each one actually stops, and the risks that remain are in [`docs/THREAT-MODEL.md`](THREAT-MODEL.md) — written outward, for somebody deciding whether to install this. A rule changed here without checking that document is a rule changed with its reason left behind.
+
 - Secrets: only through the broker (ADR-0010). Grep-able tripwires in CI: no
   `process.env.*KEY*` reads outside `watch/` and `herald/`; no secret-shaped strings
   in fixtures.
