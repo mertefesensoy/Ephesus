@@ -4887,6 +4887,34 @@ structural rather than a habit.
       DESIGN on the stale linux floor with everything else green, its artifact
       ratcheted the block, and run `33811944369` on `8998918` is GREEN on all
       three jobs. Branch `feature/m8-4-setup-cliff`.*
+      *AUDIT (2026-09-07): **every claim verified, and the first-afternoon path
+      EXERCISED rather than trusted.** `ensureHarnessHome` against a fresh temp
+      root seeds exactly `gate-policy.json` and `authority.json`, NAMES both in
+      `seeded`, loads with `warning: null`, and seeds nothing on a second boot.
+      The shipped policy is DD-1 to the letter — `autonomous` with destructive,
+      prod-facing, scope-change, outbound and spend at `supervised`,
+      `needs-human` at `manual`, `tool-permission` absent — and unbudgeted by
+      default. On the Architect's own machine `authority.json` is FR-5.5's
+      example exactly: `route`/`task` on `*`, `memo` on test-code and docs, no
+      `gate` and no `spend`. The auth predicate still reads the denial BEFORE the
+      affirmation, which is the ordering whose mutant survived this package's
+      first pass, and `grantsUnavailable` is tested on both sides — the resolver
+      main-side and the sentence on the screen. Noted, not a defect: neither
+      `home/seeded-config` nor a `needs-login` card has ever fired here, because
+      this install predates them, which is why the first run was simulated.
+      **The finding: this package's OWN defect recurred.** M8.4 fixed a README
+      whose status was "two milestones stale"; by M8.9 the same section was three
+      packages behind — M8.6, M8.7a/b and M8.8 were absent, and grep across the
+      whole file returned `worktree` 0, `restart` 0, `respawn` 0. The front door
+      described a company without worktree isolation, without engine isolation
+      and without a survivable restart, which are precisely the things a
+      prospective installer needs to read. Fixed in both directions: the prose is
+      written, and `scripts/check-readme-current.cjs` now fails CI when a package
+      ticked in this file is missing from the README's `<!-- landed: -->` marker.
+      It deliberately does NOT read the prose — a check that guessed whether a
+      paragraph "describes" a package would block good writing or pass bad
+      writing — so it catches the oversight that actually happened twice, and
+      says so about what it cannot catch.*
 
 ### M8.3 / M8.4 defect clearance (2026-09-04) — 2 defects, 7 surviving mutants
 
