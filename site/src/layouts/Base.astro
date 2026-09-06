@@ -104,7 +104,16 @@ const nav = [
   <!-- Icons. The SVG scales to whatever size a browser asks for; the PNGs cover
        the ones that will not take SVG, and apple-touch-icon covers iOS home
        screens. theme-color is ink-900, which is the header border and the mark's
-       own keyline. -->
+       own keyline.
+
+       The .ico and the 192px PNG lead because Google's favicon crawler takes
+       neither SVG (not in its supported list: BMP, GIF, ICO, PNG, JPEG, PPM,
+       TIFF) nor the web app manifest, and it wants an icon larger than 48px.
+       Browsers still choose the SVG, which they select on type rather than on
+       document order. The 16 and 32 PNG links are byte-identical to two of the
+       .ico's three frames; they stay so those files keep a referrer. -->
+  <link rel="icon" href="/favicon.ico" sizes="48x48 32x32 16x16">
+  <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
