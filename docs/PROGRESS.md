@@ -5491,3 +5491,55 @@ everything it composes must already work.
       SRS §6.7 booked with a date; signed builds on three OSes; PROGRESS + docs
       synced. **This is the v1 acceptance boundary** — after it the only gate
       left is §6.7's two-week run.
+
+---
+
+### The one-hour test reached a pull request (2026-09-06) — SRS §6.1's core clause MET
+
+The first run in which the Skeleton Crew, on a real repository, detected a CI
+failure, diagnosed it, fixed it, committed under the company identity, pushed
+and opened a pull request with no human in the loop:
+**https://github.com/mertefesensoy/MUSAHIT/pull/1** (`app/ephesus-crew`, 4 files,
++32 −24, MERGEABLE).
+
+The diagnosis was real work, not a retry: `ArcLinker.run()` computed its own
+`now` while the tests pinned fixture arcs to a hardcoded May-2026 constant, so
+once wall-clock passed NOW+30d — about 2026-06-22 — zero active arcs loaded and
+seven tests failed. Calendar-driven, not flaky, and the reason MUSAHIT's CI had
+never been green. Fixed with an optional `now=` that leaves the sole production
+caller untouched; 841 passed, 1 skipped.
+
+**§6.1 clause by clause, honestly:**
+
+| Clause | Verdict |
+|---|---|
+| detected the failure | **met** — Harbor ingested both runs; both tasks assigned |
+| fixed it or opened a fix PR | **met** — PR #1 |
+| filed the required memo if the fix crossed policy | **n/a, correctly** — the agent cited runbook step 5 as its authority for its own branch + PR, and stopped at the diagnosis on the one change that DID cross policy (the `article_id` primary-key remint), escalating instead |
+| the next briefing narrates the incident accurately from the log | **met** — Artemis rewrote `board.md` with file:line citations, hedged the unverified half ("verified locally by him, not yet by CI"), and listed three open Architect decisions |
+| zero un-gated destructive actions | **met** |
+
+**Qualification the run itself surfaced:** PR #1 is based on `main`, which
+carries no `.github/workflows/` (404; the workflow exists only on
+`ci/add-pytest-workflow`). The fix is correct and that PR can never demonstrate
+it. Artemis caught this and recommended closing #1 as superseded in favour of
+the crew's second branch, which is correctly based — the PR the expired GitHub
+token stopped it opening.
+
+**Five harness defects stood between the company and this**, each invisible until
+the one in front of it was fixed, all with mutation-proven tests and all on
+`fix/mail-lost-when-a-woken-agent-dies`. See
+`docs/implementations/2026-09-06-an-emptied-worktree-path-retired-the-agent.md`
+for the chain, including the two diagnoses this session got wrong and the
+correction to the claim above.
+
+**Open, and the Architect's:** Harbor's `awaiting` map does not survive a
+restart, so a crew holding a triage task loses its reporting channel permanently
+(defect #11 — ADR-0027 §5 reasoned about `raised` and never considered
+`awaiting`); the health-watcher's rung-3 breaker stop, whose condition has
+expired; and the three decisions Artemis queued on the board.
+
+This does NOT close **M7 exit** on its own — that asks for §6.1 demonstrated
+end to end, and the reporting channel was closed mid-run by defect #11. It is
+the first time the chain has reached a pull request, and it is recorded here so
+the next review starts from what happened rather than from the last verdict.

@@ -443,3 +443,150 @@ Recorded because the mistake is instructive and repeats one already in this sess
 quiet sample is not evidence of a stalled agent, exactly as a zero-byte terminal was not evidence of
 a hung engine. In both cases the answer was in a record the harness already keeps — the call's
 return value, and the Agora log — and in both cases waiting one more beat would have shown it.
+
+---
+
+# Addendum 3 — an agent could not refresh the token the harness gave it (defect #10)
+
+**Status: BUILT.** Reported by the on-call agent itself, mid-run, in an escalation to Artemis.
+
+## Problem
+
+Having opened PR #1, the crew pushed a second fix branch
+(`agent/skeleton-crew-musahit-ci-babysitter-arc-clock-ci`) and then stopped, escalating:
+
+> *"BLOCKER 2 — GH token expired, and I could not refresh it. Per protocol I tried `$EPH_GH_TOKEN`
+> after a 401. The environment blocked the refresh… `git push` still works; only the `gh` API path
+> is dead."*
+
+Every claim checks out. The branch is on the remote with no pull request against it.
+
+`GH_TOKEN` is a GitHub App installation token and expires an hour after the spawn (ADR-0022) —
+**inside the length of one ordinary run**, and the one-hour test is named for its length.
+`prompts/agora/PROTOCOL.md` anticipates exactly this:
+
+> "`$GH_TOKEN` is a GitHub credential that expires an hour after you were started… run
+> `$EPH_GH_TOKEN` for a fresh one rather than concluding you lack permission."
+
+`index.ts` duly exports `EPH_GH_TOKEN` as the harness's own shim command. **Nothing granted
+permission to run it.** `mailboxPermissions` was the only harness grant in the agent's settings, so
+under `auto` the engine's classifier judged an unheralded credential command on its merits and
+refused. The agent behaved perfectly: it followed the protocol, hit a wall it could not pass, and
+escalated rather than inventing a way round.
+
+The failure shape is the one this codebase keeps meeting: **capable for the first hour, silently
+blind afterwards.** Nothing was broken at spawn, and the demo that runs for ten minutes never sees
+it.
+
+## Implementation approach
+
+`ghTokenPermissions(cfg)` contributes two `Bash` rules to the same permissions block the mailbox
+grant already merges into.
+
+**The grant widens nothing.** The shim mints the same scoped installation token the harness already
+placed in this agent's environment at spawn. The only capability added is replacing one that timed
+out. Withholding it does not make the agent less able to reach GitHub — it makes it able for an hour
+and then not, which is strictly worse than either alternative.
+
+**Two rules, because there are two ways to type it.** `Bash($EPH_GH_TOKEN)` matches the literal
+PROTOCOL.md names; `Bash(<expanded command>)` matches an agent that resolves the variable first.
+`GH_TOKEN_REFRESH_COMMAND` is exported and asserted against the string in the prompt, because a
+rule that does not match the sentence the agent was given grants nothing at all — and the rule and
+the sentence live in different files.
+
+**EXACT rules, never a `:*` prefix.** A prefix on a credential command would also admit whatever an
+injected suffix appended to it, and this command has no use for a suffix. A test walks every `Bash`
+rule the harness writes and fails on a wildcard.
+
+**No rule at all when `ghTokenCommand` is empty** — no company GitHub identity is configured, there
+is no fresher token to get, and a rule for it would be permission to run nothing.
+
+## Verification
+
+`test/main/engines/claude.test.ts` — 5 cases; **6 mutations, all killed**, including "grant nothing
+at all" (the defect restored), "use a prefix rule", and "the granted literal drifts from the one
+PROTOCOL.md names".
+
+---
+
+# Defect #11 — NOT FIXED: Harbor's triage queue does not survive a restart
+
+Reported in the same escalation and **left for a decision**, because the fix reverses part of an
+accepted ADR and that is not a session's call.
+
+> *"I filed INCIDENT-TRIAGE for each run. Harbor refused both, identically: `no incident
+> "mertefesensoy/MUSAHIT#ci-run:33986883947" is awaiting triage`… The incident string I used is
+> copied verbatim from Harbor's own request to you… I did not invent a different incident id to get
+> past the check."*
+
+### What is actually wrong
+
+`incidents.ts` holds **two** maps, and ADR-0027 reasoned about only one of them.
+
+- **`raised`** (line 184) — the deduplication set. [ADR-0027 §5](../adr/ADR-0027-what-survives-a-restart.md)
+  argues, correctly, that it belongs in memory: a restart *should* re-raise a still-failing
+  incident, "a duplicate incident is a cheap failure while a dropped one is the subsystem not
+  working."
+- **`awaiting`** (line 187) — "raised incidents awaiting a triage report, by the message id sent."
+  **This was never on the register.** It is not a deduplication hint; it is the only record that an
+  outstanding triage request exists, and `submitTriage` refuses any report whose incident is not in
+  it.
+
+So a restart drops `awaiting`, and every agent already holding a triage task loses its reporting
+channel permanently. The task cannot be closed through the designed route, and the refusal correctly
+tells the agent something that is true and unfixable from where it stands.
+
+**This is the same shape M8.8 was written to eliminate**: a durable obligation (the task) whose
+in-memory counterpart vanished, leaving work that can never close — the gate-orphan problem, in a
+different subsystem. ADR-0027's own §5 sentence, *"persist a decision about an identity; do not
+persist an observation about a process"*, actually argues FOR persisting `awaiting`: an outstanding
+triage request is a standing obligation attached to an incident identity, not an observation about a
+live process.
+
+### Why it is not fixed here
+
+Persisting it needs decisions this session should not make alone: whether a restored request
+re-notifies its assignee, whether it expires, and how it interacts with `raised` deliberately
+re-raising the same incident (a restored `awaiting` plus a re-raise is two obligations for one
+failure). That is an ADR-0027 amendment plus a `JsonStateStore` package, not a bug fix.
+
+Two aggravating facts found while checking the agent's report, both true and both worth knowing:
+
+- `~/.ephesus/profiles/` contains **only** `.skeleton-crew.home-v1.bak/`. The profile directory was
+  renamed and nothing replaced it; activation still works because the store falls back to the
+  bundled profiles, so the rename is invisible until something reads the home copy.
+- There is no `agent.harbor` directory under `agora/agents/`.
+
+Neither is the cause of the refusal — the cause is the dropped `awaiting` map — but both were in the
+agent's report and both check out.
+
+---
+
+# Correction 2 — the pull request cannot run CI, and the company said so first
+
+This session reported PR #1 as meeting SRS §6 criterion 1 and noted "no checks reported on the
+branch" without chasing it. Artemis chased it, and was right:
+
+> *"close PR #1 (opened against `main`, which carries no `.github/workflows/`) as superseded"*
+
+Verified: `GET repos/mertefesensoy/MUSAHIT/contents/.github/workflows` returns **404 on `main`** and
+`ci.yml` on `ci/add-pytest-workflow`. PR #1's base is `main`. **The fix is correct and the pull
+request can never demonstrate it**, because no workflow exists on the branch it targets. The crew's
+second branch (`…-arc-clock-ci`, commit `144d18a`) is correctly based for that, and is the one that
+should carry the PR — which is exactly what the expired token stopped it opening.
+
+Criterion 1's clause is still met on its own words ("fixed it or opened a fix PR"); the PR exists and
+carries the fix. But the practical claim a reader would take from "PR open, mergeable" is weaker
+than it sounded, and the correction belongs here rather than in a later session's surprise.
+
+Worth recording separately: **Artemis diagnosed defect #11 independently and correctly**, from the
+harness source, before this session had written it up —
+
+> *"Cause, read from the harness source: `IncidentEndpoint` holds raised incidents in an in-memory
+> `Map` (`src/main/incidents.ts:187`) with no persistence. Harbor raised these at 19:10Z on
+> 2026-09-05; the app restarted around 22:57Z; the map went with it."*
+
+— and escalated the *pattern* rather than the instance, citing its own earlier undertaking on the
+board to do so once. It also caught that `activations.json` now holds `instances: []`, so a future
+MUSAHIT CI failure would raise an incident to nobody. That is the Gymnasium's premise working
+without the Gymnasium: the company reading its own source and reporting what it found.
