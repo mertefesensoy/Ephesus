@@ -5392,23 +5392,76 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `GateManager`, so this closes the class, not one instance.*
 
 - [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
-      `feature/usage-aware-pacing` (9d66df5), which is UNMERGED and conflicts
-      structurally with the capacity UI landed since. There is no incident
-      surface of any kind: the crew's actual work product — four CI incidents
-      triaged with severity and root cause on this machine — is unreachable from
-      the app. And a hung harness is indistinguishable from a healthy idle one:
-      the bridge check is one-shot at mount, every poll holds its last value on
-      failure, there is no heartbeat anywhere, and the pace verdict never reaches
-      the renderer at all.
-      *This package OWNS the pacing-UI merge rather than treating it as a
-      chore. The branch and the current dock both restructured the same JSX and
-      renamed a tone helper; a hand-splice was attempted on 2026-09-02 and
-      abandoned deliberately in favour of doing it here with tests.*
-      *Docs: UI-DESIGN §5, ADR-0023. Tests: renderer tests over the MERGED dock
-      (both the capacity row and the pace strip); a stale poll renders as stale
-      rather than as its last good value. Risk: the existing dock fixture was
-      cast `as never`, which hid a missing required field until it threw at
-      runtime — fixtures in this package must be typed.*
+      `feature/usage-aware-pacing` (9d66df5).
+      *Docs: UI-DESIGN §5, ADR-0023, SDD §4.3 (the incident log kinds this reads).
+      Tests: a stale poll renders as stale rather than as its last good value;
+      an incident refused is visible as a refusal, not as an absence. Risk: the
+      dock fixture is STILL cast `as never` in three places
+      (`test/renderer/agent-dock.test.tsx:93,175,221`), which is what hid a
+      missing required field until it threw at runtime — fixtures this package
+      touches must be typed.*
+
+      **SCOPE AUDIT (2026-09-06, before any of it was built).** The register was
+      written on 2026-09-02 and one of its three items has since landed. What
+      follows is the state a new session should start from; every claim below was
+      established by execution or by reading the Architect's own `log.jsonl`.
+
+      **(1) The pacing-UI merge — DONE, and the register is stale.** `9d66df5` is
+      reachable from HEAD and the content is there: `AgentDock.tsx` imports
+      `paceNoteOf`/`PaceNote`, calls `eph.watch.usage()`, and carries the capacity
+      row alongside the pace strip. The structural conflict this package existed
+      to own — the branch and the dock having restructured the same JSX — is
+      resolved, and `watch:usage` reaches the renderer, so *"the pace verdict
+      never reaches the renderer at all"* is no longer true. Both halves have
+      renderer tests (`spend-surface.test.tsx` for pace, `agent-dock.test.tsx` and
+      `capacity-visible.test.tsx` for capacity). **Owed from this item: nothing
+      but the `as never` fixtures above.**
+
+      **(2) B15, a hung harness vs a healthy idle one — PARTLY.** Fixed: the pace
+      verdict reaches the renderer (item 1); `StatusBadge` distinguishes `'error'`
+      from `0`; the strip shows `⚠ events stale — hook endpoint unavailable`.
+      **Still open, and this is the one that makes every other surface
+      trustworthy:** the bridge check is one-shot at mount —
+      `useEffect(…, [])` calls `eph.config.get()` exactly once, so **if main dies
+      after mount the strip reads `bridge: ready` forever** — and there is no
+      heartbeat anywhere in `src/`. Polls still hold their last value on failure;
+      that is deliberate (`/* held, not cleared — see the poll */`) but capacity
+      discloses no staleness, so held-and-current are indistinguishable there.
+
+      **(3) B14, the incident surface — NOT STARTED, and larger than a panel.**
+      There is no IPC channel (`incident` appears nowhere in `src/shared/ipc.ts`),
+      no `IpcDeps` method, and no panel. **There is also no durable store:**
+      `IncidentEndpoint` reaches the outside world only through `onLogEvent`, so
+      incidents exist solely as `log.jsonl` rows. A surface must either fold them
+      from the log or gain a store — decide that first, because it decides
+      everything else. ADR-0027's test applies: is this held, or derived?
+
+      **What the audit found by reading the data B14 would have shown, and what
+      makes this package worth more than a panel.** 68 incident rows across 8
+      event kinds on the Architect's machine. **21 triage attempts, 12 refused.**
+      Nine of those refusals are `agent.artemis` replying in prose — *"This is
+      th…", "Assigned t…", "Task opene…", "Opened and…", "Reassigned…"*. She is
+      doing exactly what `prompts/harbor/incident-body.md` asks (open the task,
+      assign it) and then writing back to `agent.harbor` to say so, which the same
+      prompt forbids by name and warns will bounce. It bounced nine times. **The
+      guard works; the refusal MESSAGE is what fails** — she is told `triage
+      report: not JSON — Unexpected token 'T'`, when the answer she needs is "you
+      were not asked to reply here". A parse error cannot teach the rule it is
+      enforcing. **And 3 of 6 root-cause verdicts were discarded** with `Too big:
+      expected string to have <=2000 characters` (`src/shared/root-cause.ts:141`),
+      so the verifier's reasoning was thrown away for length.
+
+      **Two live defects, independent of the panel and cheap:** the incident
+      endpoint should refuse a reply-from-the-wrong-sender with the sentence that
+      teaches the rule rather than with a JSON parse error; and a verdict over the
+      cap should be refused with the limit NAMED, or truncated with a marker —
+      silently losing a verifier's reasoning is the worst of the three options.
+      Both are prompt-surface and refusal-quality work (invariant §8), and neither
+      needs B14 to land first.
+
+      **Suggested order for the build session:** the two refusal defects (small,
+      stop live waste), then B15's heartbeat and re-checking bridge probe
+      (smaller than B14, and it is what makes the rest believable), then B14.
 
 - [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
       read parses from byte zero: a synthetic overnight measured 28.4 MB and
