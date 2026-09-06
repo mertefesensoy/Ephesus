@@ -819,6 +819,40 @@ function isHarnessStatusLine(entry: unknown, shimPath: string | undefined): bool
   return typeof command === 'string' && command.includes(shimPath)
 }
 
+/**
+ * The company signs its own work (ADR-0022): the commit author is the GitHub
+ * App, and nothing names the vendor whose model happened to write the diff.
+ *
+ * Left unset, the engine appends its own `Co-Authored-By: <model> <vendor
+ * address>` to every commit it makes and its own line to every PR body. That
+ * reached a real pull request on 2026-09-06 — MUSAHIT #1, authored correctly by
+ * `app/ephesus-crew` and trailed by a model name — which SRS §6 criterion 10
+ * forbids in the same sentence that requires the co-author trailer ("no
+ * Architect or vendor identity anywhere"). `scripts/check-attribution.cjs`
+ * scans this repository's history and could never have seen it: the offending
+ * commit is in the TARGET.
+ *
+ * Established against the shipped binary, not assumed. `attribution.commit` and
+ * `attribution.pr` are documented there as "Attribution text … Empty string
+ * hides attribution", and `sessionUrl` appends a claude.ai session link — an
+ * identity leak of its own, and a live URL in somebody else's repository.
+ * `includeCoAuthoredBy` is the same switch under the older name, marked
+ * "Deprecated: Use attribution instead"; it is set as well because the harness
+ * runs whatever engine build is on the machine (ADR-0028 pins nothing), and of
+ * all the rules in this codebase this is the one where a redundant belt costs
+ * less than a single point of failure. The two are one switch across versions,
+ * not two mechanisms that half-overlap.
+ *
+ * This OVERRIDES rather than merges, unlike hooks, permissions and the status
+ * line. Those are surfaces the Architect may legitimately be using; this is a
+ * company rule about what the company's name goes on. Their own
+ * `~/.claude/settings.json` is a different file and is never touched (ADR-0026).
+ */
+export const NO_VENDOR_ATTRIBUTION = {
+  attribution: { commit: '', pr: '', sessionUrl: false },
+  includeCoAuthoredBy: false
+} as const
+
 export function mergeClaudeSettings(
   existing: string | null,
   deps: ClaudeAdapterDeps,
@@ -879,7 +913,9 @@ export function mergeClaudeSettings(
     : priorStatusLine
   const withStatus = statusLine === undefined ? {} : { statusLine }
 
-  if (!cfg) return `${JSON.stringify({ ...base, ...withStatus, hooks: merged }, null, 2)}\n`
+  if (!cfg) {
+    return `${JSON.stringify({ ...base, ...withStatus, ...NO_VENDOR_ATTRIBUTION, hooks: merged }, null, 2)}\n`
+  }
 
   // Merge the mailbox grant into whatever the Architect already allowed, never
   // replacing their list.
@@ -912,7 +948,11 @@ export function mergeClaudeSettings(
     ]
   }
 
-  return `${JSON.stringify({ ...base, ...withStatus, hooks: merged, permissions }, null, 2)}\n`
+  return `${JSON.stringify(
+    { ...base, ...withStatus, ...NO_VENDOR_ATTRIBUTION, hooks: merged, permissions },
+    null,
+    2
+  )}\n`
 }
 
 /**
@@ -1257,7 +1297,14 @@ export class ClaudeAdapter implements EngineAdapter {
       // ...but NOT its own credentials: the company borrows the Architect's
       // session (decision 3). Always exported, empty value included — see
       // `claudeCredentialsDir`, where omitting it is the failure case.
-      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeCredentialsDir()
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: claudeCredentialsDir(),
+      // The company does not upgrade itself mid-run. Up to 30 agents share one
+      // engine install, so a background self-update is many processes racing to
+      // replace the binary all of them are executing — and on Windows the loser
+      // gets `update_apply_exe_locked` and retries at every subsequent startup.
+      // The harness upgrades the engine deliberately, between runs, or not at
+      // all; an agent must never decide that for the company.
+      DISABLE_AUTOUPDATER: '1'
     }
   }
 

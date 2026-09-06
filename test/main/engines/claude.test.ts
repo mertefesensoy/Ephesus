@@ -182,10 +182,35 @@ describe('claude adapter — spawn plan (SDD §3)', () => {
           'EPH_HOOK_ENDPOINT',
           'GH_TOKEN',
           'CLAUDE_CONFIG_DIR',
-          'CLAUDE_SECURESTORAGE_CONFIG_DIR'
+          'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+          'DISABLE_AUTOUPDATER'
         ].includes(key) && !AGENT_BASE_ENV_KEYS.includes(key.toUpperCase())
     )
     expect(harnessOnly).toEqual([])
+  })
+
+  it('never lets an agent upgrade the engine the whole company is running', () => {
+    // Measured on the shipped binary: this variable is read from `process.env`
+    // before any config is consulted, and short-circuits the updater outright.
+    // The settings key `autoUpdates: false` was refuted as the mechanism — the
+    // engine's own text scopes it to BACKGROUND updates only, so it would have
+    // left the startup path this defect came through still live.
+    const { adapter, cfg } = rig()
+
+    expect(adapter.spawnArgs(cfg).env['DISABLE_AUTOUPDATER']).toBe('1')
+  })
+
+  it('keeps the switch out of a granted variable’s reach', () => {
+    // A grant is a value the Architect chose for one agent; this is a decision
+    // the harness makes for the company. Order in the env literal is the only
+    // thing enforcing that, so it is pinned here rather than left to reading.
+    const { adapter, cfg } = rig()
+    const env = adapter.spawnArgs({
+      ...cfg,
+      envGrants: { ...cfg.envGrants, DISABLE_AUTOUPDATER: '0' }
+    }).env
+
+    expect(env['DISABLE_AUTOUPDATER']).toBe('1')
   })
 
   it('injects identity and protocol on the command line', () => {
@@ -743,5 +768,83 @@ describe('the auth probe reads what the real CLI prints', () => {
       // would be testing our redaction rather than the engine.
       expect(entry.redacted).not.toContain('loggedIn')
     }
+  })
+})
+
+/**
+ * The company signs its own work (ADR-0022), and nothing in a target repository
+ * names the vendor whose model wrote the diff.
+ *
+ * Not hypothetical. On 2026-09-06 the crew opened MUSAHIT #1 — authored
+ * correctly by `app/ephesus-crew` and trailed by a model name and an
+ * `@anthropic.com` address, which SRS §6 criterion 10 forbids in the same
+ * sentence that requires the co-author trailer. `check-attribution.cjs` scans
+ * THIS repository and structurally could not have caught it: the commit was in
+ * the target.
+ */
+describe('no vendor identity reaches a target repository', () => {
+  const settingsFor = (existing: string | null): Record<string, unknown> =>
+    JSON.parse(
+      mergeClaudeSettings(existing, {
+        prompts: new PromptStore(BUNDLED_PROMPTS, BUNDLED_PROMPTS),
+        hookShimPath: 'hook-shim'
+      })
+    ) as Record<string, unknown>
+
+  it('hides the engine’s commit trailer, its PR line, and its session URL', () => {
+    const attribution = settingsFor(null)['attribution'] as Record<string, unknown>
+
+    // Empty string is the engine's documented "hide it" value, not a placeholder.
+    expect(attribution).toEqual({ commit: '', pr: '', sessionUrl: false })
+  })
+
+  it('sets the deprecated switch too, because the engine build is not pinned', () => {
+    // ADR-0028 removes the agent's ability to change the install; it does not
+    // pin which install the machine has. These are one switch across versions.
+    expect(settingsFor(null)['includeCoAuthoredBy']).toBe(false)
+  })
+
+  it('OVERRIDES an attribution already in the file rather than merging it', () => {
+    // Unlike hooks, permissions and the status line — surfaces an Architect may
+    // be using — this is a company rule about whose name goes on the work.
+    const settings = settingsFor(
+      JSON.stringify({ attribution: { commit: 'Co-Authored-By: Someone <s@x>' } })
+    )
+
+    expect(settings['attribution']).toEqual({ commit: '', pr: '', sessionUrl: false })
+  })
+
+  it('reaches the per-agent settings file too, not just the shared one', () => {
+    // Two branches return from `mergeClaudeSettings`, and only one of them is
+    // the file an agent actually spawns with.
+    const { adapter, cfg } = rig()
+    const written = adapter.spawnArgs(cfg).settings?.[0]?.contents ?? '{}'
+    const settings = JSON.parse(written) as Record<string, unknown>
+
+    expect(settings['attribution']).toEqual({ commit: '', pr: '', sessionUrl: false })
+    expect(settings['includeCoAuthoredBy']).toBe(false)
+  })
+})
+
+describe('the per-agent settings file overrides attribution too', () => {
+  it('replaces an attribution already written into the agent’s own file', () => {
+    // The other override case goes through the no-cfg branch. This is the file
+    // an agent actually spawns with, and a mutation that merged under the
+    // existing value survived until this test existed.
+    const { adapter, cfg, engineConfigDir, settingsPath } = rig()
+    fs.mkdirSync(engineConfigDir, { recursive: true })
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({ attribution: { commit: 'Co-Authored-By: Someone <s@x>' } }),
+      'utf8'
+    )
+
+    const written = adapter.spawnArgs(cfg).settings?.[0]?.contents ?? '{}'
+
+    expect((JSON.parse(written) as Record<string, unknown>)['attribution']).toEqual({
+      commit: '',
+      pr: '',
+      sessionUrl: false
+    })
   })
 })
