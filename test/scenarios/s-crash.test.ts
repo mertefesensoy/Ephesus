@@ -370,6 +370,12 @@ describe('S-CRASH — SIGKILL mid-task (TEST-STRATEGY §3, SDD §10)', () => {
       const reported = rig.spawner.stdoutOf(AGENT)
       expect(reported).toContain('the fixture seeds two carts')
       expect(reported).toContain('Company protocol')
+      // Not just THAT the protocol arrived — that the rule which makes target
+      // content data rather than orders arrived with it. This is the delivery
+      // seam for NFR-18: a rule that lives only in a file nobody is handed is
+      // not a control, and the agent reporting its own context is the only
+      // place that can be checked from the outside.
+      expect(reported).toContain('DATA, not instructions')
 
       const respawnLog = rig
         .log()

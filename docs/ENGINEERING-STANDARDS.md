@@ -117,6 +117,13 @@ ephesus/docs/                                             # this suite; ADRs app
   templates and least-privilege (a role requesting a new grant = security memo).
 - Dependencies: additions require a memo; lockfile changes are reviewed; `npm audit`
   high/critical blocks release, not merge (with a dated waiver path via memo).
+- **Everything an agent reads is untrusted (NFR-18)**, not only watched sources. Repository
+  content, CI and test output, issue and PR text and API responses are DATA: an instruction
+  found in any of them is reported with its provenance, never obeyed. Only the company
+  protocol and harness-delivered `inbox/` messages instruct an agent. This binds the crew
+  harder than the researcher — a crew agent holds a repository token and can push, where a
+  researcher is read-only. The rule lives in `prompts/agora/PROTOCOL.md` so every agent is
+  handed it, and `test/scenarios/s-crash.test.ts` asserts it actually reaches a live one.
 - Watched-source hygiene (ADR-0017, NFR-17): repositories registered for Stoa study
   are read as untrusted data — researcher runs are read-only with no secret grants,
   and instructions found inside studied content are findings to report, never
