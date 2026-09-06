@@ -425,6 +425,39 @@ describe('an emptied worktree path (2026-09-06 respawn defect)', () => {
     expect(fs.existsSync(path.join(target.path, 'README.md'))).toBe(true)
   })
 
+  it('answers rather than throws when git cannot even be spawned', async () => {
+    // The runner's contract, and the reason `create` can promise a reason for
+    // every refusal: `execFile` REJECTS instead of calling back when the spawn
+    // itself cannot happen. Nothing in this module catches, so that rejection
+    // escaped `create` on Linux — for a case that passed all day on win32 —
+    // and CI found it rather than this suite.
+    //
+    // A null byte in the path is used rather than the ENOTDIR that actually
+    // failed, because ENOTDIR is exactly the platform-conditional thing under
+    // test: POSIX throws it synchronously, Windows delivers it to the callback.
+    // A test that only reaches this guard on Linux is a guard no mutation run
+    // on this machine can kill, which is how it got here in the first place.
+    const cwd = `has-a${String.fromCharCode(0)}null-byte`
+    const outcome = await new ExecGitRunner().run(cwd, ['status'])
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.code).toBeNull()
+    expect(outcome.stderr.length).toBeGreaterThan(0)
+  })
+
+  it('refuses a cwd that is not a directory, on either platform', async () => {
+    // The shape of the real CI failure, asserted for its OUTCOME rather than
+    // its mechanism: POSIX throws at the spawn and Windows answers through the
+    // callback, and both must arrive as a failed git command.
+    const r = rig()
+    const notADirectory = path.join(r.root, 'a-file')
+    fs.writeFileSync(notADirectory, 'not a directory\n', 'utf8')
+
+    const outcome = await new ExecGitRunner().run(notADirectory, ['status', '--porcelain'])
+
+    expect(outcome.ok).toBe(false)
+  })
+
   it('refuses a FILE standing where the worktree goes', async () => {
     const r = rig()
     const target = plan(r)

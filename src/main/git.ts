@@ -57,20 +57,37 @@ export class ExecGitRunner implements GitRunner {
 
   run(cwd: string, args: readonly string[]): Promise<GitResult> {
     return new Promise((resolve) => {
-      execFile(
-        'git',
-        [...IDENTITY_ARGS, ...args],
-        { cwd, timeout: this.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          const code =
-            err && typeof (err as { code?: unknown }).code === 'number'
-              ? (err as { code: number }).code
-              : err
-                ? null
-                : 0
-          resolve({ ok: !err, stdout, stderr: stderr || (err ? err.message : ''), code })
-        }
-      )
+      // `execFile` REJECTS rather than calling back when the spawn itself
+      // cannot happen — a `cwd` that is not a directory throws `ENOTDIR`
+      // synchronously on POSIX, where Windows lets it through to the callback.
+      // Every caller here treats a `GitResult` as the answer and never catches,
+      // so a rejection escaped `Worktrees.create` on Linux and broke its
+      // "returns a reason" contract for a case that passed all day on win32:
+      // a file standing where a worktree goes. A runner that cannot run is a
+      // failed git command, not an exception.
+      try {
+        execFile(
+          'git',
+          [...IDENTITY_ARGS, ...args],
+          { cwd, timeout: this.timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+          (err, stdout, stderr) => {
+            const code =
+              err && typeof (err as { code?: unknown }).code === 'number'
+                ? (err as { code: number }).code
+                : err
+                  ? null
+                  : 0
+            resolve({ ok: !err, stdout, stderr: stderr || (err ? err.message : ''), code })
+          }
+        )
+      } catch (err) {
+        resolve({
+          ok: false,
+          stdout: '',
+          stderr: describeError(err),
+          code: null
+        })
+      }
     })
   }
 }
