@@ -223,6 +223,7 @@
         "src/main/db.ts",
         "src/shared/config.ts",
         "src/shared/window-state.ts",
+        "src/shared/renderer-health.ts",
         "src/shared/ipc.ts"
       ]
     },

@@ -26,6 +26,7 @@ import { createCrewSurvival, type CrewSurvival } from './respawn'
 import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
+import { decideRelaunch, describeRendererDeath } from '../shared/renderer-health'
 import { provesTurnRunning } from '../shared/hooks'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { GatesRecord, OpenGate } from '../shared/gates'
@@ -725,6 +726,14 @@ function steerTemplateFor(hit: { signal: string; detail: Record<string, unknown>
   return hit.detail['source'] === 'stop-loop' ? 'stop-loop' : hit.signal
 }
 
+/**
+ * When each renderer death happened, so a crash LOOP can be told from a window
+ * that died once an hour. Session-lived on purpose: a relaunch ladder that
+ * survived a restart would refuse to open the very window the restart was meant
+ * to produce.
+ */
+const rendererDeaths: number[] = []
+
 function createWindow(): void {
   const displays = screen.getAllDisplays().map((d) => d.workArea)
   const restored = sanitizeBounds(db?.getWindowBounds(), displays)
@@ -757,6 +766,54 @@ function createWindow(): void {
     void shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  /**
+   * The renderer died (2026-09-06). Until this handler existed nothing in the
+   * harness noticed: `UiBridge` cannot tell a dead renderer from a closing
+   * window, so every send became a silent no-op while main, the agents and the
+   * triggers all carried on. The Architect got a white window and no reason.
+   *
+   * `clean-exit` during the quit sequence is the window going away on purpose;
+   * anything else is a fault, and even a clean exit outside a quit is one.
+   */
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (quit.hasStarted() || quit.hasFinished()) return
+    rendererDeaths.push(Date.now())
+    const verdict = decideRelaunch(rendererDeaths, Date.now())
+    reportDegradation(
+      'renderer/gone',
+      `${describeRendererDeath(details.reason, details.exitCode)}${
+        verdict.relaunch ? ' — relaunching it' : `; ${verdict.because}`
+      }`
+    )
+    agora?.appendLog({
+      kind: 'degradation',
+      event: 'renderer-gone',
+      reason: details.reason,
+      exitCode: details.exitCode,
+      deathsInWindow: verdict.recent,
+      relaunched: verdict.relaunch
+    })
+    // The log is the only place this survives: the surface that would show it
+    // is the thing that just died.
+    if (!verdict.relaunch) return
+    if (win.isDestroyed()) createWindow()
+    else win.webContents.reload()
+  })
+
+  /**
+   * The renderer is alive but its JS thread is not answering — the shape this
+   * defect wore before it became a death. Reported rather than acted on: a busy
+   * renderer usually comes back, and killing one that was about to finish would
+   * turn a stall into a loss.
+   */
+  win.webContents.on('unresponsive', () => {
+    reportDegradation(
+      'renderer/unresponsive',
+      'the window stopped answering; the company is still running behind it'
+    )
+  })
+  win.webContents.on('responsive', () => degradations.clear('renderer/unresponsive'))
 
   ui.attach(win)
 
