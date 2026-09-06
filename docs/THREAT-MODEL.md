@@ -152,8 +152,11 @@ run as your user, with your filesystem.
 
 ## 8. Reporting a vulnerability
 
-There is no security contact configured for this project yet. Until there is, this document should
-not be read as a claim that reports will be triaged.
+Privately, never as a public issue — through
+[GitHub's private vulnerability reporting](https://github.com/mertefesensoy/Ephesus/security/advisories/new)
+or by email with `SECURITY` in the subject. Both are in [`SECURITY.md`](../SECURITY.md), which also
+states the honest support position: Ephesus is pre-alpha, `main` is the only thing that exists, and
+there are no supported releases.
 
 ---
 
