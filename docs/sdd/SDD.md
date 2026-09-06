@@ -264,6 +264,25 @@ Defined normatively in ADR-0009. Runtime notes:
   symptom of that is an agent that hangs. Trust is still written from an
   activation and nowhere else — never from spawn, respawn or a wake (ADR-0021,
   unchanged).
+- **An emptied worktree path is reusable; anything else is still refused**
+  (2026-09-06). `Worktrees.create` will not write into a path it cannot prove is
+  the agent's own checkout, which is how "never destroy an agent's uncommitted
+  work" is enforced at create time. That proof is two `git rev-parse` calls
+  inside the directory, and an EMPTY directory fails both — so a worktree whose
+  contents git removed while a held directory handle (OneDrive, a watcher, an
+  open shell) kept the directory standing refused the agent's respawn, and every
+  respawn after it, for good. The guard was asking about identity to decide a
+  question about contents. `worktreePathIsVacant` asks the real one: an empty
+  real directory holds no work, and `git worktree add` accepts it as it stands,
+  so `create` prunes git's stale administrative entry (`remove`'s reason,
+  applied at the other end) and proceeds. Nothing is deleted on this route —
+  keeping this module's promise not to destroy anything at a worktree path, and
+  removing a "could not remove it" state no portable test can reach. A populated
+  directory, a file, a checkout on another branch, and a path that cannot be
+  listed all still refuse, and the reason names which. The vacancy check uses
+  `lstat`: through `stat` a junction reads as an ordinary empty directory and
+  would land the checkout in a directory nobody approved (ADR-0021's guard, at a
+  second doorway).
 - **A hire also declares what happens when it dies** (`onExit: "offer" | "respawn"`,
   same two layers, default `offer` = SDD §10's own word). Both fields are
   additive and optional on `hireTemplateSchema` and `profileDocumentSchema`, so

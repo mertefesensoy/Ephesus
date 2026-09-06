@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExecGitRunner, Worktrees } from '../../src/main/git'
+import { ExecGitRunner, Worktrees, worktreePathIsVacant } from '../../src/main/git'
 import { removeTempDir } from '../tmpdir'
 
 /**
@@ -234,10 +234,146 @@ describe('respawning onto a surviving worktree (M4 close-out audit)', () => {
     const r = rig()
     const target = plan(r)
     fs.mkdirSync(target.path, { recursive: true })
+    fs.writeFileSync(path.join(target.path, 'not-ours.txt'), 'someone else\n', 'utf8')
 
     const outcome = await r.worktrees.create(target)
 
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    expect(fs.existsSync(path.join(target.path, 'not-ours.txt'))).toBe(true)
+  })
+
+  it('refuses a checkout of the right shape sitting on the WRONG branch', async () => {
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create({ ...target, branch: 'agent/someone-else' })
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    // Still a checkout, still git's — clearing it would have destroyed it.
+    expect(fs.existsSync(path.join(target.path, 'README.md'))).toBe(true)
+  })
+})
+
+/**
+ * The defect that retired an agent for good: its worktree path survived an
+ * unwind as an EMPTY directory (git deleted the contents; a held handle kept
+ * the directory), so the ownership probe found no repository, `create` refused,
+ * and every respawn from then on was refused identically. Observed on the
+ * MUSAHIT run — the agent could not be spawned again at all.
+ *
+ * The refusal protects uncommitted work. An empty directory has none, so the
+ * two cases are told apart by the only question that carries the safety
+ * argument: is there anything in there?
+ */
+describe('an emptied worktree path (2026-09-06 respawn defect)', () => {
+  it('accepts an EMPTY leftover directory and gives the agent its checkout', async () => {
+    const r = rig()
+    const target = plan(r)
+    fs.mkdirSync(target.path, { recursive: true })
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) {
+      expect(outcome.path).toBe(target.path)
+      expect(outcome.branch).toBe(target.branch)
+    }
+    // A real checkout on the agent's own branch, not merely a directory that
+    // stopped being refused.
+    expect(fs.existsSync(path.join(target.path, 'README.md'))).toBe(true)
+    expect(
+      execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: target.path,
+        encoding: 'utf8'
+      }).trim()
+    ).toBe(target.branch)
+  })
+
+  it('recovers when git still holds a stale entry for the emptied path', async () => {
+    // The failure without the prune: git refuses `worktree add` for a path it
+    // already has registered, so accepting the empty directory alone would
+    // swap one permanent refusal for another.
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create(target)
+    for (const entry of fs.readdirSync(target.path)) {
+      fs.rmSync(path.join(target.path, entry), { recursive: true, force: true })
+    }
+    expect(fs.readdirSync(target.path)).toEqual([])
+    expect(execFileSync('git', ['worktree', 'list'], { cwd: r.repo, encoding: 'utf8' })).toContain(
+      path.basename(target.path)
+    )
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(true)
+    expect(fs.existsSync(path.join(target.path, 'README.md'))).toBe(true)
+  })
+
+  it('refuses a FILE standing where the worktree goes', async () => {
+    const r = rig()
+    const target = plan(r)
+    fs.mkdirSync(path.dirname(target.path), { recursive: true })
+    fs.writeFileSync(target.path, 'not a directory\n', 'utf8')
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    expect(fs.readFileSync(target.path, 'utf8')).toBe('not a directory\n')
+  })
+
+  it('REFUSES a link that would silently redirect the checkout (ADR-0021)', async () => {
+    // A junction reads as an ordinary empty directory through `stat`, and its
+    // target is a directory nobody approved for this agent. `lstat` is the only
+    // thing between "an empty path we may use" and "somebody else's directory
+    // wearing that path's name".
+    const r = rig()
+    const target = plan(r)
+    const elsewhere = path.join(r.root, 'somewhere-else')
+    fs.mkdirSync(elsewhere)
+    fs.mkdirSync(path.dirname(target.path), { recursive: true })
+    fs.symlinkSync(elsewhere, target.path, 'junction')
+
+    const verdict = worktreePathIsVacant(target.path)
+    expect(verdict).toEqual({ vacant: false, because: 'already exists' })
+
+    const outcome = await r.worktrees.create(target)
+    expect(outcome.ok).toBe(false)
+    // Nothing was checked out into the directory the link pointed at.
+    expect(fs.readdirSync(elsewhere)).toEqual([])
+  })
+
+  it('names an unreadable path as unreadable rather than as somebody’s work', async () => {
+    // Both refusals stop the spawn; only one of them sends the Architect
+    // looking for files that are not there.
+    const verdict = worktreePathIsVacant(path.join(rig().root, 'never-made'))
+    expect(verdict.vacant).toBe(false)
+    if (!verdict.vacant) expect(verdict.because).toContain('could not be read')
+  })
+
+  it('reports a populated directory as occupied, and touches nothing', async () => {
+    const r = rig()
+    const dir = path.join(r.root, 'has-work')
+    fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(dir, 'work.txt'), 'keep me\n', 'utf8')
+
+    expect(worktreePathIsVacant(dir)).toEqual({ vacant: false, because: 'already exists' })
+    expect(fs.readdirSync(dir)).toEqual(['work.txt'])
+  })
+
+  it('reports an empty directory as vacant WITHOUT removing it', async () => {
+    // The predicate is pure inspection: `git worktree add` accepts the empty
+    // directory as it stands, so this module never deletes at the worktree
+    // path — the promise it makes everywhere else.
+    const r = rig()
+    const dir = path.join(r.root, 'empty')
+    fs.mkdirSync(dir)
+
+    expect(worktreePathIsVacant(dir)).toEqual({ vacant: true })
+    expect(fs.existsSync(dir)).toBe(true)
   })
 })

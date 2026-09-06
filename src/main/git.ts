@@ -130,6 +130,54 @@ export interface WorktreesOptions {
   readonly forbiddenRoot: string
 }
 
+/** Whether a path may host a worktree, or the clause explaining why not. */
+export type VacancyVerdict =
+  { readonly vacant: true } | { readonly vacant: false; readonly because: string }
+
+/**
+ * Contract: pure inspection — reports whether `target` is an empty real
+ * directory. Reads the filesystem, changes nothing, never throws.
+ *
+ * This exists because the refusal it informs is permanent. `create` will not
+ * write into a path it cannot prove is the agent's own checkout, which is
+ * right — but a path that survived an unwind with its files already gone holds
+ * nobody's work, and refusing it retires the agent for good. On Windows that is
+ * the ordinary case rather than the exotic one: git deletes a worktree's
+ * contents and a held directory handle (OneDrive, a watcher, an open shell)
+ * leaves the empty directory standing.
+ *
+ * Nothing here deletes. `git worktree add` accepts an existing empty directory,
+ * so the harness never has to remove one — which is why this reports rather
+ * than clears: the module's promise not to destroy anything at the worktree
+ * path holds on the new route too, and there is no "could not remove it" state
+ * to get wrong.
+ *
+ * "Empty" carries the whole safety argument, so it is read literally: one entry
+ * of any kind, a file where a directory was expected, a link standing in for
+ * one (ADR-0021's junction guard — the checkout would land in a directory
+ * nobody approved), or a path that cannot be listed at all. Each keeps the
+ * refusal.
+ */
+export function worktreePathIsVacant(target: string): VacancyVerdict {
+  let entries: readonly string[]
+  try {
+    // lstat, not stat: a link here reads as a perfectly ordinary directory
+    // while redirecting the checkout somewhere the harness never approved.
+    if (!fs.lstatSync(target).isDirectory()) return { vacant: false, because: 'already exists' }
+    entries = fs.readdirSync(target)
+  } catch (err) {
+    // Uninspectable is not empty — the same safe direction `state` takes.
+    return {
+      vacant: false,
+      because: `already exists and could not be read: ${
+        err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err)
+      }`
+    }
+  }
+  if (entries.length > 0) return { vacant: false, because: 'already exists' }
+  return { vacant: true }
+}
+
 export class Worktrees {
   constructor(private readonly options: WorktreesOptions) {}
 
@@ -174,7 +222,17 @@ export class Worktrees {
         common.ok &&
         path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
       if (owned) return { ok: true, path: target, branch: plan.branch, created: false }
-      return { ok: false, reason: `worktree refused: "${plan.path}" already exists` }
+      // Not the agent's checkout. Before refusing it forever, ask the only
+      // question the refusal is actually protecting: is there anything in
+      // there? An empty directory holds no work, and `worktree add` will use
+      // it as it stands.
+      const vacancy = worktreePathIsVacant(target)
+      if (!vacancy.vacant) {
+        return { ok: false, reason: `worktree refused: "${plan.path}" ${vacancy.because}` }
+      }
+      // git may still hold an administrative entry pointing at the path whose
+      // files are gone; without this, `worktree add` refuses it as registered.
+      await this.options.runner.run(repo, ['worktree', 'prune'])
     }
 
     const known = await this.options.runner.run(repo, [
