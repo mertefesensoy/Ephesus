@@ -52,6 +52,7 @@ import { NO_TOOLS } from '../shared/engine-tools'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
+import { foldIncidents } from '../shared/incident-view'
 import { HireExchange } from './harbor/hires'
 import { FrontOffice, OUTBOUND_SUBJECT } from './frontoffice'
 import { HARBOR_SCHEMA_VERSION } from '../shared/harbor'
@@ -3023,6 +3024,12 @@ async function boot(): Promise<void> {
         unavailable: 'the Harbor has not started',
         repos: []
       },
+    // B14: folded from the book of record on every call, never cached and
+    // never stored. ADR-0027 §5 records incident correlation as state the
+    // harness deliberately does NOT persist; a cache here would reverse that
+    // decision by accident, and would go stale the moment anything else
+    // appended a row.
+    incidentBoard: () => foldIncidents(agora?.readLogAll() ?? []),
     // Sharing (FR-10.4 — M7.6). `inspect` writes nothing; `install` writes
     // files and does NOT activate — an imported profile is inert until the
     // Architect activates it through `profiles:activate`.

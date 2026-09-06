@@ -138,6 +138,7 @@
         "src/main/known-targets.ts",
         "src/shared/harbor.ts",
         "src/shared/incident.ts",
+        "src/shared/incident-view.ts",
         "src/shared/known-targets.ts",
         "src/shared/parse-reasons.ts",
         "src/shared/outbound.ts",
@@ -233,7 +234,7 @@
       "members": [
         "src/renderer/src/",
         "src/shared/badges.ts",
-   "src/shared/freshness.ts",
+        "src/shared/freshness.ts",
         "src/shared/fonts.ts",
         "src/shared/contrast.ts"
       ]
@@ -254,41 +255,41 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-06T15:17:39.374Z",
-        "commit": "ca1158a",
+        "at": "2026-09-06T23:20:34.131Z",
+        "commit": "efc24a9",
         "ref": "local",
-        "tree": "6d009e038f82",
+        "tree": "d2cddb05c4db",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
         "command": "npm run test:coverage"
       },
       "candidate": {
-        "tree": "6d009e038f82",
-        "map": "aa81e9bd1306",
+        "tree": "d2cddb05c4db",
+        "map": "7b5d1c6d43f5",
         "runs": [
           {
-            "at": "2026-09-06T15:07:48.977Z",
-            "commit": "ca1158a",
+            "at": "2026-09-06T23:20:34.131Z",
+            "commit": "efc24a9",
             "ref": "local",
-            "tree": "6d009e038f82",
+            "tree": "d2cddb05c4db",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T15:07:48.560Z",
+            "report": "2026-09-06T23:20:33.453Z",
             "floors": {
               "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
               },
               "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
+                "lines": 95.41,
+                "branches": 87.79,
+                "functions": 92.51,
+                "statements": 93.2
               },
               "hermes": {
                 "lines": 98.61,
@@ -297,10 +298,10 @@
                 "statements": 96.59
               },
               "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
+                "lines": 97.99,
+                "branches": 88.69,
+                "functions": 97.37,
+                "statements": 96.68
               },
               "artemis": {
                 "lines": 97.66,
@@ -321,10 +322,10 @@
                 "statements": 90.14
               },
               "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
               },
               "watch": {
                 "lines": 96.17,
@@ -346,9 +347,9 @@
               },
               "stoa": {
                 "lines": 96.48,
-                "branches": 84.11,
+                "branches": 84.77,
                 "functions": 98.31,
-                "statements": 95.16
+                "statements": 95.5
               },
               "company": {
                 "lines": 97.66,
@@ -363,10 +364,10 @@
                 "statements": 55.34
               },
               "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
+                "lines": 42.43,
+                "branches": 44.57,
+                "functions": 30.61,
+                "statements": 40.75
               },
               "herald": {
                 "lines": 93.05,
@@ -383,27 +384,27 @@
             }
           },
           {
-            "at": "2026-09-06T15:14:38.913Z",
-            "commit": "ca1158a",
+            "at": "2026-09-06T23:40:53.239Z",
+            "commit": "efc24a9",
             "ref": "local",
-            "tree": "6d009e038f82",
+            "tree": "d2cddb05c4db",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T15:14:38.512Z",
+            "report": "2026-09-06T23:40:43.770Z",
             "floors": {
               "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
               },
               "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
+                "lines": 95.41,
+                "branches": 87.79,
+                "functions": 92.51,
+                "statements": 93.2
               },
               "hermes": {
                 "lines": 98.61,
@@ -412,10 +413,10 @@
                 "statements": 96.59
               },
               "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
+                "lines": 97.99,
+                "branches": 88.69,
+                "functions": 97.37,
+                "statements": 96.68
               },
               "artemis": {
                 "lines": 97.66,
@@ -436,10 +437,10 @@
                 "statements": 90.14
               },
               "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
               },
               "watch": {
                 "lines": 96.17,
@@ -461,9 +462,9 @@
               },
               "stoa": {
                 "lines": 96.48,
-                "branches": 84.11,
+                "branches": 84.77,
                 "functions": 98.31,
-                "statements": 95.16
+                "statements": 95.5
               },
               "company": {
                 "lines": 97.66,
@@ -478,125 +479,10 @@
                 "statements": 55.34
               },
               "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-06T15:17:39.374Z",
-            "commit": "ca1158a",
-            "ref": "local",
-            "tree": "6d009e038f82",
-            "platform": "win32",
-            "node": "v20.16.0",
-            "os": "Windows_NT 10.0.26200",
-            "command": "npm run test:coverage",
-            "report": "2026-09-06T15:17:38.938Z",
-            "floors": {
-              "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
-              },
-              "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
-              },
-              "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.59
-              },
-              "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
-              },
-              "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
-                "functions": 90.2,
-                "statements": 94.85
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.11,
-                "functions": 98.31,
-                "statements": 95.16
-              },
-              "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
-              },
-              "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
-              },
-              "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
+                "lines": 42.43,
+                "branches": 44.57,
+                "functions": 30.61,
+                "statements": 40.75
               },
               "herald": {
                 "lines": 93.05,
@@ -669,7 +555,7 @@
           "branches": 75.12,
           "functions": 89.19,
           "statements": 87.87,
-          "files": 15
+          "files": 17
         },
         "watch": {
           "lines": 96.17,
@@ -718,7 +604,7 @@
           "branches": 40.26,
           "functions": 27.35,
           "statements": 33.36,
-          "files": 25
+          "files": 27
         },
         "herald": {
           "lines": 93.05,
@@ -744,7 +630,6 @@
         "src/main/pty.ts",
         "src/main/watch/cipher.ts",
         "src/preload/index.ts",
-        "src/renderer/src/App.tsx",
         "src/renderer/src/BriefsPanel.tsx",
         "src/renderer/src/CommandBar.tsx",
         "src/renderer/src/DecksPanel.tsx",

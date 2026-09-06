@@ -225,6 +225,7 @@ async function rig(options: RigOptions = {}): Promise<{
       unavailable: 'no Harbor in this rig',
       repos: []
     }),
+    incidentBoard: () => ({ incidents: [], unclaimed: [], unattributedRefusals: [] }),
     profilesInstances: () => [],
     orgChart: () => [],
     orgMetrics: () => ({ metrics: [], findings: [] }),

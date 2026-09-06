@@ -29,6 +29,7 @@ import type { LogEntry } from '../shared/log'
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { HarborView } from '../shared/harbor'
+import type { IncidentBoard } from '../shared/incident-view'
 import type { ShareExport, ShareInspection, ShareInstall } from '../shared/share-view'
 import type {
   ActivationResult,
@@ -166,6 +167,7 @@ const eph: EphApi = {
   },
   harbor: {
     repos: () => ipcRenderer.invoke(IpcChannels.harborRepos) as Promise<HarborView>,
+    incidents: () => ipcRenderer.invoke(IpcChannels.harborIncidents) as Promise<IncidentBoard>,
     hireExport: (profile, hire) =>
       ipcRenderer.invoke(IpcChannels.harborHireExport, { profile, hire }) as Promise<ShareExport>,
     profileExport: (name) =>
