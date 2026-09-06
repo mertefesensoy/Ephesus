@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { reasonsFor } from './parse-reasons'
 
 /**
  * Root-cause claims and the independent verdicts on them (FR-9.2, UC-09 — the
@@ -177,13 +178,7 @@ export function parseRootCauseVerdict(body: string): RootCauseVerdictParse {
   }
   const parsed = rootCauseVerdictSchema.safeParse(raw)
   if (parsed.success) return { ok: true, verdict: parsed.data }
-  return {
-    ok: false,
-    reasons: parsed.error.issues.map((issue) => {
-      const where = issue.path.length > 0 ? issue.path.join('.') : 'root-cause verdict'
-      return `${where}: ${issue.message}`
-    })
-  }
+  return { ok: false, reasons: reasonsFor(parsed.error, 'root-cause verdict', raw) }
 }
 
 /**

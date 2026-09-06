@@ -112,7 +112,20 @@ export interface IncidentBinding {
  * moment an incident lands.
  */
 export type RenderedText =
-  'subject' | 'body' | 'verify-subject' | 'verify-body' | 'disputed-subject' | 'disputed-body'
+  | 'subject'
+  | 'body'
+  | 'verify-subject'
+  | 'verify-body'
+  | 'disputed-subject'
+  | 'disputed-body'
+  /**
+   * The two refusals that have to TEACH (M8.9). A refusal an agent cannot learn
+   * from is re-earned every time, and both of these were: the orchestrator's
+   * courtesy reply bounced nine times off a JSON parse error, and every verdict
+   * the company ever received was thrown away for length.
+   */
+  | 'not-your-triage'
+  | 'verdict-refused'
 
 export interface IncidentEndpointOptions {
   /**
@@ -345,6 +358,38 @@ export class IncidentEndpoint {
       return null
     }
 
+    // The threaded incident, when the sender replied rather than composing
+    // afresh. Read once: both the guard below and every refusal row want it.
+    const threaded =
+      message.in_reply_to === null ? undefined : this.awaiting.get(message.in_reply_to)
+
+    // The orchestrator answering the harbor about an incident she was asked to
+    // DELEGATE (M8.9). `prompts/harbor/incident-body.md` forbids this by name
+    // and warns it will bounce; it bounced nine times, and each time she was
+    // told `triage report: not JSON — Unexpected token 'T'`. The guard was
+    // right and the sentence was useless: a parse error cannot teach the rule
+    // it is enforcing, so the same reply is earned again on the next incident.
+    //
+    // Deliberately NARROW. "Only `incident.agentId` may report" was the obvious
+    // generalisation and it is wrong: the live log has the orchestrator
+    // reassigning a triage ("reassigned to you; on-call agent is out of
+    // budget"), and a rule that refused the reassignee would refuse honest
+    // work to fix a courtesy reply.
+    const orchestrator = this.options.orchestratorId()
+    if (message.from === orchestrator && !this.orchestratorIsOnCall(threaded, orchestrator)) {
+      const because = 'the triage of an incident belongs to its on-call agent, not to you'
+      this.options.onLogEvent({
+        kind: 'profile',
+        event: 'incident-triage-refused',
+        from: message.from,
+        msgId: message.id,
+        incident: threaded?.key ?? null,
+        reasons: [because]
+      })
+      this.refuse(message, [because], this.options.render('not-your-triage', {}))
+      return null
+    }
+
     const parsed = parseTriageReport(message.body)
     if (!parsed.ok) {
       this.options.onLogEvent({
@@ -352,6 +397,7 @@ export class IncidentEndpoint {
         event: 'incident-triage-refused',
         from: message.from,
         msgId: message.id,
+        incident: threaded?.key ?? null,
         reasons: parsed.reasons
       })
       this.refuse(message, parsed.reasons)
@@ -374,6 +420,7 @@ export class IncidentEndpoint {
         event: 'incident-triage-refused',
         from: message.from,
         msgId: message.id,
+        incident: report.incident,
         reasons: faith.reasons
       })
       this.refuse(message, faith.reasons)
@@ -381,8 +428,7 @@ export class IncidentEndpoint {
     }
 
     const incident =
-      (message.in_reply_to === null ? undefined : this.awaiting.get(message.in_reply_to)) ??
-      [...this.awaiting.values()].find((candidate) => candidate.key === report.incident)
+      threaded ?? [...this.awaiting.values()].find((candidate) => candidate.key === report.incident)
 
     if (incident === undefined) {
       const because = `no incident "${report.incident}" is awaiting triage`
@@ -391,6 +437,7 @@ export class IncidentEndpoint {
         event: 'incident-triage-refused',
         from: message.from,
         msgId: message.id,
+        incident: report.incident,
         reasons: [because]
       })
       this.refuse(message, [because])
@@ -447,6 +494,23 @@ export class IncidentEndpoint {
     this.verify(incident, report, message.from)
 
     return escalation
+  }
+
+  /**
+   * Whether the orchestrator is legitimately the one reporting this triage.
+   *
+   * Two lookups, in order of authority. When the reply threads to an incident
+   * this endpoint raised, that incident's own on-call agent settles it — a
+   * one-agent company where the orchestrator IS on call must not be refused for
+   * doing its job. When it does not thread (an agent that composes a fresh
+   * message rather than replying leaves nothing to look up), the question falls
+   * back to whether ANY live binding puts the orchestrator on call at all: if
+   * none does, she cannot be the right reporter for any incident, and the
+   * answer is total rather than a guess.
+   */
+  private orchestratorIsOnCall(threaded: Incident | undefined, orchestrator: string): boolean {
+    if (threaded !== undefined) return threaded.agentId === orchestrator
+    return this.options.bindings().some((binding) => binding.agentId === orchestrator)
   }
 
   /**
@@ -564,23 +628,40 @@ export class IncidentEndpoint {
    * other incident fact does: through the log and the next standup.
    */
   onVerdict(message: Message): RootCauseVerdict | null {
+    const threaded =
+      message.in_reply_to === null ? undefined : this.awaitingVerdict.get(message.in_reply_to)
+
     const parsed = parseRootCauseVerdict(message.body)
     if (!parsed.ok) {
-      this.refuseVerdict(message, parsed.reasons)
+      // The verdict is unreadable, so its incident key is only knowable from
+      // the thread. Null rather than a guess: a refusal filed against the wrong
+      // incident is worse than one filed against none.
+      this.refuseVerdict(message, parsed.reasons, {
+        incident: threaded?.incident.key ?? null,
+        stillOpen: threaded !== undefined
+      })
       return null
     }
     const verdict = parsed.verdict
 
     const pending =
-      (message.in_reply_to === null ? undefined : this.awaitingVerdict.get(message.in_reply_to)) ??
+      threaded ??
       [...this.awaitingVerdict.values()].find(
         (candidate) =>
           candidate.incident.key === verdict.incident && candidate.verifier === message.from
       )
     if (pending === undefined) {
-      this.refuseVerdict(message, [
-        `no root cause for "${verdict.incident}" is awaiting a verdict from you`
-      ])
+      // Nothing is open, so the advice that a thread is still waiting would be
+      // a lie — and telling an agent to answer again a question nobody asked is
+      // how a refusal buys a second wasted turn instead of saving one.
+      this.refuseVerdict(
+        message,
+        [`no root cause for "${verdict.incident}" is awaiting a verdict from you`],
+        {
+          incident: verdict.incident,
+          stillOpen: false
+        }
+      )
       return null
     }
 
@@ -591,9 +672,13 @@ export class IncidentEndpoint {
     // more than the volunteer. A rejected volunteer is told why and can say it
     // to the Architect in the ordinary way.
     if (message.from !== pending.verifier) {
-      this.refuseVerdict(message, [
-        `the verdict on "${verdict.incident}" was asked of ${pending.verifier}, not of you`
-      ])
+      // Open, but not to this sender. Inviting the volunteer to answer again
+      // would invite exactly the self-verification the check just refused.
+      this.refuseVerdict(
+        message,
+        [`the verdict on "${verdict.incident}" was asked of ${pending.verifier}, not of you`],
+        { incident: pending.incident.key, stillOpen: false }
+      )
       return null
     }
 
@@ -603,15 +688,22 @@ export class IncidentEndpoint {
     // may have been done against the wrong repository. Silently trusting the
     // thread would file a verdict on a claim nobody checked.
     if (verdict.incident !== pending.incident.key) {
-      this.refuseVerdict(message, [
-        `this thread asked about "${pending.incident.key}"; your verdict names "${verdict.incident}"`
-      ])
+      this.refuseVerdict(
+        message,
+        [
+          `this thread asked about "${pending.incident.key}"; your verdict names "${verdict.incident}"`
+        ],
+        { incident: pending.incident.key, stillOpen: true }
+      )
       return null
     }
 
     const evidenced = checkVerdict(verdict, pending.claim)
     if (!evidenced.ok) {
-      this.refuseVerdict(message, evidenced.reasons)
+      this.refuseVerdict(message, evidenced.reasons, {
+        incident: pending.incident.key,
+        stillOpen: true
+      })
       return null
     }
 
@@ -691,20 +783,48 @@ export class IncidentEndpoint {
     )
   }
 
-  /** A refusal back to a verifier, logged the way a refused report is. */
-  private refuseVerdict(message: Message, reasons: readonly string[]): void {
+  /**
+   * A refusal back to a verifier, logged the way a refused report is.
+   *
+   * `stillOpen` is the difference between a refusal that buys a corrected
+   * answer and one that buys a second wasted turn. Three of the four refusal
+   * paths here leave `awaitingVerdict` untouched, so the question really is
+   * still the verifier's to answer — and every root-cause verdict this company
+   * has ever received was refused for LENGTH, with nothing to say the thread
+   * was still open and the reading did not have to be redone. The caller passes
+   * it rather than this method inferring it, because "is the thread open" and
+   * "is it open TO YOU" differ on the unsolicited-volunteer path, and an
+   * inference here could not tell those apart.
+   */
+  private refuseVerdict(
+    message: Message,
+    reasons: readonly string[],
+    about: { readonly incident: string | null; readonly stillOpen: boolean }
+  ): void {
     this.options.onLogEvent({
       kind: 'profile',
       event: 'incident-verdict-refused',
       from: message.from,
       msgId: message.id,
+      incident: about.incident,
       reasons
     })
-    this.refuse(message, reasons)
+    this.refuse(
+      message,
+      reasons,
+      about.stillOpen ? this.options.render('verdict-refused', {}) : undefined
+    )
   }
 
-  /** A refusal back to the agent that wrote, on the same conversation. */
-  private refuse(original: Message, reasons: readonly string[]): void {
+  /**
+   * A refusal back to the agent that wrote, on the same conversation.
+   *
+   * `advice` is the paragraph that teaches the rule the reasons enforce
+   * (invariant §8 — it is prompt text, and it is the Architect's to edit). The
+   * reasons come first and stay first: they are what changed, and an agent
+   * scanning a refusal for the actionable line should find it on line one.
+   */
+  private refuse(original: Message, reasons: readonly string[], advice?: string): void {
     const at = this.now()
     this.options.deliver(
       composeMessage({
@@ -715,7 +835,7 @@ export class IncidentEndpoint {
         to: original.from,
         act: 'refuse',
         subject: `re: ${original.subject}`.slice(0, 200),
-        body: reasons.join('\n'),
+        body: advice === undefined ? reasons.join('\n') : `${reasons.join('\n')}\n\n${advice}`,
         hops: replyHops(original),
         created_at: at.toISOString()
       })

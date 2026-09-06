@@ -139,6 +139,7 @@
         "src/shared/harbor.ts",
         "src/shared/incident.ts",
         "src/shared/known-targets.ts",
+        "src/shared/parse-reasons.ts",
         "src/shared/outbound.ts",
         "src/shared/root-cause.ts",
         "src/shared/gh-token.ts",
