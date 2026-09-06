@@ -462,6 +462,47 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
 }
 
 /**
+ * The literal PROTOCOL.md tells an agent to run when its GitHub token expires.
+ *
+ * Kept as one exported constant because a rule that does not match the sentence
+ * the agent was given is a rule that grants nothing, and the two live in
+ * different files (`prompts/agora/PROTOCOL.md`, "run `$EPH_GH_TOKEN` for a
+ * fresh one").
+ */
+export const GH_TOKEN_REFRESH_COMMAND = '$EPH_GH_TOKEN'
+
+/**
+ * Lets the agent refresh the GitHub token the harness already gave it.
+ *
+ * `GH_TOKEN` is a GitHub App installation token and expires an hour after the
+ * spawn (ADR-0022), which is inside the length of one ordinary run. PROTOCOL.md
+ * accordingly tells an agent to run `$EPH_GH_TOKEN` after a 401 — and nothing
+ * granted permission to run it, so under `auto` the engine's classifier refused
+ * it and the agent had no way through. Found live on 2026-09-06: the on-call
+ * agent pushed its second fix branch, could not open the pull request, and
+ * escalated "GH token expired, and I could not refresh it" instead.
+ *
+ * The grant widens nothing. The shim mints the same scoped installation token
+ * the harness already put in this agent's environment at spawn; the only thing
+ * it adds is the ability to replace one that timed out. Withholding it does not
+ * make the agent less capable of reaching GitHub — it makes it capable for the
+ * first hour and silently blind afterwards, which is the worse of the two.
+ *
+ * EXACT rules, never a `:*` prefix. A prefix on a credential command would also
+ * admit whatever an injected suffix appended to it, and there is no suffix this
+ * command has any use for.
+ */
+function ghTokenPermissions(cfg: AgentSpawnConfig): readonly string[] {
+  if (cfg.ghTokenCommand.length === 0) return []
+  return [
+    `Bash(${GH_TOKEN_REFRESH_COMMAND})`,
+    // The same call with the variable already expanded, which is what an agent
+    // that resolves it before running lands on.
+    `Bash(${cfg.ghTokenCommand.split(path.sep).join('/')})`
+  ]
+}
+
+/**
  * Claude Code's own record of which working directories a human has approved:
  * `~/.claude.json` → `projects[<cwd>].hasTrustDialogAccepted`.
  *
@@ -917,9 +958,11 @@ export function mergeClaudeSettings(
     return `${JSON.stringify({ ...base, ...withStatus, ...NO_VENDOR_ATTRIBUTION, hooks: merged }, null, 2)}\n`
   }
 
-  // Merge the mailbox grant into whatever the Architect already allowed, never
-  // replacing their list.
+  // Merge the harness's own grants into whatever the Architect already allowed,
+  // never replacing their list: this agent's mailbox, and the one command that
+  // refreshes the credential the harness itself handed it.
   const grant = mailboxPermissions(cfg)
+  const tokenRules = ghTokenPermissions(cfg)
   const existingPermissions =
     typeof base['permissions'] === 'object' &&
     base['permissions'] !== null &&
@@ -937,11 +980,16 @@ export function mergeClaudeSettings(
   // plain append produced on every re-install.
   const mine = new Set([
     ...(grant['allow'] as unknown[]),
-    ...(grant['additionalDirectories'] as unknown[])
+    ...(grant['additionalDirectories'] as unknown[]),
+    ...tokenRules
   ])
   const permissions = {
     ...existingPermissions,
-    allow: [...priorAllow.filter((item) => !mine.has(item)), ...(grant['allow'] as unknown[])],
+    allow: [
+      ...priorAllow.filter((item) => !mine.has(item)),
+      ...(grant['allow'] as unknown[]),
+      ...tokenRules
+    ],
     additionalDirectories: [
       ...priorDirs.filter((item) => !mine.has(item)),
       ...(grant['additionalDirectories'] as unknown[])

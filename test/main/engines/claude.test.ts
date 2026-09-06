@@ -12,7 +12,8 @@ import {
   ClaudeAdapter,
   claudePermissionMode,
   mergeClaudeSettings,
-  CLAUDE_FILE_RULE_TOOLS
+  CLAUDE_FILE_RULE_TOOLS,
+  GH_TOKEN_REFRESH_COMMAND
 } from '../../../src/main/engines/claude'
 import { AGENT_BASE_ENV_KEYS, baseAgentEnv } from '../../../src/main/engines/spawn-env'
 import { PromptStore } from '../../../src/main/prompts'
@@ -846,5 +847,70 @@ describe('the per-agent settings file overrides attribution too', () => {
       pr: '',
       sessionUrl: false
     })
+  })
+})
+
+/**
+ * `GH_TOKEN` is a GitHub App installation token and expires an hour after the
+ * spawn (ADR-0022) — inside the length of one ordinary run. PROTOCOL.md tells
+ * an agent to run `$EPH_GH_TOKEN` after a 401, and nothing granted permission
+ * to run it, so under `auto` the classifier refused and the agent had no way
+ * through. Found live on 2026-09-06: the on-call agent pushed its second fix
+ * branch, could not open the pull request, and escalated instead.
+ */
+describe('an agent may refresh the token the harness gave it', () => {
+  const allowIn = (cfg: AgentSpawnConfig, adapter: ClaudeAdapter): readonly string[] => {
+    const written = adapter.spawnArgs(cfg).settings?.[0]?.contents ?? '{}'
+    const parsed = JSON.parse(written) as { permissions?: { allow?: string[] } }
+    return parsed.permissions?.allow ?? []
+  }
+
+  it('grants exactly the literal PROTOCOL.md tells it to run', () => {
+    const { adapter, cfg } = rig()
+    const withToken = { ...cfg, ghTokenCommand: '/usr/bin/node /app/shims/eph-gh-token.mjs' }
+
+    // The rule and the sentence live in different files; one that does not
+    // match the other grants nothing at all.
+    expect(allowIn(withToken, adapter)).toContain(`Bash(${GH_TOKEN_REFRESH_COMMAND})`)
+    expect(GH_TOKEN_REFRESH_COMMAND).toBe('$EPH_GH_TOKEN')
+  })
+
+  it('grants the expanded form too, for an agent that resolves it first', () => {
+    const { adapter, cfg } = rig()
+    const withToken = { ...cfg, ghTokenCommand: '/usr/bin/node /app/shims/eph-gh-token.mjs' }
+
+    expect(allowIn(withToken, adapter)).toContain('Bash(/usr/bin/node /app/shims/eph-gh-token.mjs)')
+  })
+
+  it('uses EXACT rules, never a prefix — this is a credential command', () => {
+    // A `:*` prefix would also admit whatever an injected suffix appended to
+    // it, and this command has no use for a suffix.
+    const { adapter, cfg } = rig()
+    const withToken = { ...cfg, ghTokenCommand: '/usr/bin/node /app/shims/eph-gh-token.mjs' }
+
+    for (const rule of allowIn(withToken, adapter).filter((r) => r.startsWith('Bash('))) {
+      expect(rule).not.toContain(':*')
+      expect(rule).not.toContain('*')
+    }
+  })
+
+  it('grants nothing when no company GitHub identity is configured', () => {
+    // An empty command means there is no fresher token to get; a rule for it
+    // would be a permission to run nothing.
+    const { adapter, cfg } = rig()
+
+    expect(
+      allowIn({ ...cfg, ghTokenCommand: '' }, adapter).some((r) => r.startsWith('Bash('))
+    ).toBe(false)
+  })
+
+  it('keeps the mailbox grant alongside it', () => {
+    // Both are the harness's own grants and one must not displace the other.
+    const { adapter, cfg } = rig()
+    const withToken = { ...cfg, ghTokenCommand: '/usr/bin/node /app/shims/eph-gh-token.mjs' }
+    const allow = allowIn(withToken, adapter)
+
+    expect(allow.some((r) => r.startsWith('Edit('))).toBe(true)
+    expect(allow.some((r) => r.startsWith('Bash('))).toBe(true)
   })
 })
