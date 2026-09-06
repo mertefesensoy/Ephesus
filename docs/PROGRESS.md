@@ -4634,6 +4634,38 @@ structural rather than a habit.
       metric due 2026-09-16), the M8.0 implementation doc. Owed, recorded not
       built: export-level dead code (the M3 `effectivePolicy` shape) is
       invisible to both halves. Branch `feature/m8-0-coverage-seam-rule`,
+
+      *AUDIT (2026-09-07): **clean — and the one package whose real evidence is the
+      other nine audits.** Both gates were PROVEN by planted probe rather than
+      trusted, because a tripwire that finds nothing looks exactly like one that
+      passes. A new `src/shared/audit-probe.ts` — mapped to no subsystem, entered by
+      no test, imported by nothing — was refused with exit 1 and a sentence naming
+      the file and its three remedies (wire it, delete it, or allowlist it WITH the
+      decision). The coverage check fails CLOSED on the same tree: asked to judge
+      without a report it refuses rather than passes. Probe removed, both green.
+      **Neither allowlist has been gamed.** `UNREACHABLE_ALLOWLIST` is untouched
+      since the commit that created it — still the Herald ×7 and `contrast.ts`, each
+      with its reason — and the untested-module record has FALLEN from 24 to 22, is
+      identical on both platforms, and contains nothing added in this session.
+      **What the gate caught in one day of audit work:** `agora` statements diluted
+      by an unreachable catch, `agora` branches diluted by a duplicated error
+      ternary, `renderer-health.ts` belonging to no subsystem, and the stale linux
+      record — that last from CI, which is the half this machine cannot measure.
+      Three of the four were in code written the same day.
+      **CORRECTION to the standing finding above:** it says `main` has NO branch
+      protection, so "every CI gate is advisory until required checks are enabled".
+      That is no longer true and was verified through the API rather than assumed:
+      `main` requires "Typecheck · lint · test", "Docs integrity" and "Commit
+      attribution", with `strict: true` — which is what refused a merge on 2026-09-06
+      until the branch was brought up to date — and `enforce_admins: false`, so the
+      Architect can still override deliberately. The gates are REQUIRED, not advisory.
+      **One honest observation about these audit notes rather than about the gate:**
+      the M8.1 block restates the rule as "figures live in
+      `scripts/coverage-floors.json`, never in prose", and this session’s notes and
+      commit messages do quote moved floors. They carry their condition, and
+      `check-coverage.cjs` reads only the JSON, so they are history rather than a
+      competing record — but they will go stale where the record will not. Read the
+      file, never a note, for what a floor is now.*
       pushed, UNMERGED — merging is the Architect's. FOUND BY CI, RECORDED
       NOT FIXED: runs `33629903392` and `33633478191` (both docs-only
       commits — two of the branch's six runs) failed
