@@ -3,7 +3,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExecGitRunner, Worktrees, worktreePathIsVacant } from '../../src/main/git'
+import {
+  ExecGitRunner,
+  isAgentsOwnBranch,
+  Worktrees,
+  worktreePathIsVacant
+} from '../../src/main/git'
 import { removeTempDir } from '../tmpdir'
 
 /**
@@ -375,5 +380,103 @@ describe('an emptied worktree path (2026-09-06 respawn defect)', () => {
 
     expect(worktreePathIsVacant(dir)).toEqual({ vacant: true })
     expect(fs.existsSync(dir)).toBe(true)
+  })
+})
+
+/**
+ * An agent's branch is a NAMESPACE, not one name.
+ *
+ * The runbook tells a hire to "push your own `agent/*` branch and open a pull
+ * request", so a hire that does its job ends up on `agent/<id>-<topic>`.
+ * Requiring the exact name read that as somebody else's checkout and refused
+ * the respawn — and because activation is all-or-nothing it took the whole
+ * company down with it. Observed live on 2026-09-06 after the dependency-updater
+ * opened three security pull requests.
+ */
+describe('an agent respawning onto its own topic branch', () => {
+  it('reuses a checkout sitting on a branch BENEATH its own', async () => {
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create(target)
+    execFileSync('git', ['checkout', '-q', '-b', `${target.branch}-sec-fix`], { cwd: target.path })
+
+    const again = await r.worktrees.create(target)
+
+    expect(again.ok).toBe(true)
+    // Left WHERE IT STANDS: the topic branch is where its work is, and moving
+    // it back would strand the commits it is about to push.
+    if (again.ok) expect(again.branch).toBe(`${target.branch}-sec-fix`)
+    expect(
+      execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: target.path,
+        encoding: 'utf8'
+      }).trim()
+    ).toBe(`${target.branch}-sec-fix`)
+  })
+
+  it('still refuses a checkout on ANOTHER agent’s branch', async () => {
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create(target)
+    execFileSync('git', ['checkout', '-q', '-b', 'agent/somebody-else'], { cwd: target.path })
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+  })
+})
+
+describe('isAgentsOwnBranch — the namespace, and its edge', () => {
+  const own = 'agent/mason'
+
+  it('accepts the branch itself and topic branches beneath it', () => {
+    expect(isAgentsOwnBranch(own, own)).toBe(true)
+    expect(isAgentsOwnBranch(`${own}-arc-clock`, own)).toBe(true)
+    expect(isAgentsOwnBranch(`${own}-2`, own)).toBe(true)
+  })
+
+  it('REQUIRES the separator, so a longer id is not swallowed', () => {
+    // Without it `agent/mason` would own `agent/masonry`, which is the exact
+    // confusion a namespace prefix exists to prevent.
+    expect(isAgentsOwnBranch('agent/masonry', own)).toBe(false)
+    expect(isAgentsOwnBranch('agent/masonry-topic', own)).toBe(false)
+  })
+
+  it('refuses another agent’s branch and the base branches', () => {
+    expect(isAgentsOwnBranch('agent/thalia', own)).toBe(false)
+    expect(isAgentsOwnBranch('main', own)).toBe(false)
+    expect(isAgentsOwnBranch('', own)).toBe(false)
+  })
+})
+
+describe('a worktree of somebody else’s repository', () => {
+  it('is REFUSED even when its branch matches the agent’s namespace', async () => {
+    // The branch name is not proof of ownership: another repository can have a
+    // branch called anything. `git-common-dir` is what ties the checkout to
+    // THIS target, and without it the agent would be handed a stranger's code
+    // and push its work into it.
+    const r = rig()
+    const target = plan(r)
+
+    const other = path.join(r.root, 'other-repo')
+    fs.mkdirSync(other)
+    const git = (cwd: string, args: readonly string[]): void => {
+      execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd })
+    }
+    git(other, ['init', '-q', '-b', 'main'])
+    fs.writeFileSync(path.join(other, 'SECRETS.md'), '# not ours\n', 'utf8')
+    git(other, ['add', '.'])
+    git(other, ['commit', '-qm', 'initial'])
+    // Same path, same branch name, different repository.
+    fs.mkdirSync(path.dirname(target.path), { recursive: true })
+    git(other, ['worktree', 'add', '-b', target.branch, target.path])
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    // The stranger's checkout is untouched.
+    expect(fs.existsSync(path.join(target.path, 'SECRETS.md'))).toBe(true)
   })
 })

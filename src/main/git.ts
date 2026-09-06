@@ -130,6 +130,31 @@ export interface WorktreesOptions {
   readonly forbiddenRoot: string
 }
 
+/**
+ * Contract: pure. Whether `branch` belongs to the agent whose own branch is
+ * `own` — either it IS that branch, or it is a topic branch beneath it.
+ *
+ * The agent's branch is a NAMESPACE, not a single name. `agent/<id>` is where a
+ * respawn lands by default, but the runbook tells a hire to "push your own
+ * `agent/*` branch and open a pull request", and a hire doing exactly that ends
+ * up on `agent/<id>-<topic>`. Requiring the exact name read that as somebody
+ * else's checkout and refused the respawn — so an agent was punished for having
+ * done its job, and because activation is all-or-nothing it took the whole
+ * company down with it.
+ *
+ * Observed live on 2026-09-06: the dependency-updater opened three security
+ * pull requests, was left on `agent/…-dependency-updater-pytest-asyncio-14-compat`,
+ * and the next activation failed with "worktree refused: … already exists" on a
+ * clean checkout of the right repository.
+ *
+ * The separator is required, so `agent/mason-2` is Mason's and `agent/masonry`
+ * is not. Without it the namespace would leak into every id that merely starts
+ * with another's, which is exactly the confusion the prefix is meant to avoid.
+ */
+export function isAgentsOwnBranch(branch: string, own: string): boolean {
+  return branch === own || branch.startsWith(`${own}-`)
+}
+
 /** Whether a path may host a worktree, or the clause explaining why not. */
 export type VacancyVerdict =
   { readonly vacant: true } | { readonly vacant: false; readonly because: string }
@@ -216,12 +241,15 @@ export class Worktrees {
       // contradicted the card that still names it (M4 close-out audit).
       const head = await this.options.runner.run(target, ['rev-parse', '--abbrev-ref', 'HEAD'])
       const common = await this.options.runner.run(target, ['rev-parse', '--git-common-dir'])
+      const branch = head.ok ? head.stdout.trim() : ''
       const owned =
         head.ok &&
-        head.stdout.trim() === plan.branch &&
+        isAgentsOwnBranch(branch, plan.branch) &&
         common.ok &&
         path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
-      if (owned) return { ok: true, path: target, branch: plan.branch, created: false }
+      // Reuse it WHERE IT STANDS: the branch it is on is where its work is, and
+      // moving it back would strand the commits the agent is about to push.
+      if (owned) return { ok: true, path: target, branch, created: false }
       // Not the agent's checkout. Before refusing it forever, ask the only
       // question the refusal is actually protecting: is there anything in
       // there? An empty directory holds no work, and `worktree add` will use
