@@ -887,6 +887,121 @@
                 "statements": 47.26
               }
             }
+          },
+          {
+            "at": "2026-09-06T21:03:15.413Z",
+            "commit": "a778b1e",
+            "ref": "26/merge",
+            "tree": "8ff9fcc84a5f",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-06T21:03:15.318Z",
+            "floors": {
+              "boot": {
+                "lines": 21.21,
+                "branches": 9.13,
+                "functions": 8.27,
+                "statements": 20.26
+              },
+              "engines": {
+                "lines": 94.84,
+                "branches": 86.91,
+                "functions": 91.01,
+                "statements": 92.84
+              },
+              "hermes": {
+                "lines": 98.61,
+                "branches": 91.16,
+                "functions": 98.86,
+                "statements": 96.79
+              },
+              "agora": {
+                "lines": 96.91,
+                "branches": 87.7,
+                "functions": 96.05,
+                "statements": 95.44
+              },
+              "artemis": {
+                "lines": 97.66,
+                "branches": 91.78,
+                "functions": 91.67,
+                "statements": 97.08
+              },
+              "library": {
+                "lines": 90.22,
+                "branches": 78.75,
+                "functions": 86.4,
+                "statements": 88.42
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 89.82,
+                "branches": 75.74,
+                "functions": 89.74,
+                "statements": 88.38
+              },
+              "watch": {
+                "lines": 96.17,
+                "branches": 87.1,
+                "functions": 90.2,
+                "statements": 94.85
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.66,
+                "branches": 92.63,
+                "functions": 94.48,
+                "statements": 96.08
+              },
+              "home": {
+                "lines": 55.43,
+                "branches": 44.12,
+                "functions": 40.74,
+                "statements": 55.34
+              },
+              "panels": {
+                "lines": 34.41,
+                "branches": 39.91,
+                "functions": 27.35,
+                "statements": 33.28
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
           }
         ]
       },
