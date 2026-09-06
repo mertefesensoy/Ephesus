@@ -4980,6 +4980,31 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `profiles.ts`),
       `docs/implementations/2026-09-04-m8-5-mission-watches-repository.md`.
       Branch `feature/m8-5-mission-watches-repository`.*
+      *AUDIT (2026-09-07): **the central mechanism is now proven in production,
+      which is what this package could not claim when it closed.** All four
+      precedence rungs have run on the Architect's machine — `architect` x5,
+      `bundle` x2, `target` x1 — and the DERIVED one produced the right answer
+      against a real checkout (`reposFrom: "target"` -> `mertefesensoy/MUSAHIT`),
+      after which the Harbor ingested. The security claim holds precisely: a
+      remote URL is echoed on neither parse path, because the URL branch reads
+      `parsed.hostname` (WHATWG keeps userinfo in separate properties) and the
+      scp branch captures userinfo into a group it discards; both are tested
+      with a credential in that position, as is the Windows drive letter.
+      `watchedRepos` really is the single source for the Harbor's ingest list
+      AND the cadence's arming condition, and `onWatching` carries both
+      directions (raised on activate, cleared on deactivate), with degradations
+      replayed at boot as `carried` so a restored instance stays honest.
+      **The finding: the one half of the wrong-repository hazard the ARCHITECT
+      can cause had no test.** `deriveRepo` refuses to guess between a fork's two
+      remotes and that refusal has fifty-odd cases; the override is how the
+      Architect answers it, and the rule that stops that answer following them to
+      a different checkout lived in a `useCallback` the static-markup harness
+      cannot run. Extracted as `overrideAfterRetarget` and table-tested — the
+      same lesson `parseRepoList` was extracted for, recorded in this package's
+      own test docblock. The extraction alone was NOT the fix: a mutation that
+      stopped the panel consulting the rule at all still killed nothing, so a
+      jsdom seam test now mounts the panel, types an override, moves the target
+      and asserts the box cleared. 6 mutations, 6 killed.*
 
 - [x] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
       path never requests worktree isolation (verified: zero `worktree`
