@@ -94,6 +94,8 @@ async function rig(
     spawnBlocked?: () => string | null
     /** Register an engine with no transcript reader (ADR-0009 allows one). */
     noTranscripts?: boolean
+    /** A ceiling the Architect chose; absent means unbudgeted (ADR-0029). */
+    dailyTokens?: number
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-artemis-'))
@@ -159,6 +161,7 @@ async function rig(
     },
     onLogEvent: (draft) => logs.push(draft),
     onDegraded: (detail) => degradations.push(detail),
+    ...(over.dailyTokens === undefined ? {} : { dailyTokens: over.dailyTokens }),
     // No real waiting: the ladder's *shape* is the property, not its seconds.
     delay: async () => {},
     now: () => clock.ms,
@@ -240,10 +243,27 @@ describe('she is hired like anyone else (FR-5.1)', () => {
     expect(card?.envGrants).toEqual([])
   })
 
-  it('carries a budget, like any other hire (ADR-0011)', async () => {
+  it('is UNBUDGETED by default (ADR-0029)', async () => {
+    // This assertion used to be `toBeGreaterThan(0)`, encoding the earlier
+    // decision that she must always carry a ceiling. That decision was reversed
+    // after the ceiling did the damage it was meant to prevent: on 2026-09-06
+    // she breached at forty million and rung-3 stopped mid-run with five
+    // incidents unrouted, taking the whole all-or-nothing activation with her.
+    //
+    // Null is not zero. `spendFor` reads a null ceiling as `unbudgeted`, and
+    // the breaker's burn-rate signal fires only on `breached` — so an
+    // unbudgeted orchestrator cannot trip THAT signal, while every other one
+    // still can.
     const r = await rig()
     const card = await r.artemis.start(ENGINE)
-    expect(card?.dailyTokens).toBeGreaterThan(0)
+    expect(card?.dailyTokens).toBeNull()
+  })
+
+  it('carries the ceiling the Architect names, when they name one', async () => {
+    // The mechanism survives the default change — it is the default that moved.
+    const r = await rig({ dailyTokens: 7_000_000 })
+    const card = await r.artemis.start(ENGINE)
+    expect(card?.dailyTokens).toBe(7_000_000)
   })
 
   it('is a degradation, not a crash, when she cannot be hired', async () => {
