@@ -119,6 +119,7 @@ import {
   wireGateChokePoints
 } from './watch/gates'
 import { EMPTY_GATES, GATES_REL, gatesRecordSchema } from '../shared/gates'
+import { DRAFTS_REL, draftsRecordSchema, EMPTY_DRAFTS, type DraftsRecord } from '../shared/outbound'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
 import { SteerNotes } from './watch/steer-notes'
@@ -202,6 +203,7 @@ let restartStores: {
   readonly triggers: StateStore<TriggersRecord>
   readonly activations: StateStore<ActivationsRecord>
   readonly gates: StateStore<GatesRecord>
+  readonly drafts: StateStore<DraftsRecord>
 } | null = null
 
 /**
@@ -216,7 +218,7 @@ let restartStores: {
 function writeRestartRecord<T>(
   store: StateStore<T> | undefined,
   value: T,
-  what: 'triggers' | 'activations' | 'gates'
+  what: 'triggers' | 'activations' | 'gates' | 'drafts'
 ): void {
   if (store === undefined) return
   const saved = store.save(value)
@@ -910,6 +912,11 @@ async function boot(): Promise<void> {
       file: path.join(home.root, GATES_REL),
       schema: gatesRecordSchema,
       empty: EMPTY_GATES
+    }),
+    drafts: new JsonStateStore({
+      file: path.join(home.root, DRAFTS_REL),
+      schema: draftsRecordSchema,
+      empty: EMPTY_DRAFTS
     })
   }
   // Files the harness had to create for itself, named rather than done quietly
@@ -1129,7 +1136,18 @@ async function boot(): Promise<void> {
       // for a gate that held no draft, so every other gate kind passes through
       // here untouched.
       if (gate.kind === 'outbound') {
-        void frontOffice?.onVerdict(gate.id, verdict === 'approved')
+        // The `false` is NOT discarded. It means the gate held no draft, which
+        // after ADR-0030 can only happen if the record was damaged or trimmed —
+        // and an approval the harness cannot honour must be a condition the
+        // Architect sees, not a comment that quietly never went out (§7).
+        void frontOffice?.onVerdict(gate.id, verdict === 'approved').then((handled) => {
+          if (handled) return
+          reportDegradation(
+            `restart/draftless-gate:${gate.id}`,
+            `gate ${gate.id} was ${verdict} but held no draft, so nothing was posted — ` +
+              'ask the agent to write the comment again'
+          )
+        })
       }
       ui.send(GATE_OPEN_CHANNEL, null)
     },
@@ -1829,6 +1847,7 @@ async function boot(): Promise<void> {
       })
       return outcome?.held === true ? outcome.gate.id : null
     },
+    persist: (record) => writeRestartRecord(restartStores?.drafts, record, 'drafts'),
     post: (permit) =>
       harbor?.postComment(permit) ?? Promise.resolve({ ok: false, because: 'no harbor' }),
     deliver: (message) => hermes?.deliverFromHarness(message),
@@ -2480,6 +2499,11 @@ async function boot(): Promise<void> {
       restoreTriggers: (lastFired) => scheduler.restore(lastFired),
       restoreActivations: (record) => activations?.restore(record.instances) ?? [],
       restoreGates: (record) => gates?.restore(record) ?? { open: 0, settled: 0 },
+      restoreDrafts: (record) => frontOffice?.restore(record) ?? { filed: 0, held: 0 },
+      gatesHoldingADraft: () =>
+        (frontOffice?.pending() ?? []).flatMap((filed) =>
+          filed.gateId === null ? [] : [filed.gateId]
+        ),
       openGates: () => gates?.list() ?? [],
       // `Agora.tasks()` does NOT throw on a corrupt ledger, so the corruption
       // is asked for by name rather than caught — see `blockedTasksFrom`.

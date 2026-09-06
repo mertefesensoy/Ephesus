@@ -1,5 +1,6 @@
 import type { GatesRecord, OpenGate } from '../shared/gates'
 import { reconcileGates } from '../shared/gates'
+import type { DraftsRecord } from '../shared/outbound'
 import type { ActivationsRecord } from '../shared/profile-activation'
 import type { TriggersRecord } from '../shared/restart'
 import type { ProfileInstance } from './profiles'
@@ -112,6 +113,8 @@ export interface RestoreReport {
     readonly settledGates: number
     readonly orphanBlocks: number
     readonly staleGates: number
+    readonly drafts: number
+    readonly draftlessGates: number
   }
 }
 
@@ -120,6 +123,13 @@ export interface RestoreTargets {
   restoreTriggers(lastFired: Readonly<Record<string, number>>): number
   /** Puts instances back with their crews down. Returns one note each. */
   restoreActivations(record: ActivationsRecord): readonly string[]
+  /**
+   * Puts filed outbound drafts back (ADR-0030). Returns how many came back and
+   * how many are still waiting at a gate.
+   */
+  restoreDrafts(record: DraftsRecord): { readonly filed: number; readonly held: number }
+  /** Gate ids that have a draft to post. Read AFTER `restoreDrafts`. */
+  gatesHoldingADraft(): readonly string[]
   /** Puts held gates and settled verdicts back. */
   restoreGates(record: GatesRecord): { readonly open: number; readonly settled: number }
   /** The gates now held, for the reconcile against `tasks.json`. */
@@ -136,6 +146,7 @@ export interface RestoreStores {
   readonly triggers: StateStore<TriggersRecord>
   readonly activations: StateStore<ActivationsRecord>
   readonly gates: StateStore<GatesRecord>
+  readonly drafts: StateStore<DraftsRecord>
 }
 
 export function restoreCompany(stores: RestoreStores, targets: RestoreTargets): RestoreReport {
@@ -147,7 +158,9 @@ export function restoreCompany(stores: RestoreStores, targets: RestoreTargets): 
     openGates: 0,
     settledGates: 0,
     orphanBlocks: 0,
-    staleGates: 0
+    staleGates: 0,
+    drafts: 0,
+    draftlessGates: 0
   }
 
   // 1. Triggers. A damaged clock is not a reason to skip the rest; the
@@ -192,6 +205,43 @@ export function restoreCompany(stores: RestoreStores, targets: RestoreTargets): 
         `restored ${String(restored.open)} open gate(s) and ${String(restored.settled)} settled verdict(s)`
       )
     }
+  }
+
+  // 4. Outbound drafts, then the gates that hold none.
+  //
+  //    After the gates, because the check is a reconcile between the two: a
+  //    restored `outbound` gate whose draft did not come back is a gate the
+  //    Architect can approve into nothing. That is the failure ADR-0030 closes,
+  //    and it is REPORTED rather than settled for the same reason an orphan
+  //    block is — auto-denying it would drop the agent's words on the harness's
+  //    own authority, and auto-approving it would publish a comment nobody can
+  //    read (NFR-9).
+  const drafts = read(stores.drafts.load(), problems, {
+    cause: 'restart/drafts-unreadable',
+    consequence:
+      'any outbound gate still open holds no words, so approving it would post nothing — deny those gates and ask the agent to draft again'
+  })
+  if (drafts?.seeded === true) {
+    const restored = targets.restoreDrafts(drafts.value)
+    counts.drafts = restored.filed
+    if (restored.filed > 0) {
+      notes.push(
+        `restored ${String(restored.filed)} filed draft(s), ${String(restored.held)} still waiting at a gate`
+      )
+    }
+  }
+  const withDrafts = new Set(targets.gatesHoldingADraft())
+  const draftless = targets
+    .openGates()
+    .filter((gate) => gate.kind === 'outbound' && !withDrafts.has(gate.id))
+  counts.draftlessGates = draftless.length
+  for (const gate of draftless) {
+    problems.push({
+      cause: `restart/draftless-gate:${gate.id}`,
+      detail:
+        `outbound gate ${gate.id} came back without the draft it was holding, so approving it would ` +
+        'post nothing — deny it and ask the agent to draft the comment again'
+    })
   }
 
   const tasks = targets.blockedTasks()

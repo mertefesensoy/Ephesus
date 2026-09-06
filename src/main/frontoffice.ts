@@ -2,11 +2,13 @@ import { composeMessage, makeMessageId, type Message } from '../shared/message'
 import { replyHops } from '../shared/routing'
 import { HARBOR_ENDPOINT } from '../shared/reserved'
 import {
+  DRAFT_RECORD_TRIM,
   dispositionFor,
   outboundKey,
   parseOutboundDraft,
   permitFromApproval,
   permitToPost,
+  type DraftsRecord,
   type OutboundDisposition,
   type OutboundDraft,
   type PostPermit
@@ -61,6 +63,8 @@ export interface FiledDraft {
   readonly disposition: OutboundDisposition
   /** The gate holding it, when one was opened. */
   readonly gateId: string | null
+  /** Still waiting for the Architect's verdict. See `filedDraftSchema`. */
+  readonly awaiting: boolean
   readonly at: string
 }
 
@@ -86,6 +90,14 @@ export interface FrontOfficeOptions {
   deliver(message: Message): void
   /** `log.jsonl` kind `remote` (SDD §4.3, FR-10.3). */
   onLogEvent(draft: { kind: 'remote' } & Record<string, unknown>): void
+  /**
+   * Writes the restart record (ADR-0030). Called after EVERY mutation of
+   * `filed` or `held`, from `persist` rather than from the callers of those
+   * mutations — a persist a caller can forget is a record that is right until
+   * the one path nobody re-read, which is exactly how the draft behind a
+   * restored gate went missing in the first place.
+   */
+  persist?(record: DraftsRecord): void
   now?(): Date
 }
 
@@ -139,8 +151,17 @@ export class FrontOffice {
     const at = this.now().toISOString()
 
     if (disposition.kind === 'file') {
-      const filed: FiledDraft = { key, draft, author: message.from, disposition, gateId: null, at }
+      const filed: FiledDraft = {
+        key,
+        draft,
+        author: message.from,
+        disposition,
+        gateId: null,
+        awaiting: false,
+        at
+      }
       this.filed.push(filed)
+      this.persist()
       this.options.onLogEvent({
         kind: 'remote',
         event: 'outbound-filed',
@@ -160,9 +181,21 @@ export class FrontOffice {
 
     if (disposition.kind === 'hold') {
       const gateId = this.options.openGate({ agentId: message.from, key, draft })
-      const filed: FiledDraft = { key, draft, author: message.from, disposition, gateId, at }
+      const filed: FiledDraft = {
+        key,
+        draft,
+        author: message.from,
+        disposition,
+        gateId,
+        // A hold with no gate is not waiting for anyone: nobody was asked.
+        awaiting: gateId !== null,
+        at
+      }
       this.filed.push(filed)
       if (gateId !== null) this.held.set(gateId, filed)
+      // AFTER the hold, not before: the trim skips drafts still waiting, and
+      // it reads `held` to know which those are.
+      this.persist()
       this.options.onLogEvent({
         kind: 'remote',
         event: 'outbound-held',
@@ -207,6 +240,11 @@ export class FrontOffice {
     const filed = this.held.get(gateId)
     if (filed === undefined) return false
     this.held.delete(gateId)
+    // The row keeps its gate id as history and stops awaiting: a restart must
+    // not put a decided draft back in front of the Architect.
+    const index = this.filed.indexOf(filed)
+    if (index >= 0) this.filed[index] = { ...filed, awaiting: false }
+    this.persist()
 
     const permit = permitFromApproval(filed.draft, gateId, approved)
     if (permit === null) {
@@ -222,6 +260,50 @@ export class FrontOffice {
     }
     await this.send(permit, null)
     return true
+  }
+
+  /**
+   * Contract: puts filed drafts back after a restart, replacing whatever this
+   * instance holds. Returns how many are waiting at a gate — the number that
+   * decides whether an approval can still be honoured.
+   *
+   * Verbatim, never re-derived: the words are the agent's, and a draft rebuilt
+   * from the gate's packaging would be the harness paraphrasing a comment it
+   * is about to publish under the company's name.
+   */
+  restore(record: DraftsRecord): { readonly filed: number; readonly held: number } {
+    this.filed.length = 0
+    this.held.clear()
+    for (const draft of record.drafts) {
+      this.filed.push(draft)
+      if (draft.gateId !== null && draft.awaiting) this.held.set(draft.gateId, draft)
+    }
+    return { filed: this.filed.length, held: this.held.size }
+  }
+
+  /**
+   * The record as it stands, trimmed oldest-first.
+   *
+   * A draft still held at a gate is skipped by the trim however old it is:
+   * dropping one silently un-approves a comment the Architect can still say
+   * yes to. Only reviewed history is shed.
+   */
+  private record(): DraftsRecord {
+    const kept = [...this.filed]
+    let index = 0
+    while (kept.length > DRAFT_RECORD_TRIM && index < kept.length) {
+      const draft = kept[index]
+      if (draft !== undefined && draft.gateId !== null && this.held.has(draft.gateId)) {
+        index += 1
+        continue
+      }
+      kept.splice(index, 1)
+    }
+    return { schemaVersion: 1, drafts: kept }
+  }
+
+  private persist(): void {
+    this.options.persist?.(this.record())
   }
 
   private async send(permit: PostPermit, original: Message | null): Promise<void> {

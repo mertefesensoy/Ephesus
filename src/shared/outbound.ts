@@ -198,3 +198,89 @@ export function permitFromApproval(
 export function outboundKey(draft: Pick<OutboundDraft, 'repo' | 'target' | 'ref'>): string {
   return `${draft.repo}#${draft.target}:${String(draft.ref)}`
 }
+
+/**
+ * The Front Office's restart record (ADR-0030, extending ADR-0027).
+ *
+ * ## The defect this closes
+ *
+ * `gates.json` restores an `outbound` gate, and until this existed the DRAFT
+ * that gate held did not come back with it — `FrontOffice.held` was memory
+ * alone. The Architect saw a restored gate, read packaging that rendered
+ * correctly, approved it, and `onVerdict` found nothing to post. The gate
+ * settled as approved, the log recorded a verdict, and the comment never left
+ * the machine. M8.8 made that reachable rather than causing it: before the
+ * restore the queue came back empty and the gate could not be approved at all.
+ *
+ * ADR-0027's rule was right and its list was short by one — a filed draft is a
+ * decision about an identity (these words, from this agent, held at this gate),
+ * not an observation about a process, and nothing re-derives it.
+ */
+export const DRAFTS_REL = 'drafts.json'
+
+const outboundDispositionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), because: z.literal('draft-only') }).strict(),
+  z.object({ kind: z.literal('hold'), because: z.literal('above-configured-level') }).strict(),
+  z.object({ kind: z.literal('post') }).strict()
+])
+
+/** One draft as it was filed: the words, who wrote them, and what was done. */
+export const filedDraftSchema = z
+  .object({
+    key: z.string().min(1).max(256),
+    draft: outboundDraftSchema,
+    author: z.string().min(1).max(128),
+    disposition: outboundDispositionSchema,
+    /** The gate holding it, or null for a draft-only filing. */
+    gateId: z.string().min(1).max(128).nullable(),
+    /**
+     * Still waiting for the Architect. Recorded rather than inferred from
+     * `gateId`, because a decided draft keeps its gate id as history — and a
+     * restore that re-held every draft with a gate id would put comments the
+     * Architect already answered back into `pending()`, which is what the
+     * standup reads.
+     */
+    awaiting: z.boolean(),
+    at: z.string().min(1).max(64)
+  })
+  .strict()
+  // `awaiting` and `gateId` are two fields describing one situation, so the
+  // schema says how they relate rather than leaving the impossible pair
+  // representable. A hold that could not open a gate is not waiting for
+  // anyone — nobody was asked — and a record claiming otherwise would restore
+  // a draft that no verdict can ever reach. `JsonStateStore.save` validates
+  // before writing, so this refuses the write rather than the next boot.
+  .refine(
+    (filed) => !(filed.awaiting && filed.gateId === null),
+    'a draft cannot await a gate it never got'
+  )
+
+/**
+ * How many drafts the record keeps, oldest dropped first.
+ *
+ * Smaller than the settled-gate bound because each row carries a comment body
+ * of up to 20,000 characters, so this file grows per row where that one does
+ * not. **A draft still held at a gate is never dropped**, whatever the count —
+ * dropping one is the defect this record exists to close, and the trim exists
+ * only to stop the reviewed history growing without limit (the M8.10 class,
+ * early). The schema's own bound is deliberately looser than the trim so that a
+ * company holding an implausible number of unanswered gates still writes its
+ * record rather than failing the save.
+ */
+export const DRAFT_RECORD_TRIM = 200
+
+export const draftsRecordSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    drafts: z.array(filedDraftSchema).max(1000)
+  })
+  .strict()
+  .refine(
+    (value) =>
+      new Set(value.drafts.filter((d) => d.gateId !== null).map((d) => d.gateId)).size ===
+      value.drafts.filter((d) => d.gateId !== null).length,
+    'two drafts held at one gate'
+  )
+
+export type DraftsRecord = z.infer<typeof draftsRecordSchema>
+export const EMPTY_DRAFTS: DraftsRecord = { schemaVersion: 1, drafts: [] }

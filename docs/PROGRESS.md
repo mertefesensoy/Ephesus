@@ -5314,6 +5314,27 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       for a historical orphan block; the capacity retry `attempts` rung resets
       across a restart (bounded, self-correcting). Branch
       `feature/m8-8-restart-survivable`.*
+      *AUDIT (2026-09-06, working toward a releasable MVP): the package's own
+      scope holds up under execution — `restore.ts` 100% lines, `state-store.ts`
+      100%, `restart.ts` 100%; S-BLACKOUT really restarts over two lifetimes
+      against the real modules; all three subsystems persist from a PRIVATE
+      method so no caller can forget one; save failures are reported and cleared;
+      `restoreCompany` runs before the Harbor is constructed. All three
+      deliberate omissions still hold in today's code, and `hermes.paused` is a
+      fourth (driven only by the capacity watch, which is derived). **One seam it
+      did not consider:** `gates.json` restored an `outbound` gate and nothing
+      restored the DRAFT it held, so the Architect approved a normal-looking gate
+      and `onVerdict` returned a `false` that `index.ts` discarded — the comment
+      never left the machine, and nothing said so. M8.8 did not cause it but made
+      it reachable: before the restore the queue came back empty and the gate
+      could not be approved at all. Closed by ADR-0030 (a fourth record,
+      `drafts.json`) plus a boot reconcile that REPORTS a draftless gate and a
+      verdict-time degradation; the sweep is in
+      `docs/implementations/2026-09-06-outbound-draft-survives-restart.md`.
+      11 mutations, all killed; two of them changed the DESIGN rather than the
+      tests (`awaiting` exists because a survivor showed a decided draft came
+      back pending). `FrontOffice.held` was the only gate-keyed payload outside
+      `GateManager`, so this closes the class, not one instance.*
 
 - [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
       `feature/usage-aware-pacing` (9d66df5), which is UNMERGED and conflicts
