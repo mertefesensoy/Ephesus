@@ -2,8 +2,18 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
-import { GateManager } from '../../src/main/watch/gates'
+import {
+  GATE_SCHEMA_VERSION,
+  shippedGatePolicy,
+  type GatePolicy,
+  type OpenGate
+} from '../../src/shared/gates'
+import {
+  GateManager,
+  gatePolicyView,
+  loadGatePolicy,
+  saveGateCeilings
+} from '../../src/main/watch/gates'
 import type { Breaker } from '../../src/main/watch/breaker'
 import { ProfileStore } from '../../src/main/profiles'
 import { removeTempDir } from '../tmpdir'
@@ -119,6 +129,12 @@ interface RigOptions {
    * met. The M6 close-out audit's finding, applied.
    */
   readonly profiles?: ProfileStore
+  /**
+   * A REAL `gate-policy.json` on disk, for the same reason `profiles` is real:
+   * the ceilings seam is channel → handler → writer → FILE, and a stubbed
+   * writer would leave the half that can lose the Architect's rules untested.
+   */
+  readonly policyPath?: string
 }
 
 /** Registers the real handlers over a real GateManager. */
@@ -147,6 +163,14 @@ async function rig(options: RigOptions = {}): Promise<{
     humanQueue: () => [],
     dismissFromHumanQueue: () => true,
     capacity: () => ({ parked: [], since: null, retryAt: null }),
+    gatePolicyView: () =>
+      options.policyPath === undefined
+        ? { autonomy: 'manual' as const, maxDailyTokens: null, warning: null }
+        : gatePolicyView(options.policyPath),
+    saveGateCeilings: (ceilings) =>
+      options.policyPath === undefined
+        ? { ok: false as const, reason: 'no policy file in this rig' }
+        : saveGateCeilings(options.policyPath, ceilings),
     breakerState: () => [],
     breaker: options.breaker ?? {
       stopsView: () => ({ stops: [], error: null }),
@@ -511,5 +535,95 @@ describe('profiles: — the channel reaches the store, and the store reaches the
     const { call } = await rig({ profiles: storeWithOneBundle() })
     await expect(call('profiles:inspect', { name: '' })).rejects.toThrow()
     await expect(call('profiles:inspect', {})).rejects.toThrow()
+  })
+})
+
+describe('watch:policy / watch:set-policy — the settings seam, end to end', () => {
+  const tempDirs: string[] = []
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) removeTempDir(dir)
+  })
+
+  function seededPolicy(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ipc-policy-'))
+    tempDirs.push(dir)
+    const file = path.join(dir, 'gate-policy.json')
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify(shippedGatePolicy, null, 2)}
+`,
+      'utf8'
+    )
+    return file
+  }
+
+  it('reads the ceilings, writes them, and reads back what it wrote', async () => {
+    const policyPath = seededPolicy()
+    const { call } = await rig({ policyPath })
+
+    expect(await call('watch:policy')).toEqual({
+      autonomy: 'autonomous',
+      maxDailyTokens: null,
+      warning: null
+    })
+
+    // The whole point of the panel: a value set here is in force for the next
+    // spawn, because main re-reads this file rather than a cached copy.
+    expect(await call('watch:set-policy', { autonomy: 'supervised', maxDailyTokens: 250 })).toEqual(
+      {
+        ok: true,
+        reason: null,
+        view: { autonomy: 'supervised', maxDailyTokens: 250, warning: null }
+      }
+    )
+    expect(loadGatePolicy(policyPath).policy.maxDailyTokens).toBe(250)
+  })
+
+  it('refuses to let the renderer reach the rules table', async () => {
+    const policyPath = seededPolicy()
+    const { call } = await rig({ policyPath })
+
+    // `gateCeilingsSchema` is strict, so `rules` is not merely ignored — the
+    // payload is refused. A renderer must not be able to widen `needs-human`.
+    await expect(
+      call('watch:set-policy', { autonomy: 'autonomous', maxDailyTokens: null, rules: [] })
+    ).rejects.toThrow()
+    expect(loadGatePolicy(policyPath).policy.rules).toEqual(shippedGatePolicy.rules)
+  })
+
+  it('validates the ceilings before they reach the file', async () => {
+    const policyPath = seededPolicy()
+    const { call } = await rig({ policyPath })
+    for (const payload of [
+      {},
+      { autonomy: 'whatever', maxDailyTokens: null },
+      // Omitted is not the same as null on the wire: a patch that leaves the
+      // field out cannot say whether it means "keep" or "clear".
+      { autonomy: 'manual' },
+      { autonomy: 'manual', maxDailyTokens: 0 },
+      { autonomy: 'manual', maxDailyTokens: 1.5 },
+      { autonomy: 'manual', maxDailyTokens: 1_000_000_001 }
+    ]) {
+      await expect(call('watch:set-policy', payload)).rejects.toThrow()
+    }
+    expect(loadGatePolicy(policyPath).policy.autonomy).toBe('autonomous')
+  })
+
+  it('answers a refused save with the ceilings still in force', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ipc-policy-'))
+    tempDirs.push(dir)
+    const policyPath = path.join(dir, 'gate-policy.json')
+    const { call } = await rig({ policyPath })
+
+    // A panel that kept showing the edit it failed to save would be claiming a
+    // ceiling that is not in force — invariant §7's bad-news-as-good failure.
+    expect(
+      await call('watch:set-policy', { autonomy: 'autonomous', maxDailyTokens: null })
+    ).toEqual({
+      ok: false,
+      reason: expect.stringContaining('could not be read') as unknown as string,
+      view: expect.objectContaining({ autonomy: 'manual' }) as unknown as object
+    })
   })
 })

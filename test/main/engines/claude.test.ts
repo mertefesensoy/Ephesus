@@ -404,6 +404,18 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
 
     expect(() => adapter.wireHooks(cfg)).toThrow(/not valid JSON, refusing to overwrite/)
   })
+
+  it('refuses valid JSON that is not a settings OBJECT', () => {
+    // Parseable and still not a settings file. Without its own guard the merge
+    // spreads an array into `{}` and writes back a settings file whose keys are
+    // "0", "1", "2" — the Architect's file destroyed by a write that succeeded.
+    const { engineConfigDir, adapter, cfg, settingsPath } = rig()
+    fs.mkdirSync(engineConfigDir, { recursive: true })
+    fs.writeFileSync(settingsPath, '["hooks"]', 'utf8')
+
+    expect(() => adapter.wireHooks(cfg)).toThrow(/not a JSON object, refusing to overwrite/)
+    expect(fs.readFileSync(settingsPath, 'utf8')).toBe('["hooks"]')
+  })
 })
 
 describe('claude adapter — the mailbox grant (FR-3.2)', () => {

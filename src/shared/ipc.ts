@@ -57,7 +57,7 @@ import type { Registry } from './registry'
 import type { BreakerState, BreakerStopsView } from './breaker'
 import type { CapacityView } from './capacity'
 import type { AgentSpend } from './cost'
-import type { GateVerdict, OpenGate } from './gates'
+import type { GateCeilings, GatePolicyView, GateVerdict, OpenGate } from './gates'
 import type { Message } from './message'
 import type { SecretStatus, SecretTest } from './secrets'
 import type { TaskLedger } from './tasks'
@@ -188,7 +188,9 @@ export const IpcChannels = {
   watchBreakerStops: 'watch:breaker-stops',
   watchClearBreakerStop: 'watch:clear-breaker-stop',
   watchCapacity: 'watch:capacity',
-  watchDismiss: 'watch:dismiss'
+  watchDismiss: 'watch:dismiss',
+  watchPolicy: 'watch:policy',
+  watchSetPolicy: 'watch:set-policy'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -629,6 +631,24 @@ export interface EphApi {
      * question is "is the company stopped", not "what is agent 4 doing".
      */
     capacity: () => Promise<CapacityView>
+    /**
+     * The two company-wide ceilings as they stand in `gate-policy.json`
+     * (FR-11.6), with the reason they might be the deny-all fallback instead.
+     */
+    policy: () => Promise<GatePolicyView>
+    /**
+     * Writes those two ceilings and nothing else. The rules table is not
+     * reachable from here on purpose — see `gateCeilingsSchema`.
+     *
+     * Resolves with the refusal reason when the policy could not be patched;
+     * a save NEVER replaces a policy main could not read, because that would
+     * discard the Architect's gate rules to fix a display.
+     */
+    setPolicy: (ceilings: GateCeilings) => Promise<{
+      readonly ok: boolean
+      readonly reason: string | null
+      readonly view: GatePolicyView
+    }>
     /** Subscribe to "a park opened, continued, or cleared"; the view re-reads. */
     onCapacityChange: (cb: () => void) => () => void
   }

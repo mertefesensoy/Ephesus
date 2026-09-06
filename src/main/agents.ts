@@ -987,9 +987,15 @@ export class AgentManager {
    * "we cannot check" must not become "we refuse to resume".
    */
   private transcriptExists(agent: LiveAgent, sessionId: string): boolean {
-    const dir = agent.adapter.transcripts?.transcriptDir(agent.cfg)
-    if (dir === undefined) return true
     try {
+      // Inside the try, not outside it. `transcriptDir` is adapter code and can
+      // throw; while it sat above this block the documented "never throws" was
+      // false, and an adapter that blew up looking for its own transcript
+      // directory took the whole respawn with it — the exact opposite of the
+      // rule this function exists to state. `fs.existsSync` returns false rather
+      // than throwing, so the catch guarded almost nothing where it was.
+      const dir = agent.adapter.transcripts?.transcriptDir(agent.cfg)
+      if (dir === undefined) return true
       return fs.existsSync(path.join(dir, `${sessionId}.jsonl`))
     } catch {
       return true

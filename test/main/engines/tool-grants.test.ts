@@ -261,3 +261,58 @@ describe('the spawn plan carries the grants (ADR-0026)', () => {
     for (const argument of argv) expect(argument).not.toBe('')
   })
 })
+
+/**
+ * The four refusals `resolveToolGrants` can reach that nothing exercised.
+ *
+ * They matter more than their line count: each one is the difference between
+ * "this grant was refused, here is which" and an agent silently spawning with a
+ * directory the bundle never earned. A guard with no test is a guard that has
+ * never been shown to fire.
+ */
+describe('a grant that cannot be resolved is refused, naming itself', () => {
+  it('refuses when the root it names is not configured', () => {
+    // `home` is absent for an agent spawned outside a harness home. Resolving
+    // the grant against `undefined` would join onto the process cwd.
+    const result = resolveToolGrants([{ root: 'home', path: 'company-tools' }], {
+      target: roots().target,
+      home: ''
+    })
+    expect(result).toEqual({
+      ok: false,
+      because: 'tool grant home:company-tools: no home root to resolve'
+    })
+  })
+
+  it('refuses when the root itself does not exist on disk', () => {
+    const r = roots()
+    const result = resolveToolGrants([{ root: 'target', path: '.claude' }], {
+      target: path.join(r.target, 'no-such-checkout'),
+      home: r.home
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.because).toContain('root does not resolve')
+  })
+
+  it('judges a grant on a directory that does not exist yet by where it would be', () => {
+    // The walk-up: no part of `a/b/c` exists, so containment is decided by the
+    // deepest ancestor that does. It is inside, so this is a MISSING grant —
+    // a visible degradation — and not a refusal.
+    const r = roots()
+    const result = resolveToolGrants([{ root: 'target', path: 'a/b/c' }], r)
+    expect(result).toEqual({ ok: true, tools: { pluginDirs: [], missing: ['target:a/b/c'] } })
+  })
+
+  it('accepts the root itself as a grant', () => {
+    // `path.relative(root, root)` is the empty string, which starts with
+    // neither `..` nor a drive letter: without its own case it would fall
+    // through to the escape check and read as contained by luck, not by rule.
+    const r = roots()
+    const result = resolveToolGrants([{ root: 'target', path: '.' }], r)
+    expect(result).toEqual({
+      ok: true,
+      tools: { pluginDirs: [fs.realpathSync.native(r.target)], missing: [] }
+    })
+  })
+})

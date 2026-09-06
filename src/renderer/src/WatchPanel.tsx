@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { SecretsPanel } from './SecretsPanel'
+import { SettingsPanel } from './SettingsPanel'
 import type { BreakerState, BreakerStop, BreakerStopsView } from '../../shared/breaker'
 import type { AgentSpend } from '../../shared/cost'
 import { RUNG_NAMES } from '../../shared/breaker'
@@ -247,6 +248,12 @@ export function WatchPanel(): ReactElement {
           credential store nobody can reach is how five hires spent an evening
           spawning with `grantsMissing: ["GH_TOKEN"]`. */}
       <SecretsPanel />
+
+      {/* The two ceilings, beside the credentials and above the spend they
+          cap. In the Watch because the Watch already owns the policy file
+          (`main/watch/gates.ts`), and because the question "what may the
+          company do, and what is it doing" has one answer or none. */}
+      <SettingsPanel />
 
       <BreakerStops
         view={state.stops}

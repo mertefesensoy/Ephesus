@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { writeFileAtomic } from '../fsx'
 import {
   DEFAULT_MEMO_POLICY,
   matchMemoTrigger,
@@ -16,6 +17,8 @@ import {
   GATE_SCHEMA_VERSION,
   openGateSchema,
   parseGatePolicy,
+  type GateCeilings,
+  type GatePolicyView,
   repeatBackRequired,
   SETTLED_GATE_LIMIT,
   type AutonomyLevel,
@@ -405,6 +408,94 @@ export function loadGatePolicy(policyPath: string): {
         err instanceof Error ? err.message.split('\n')[0] : String(err)
       }`
     }
+  }
+}
+
+/** First line of an error, for a refusal a human will read in a panel. */
+function firstLine(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.split('\n')[0] ?? 'unreadable'
+}
+
+/** The two ceilings as they stand on disk, with the reason if they are not. */
+export function gatePolicyView(policyPath: string): GatePolicyView {
+  const { policy, warning } = loadGatePolicy(policyPath)
+  return {
+    autonomy: policy.autonomy,
+    maxDailyTokens: policy.maxDailyTokens ?? null,
+    warning
+  }
+}
+
+/**
+ * Writes the two company-wide ceilings, leaving the rest of the policy alone
+ * (FR-11.7). Everything the settings surface can change comes through here.
+ *
+ * ## Contract
+ *
+ * A save is a PATCH of a policy that already parses — never a replacement of
+ * one that does not. It re-reads the file itself rather than taking a policy
+ * from the caller, and refuses when the file is missing or invalid.
+ *
+ * That refusal is the whole reason this function exists instead of a two-line
+ * `writeFileAtomic` at the call site. `loadGatePolicy` never widens on failure:
+ * an unreadable file reads as `denyAllPolicy`, which has an EMPTY rules table.
+ * A writer that patched what the loader handed it would take the Architect's
+ * six gate rules, silently drop every one, and write the result back as though
+ * it had been chosen — turning a transient read error into permanent data loss,
+ * and doing it at the exact moment someone was adjusting a safety dial.
+ * Refusing loudly is the only direction this may fail in.
+ *
+ * `maxDailyTokens: null` DELETES the key rather than writing a figure, because
+ * on disk unbudgeted is the absence of a ceiling (ADR-0029). The patched object
+ * is re-validated before it is written: the pieces were each valid separately,
+ * and it is the combination that reaches the file.
+ */
+export function saveGateCeilings(
+  policyPath: string,
+  ceilings: GateCeilings
+):
+  | { readonly ok: true; readonly view: GatePolicyView }
+  | { readonly ok: false; readonly reason: string } {
+  let raw: unknown
+  try {
+    raw = JSON.parse(fs.readFileSync(policyPath, 'utf8'))
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `gate-policy.json could not be read, so nothing was changed: ${firstLine(err)}`
+    }
+  }
+  const current = parseGatePolicy(raw)
+  if (!current.ok) {
+    return {
+      ok: false,
+      reason: `gate-policy.json is invalid (${current.reason}), so nothing was changed — fix the file, or delete it and restart to have it seeded again`
+    }
+  }
+  // Unbudgeted DELETES the key. Spelt out with `delete` rather than a
+  // conditional spread because a spread can only ever add it back: `{ ...policy }`
+  // plus "add nothing" left yesterday's figure sitting in the file, and turning
+  // the ceiling off silently did nothing at all. Spread first so every other
+  // field rides through, including ones added to the schema later.
+  //
+  // Typed `GatePolicy` and NOT re-parsed. A third `parseGatePolicy` here looked
+  // like defence in depth and was an equivalent mutant: both halves are already
+  // validated — the file by the parse above, the ceilings by `gateCeilingsSchema`
+  // at the IPC boundary — and since both share `maxDailyTokensSchema` the bounds
+  // cannot drift apart, so no combination of them can be invalid. A guard
+  // nothing can reach is a guard nothing tests.
+  const next: GatePolicy = { ...current.policy, autonomy: ceilings.autonomy }
+  if (ceilings.maxDailyTokens === null) delete next.maxDailyTokens
+  else next.maxDailyTokens = ceilings.maxDailyTokens
+  try {
+    writeFileAtomic(policyPath, `${JSON.stringify(next, null, 2)}\n`)
+  } catch (err) {
+    return { ok: false, reason: `gate-policy.json could not be written: ${firstLine(err)}` }
+  }
+  return {
+    ok: true,
+    view: { autonomy: next.autonomy, maxDailyTokens: next.maxDailyTokens ?? null, warning: null }
   }
 }
 

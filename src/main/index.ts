@@ -111,7 +111,13 @@ import { FileBreakerStopStore } from './watch/breaker-store'
 import { BudgetWatcher } from './watch/budgets'
 import { CapacityWatch } from './watch/capacity'
 import { safeStorageCipher } from './watch/cipher'
-import { GateManager, loadGatePolicy, wireGateChokePoints } from './watch/gates'
+import {
+  GateManager,
+  gatePolicyView,
+  loadGatePolicy,
+  saveGateCeilings,
+  wireGateChokePoints
+} from './watch/gates'
 import { EMPTY_GATES, GATES_REL, gatesRecordSchema } from '../shared/gates'
 import { CostLedger } from './watch/ledger'
 import { SecretBroker } from './watch/secrets'
@@ -2783,6 +2789,11 @@ async function boot(): Promise<void> {
     humanQueue: () => hermes?.humanQueue() ?? [],
     dismissFromHumanQueue: (messageId) => hermes?.dismissFromHumanQueue(messageId) ?? false,
     capacity: () => capacityWatch?.view() ?? { parked: [], since: null, retryAt: null },
+    // Read on every call, never cached: gate-policy.json is the truth and
+    // the settings panel writes it, so a snapshot here would show the
+    // Architect a ceiling that stopped being in force the moment they set it.
+    gatePolicyView: () => gatePolicyView(gatePolicyPath),
+    saveGateCeilings: (ceilings) => saveGateCeilings(gatePolicyPath, ceilings),
     breakerState: () =>
       (agentManager?.list() ?? [])
         .filter((card) => card.lifecycle !== 'exited')

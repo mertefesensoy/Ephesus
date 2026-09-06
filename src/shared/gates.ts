@@ -133,6 +133,14 @@ export const gateRuleSchema = z
 
 export type GateRule = z.infer<typeof gateRuleSchema>
 
+/**
+ * The daily token ceiling's bounds, defined ONCE and used by both the file
+ * schema and the wire schema. Written twice they agreed by coincidence, and a
+ * later widening of one would have let a figure the policy file rejects reach
+ * the writer — a save that refuses with a message naming no field.
+ */
+export const maxDailyTokensSchema = z.number().int().positive().max(1_000_000_000)
+
 export const gatePolicySchema = z
   .object({
     schemaVersion: z.literal(GATE_SCHEMA_VERSION),
@@ -159,7 +167,7 @@ export const gatePolicySchema = z
      * reports tokens, so a currency field would be compared against a token
      * count and mean nothing.
      */
-    maxDailyTokens: z.number().int().positive().max(1_000_000_000).optional(),
+    maxDailyTokens: maxDailyTokensSchema.optional(),
     rules: z
       .array(gateRuleSchema)
       .max(64)
@@ -247,6 +255,56 @@ export function parseGatePolicy(
   const issue = parsed.error.issues[0]
   const where = issue && issue.path.length > 0 ? issue.path.join('.') : 'policy'
   return { ok: false, reason: `${where}: ${issue?.message ?? 'invalid gate policy'}` }
+}
+
+/**
+ * The two company-wide ceilings, as the settings surface sends them (FR-11.7).
+ *
+ * ## Why the wire form is not the file form
+ *
+ * On disk `maxDailyTokens` is `positive().optional()`: unbudgeted is the
+ * ABSENCE of a figure (ADR-0029), and there is deliberately no zero and no
+ * null that means it — a zero reads as "breached before the first token".
+ *
+ * On the wire it is required and `nullable()`, because a patch that simply
+ * omits the field cannot distinguish "leave the ceiling alone" from "remove
+ * the ceiling", and a settings surface that cannot say *unbudgeted* out loud
+ * cannot turn a ceiling off. The writer translates: `null` deletes the key.
+ *
+ * `rules` is deliberately absent, and that is the design, not an omission.
+ * The rules table decides which action CLASSES need a human; it is edited in
+ * the file, by someone who has read what a kind means. A control that could
+ * widen `needs-human` with one click is not a setting, it is a hole.
+ */
+export const gateCeilingsSchema = z
+  .object({
+    autonomy: autonomyLevelSchema,
+    maxDailyTokens: maxDailyTokensSchema.nullable()
+  })
+  .strict()
+
+export type GateCeilings = z.infer<typeof gateCeilingsSchema>
+
+/**
+ * What the settings surface is shown: the ceilings as they stand on disk, and
+ * the reason they might not be the ones the Architect wrote.
+ *
+ * `warning` is not decoration. When `gate-policy.json` is missing or corrupt
+ * the harness runs on `denyAllPolicy` — every profile clamped to `manual`,
+ * every agent parked at a permission prompt — and a panel that rendered that
+ * fallback as though it had been chosen would be showing a degradation as a
+ * setting. That is invariant §7's exact failure: bad news arriving as good.
+ */
+export interface GatePolicyView {
+  readonly autonomy: AutonomyLevel
+  readonly maxDailyTokens: number | null
+  /** Non-null when what is shown is the deny-all fallback, not the file. */
+  readonly warning: string | null
+}
+
+/** Contract: pure. The ceilings a view carries, ready to send back unchanged. */
+export function ceilingsOf(view: GatePolicyView): GateCeilings {
+  return { autonomy: view.autonomy, maxDailyTokens: view.maxDailyTokens }
 }
 
 /**

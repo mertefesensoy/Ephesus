@@ -6,6 +6,7 @@ import { BreakerStops, WatchPanel } from '../../src/renderer/src/WatchPanel'
 import type { BreakerStop } from '../../src/shared/breaker'
 
 vi.mock('../../src/renderer/src/SecretsPanel', () => ({ SecretsPanel: () => null }))
+vi.mock('../../src/renderer/src/SettingsPanel', () => ({ SettingsPanel: () => null }))
 const stop: BreakerStop = {
   agentId: 'agent.artemis',
   at: 100_000,

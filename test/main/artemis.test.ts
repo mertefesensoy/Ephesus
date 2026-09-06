@@ -94,6 +94,8 @@ async function rig(
     spawnBlocked?: () => string | null
     /** Register an engine with no transcript reader (ADR-0009 allows one). */
     noTranscripts?: boolean
+    /** Register an engine whose transcript reader THROWS when asked. */
+    brokenTranscripts?: boolean
     /** A ceiling the Architect chose; absent means unbudgeted (ADR-0029). */
     dailyTokens?: number
     /** The config dial, consulted only when no explicit ceiling was given. */
@@ -120,7 +122,20 @@ async function rig(
   // from it.
   const withoutTranscripts: EngineAdapter = { ...fake }
   delete (withoutTranscripts as { transcripts?: unknown }).transcripts
-  engines.register(over.noTranscripts ? withoutTranscripts : fake)
+  // And one whose reader is present and BROKEN, which is a different case:
+  // "we cannot check" must still not become "we refuse to resume".
+  const brokenTranscripts: EngineAdapter = {
+    ...fake,
+    transcripts: {
+      ...fake.transcripts,
+      transcriptDir: () => {
+        throw new Error('the transcript root is gone')
+      }
+    } as EngineAdapter['transcripts']
+  }
+  engines.register(
+    over.noTranscripts ? withoutTranscripts : over.brokenTranscripts ? brokenTranscripts : fake
+  )
   fs.writeFileSync(path.join(home, 'idle.mjs'), 'setTimeout(() => {}, 60_000)\n')
 
   const spawner = new ScriptedSpawner()
@@ -395,6 +410,21 @@ describe('she is brought back when she dies (FR-5.4)', () => {
     await r.settle()
     expect(r.spawner.spawns[1]?.plan.argv).toContain('sess-2')
     expect(r.spawner.spawns[1]?.plan.argv).not.toContain('sess-1')
+  })
+
+  it('still resumes when the engine THROWS being asked where its transcripts are', async () => {
+    // "Cannot check" is not "refuse". An adapter that blows up looking for its
+    // own transcript directory must cost the agent nothing — before this the
+    // throw escaped `transcriptExists` entirely and took the respawn with it,
+    // turning a broken reader into an agent that could not come back.
+    const r = await rig({ brokenTranscripts: true })
+    await r.artemis.start(ENGINE)
+    r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-unknowable')
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+
+    expect(r.spawner.spawns).toHaveLength(2)
+    expect(r.spawner.spawns[1]?.plan.argv).toContain('sess-unknowable')
   })
 
   it('starts FRESH when the recorded session has no transcript left', async () => {
