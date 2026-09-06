@@ -38,6 +38,27 @@ export const configSchema = z
      */
     everEnabledImproving: z.boolean().optional(),
     /**
+     * A daily token ceiling for hires that declare none of their own.
+     *
+     * ADR-0029 made unbudgeted the DEFAULT after ceilings stopped four of five
+     * agents mid-run, and it is the right default for an Architect watching
+     * their own account with the figures in front of them. It is the wrong one
+     * to hand a stranger: somebody installing Ephesus on their own repositories
+     * should not discover uncapped spend by finding out what it cost.
+     *
+     * So the choice is a dial rather than a constant. Absent means unbudgeted,
+     * which keeps ADR-0029's decision intact for anyone who has already made
+     * it; a number means every hire without its own `budget` inherits that
+     * ceiling. A hire that declares one always wins — this is a floor for the
+     * silent case, never an override of a stated intent.
+     *
+     * Deliberately a number and not a boolean. "Budgets on" would put the
+     * figure back in code, which is the thing ADR-0011's own history shows
+     * going wrong twice: two million and then forty million were both chosen by
+     * a program rather than by the person paying.
+     */
+    defaultDailyTokens: z.number().int().min(1).max(1_000_000_000).optional(),
+    /**
      * The Herald's optional local wake word (FR-8.3, VOICE-DESIGN §2).
      *
      * Optional and absent-means-false, because off is the honest default:

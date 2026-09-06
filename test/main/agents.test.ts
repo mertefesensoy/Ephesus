@@ -108,6 +108,7 @@ interface RigOptions {
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
   readonly onLogEvent?: AgentManagerOptions['onLogEvent']
   readonly authProbe?: AgentManagerOptions['authProbe']
+  readonly defaultDailyTokens?: AgentManagerOptions['defaultDailyTokens']
   /**
    * Which engine the spawn names. Codex is registered too when it is asked
    * for, because its BinarySpec declares NO auth probe — which is the case
@@ -157,6 +158,7 @@ async function rig(
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
     ...(extra.authProbe ? { authProbe: extra.authProbe } : {}),
+    ...(extra.defaultDailyTokens ? { defaultDailyTokens: extra.defaultDailyTokens } : {}),
     ...(extra.respawnBlocked ? { respawnBlocked: extra.respawnBlocked } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
@@ -852,5 +854,33 @@ describe('a stopped agent will not be respawned, whoever asks', () => {
     // …and the respawn actually goes through, so the guard is not simply
     // refusing everything.
     await expect(r.manager.respawn('agent.mason')).resolves.toBeDefined()
+  })
+})
+
+/**
+ * ADR-0029 made unbudgeted the default, which is right for an Architect who is
+ * watching their own account and wrong to hand a stranger. The dial is how
+ * somebody installing Ephesus gets a ceiling without editing every hire file.
+ */
+describe('the default-ceiling dial (ADR-0029)', () => {
+  it('is unbudgeted when nothing names a ceiling', async () => {
+    const r = await rig()
+    const card = await r.manager.spawn(r.request)
+    expect(card.dailyTokens).toBeNull()
+  })
+
+  it('applies the dial to a hire that declares none', async () => {
+    const r = await rig(undefined, undefined, { defaultDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn(r.request)
+    expect(card.dailyTokens).toBe(4_000_000)
+  })
+
+  it('lets the hire’s OWN figure outrank the dial', async () => {
+    // The dial fills silence; it never overrides a stated intent. Reversing this
+    // would let a config quietly rewrite a number somebody wrote in a file they
+    // read before activating.
+    const r = await rig(undefined, undefined, { defaultDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn({ ...r.request, budget: { dailyTokens: 11_000_000 } })
+    expect(card.dailyTokens).toBe(11_000_000)
   })
 })

@@ -117,6 +117,12 @@ export interface ArtemisOptions {
   respawnBlocked?(agentId: string): string | null
   readonly agentId?: string
   readonly dailyTokens?: number
+  /**
+   * The Architect's default ceiling (`config.json`), consulted when no explicit
+   * `dailyTokens` was given. Same order as every hire: a stated figure wins,
+   * the dial fills the silence, and absent means unbudgeted (ADR-0029).
+   */
+  defaultDailyTokens?(): number | null
 }
 
 export class Artemis {
@@ -246,9 +252,10 @@ export class Artemis {
       // repeated calls, hop caps, pathology — and ADR-0023's wall-clock wake
       // cap are untouched. Removing the spend ceiling is not removing the
       // governor.
-      ...(this.options.dailyTokens === undefined
-        ? {}
-        : { budget: { dailyTokens: this.options.dailyTokens } })
+      ...((): Record<string, unknown> => {
+        const ceiling = this.options.dailyTokens ?? this.options.defaultDailyTokens?.() ?? null
+        return ceiling === null ? {} : { budget: { dailyTokens: ceiling } }
+      })()
     }
   }
 

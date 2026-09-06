@@ -96,6 +96,8 @@ async function rig(
     noTranscripts?: boolean
     /** A ceiling the Architect chose; absent means unbudgeted (ADR-0029). */
     dailyTokens?: number
+    /** The config dial, consulted only when no explicit ceiling was given. */
+    defaultDailyTokens?: number
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-artemis-'))
@@ -162,6 +164,9 @@ async function rig(
     onLogEvent: (draft) => logs.push(draft),
     onDegraded: (detail) => degradations.push(detail),
     ...(over.dailyTokens === undefined ? {} : { dailyTokens: over.dailyTokens }),
+    ...(over.defaultDailyTokens === undefined
+      ? {}
+      : { defaultDailyTokens: () => over.defaultDailyTokens ?? null }),
     // No real waiting: the ladder's *shape* is the property, not its seconds.
     delay: async () => {},
     now: () => clock.ms,
@@ -257,6 +262,23 @@ describe('she is hired like anyone else (FR-5.1)', () => {
     const r = await rig()
     const card = await r.artemis.start(ENGINE)
     expect(card?.dailyTokens).toBeNull()
+  })
+
+  it('takes the config dial when no explicit ceiling was given', async () => {
+    // The distribution case: unbudgeted is right for an Architect watching
+    // their own account, and wrong to hand a stranger. The dial is how somebody
+    // installing Ephesus gets a ceiling without editing seven hire files.
+    const r = await rig({ defaultDailyTokens: 3_000_000 })
+    const card = await r.artemis.start(ENGINE)
+    expect(card?.dailyTokens).toBe(3_000_000)
+  })
+
+  it('lets an explicit ceiling outrank the dial', async () => {
+    // A stated figure is an intent; the dial fills silence. Reversing that
+    // would make the config quietly override what somebody wrote down.
+    const r = await rig({ dailyTokens: 9_000_000, defaultDailyTokens: 3_000_000 })
+    const card = await r.artemis.start(ENGINE)
+    expect(card?.dailyTokens).toBe(9_000_000)
   })
 
   it('carries the ceiling the Architect names, when they name one', async () => {

@@ -331,6 +331,16 @@ export interface AgentManagerOptions {
    */
   rosterBudget?(agentId: string): number | null
   /**
+   * The Architect's ceiling for hires that declare none (`config.json`'s
+   * `defaultDailyTokens`, ADR-0029). Read per spawn rather than captured at
+   * boot, so changing the dial does not need a restart to take effect on the
+   * next hire.
+   *
+   * LAST in the chain on purpose: a hire that states a figure, and a roster row
+   * that remembers one, both outrank it. This fills the silent case only.
+   */
+  defaultDailyTokens?(): number | null
+  /**
    * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
    *
    * Optional so the lifecycle stays constructible without the Watch — and when
@@ -814,7 +824,10 @@ export class AgentManager {
       settingsWritten: [],
       envGrants: request.envGrants,
       dailyTokens:
-        request.budget?.dailyTokens ?? this.options.rosterBudget?.(request.agentId) ?? null,
+        request.budget?.dailyTokens ??
+        this.options.rosterBudget?.(request.agentId) ??
+        this.options.defaultDailyTokens?.() ??
+        null,
       capabilities: request.capabilities,
       seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),
