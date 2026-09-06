@@ -273,8 +273,10 @@ stable and referenced by the SDD, test strategy, and implementation plan.
 - **FR-1.2** The system SHALL support Claude Code as the reference engine, and SHALL define an engine adapter interface such that additional CLIs (Codex, Gemini CLI, Grok, OpenCode, custom command) are added without core changes (ADR-0009 prior-art seam).
 - **FR-1.3** The system SHALL let the Architect type into any agent's terminal, with interrupt (Escape) and queue-until-idle semantics when the agent is mid-tool.
 - **FR-1.4** The system SHALL detect a dead/exited process, mark the avatar `ghost`, and archive it after a grace period; session resume SHOULD be offered where the engine supports it.
-- **FR-1.5** The system SHALL support optional per-agent git worktree isolation.
+- **FR-1.5** The system SHALL support optional per-agent git worktree isolation. Isolation SHALL survive the agent's death: a respawn SHALL reuse the agent's own surviving checkout, and SHALL NOT be refused by a worktree path that holds no work. A path holding anything else SHALL still be refused, with the reason naming what was found, and nothing at the path SHALL be deleted to make room.
 - **FR-1.6** The system SHALL offer to install a missing engine CLI in the agent's own terminal and continue into the new binary on success.
+- **FR-1.7** The system SHALL prevent an agent process from upgrading the engine install the company runs on (ADR-0028). Engine upgrades are the Architect's, performed between runs.
+- **FR-1.8** The system SHALL suppress the engine’s own attribution in every artefact an agent produces in a TARGET repository — commit trailers, pull-request bodies and session links alike — so that §6 criterion 10’s “no Architect or vendor identity anywhere” holds where the company’s work actually lands. Note that the repository-history attribution scan named in ENGINEERING-STANDARDS §2 checks THIS repository only, and structurally cannot see a target’s commits.
 
 ### FR-2 — Event plane (hooks)
 - **FR-2.1** The system SHALL run a local hook endpoint (Unix domain socket; named pipe on Windows) receiving lifecycle events from engine hook shims.
