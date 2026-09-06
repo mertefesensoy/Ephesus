@@ -4708,6 +4708,29 @@ structural rather than a habit.
       as a CHARACTERIZATION case in S-CLOSING that passes today because the loss
       is real, for M8.8 to flip. Branch `feature/m8-1-quit-path`.*
 
+      *AUDIT (2026-09-07): **clean — no defect found, and the fix is verified in
+      production against this package’s own measurement.** The register said the
+      book of record held "exactly one shutdown event (`closing-begin`, no ack, no
+      complete, ever)". It now holds BOTH sides: seq 1175 (2026-09-01) is that
+      orphan `closing-begin` with nothing after it, and seq 2646-2667 (2026-09-06)
+      is `closing-begin` → three `closing-ack`, one per live crew agent →
+      `closing-complete` with `missing: []` and `timedOut: false`, 52 seconds later.
+      The defect and its repair sit in the same file.
+      **Rule 5 was re-proven by a planted probe rather than trusted**, because a
+      tripwire that finds nothing looks exactly like a tripwire that passes: a
+      `webContents.send` added to `agora.ts` produced the named failure AND exit
+      code 1, and the tree was restored. The bridge forgets its window on `closed`,
+      checks `isDestroyed()` on both objects, and wraps even that read — reading
+      `isDestroyed` off a torn-down native object can itself throw. `before-quit`
+      guards the double gesture and lets only the ending quit through; the phase
+      order is closing → disarm → unwind → steps, with M8.7’s DISARM in the place
+      that clearance put it.
+      **The D12 rig discipline was not only kept but extended by a later package:**
+      the scenario builds the SHIPPED `QuitSequence`, and when M8.7 added the disarm
+      phase the rig gained it *present and empty* with the reason written down —
+      "an absent seam is how a rig starts drifting from production without anybody
+      deciding that it should".*
+
 - [x] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
       line plus a 50-entry in-memory ring surfaced only in a tooltip: it never
       reaches `log.jsonl`, it is gone at restart, and the wake-deferral emitter
