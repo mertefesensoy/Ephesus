@@ -222,7 +222,7 @@ describe('org metrics count from the log the endpoint really writes (regression)
 
     // The row the endpoint wrote must carry the status the metric reads.
     const row = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((entry) => entry['kind'] === 'task' && entry['event'] === 'update')
       .at(-1)
     expect(row).toMatchObject({ status: 'done', assignee: 'agent.mason' })

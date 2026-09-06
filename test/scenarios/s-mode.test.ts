@@ -61,7 +61,7 @@ function modesOf(
     rows: () => eph.gymnasium.rows(),
     gymEvents: () =>
       eph.agora
-        .readLog()
+        .readLogAll()
         .filter((entry) => entry['kind'] === 'gym')
         .map((entry) => ({
           event: entry['event'],
@@ -195,7 +195,7 @@ describe('S-MODE — the first enable is refused until the gate is met (FR-14.3)
     // …and the three proposal rows are still on the page beside it: the
     // mode section must not have cost the ledger its table.
     expect(eph.gymnasium.rows()).toHaveLength(3)
-    const events = eph.agora.readLog().filter((e) => e['kind'] === 'gym')
+    const events = eph.agora.readLogAll().filter((e) => e['kind'] === 'gym')
     expect(events.some((e) => e['event'] === 'mode-changed' && e['to'] === 'improving')).toBe(true)
   })
 })
@@ -270,7 +270,7 @@ describe('S-MODE — autonomy is gated at the scheduler (FR-14.4)', () => {
     // FR-14.1: the record the SHIPPED tick wrote carries the mode it ran
     // under, and names the source it planned.
     const record = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'stoa' && e['event'] === 'cadence-fired')
       .at(-1)
     expect(record?.['mode']).toBe('improving')
@@ -288,7 +288,7 @@ describe('S-MODE — a rung-3 stop on gym/stoa work auto-reverts (FR-14.5)', () 
 
     expect(modes.mode()).toBe('directed')
     const changed = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'gym' && e['event'] === 'mode-changed')
       .at(-1)
     expect(changed).toMatchObject({ to: 'directed', by: 'breaker' })

@@ -205,8 +205,22 @@ export class Agora {
     }
   }
 
-  /** Events after `afterSeq` (SDD §5 `agora.log(afterSeq, limit)`). */
-  readLog(afterSeq = 0, limit = 500): readonly LogEntry[] {
+  /**
+   * Events after `afterSeq` (SDD §5 `agora.log(afterSeq, limit)`).
+   *
+   * Both arguments are REQUIRED (M8.3 audit, 2026-09-07). They used to default
+   * to `(0, 500)` — the oldest five hundred entries and no further — and three
+   * callers took that default, which is the whole of B3: the standup filtered a
+   * 500-entry head by a cursor that had already passed it and compiled every
+   * later brief from nothing, the org metrics folded 500 of 1,177 rows, and the
+   * proof gate could not see older evidence. M8.3 moved those callers onto
+   * `readLogSince` / `readLogAll` and left the default in place.
+   *
+   * A default that is wrong for every caller who does not think about it is a
+   * trap waiting for the next one, and this is a paging reader: the caller
+   * always knows its window. Say it, or use `tailLog` for the newest N.
+   */
+  readLog(afterSeq: number, limit: number): readonly LogEntry[] {
     return this.log.read(afterSeq, limit)
   }
 

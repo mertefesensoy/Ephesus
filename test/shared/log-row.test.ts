@@ -91,8 +91,36 @@ describe('every kind the harness can emit renders something', () => {
     )
   })
 
-  it('has nothing to say only when the entry itself carries nothing', () => {
-    expect(logRowSummary(entry('gate'))).toBe('')
+  /**
+   * REVERSED deliberately (M8.3 audit, 2026-09-07), with the reason here rather
+   * than in a commit nobody reads.
+   *
+   * This case used to assert `''` — "has nothing to say only when the entry
+   * itself carries nothing" — while M8.3's own evidence claimed the summary was
+   * "unable to return an empty string". The register described a guarantee the
+   * code never had, and this test pinned the opposite.
+   *
+   * A blank line in the Activity panel is B3, the defect this module exists to
+   * close, and it does not become acceptable because the row that produced it
+   * was thin. The row is reachable from DISK — an older format, a hand-edit, a
+   * future kind whose payload is a nested object — so "the entry carries
+   * nothing" is not a hypothetical, it is a file the panel will one day read.
+   */
+  it('names the kind rather than rendering a blank line, whatever the entry carries', () => {
+    expect(logRowSummary(entry('gate'))).toBe('gate #1')
+    // The shapes `otherFields` cannot render: objects, nulls, empty strings.
+    expect(logRowSummary(entry('spawn', { detail: {}, meta: { a: 1 } }))).toBe('spawn #1')
+    expect(logRowSummary(entry('spawn', { agentId: '', because: null }))).toBe('spawn #1')
+  })
+
+  it('never renders a label with no value behind it', () => {
+    // A bare `exit ` or `rung ` is worse than a blank part: the row looks
+    // populated and says nothing, which is exactly what reading `signal` for
+    // `signals` did to all 93 breaker rows.
+    expect(logRowSummary(entry('exit', { agentId: 'agent.mason' }))).toBe('agent.mason')
+    expect(logRowSummary(entry('breaker', { agentId: 'agent.mason', signals: [] }))).toBe(
+      'agent.mason'
+    )
   })
 })
 

@@ -44,7 +44,7 @@ describe('S-BOUNCE', () => {
     expect(refusal.body).toContain('agent.ghost')
 
     // And the log records it with the refs to find both messages again.
-    const bounce = company.agora.readLog().find((e) => e['kind'] === 'bounce')
+    const bounce = company.agora.readLogAll().find((e) => e['kind'] === 'bounce')
     expect(bounce).toMatchObject({
       kind: 'bounce',
       msgId: sent.id,
@@ -87,7 +87,7 @@ describe('S-BOUNCE', () => {
     // Drained from the outbox…
     expect(fs.readdirSync(outbox).filter((n) => n.endsWith('.json'))).toEqual([])
     // …and present as a bounce in the log plus a refusal in the sender's inbox.
-    expect(company.agora.readLog().filter((e) => e['kind'] === 'bounce')).toHaveLength(1)
+    expect(company.agora.readLogAll().filter((e) => e['kind'] === 'bounce')).toHaveLength(1)
     expect(company.inbox('agent.a')).toHaveLength(1)
   })
 
@@ -145,6 +145,6 @@ describe('S-BOUNCE', () => {
     expect(company.inbox('agent.a')).toHaveLength(1)
     const consumed = await company.hermes.consumeInbox('agent.a')
     expect(consumed).toHaveLength(1)
-    expect(company.agora.readLog().filter((e) => e['kind'] === 'bounce')).toHaveLength(1)
+    expect(company.agora.readLogAll().filter((e) => e['kind'] === 'bounce')).toHaveLength(1)
   })
 })

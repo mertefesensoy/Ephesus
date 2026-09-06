@@ -4822,6 +4822,38 @@ structural rather than a habit.
       the panel’s first read. Docs: SDD §1.1 (`agora.ts`, `eventlog.ts`).
       Branch `feature/m8-3-log-surfaces`.*
 
+      *AUDIT (2026-09-07): **verified against the Architect's real book, which is
+      now 2,689 entries — more than twice the 1,177 this package was measured on
+      — and every claim holds.** `logRowSummary` renders all 2,689 rows with ZERO
+      blanks, including every kind added since by M8.6/M8.8 (`respawn`,
+      `restart`, `commands`, `workspace-trusted`). Exactly ONE `onAppend`
+      subscriber exists in production, which is the single subscription the 31
+      hand-written pushes collapsed into — no drift back. `agora/log-size` has
+      FIRED for real: "reading the whole log cost 89 ms on the main loop (1629
+      entries, 364 KiB)", then 115 ms, so the cost report this package built is
+      now reporting M8.10's problem, which is what it is for. No caller takes the
+      oldest-500 default. The Activity panel opens at the end, subscribes,
+      handles the tail-vs-append race and keeps `absorb` monotonic so a late page
+      cannot rewind to the company's first rows.
+      **The finding: a guarantee this block STATES was never enforced.** The
+      evidence says `logRowSummary` is "unable to return an empty string"; a test
+      three files away asserted the opposite (`toBe('')`), so the register
+      described something the code never did. Three of four degenerate shapes
+      rendered blank, and `{kind:'breaker', signals:[]}` rendered `"rung "` — a
+      label with no value, which is the same "looks populated and says nothing"
+      failure this package fixed for `signal` vs `signals`. Latent, not live: the
+      real log has no such row today, but rows come from DISK, so an older
+      format, a hand-edit or a future object-shaped payload reaches the panel as
+      an empty line, which IS B3. Fixed both ways — a `labelled()` helper so a
+      bare label cannot be emitted (seven sites unified; `exit` and `rung` were
+      the two that guarded it ad hoc or not at all), and a final fallback naming
+      the kind and seq. The contradicting test was REVERSED with the reason in
+      its body, M8.4's own precedent. **And `readLog`'s arguments are now
+      required**: the oldest-500 default that IS B3 was still there for the next
+      caller who did not think about it, and 57 test call sites were taking it —
+      every fixture smaller than the window, exactly as this block says. 5
+      mutations, 5 killed.*
+
 - [x] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
       harness requires, creates itself, and does not document; each absence is
       silent. `gate-policy.json` missing returns deny-all with `warning: null`,

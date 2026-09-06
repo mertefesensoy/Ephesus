@@ -52,12 +52,12 @@ describe('S-LIVELOCK', () => {
     }
 
     // Every exchange below the cap was delivered to an agent...
-    const deliveries = company.agora.readLog().filter((e) => e['kind'] === 'delivery')
+    const deliveries = company.agora.readLogAll().filter((e) => e['kind'] === 'delivery')
     expect(deliveries.filter((e) => e['to'] !== 'human')).toHaveLength(DEFAULT_HOP_CAP)
 
     // ...and the one AT the cap was diverted instead.
     const diversion = company.agora
-      .readLog()
+      .readLogAll()
       .find((e) => e['kind'] === 'bounce' && e['divertedTo'] === 'human')
     expect(diversion).toMatchObject({ hops: DEFAULT_HOP_CAP, divertedTo: 'human' })
     expect(String(diversion?.['reason'])).toContain(`hop cap ${DEFAULT_HOP_CAP}`)
@@ -100,7 +100,7 @@ describe('S-LIVELOCK', () => {
     ])
     await company.hermes.sweep()
 
-    const log = company.agora.readLog()
+    const log = company.agora.readLogAll()
     const diversion = log.find((e) => e['kind'] === 'bounce')
     // The refs needed to reconstruct it: who, to whom, where it went instead.
     expect(diversion).toMatchObject({ from: 'agent.a', to: 'agent.b', divertedTo: 'human' })

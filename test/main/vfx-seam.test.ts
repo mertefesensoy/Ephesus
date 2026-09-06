@@ -94,7 +94,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     r.send('agent.a', sent)
     await r.hermes.sweep()
 
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'delivery')
     expect(entry, 'the router logged no delivery').toBeDefined()
 
     // The whole point: the SHIPPED log entry, not one this test invented.
@@ -114,7 +114,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     r.send('agent.a', message())
     await r.hermes.sweep()
     const flown = r.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => envelopeFor(e as never) !== null)
       .map((e) => e['kind'])
     // Every entry that produces an envelope is a delivery or a bounce, and
@@ -127,7 +127,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     r.send('agent.a', message({ to: 'agent.nobody' }))
     await r.hermes.sweep()
 
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'bounce')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'bounce')
     expect(entry, 'the router logged no bounce').toBeDefined()
     const flight = envelopeFor(entry as never)
     expect(flight?.kind).toBe('bounce')
@@ -145,7 +145,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     await r.hermes.sweep()
 
     const entry = r.agora
-      .readLog()
+      .readLogAll()
       .find((e) => e['kind'] === 'bounce' && String(e['reason']).includes('hop cap'))
     expect(entry, 'the router logged no hop-cap divert').toBeDefined()
     const flight = envelopeFor(entry as never)
@@ -159,7 +159,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     r.send('agent.a', sent)
     await r.hermes.sweep()
 
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'delivery')
     const flight = envelopeFor(entry as never)
     expect(flight).not.toBeNull()
     // Reduced motion drops the flight, never the fact.
@@ -174,7 +174,7 @@ describe('an envelope flies because the real router logged a real delivery', () 
     r.send('agent.a', message())
     await r.hermes.sweep()
 
-    const entries = r.agora.readLog().filter((e) => e['kind'] === 'delivery')
+    const entries = r.agora.readLogAll().filter((e) => e['kind'] === 'delivery')
     // Reading the same log twice must give identical flights — the model holds
     // no state of its own, which is what makes the floor reconstructible
     // (NFR-13's spirit).
@@ -196,7 +196,7 @@ describe('the OTHER delivery path also flies (M6.10)', () => {
     const sent = message({ act: 'agree' })
     r.hermes.deliverFromHarness(sent)
 
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'delivery')
     expect(entry, 'deliverFromHarness logged no delivery').toBeDefined()
 
     const flight = envelopeFor(entry as never)
@@ -214,7 +214,7 @@ describe('the OTHER delivery path also flies (M6.10)', () => {
     const r = await rig()
     const sent = message({ act: 'inform' })
     r.hermes.deliverFromHarness(sent)
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'delivery')
     const flight = envelopeFor(entry as never)
     expect(flight).not.toBeNull()
     if (!flight) return

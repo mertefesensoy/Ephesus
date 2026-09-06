@@ -175,7 +175,7 @@ describe('S-STOPLOOP', () => {
     await fireStopHook(endpoint, 'agent.b', { session_id: 's1' })
 
     const stops = company.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'hook' && e['event'] === 'stop')
       .map((e) => e['because'])
 

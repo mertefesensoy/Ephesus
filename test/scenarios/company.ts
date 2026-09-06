@@ -390,7 +390,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   const briefing = new BriefingJob({
     prompts,
     gather: (sinceSeq) => ({
-      events: agora.readLog().filter((entry) => entry.seq > sinceSeq),
+      events: agora.readLogAll().filter((entry) => entry.seq > sinceSeq),
       ledger: tasks.tasks(),
       openGates: gates.list().map((gate) => ({ id: gate.id, agentId: gate.agentId })),
       openMemos: odeon.memos('open').map((memo) => ({ memoId: memo.memoId })),
@@ -416,7 +416,7 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
   const org = new OrgLayer({
     agoraRoot: agora.root,
     gather: () => ({
-      events: agora.readLog(),
+      events: agora.readLogAll(),
       // The agents this company actually has. A rig hire makes a mailbox
       // rather than a roster row, so reading the registry here would report
       // metrics for nobody.

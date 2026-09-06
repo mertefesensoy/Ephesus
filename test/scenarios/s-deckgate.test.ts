@@ -178,7 +178,7 @@ describe('S-DECKGATE — a review:deck task is mechanically unclosable', () => {
     await fileDeck(eph, 't-deckgate-07')
 
     const archived = eph.agora
-      .readLog()
+      .readLogAll()
       .find((row) => row['kind'] === 'deck' && row['event'] === 'archived')
     expect(archived).toMatchObject({ taskId: 't-deckgate-07', by: 'agent.mason' })
   })
