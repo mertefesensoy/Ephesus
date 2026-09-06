@@ -941,7 +941,44 @@ export class AgentManager {
   private resumeArgsFor(agent: LiveAgent): readonly string[] {
     const sessionId = agent.sessionIds.at(-1)
     if (sessionId === undefined || !agent.adapter.resume) return []
+    // A recorded session id is not proof the transcript still exists. When it
+    // does not, `--resume` is not a degraded start — it is a REFUSAL: the
+    // engine prints "No conversation found with session ID: …" and exits
+    // immediately, so the respawn ladder resumes into the same nothing and the
+    // agent is unspawnable until a human notices. Observed on 2026-09-06 after
+    // a transcript directory was cleared out from under two live agents, and
+    // reachable any time transcripts are rotated, pruned or tidied.
+    //
+    // Absent is not damaged (the M8.8 store's rule, applied to somebody else's
+    // file): a missing transcript means START FRESH, which is exactly what an
+    // engine with no resume support does anyway.
+    if (!this.transcriptExists(agent, sessionId)) {
+      this.options.onLogEvent?.({
+        // Part of a spawn, and the union's own vocabulary: the resume decision
+        // is made on the way into one, not as an event of its own.
+        kind: 'spawn',
+        event: 'resume-skipped',
+        agentId: agent.card.agentId,
+        because: 'the recorded session has no transcript; starting a fresh one'
+      })
+      return []
+    }
     return agent.adapter.resume.resumeArgs(sessionId)
+  }
+
+  /**
+   * Contract: whether this engine still holds the named session's transcript.
+   * Never throws — an adapter with no transcript reader answers `true`, because
+   * "we cannot check" must not become "we refuse to resume".
+   */
+  private transcriptExists(agent: LiveAgent, sessionId: string): boolean {
+    const dir = agent.adapter.transcripts?.transcriptDir(agent.cfg)
+    if (dir === undefined) return true
+    try {
+      return fs.existsSync(path.join(dir, `${sessionId}.jsonl`))
+    } catch {
+      return true
+    }
   }
 
   private assertRespawnAllowed(agentId: string): void {

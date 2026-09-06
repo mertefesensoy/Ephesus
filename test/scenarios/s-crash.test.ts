@@ -343,6 +343,15 @@ describe('S-CRASH — SIGKILL mid-task (TEST-STRATEGY §3, SDD §10)', () => {
       expect(rig.agora.registry().agents[AGENT]?.status).toBe('archived')
 
       // ── the respawn, and what it carries
+      //
+      // The engine must still HOLD the session for `--resume` to mean anything:
+      // an id whose transcript is gone makes it print "No conversation found
+      // with session ID" and exit, which the respawn ladder then repeats. This
+      // scenario asserts a resumed session, so it has to have one.
+      const transcriptDir = path.join(rig.target, '.fake-engine', 'transcripts')
+      fs.mkdirSync(transcriptDir, { recursive: true })
+      fs.writeFileSync(path.join(transcriptDir, `${SESSION}.jsonl`), '', 'utf8')
+
       rig.script([
         { kind: 'hook', event: 'session-start', payload: {} },
         { kind: 'echo-env', name: 'EPH_IDENTITY' },

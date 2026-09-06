@@ -9,7 +9,7 @@ import type { RegistryEntry } from '../../src/shared/registry'
 import { TEMPLE_SEAT } from '../../src/shared/seats'
 import { AgentManager, type AgentSpawner } from '../../src/main/agents'
 import { ARTEMIS_AGENT_ID, ARTEMIS_ROLE, Artemis, AUTHORITY_REL } from '../../src/main/artemis'
-import { EngineRegistry, type SpawnPlan } from '../../src/main/engines'
+import { EngineRegistry, type EngineAdapter, type SpawnPlan } from '../../src/main/engines'
 import { HookServer } from '../../src/main/hooks'
 import { PromptStore } from '../../src/main/prompts'
 import { MemorySettingsRegistry } from '../../src/main/settings-registry'
@@ -92,6 +92,8 @@ async function rig(
     /** A standing decision that she must not be brought back (M8.6, B11). */
     blocked?: () => string | null
     spawnBlocked?: () => string | null
+    /** Register an engine with no transcript reader (ADR-0009 allows one). */
+    noTranscripts?: boolean
   } = {}
 ): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-artemis-'))
@@ -105,12 +107,16 @@ async function rig(
 
   const prompts = new PromptStore(path.join(home, 'prompts'), BUNDLED_PROMPTS)
   const engines = new EngineRegistry()
-  engines.register(
-    makeFakeAdapter({
-      scriptPath: path.join(home, 'idle.mjs'),
-      settingsRegistry: new MemorySettingsRegistry()
-    })
-  )
+  const fake = makeFakeAdapter({
+    scriptPath: path.join(home, 'idle.mjs'),
+    settingsRegistry: new MemorySettingsRegistry()
+  })
+  // An engine that cannot be asked about its transcripts is a case ADR-0009
+  // always allowed, and the resume guard must not quietly take resume away
+  // from it.
+  const withoutTranscripts: EngineAdapter = { ...fake }
+  delete (withoutTranscripts as { transcripts?: unknown }).transcripts
+  engines.register(over.noTranscripts ? withoutTranscripts : fake)
   fs.writeFileSync(path.join(home, 'idle.mjs'), 'setTimeout(() => {}, 60_000)\n')
 
   const spawner = new ScriptedSpawner()
@@ -181,6 +187,22 @@ async function rig(
     },
     settle: () => artemis.drained()
   }
+}
+
+/**
+ * Puts a transcript on disk for a session the manager has recorded.
+ *
+ * `--resume` is only offered when the engine still HOLDS the session, because
+ * an id whose transcript is gone makes the engine print "No conversation found
+ * with session ID: …" and exit — which the respawn ladder then repeats forever.
+ * A test asserting that a session carries forward has to create one.
+ */
+function writeTranscript(r: Rig, sessionId: string): void {
+  const cwd = r.spawner.spawns.at(-1)?.plan.cwd
+  if (cwd === undefined) throw new Error('writeTranscript: no spawn to take a cwd from')
+  const dir = path.join(cwd, '.fake-engine', 'transcripts')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), '', 'utf8')
 }
 
 const ENGINE: SpawnRequest['engine'] = 'custom'
@@ -299,8 +321,12 @@ describe('she is brought back when she dies (FR-5.4)', () => {
   it('carries the engine session forward — respawn WITH memory', async () => {
     const r = await rig()
     await r.artemis.start(ENGINE)
-    // The event plane recorded a session for this spawn (M3.2 wiring).
+    // The event plane recorded a session for this spawn (M3.2 wiring)...
     r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-temple-1')
+    // ...and the engine still holds its transcript. Both halves are the
+    // precondition: a recorded id whose transcript is gone is not a session to
+    // carry forward, it is a `--resume` the engine refuses outright.
+    writeTranscript(r, 'sess-temple-1')
     await r.spawner.crash(ARTEMIS_AGENT_ID)
     await r.settle()
     expect(r.spawner.spawns[1]?.plan.argv).toContain('--resume')
@@ -312,10 +338,61 @@ describe('she is brought back when she dies (FR-5.4)', () => {
     await r.artemis.start(ENGINE)
     r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-1')
     r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-2')
+    writeTranscript(r, 'sess-1')
+    writeTranscript(r, 'sess-2')
     await r.spawner.crash(ARTEMIS_AGENT_ID)
     await r.settle()
     expect(r.spawner.spawns[1]?.plan.argv).toContain('sess-2')
     expect(r.spawner.spawns[1]?.plan.argv).not.toContain('sess-1')
+  })
+
+  it('starts FRESH when the recorded session has no transcript left', async () => {
+    // The failure this prevents: `--resume <gone>` is not a degraded start, it
+    // is a refusal. The engine prints "No conversation found with session ID"
+    // and exits at once, so the respawn ladder resumes into the same nothing
+    // and the agent is unspawnable until a human notices. Seen for real on
+    // 2026-09-06 after a transcript directory was cleared under two live
+    // agents, and reachable any time transcripts are rotated or pruned.
+    const r = await rig()
+    await r.artemis.start(ENGINE)
+    r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-vanished')
+    // Deliberately NO transcript written.
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+
+    expect(r.spawner.spawns).toHaveLength(2)
+    expect(r.spawner.spawns[1]?.plan.argv).not.toContain('--resume')
+    expect(r.spawner.spawns[1]?.plan.argv).not.toContain('sess-vanished')
+  })
+
+  it('resumes the last session whose transcript SURVIVED', async () => {
+    // The newest id is only the right one while its transcript is there.
+    const r = await rig()
+    await r.artemis.start(ENGINE)
+    r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-kept')
+    writeTranscript(r, 'sess-kept')
+    r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-gone')
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+
+    // Deliberately does NOT fall back to the older one: a resume is offered for
+    // the session the agent was actually in, or not at all.
+    expect(r.spawner.spawns[1]?.plan.argv).not.toContain('--resume')
+  })
+
+  it('resumes when the engine cannot be asked whether the session survives', async () => {
+    // "We cannot check" must never become "we refuse to resume". An engine with
+    // no transcript reader is the case ADR-0009 always allowed; treating its
+    // silence as a missing transcript would quietly take resume away from every
+    // such engine, which is a regression wearing a safety check's clothes.
+    const r = await rig({ noTranscripts: true })
+    await r.artemis.start(ENGINE)
+    r.manager.noteSession(ARTEMIS_AGENT_ID, 'sess-unverifiable')
+    await r.spawner.crash(ARTEMIS_AGENT_ID)
+    await r.settle()
+
+    expect(r.spawner.spawns[1]?.plan.argv).toContain('--resume')
+    expect(r.spawner.spawns[1]?.plan.argv).toContain('sess-unverifiable')
   })
 
   it('still respawns when the event plane never reported a session', async () => {
