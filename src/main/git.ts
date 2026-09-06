@@ -118,7 +118,14 @@ export interface WorktreeState {
 }
 
 export type WorktreeRemoval =
-  | { readonly removed: true }
+  | {
+      readonly removed: true
+      /**
+       * Non-null when git unregistered the worktree but its directory
+       * survived, and this could not tidy it — a sentence for the Architect.
+       */
+      readonly residue: string | null
+    }
   | { readonly removed: false; readonly reason: string; readonly changes: readonly string[] }
 
 export interface WorktreesOptions {
@@ -305,7 +312,7 @@ export class Worktrees {
       // Already gone: prune the stale administrative entry so the next create
       // at the same path is not refused by git's own bookkeeping.
       await this.options.runner.run(repo, ['worktree', 'prune'])
-      return { removed: true }
+      return { removed: true, residue: null }
     }
     const state = await this.state(worktreePath)
     if (!state.clean) {
@@ -324,8 +331,49 @@ export class Worktrees {
       }
     }
     await this.options.runner.run(repo, ['worktree', 'prune'])
-    return { removed: true }
+    return { removed: true, residue: sweepEmptyResidue(worktreePath) }
   }
+}
+
+/**
+ * Contract: removes the directory git left behind, and ONLY when it is empty.
+ * Returns null when nothing was left or the residue was swept, a sentence when
+ * it could not be.
+ *
+ * `git worktree remove` usually deletes the directory along with the
+ * registration. On Windows it has been observed to unregister and leave an
+ * empty directory — three of them were sitting in `~/.ephesus/worktrees` on
+ * 2026-09-06, unknown to `git worktree list`. Left alone they accumulate, and
+ * until `worktreePathIsVacant` learned that an empty directory is vacant the
+ * residue of one activation REFUSED the next one for the same agent id.
+ *
+ * **Empty only, and that is the whole safety argument.** By this point git has
+ * said the worktree is gone and `state.clean` said there was nothing
+ * uncommitted, so an empty directory is bookkeeping. Anything still inside it
+ * is a file nobody accounted for, and deleting that would be precisely the
+ * "losing an agent's unpushed work to a tidy-up" this module refuses to do —
+ * which is why `--force` appears nowhere here either.
+ */
+function sweepEmptyResidue(worktreePath: string): string | null {
+  try {
+    if (!fs.existsSync(worktreePath)) return null
+    const entries = fs.readdirSync(worktreePath)
+    if (entries.length > 0) {
+      return `worktree "${worktreePath}" was removed but ${String(entries.length)} file(s) remain in its directory; left in place`
+    }
+    fs.rmdirSync(worktreePath)
+    return null
+  } catch (err) {
+    // One catch, one sentence. "Could not read it" and "could not delete it"
+    // were two branches saying the same actionable thing — the directory is
+    // still there and this could not tidy it — and only one of them was
+    // reachable from a test, which is a branch that exists to be uncovered.
+    return `worktree "${worktreePath}" was removed but its directory could not be tidied: ${describeError(err)}`
+  }
+}
+
+function describeError(err: unknown): string {
+  return err instanceof Error ? (err.message.split('\n')[0] ?? err.message) : String(err)
 }
 
 /**

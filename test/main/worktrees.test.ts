@@ -163,11 +163,118 @@ describe('removing a worktree — never destroying work', () => {
     const p = plan(r)
     await r.worktrees.create(p)
 
-    expect(await r.worktrees.remove(r.repo, p.path)).toEqual({ removed: true })
+    expect(await r.worktrees.remove(r.repo, p.path)).toEqual({ removed: true, residue: null })
     expect(fs.existsSync(p.path)).toBe(false)
     expect(
       execFileSync('git', ['worktree', 'list'], { cwd: r.repo, encoding: 'utf8' })
     ).not.toContain(p.path)
+  })
+
+  /**
+   * The residue sweep (M8.6 audit, 2026-09-06).
+   *
+   * `git worktree remove` normally deletes the directory along with the
+   * registration. On Windows it has been observed to unregister and leave an
+   * EMPTY directory — three were sitting in `~/.ephesus/worktrees` on the
+   * Architect's machine, unknown to `git worktree list`. Left alone they
+   * accumulate, and until `worktreePathIsVacant` learned that an empty
+   * directory is vacant, the residue of one activation REFUSED the next one for
+   * the same agent id.
+   *
+   * The runner is wrapped rather than mocked wholesale: real git does every
+   * step, and only `worktree remove` is made to behave the way it behaved
+   * there — succeed, and leave the directory.
+   */
+  function leavesTheDirectory(): Worktrees {
+    const real = new ExecGitRunner()
+    return new Worktrees({
+      runner: {
+        run: async (cwd, args) => {
+          const outcome = await real.run(cwd, args)
+          if (args[0] === 'worktree' && args[1] === 'remove' && outcome.ok) {
+            const left = args[2]
+            if (left !== undefined) fs.mkdirSync(left, { recursive: true })
+          }
+          return outcome
+        }
+      },
+      forbiddenRoot: path.join(os.tmpdir(), 'no-agora-here')
+    })
+  }
+
+  it('sweeps the empty directory git unregistered and left behind', async () => {
+    const r = rig()
+    const p = plan(r)
+    await r.worktrees.create(p)
+    const swept = leavesTheDirectory()
+
+    const outcome = await swept.remove(r.repo, p.path)
+
+    expect(outcome).toEqual({ removed: true, residue: null })
+    expect(fs.existsSync(p.path)).toBe(false)
+  })
+
+  it('leaves residue in place, and SAYS so, when a file is still in it', async () => {
+    // The safety argument for the sweep. git has said the worktree is gone and
+    // the porcelain said nothing was uncommitted, so an EMPTY directory is
+    // bookkeeping — but anything still inside is a file nobody accounted for.
+    // This module does not trade somebody's work for tidiness; it is the same
+    // rule that keeps `--force` out of the whole file.
+    const r = rig()
+    const p = plan(r)
+    await r.worktrees.create(p)
+    const swept = new Worktrees({
+      runner: {
+        run: async (cwd, args) => {
+          const real = await new ExecGitRunner().run(cwd, args)
+          if (args[0] === 'worktree' && args[1] === 'remove' && real.ok) {
+            const left = args[2]
+            if (left !== undefined) {
+              fs.mkdirSync(left, { recursive: true })
+              fs.writeFileSync(path.join(left, 'left-behind.md'), '# not mine to delete\n', 'utf8')
+            }
+          }
+          return real
+        }
+      },
+      forbiddenRoot: path.join(os.tmpdir(), 'no-agora-here')
+    })
+
+    const outcome = await swept.remove(r.repo, p.path)
+
+    expect(outcome.removed).toBe(true)
+    if (outcome.removed) expect(outcome.residue).toContain('1 file(s) remain')
+    expect(fs.readFileSync(path.join(p.path, 'left-behind.md'), 'utf8')).toBe(
+      '# not mine to delete\n'
+    )
+  })
+
+  it('says so when the leftover is not a directory it can tidy at all', async () => {
+    // The catch, reached honestly: something that is not a directory is sitting
+    // where the worktree was, so the sweep cannot even list it. Still not a
+    // failed removal — git took the worktree — but not silence either.
+    const r = rig()
+    const p = plan(r)
+    await r.worktrees.create(p)
+    const swept = new Worktrees({
+      runner: {
+        run: async (cwd, args) => {
+          const real = await new ExecGitRunner().run(cwd, args)
+          if (args[0] === 'worktree' && args[1] === 'remove' && real.ok) {
+            const left = args[2]
+            if (left !== undefined) fs.writeFileSync(left, 'not a directory', 'utf8')
+          }
+          return real
+        }
+      },
+      forbiddenRoot: path.join(os.tmpdir(), 'no-agora-here')
+    })
+
+    const outcome = await swept.remove(r.repo, p.path)
+
+    expect(outcome.removed).toBe(true)
+    if (outcome.removed) expect(outcome.residue).toContain('could not be tidied')
+    expect(fs.readFileSync(p.path, 'utf8')).toBe('not a directory')
   })
 
   it('REFUSES a dirty one, names the changes, and leaves every byte in place', async () => {
@@ -202,7 +309,7 @@ describe('removing a worktree — never destroying work', () => {
     await r.worktrees.create(p)
     fs.rmSync(p.path, { recursive: true, force: true })
 
-    expect(await r.worktrees.remove(r.repo, p.path)).toEqual({ removed: true })
+    expect(await r.worktrees.remove(r.repo, p.path)).toEqual({ removed: true, residue: null })
     // Pruned, so the same path can be handed out again.
     const again = await r.worktrees.create(p)
     expect(again.ok).toBe(true)

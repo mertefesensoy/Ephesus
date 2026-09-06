@@ -5045,6 +5045,36 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       under these rules, which is M7's still-open exit criterion. Branch
       `feature/m8-6-crew-isolation`.*
 
+      *AUDIT (2026-09-06, working toward a releasable MVP): **all four decisions
+      verified, three of them by PRODUCTION OBSERVATION rather than by test.**
+      (3) the durable rung-3 stop is real and load-bearing —
+      `~/.ephesus/breaker-stops.json` holds two, including
+      `agent.skeleton-crew-musahit-health-watcher`, and the log shows that stop
+      refusing a LATER reactivation: `"will not be respawned — the breaker
+      stopped it at rung 3 (burn-rate); clear the stop first"`. (4) crew agents
+      now respawn — `ci-babysitter` x5 and `verifier` x3 against the register's
+      own measurement of zero. (2) the isolation refusal releases the claimed id
+      before throwing, and Artemis takes `blocked` from the same predicate. It
+      also explains why one crew agent has an engine config and no worktree: it
+      was stopped at rung 3 and its worktree released — the feature working, not
+      a leak. **A finding was raised and then REFUTED by the evidence, recorded
+      because the method matters:** a survey of `log.jsonl` by `event` name found
+      no crew spawn row and concluded the book of record could not answer "did
+      this hire run in its own worktree or in the Architect's checkout". It can.
+      `kind: 'spawn'` rows carry no `event` field, so the survey could not see
+      them — there are 132 recording `cwd` for EVERY spawn and 51 more carrying
+      `worktree`, `branch`, `branchCreated` and the source repo. **Surveying by
+      one field and concluding absence is how a green audit reports a defect
+      that is not there.** What was real: `git worktree remove` unregistered
+      three worktrees and left their EMPTY directories behind, unknown to `git
+      worktree list`. Bounded — and only because `worktreePathIsVacant` learned
+      that same morning that an empty directory is vacant; before that the
+      residue of one activation refused the next for the same agent id.
+      `Worktrees.remove` now sweeps an empty leftover and REPORTS one that still
+      holds files, which it never deletes (the rule that keeps `--force` out of
+      that module). 5 mutations, all killed; the three real directories were
+      cleared from the Architect's home.*
+
       **POST-CLOSE DEFECT CLEARANCE (2026-09-05, ADR-0025).** An adversarial
       audit of this package — 8 lenses, 58 findings — returned one that survived
       every refuter, and it was M8.6's own doing: **isolation silently re-opened

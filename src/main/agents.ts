@@ -107,7 +107,7 @@ export interface AgentWorktrees {
     repo: string,
     worktreePath: string
   ): Promise<
-    | { readonly removed: true }
+    | { readonly removed: true; readonly residue: string | null }
     | { readonly removed: false; readonly reason: string; readonly changes: readonly string[] }
   >
 }
@@ -1220,8 +1220,19 @@ export class AgentManager {
       worktree: worktree.path,
       branch: worktree.branch,
       worktreeRemoved: outcome.removed,
-      ...(outcome.removed ? {} : { because: outcome.reason, changes: [...outcome.changes] })
+      ...(outcome.removed
+        ? outcome.residue === null
+          ? {}
+          : { residue: outcome.residue }
+        : { because: outcome.reason, changes: [...outcome.changes] })
     })
+    // A directory git unregistered and left behind is not a failed removal —
+    // the worktree IS gone — but it is not nothing either: unswept residue
+    // accumulates in the harness home, and it used to refuse the next
+    // activation for the same agent id. Reported, not silent (invariant §7).
+    if (outcome.removed && outcome.residue !== null) {
+      this.options.onExitError?.(agent.card.agentId, new Error(outcome.residue))
+    }
     if (!outcome.removed) {
       // Visible, not just logged: a working copy left behind with somebody's
       // uncommitted work in it is exactly the kind of thing that must be said
