@@ -4765,6 +4765,32 @@ structural rather than a habit.
       renders each entry through `degradationLine`. Docs: SDD §4.3 (the kind and
       its semantics) and §1.1 (the module). Branch `feature/m8-2-degradations`.*
 
+      *AUDIT (2026-09-07): **the channel verifies against its own data, with no
+      code change.** The bounded LADDER is visible in production —
+      `agora/log-size` was written at `count: 1` and again at `count: 10`, a power
+      of ten apart with nothing between — and `usage/pacing` shows the raise
+      followed by its `cleared` row, which is the pair a condition-shaped kind
+      exists to make possible. 59 degradation rows across 41 distinct causes,
+      per-agent conditions carrying the agent as designed. The dedupe’s load-bearing
+      property was re-checked by INVENTORY rather than by test: every dynamic cause
+      in `src/` embeds a bounded identity — an agent, adapter, instance, gate, task,
+      trigger or check id, or a settings path — and none embeds a message, a
+      timestamp or free text, so nothing can defeat the dedupe by making each report
+      unique. `report` never throws and the append is caught.
+      **The channel also disproved a claim this register made the same day.** The
+      M8.4 audit note said `home/seeded-config` had never fired; `log.jsonl` seq 1177
+      says otherwise, and that note is corrected in place. The mistake was reading a
+      `.most_common(12)` and treating a truncated list as an absent one — the second
+      time in one day an audit concluded absence from a view it had narrowed itself
+      (the first surveyed rows by `event` and so could not see `kind: ’spawn’` rows).
+      Recorded in DECISIONS-LOG as a method rule.
+      **Also surfaced, for the Architect rather than fixed here:**
+      `incident/unmet-obligation` is live — *"severity-1 incident
+      mertefesensoy/MUSAHIT#ci-run:33986883947 owes an immediate spoken announcement;
+      the Herald is not wired (M6.9 deferred)"*. The company raised a severity-1 and
+      could not announce it, which is the kind of deferred-work consequence this
+      channel exists to keep visible.*
+
 - [x] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
       defaults to the OLDEST 500 entries and three callers use the default, so
       the standup's cursor pins at 500 and every later brief filters to empty:
@@ -4931,9 +4957,14 @@ structural rather than a habit.
       `gate` and no `spend`. The auth predicate still reads the denial BEFORE the
       affirmation, which is the ordering whose mutant survived this package's
       first pass, and `grantsUnavailable` is tested on both sides — the resolver
-      main-side and the sentence on the screen. Noted, not a defect: neither
-      `home/seeded-config` nor a `needs-login` card has ever fired here, because
-      this install predates them, which is why the first run was simulated.
+      the sentence on the screen. **CORRECTED the same day by the M8.2 audit:**
+      this block first said `home/seeded-config` had never fired here. It has —
+      `log.jsonl` seq 1177 carries *"authority.json was missing and has been created
+      with the shipped default — review it at C:\Users\senso\.ephesus"*. The claim came
+      from reading `Counter(...).most_common(12)` and taking a truncated list for an
+      absent one; the row has count 1 and sat outside it. So the seeding report is
+      verified in PRODUCTION, not only by the first-run simulation. A `needs-login`
+      card genuinely has not fired, the engine having always been authenticated here.
       **The finding: this package's OWN defect recurred.** M8.4 fixed a README
       whose status was "two milestones stale"; by M8.9 the same section was three
       packages behind — M8.6, M8.7a/b and M8.8 were absent, and grep across the
