@@ -97,6 +97,42 @@ export function classifyHookEvent(event: string): HookEventClassification {
 }
 
 /**
+ * Contract: pure. Whether this event is the engine's own evidence that a TURN
+ * is running — which is what tells the command queue its submit key landed and
+ * more keys would not help (`commands.ts`, 2026-09-06).
+ *
+ * Three events, and the exclusions carry as much weight as the inclusions:
+ *
+ * - `prompt-submitted` is the direct answer: the prompt became a turn.
+ * - `pre-tool`/`post-tool` are the indirect one. The wake path deliberately
+ *   sends to an agent it believes idle and tolerates being wrong (`isIdle`,
+ *   `index.ts`); when it is wrong the engine QUEUES the text behind the running
+ *   turn and `prompt-submitted` does not arrive for minutes. Without these, a
+ *   perfectly healthy mid-turn nudge would spend the whole key budget and be
+ *   reported as unaccepted.
+ * - `session-start` is excluded. A session exists long before its prompt
+ *   accepts anything — that gap IS the defect the budget was added for, and
+ *   counting it as evidence would restore it exactly.
+ * - `stop` is excluded. A turn ending says nothing about whether OUR text was
+ *   the one that ran, and text sent as a turn ends still needs its key.
+ * - `notification` is excluded, and pointedly: it is the engine saying a dialog
+ *   is up, which is the very thing that eats submit keys.
+ *
+ * Takes the RAW name, because that is what an envelope carries (FR-2.3 keeps
+ * drift addressable rather than dropping it). A name this build does not know
+ * answers `false`: an unrecognised event is not evidence of anything, and the
+ * cost of being wrong that way is one spare keystroke.
+ */
+export function provesTurnRunning(event: string): boolean {
+  const classified = classifyHookEvent(event)
+  if (!classified.known) return false
+  // Narrowed first so these literals are checked against `HookEvent` — a typo
+  // here would otherwise compile to a branch that is simply never taken.
+  const known: HookEvent = classified.event
+  return known === 'prompt-submitted' || known === 'pre-tool' || known === 'post-tool'
+}
+
+/**
  * Contract: parses an envelope from untrusted bytes. Returns the envelope or a
  * one-line reason; never throws, because the hook server must answer a malformed
  * post with a logged rejection rather than a crashed listener.

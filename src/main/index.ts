@@ -26,6 +26,7 @@ import { createCrewSurvival, type CrewSurvival } from './respawn'
 import { deriveRepo } from '../shared/repo-remote'
 import { randomBytes } from 'node:crypto'
 import { composeMessage, makeMessageId } from '../shared/message'
+import { provesTurnRunning } from '../shared/hooks'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { GatesRecord, OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
@@ -325,7 +326,17 @@ function reportDegradation(cause: DegradationCause, detail: string): void {
  */
 const commandQueue = new CommandQueue({
   sink: { write: (agentId, data) => ptyManager.write(agentId, data) },
-  onChange: (state: CommandState) => ui.send(COMMANDS_STATE_CHANNEL, state)
+  onChange: (state: CommandState) => ui.send(COMMANDS_STATE_CHANNEL, state),
+  // The text reached the agent's prompt box and no submit key would run it.
+  // Silent before 2026-09-06, which is how an on-call agent sat idle for
+  // eighteen minutes with two incidents assigned to it and nothing anywhere
+  // said so.
+  onUnaccepted: (agentId, attempts) =>
+    reportDegradation(
+      `commands/unaccepted:${agentId}`,
+      `${agentId} did not submit the text it was sent after ${String(attempts)} attempt(s) — ` +
+        `it is sitting in the agent's prompt box unrun`
+    )
 })
 
 /**
@@ -415,6 +426,11 @@ const hookServer = new HookServer({
     // no `stop` and would otherwise leave a timer that fires at an agent which
     // is no longer there.
     if (envelope.event === 'prompt-submitted') wakeClock?.began(envelope.agentId)
+
+    // The engine's own evidence that a turn is running, which is the only thing
+    // that stops the command queue pressing the submit key again. Which events
+    // count — and, just as much, which do not — is `provesTurnRunning`.
+    if (provesTurnRunning(envelope.event)) commandQueue.accepted(envelope.agentId)
     if (envelope.event === 'stop' || envelope.event === 'session-end') {
       wakeClock?.ended(envelope.agentId)
     }

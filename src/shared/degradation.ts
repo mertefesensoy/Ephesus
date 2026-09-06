@@ -45,6 +45,11 @@ export const DEGRADATION_SOURCES = [
   'breaker',
   'budgets',
   'capacity',
+  // Text the harness wrote into an agent's prompt box that the agent never ran
+  // (2026-09-06). Its own source rather than `agents`, because the agent is
+  // healthy: the process is up, the session is live, and the only thing wrong
+  // is that a keystroke went somewhere else.
+  'commands',
   'engines',
   'gates',
   'harbor',
