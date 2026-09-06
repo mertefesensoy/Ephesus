@@ -109,9 +109,10 @@ uses `bypassPermissions` — but `auto` is still "a model deciding what is safe"
 ### 6.3 Spend is bounded by your attention, not by default
 
 As of ADR-0029, hires ship **unbudgeted**. Ceilings kept firing on ordinary work and stopping the
-company, so the default changed. **Set `defaultDailyTokens` in `~/.ephesus/config.json` before you
-walk away.** The breaker's other three signals and the wake cap still bound *behaviour*; nothing
-bounds *cost* unless you set that dial.
+company, so the default changed. **Set `maxDailyTokens` in `~/.ephesus/gate-policy.json` before you
+walk away.** It sits beside the autonomy ceiling and behaves the same way — stricter-wins, so no
+profile can exceed it. The breaker's other three signals and the wake cap still bound *behaviour*;
+nothing bounds *cost* unless you set that ceiling.
 
 ### 6.4 An agent's own output is not verified
 
@@ -142,7 +143,7 @@ run as your user, with your filesystem.
 
 1. **Start with `manual` or `supervised` autonomy.** Move to `autonomous` on a repository you own,
    after you have watched a run.
-2. **Set `defaultDailyTokens`.** See §6.3.
+2. **Set `maxDailyTokens`** in `gate-policy.json`, beside the autonomy ceiling. See §6.3.
 3. **Do not point it at a repository that accepts untrusted contributions** until you have read
    §6.1 and decided you accept it.
 4. **Use a dedicated GitHub App** with the narrowest repository scope that works, never a personal

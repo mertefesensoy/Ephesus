@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { composeBudget } from '../shared/cost'
 import path from 'node:path'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import {
@@ -118,11 +119,11 @@ export interface ArtemisOptions {
   readonly agentId?: string
   readonly dailyTokens?: number
   /**
-   * The Architect's default ceiling (`config.json`), consulted when no explicit
-   * `dailyTokens` was given. Same order as every hire: a stated figure wins,
-   * the dial fills the silence, and absent means unbudgeted (ADR-0029).
+   * The company-wide ceiling (`gate-policy.json`), composed with any explicit
+   * `dailyTokens` the same way every hire's is: stricter wins, and a figure
+   * larger than the company allows is clamped down to it.
    */
-  defaultDailyTokens?(): number | null
+  maxDailyTokens?(): number | null
 }
 
 export class Artemis {
@@ -253,7 +254,10 @@ export class Artemis {
       // cap are untouched. Removing the spend ceiling is not removing the
       // governor.
       ...((): Record<string, unknown> => {
-        const ceiling = this.options.dailyTokens ?? this.options.defaultDailyTokens?.() ?? null
+        const ceiling = composeBudget(
+          this.options.dailyTokens ?? null,
+          this.options.maxDailyTokens?.() ?? null
+        ).effective
         return ceiling === null ? {} : { budget: { dailyTokens: ceiling } }
       })()
     }

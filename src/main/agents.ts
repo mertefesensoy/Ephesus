@@ -11,6 +11,7 @@ import { baseAgentEnv } from './engines/spawn-env'
 import { NO_TOOLS, type ResolvedTools } from '../shared/engine-tools'
 import type { HookServer } from './hooks'
 import type { PromptStore } from './prompts'
+import { composeBudget } from '../shared/cost'
 import { writeFileAtomic } from './fsx'
 
 /**
@@ -331,15 +332,17 @@ export interface AgentManagerOptions {
    */
   rosterBudget?(agentId: string): number | null
   /**
-   * The Architect's ceiling for hires that declare none (`config.json`'s
-   * `defaultDailyTokens`, ADR-0029). Read per spawn rather than captured at
-   * boot, so changing the dial does not need a restart to take effect on the
-   * next hire.
+   * The company-wide daily ceiling (`gate-policy.json`'s `maxDailyTokens`),
+   * or null when the Architect set none. Read per spawn rather than captured at
+   * boot, so changing it takes effect on the next hire without a restart.
    *
-   * LAST in the chain on purpose: a hire that states a figure, and a roster row
-   * that remembers one, both outrank it. This fills the silent case only.
+   * NOT a fallback — a CLAMP. `composeBudget` gives a hire that declared
+   * nothing this figure, and holds a hire that declared more down to it. The
+   * autonomy ceiling has behaved this way since ADR-0012; a budget ceiling that
+   * any profile could exceed would be a setting that looks like a limit and is
+   * not.
    */
-  defaultDailyTokens?(): number | null
+  maxDailyTokens?(): number | null
   /**
    * Whether this agent is parked on provider capacity (`watch/capacity.ts`).
    *
@@ -823,11 +826,10 @@ export class AgentManager {
       ptyId: request.agentId,
       settingsWritten: [],
       envGrants: request.envGrants,
-      dailyTokens:
-        request.budget?.dailyTokens ??
-        this.options.rosterBudget?.(request.agentId) ??
-        this.options.defaultDailyTokens?.() ??
-        null,
+      dailyTokens: composeBudget(
+        request.budget?.dailyTokens ?? this.options.rosterBudget?.(request.agentId) ?? null,
+        this.options.maxDailyTokens?.() ?? null
+      ).effective,
       capabilities: request.capabilities,
       seat: this.seatFor(request.agentId, request.role),
       spawnedAt: new Date().toISOString(),

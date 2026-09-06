@@ -2175,10 +2175,11 @@ async function boot(): Promise<void> {
         return null
       }
     },
-    // ADR-0029's dial. Read per spawn, not captured at boot, so an Architect who
-    // sets a ceiling mid-run gets it on the next hire rather than after a
-    // restart. Absent keeps the shipped default: unbudgeted.
-    defaultDailyTokens: () => getHome().config.defaultDailyTokens ?? null,
+    // The company-wide ceiling, beside the autonomy ceiling it behaves like.
+    // Read per spawn, not captured at boot, so an Architect who sets it mid-run
+    // gets it on the next hire rather than after a restart. Absent means the
+    // company sets none (ADR-0029).
+    maxDailyTokens: () => loadGatePolicy(gatePolicyPath).policy.maxDailyTokens ?? null,
     // ADR-0005 "prompt as policy": Artemis's standing context is text she is
     // handed like any other hire's role brief. The lifecycle never reads it.
     roleBrief: (card) => artemis?.roleBrief(card) ?? null,
@@ -2744,9 +2745,8 @@ async function boot(): Promise<void> {
     agents: agentManager,
     prompts,
     home: home.root,
-    // The same dial the hires read (ADR-0029): she is unbudgeted unless the
-    // Architect names a figure, here or in `config.json`.
-    defaultDailyTokens: () => getHome().config.defaultDailyTokens ?? null,
+    // The same company ceiling the hires are composed against (ADR-0029).
+    maxDailyTokens: () => loadGatePolicy(gatePolicyPath).policy.maxDailyTokens ?? null,
     // B11 applies to her too: a rung-3 stop her own ladder immediately undoes
     // is the cycle this package exists to end, and FR-14.5 already treats a
     // stop on her work as consequential enough to revert the company's mode.

@@ -481,3 +481,51 @@ export function formatUsd(usd: number): string {
   if (usd > 0 && usd < 0.01) return `$${usd.toFixed(4)}`
   return `$${usd.toFixed(2)}`
 }
+
+/** What a hire's daily ceiling became once the company's own was applied. */
+export interface ComposedBudget {
+  /** What the hire asked for, or null when it declared none. */
+  readonly requested: number | null
+  /** The company-wide ceiling, or null when the Architect set none. */
+  readonly ceiling: number | null
+  /** What the hire actually gets. Null means unbudgeted. */
+  readonly effective: number | null
+  /** True when the hire asked for more than the company allows. */
+  readonly clamped: boolean
+}
+
+/**
+ * Contract: pure. Composes a hire's declared daily ceiling with the company's,
+ * stricter-wins — the same shape `composeAutonomyTable` has used since
+ * ADR-0012, because it is the same kind of decision and an Architect should not
+ * have to learn two rules.
+ *
+ * The company ceiling does BOTH jobs:
+ *
+ *  - a hire that declared nothing receives it, so "cap this company" does not
+ *    require editing every hire file;
+ *  - a hire that declared MORE is clamped down to it, so the setting is a limit
+ *    rather than a suggestion. Without this half, a company-wide figure could
+ *    be overruled by any profile that shipped a bigger number, which is a
+ *    setting that looks like a limit and is not.
+ *
+ * A hire asking for LESS keeps its own figure. Stricter always wins, in both
+ * directions, so a careful hire is never loosened by a permissive company.
+ *
+ * Absent ceiling means the company sets none: the hire's own figure stands, and
+ * a hire with none is unbudgeted (ADR-0029).
+ */
+export function composeBudget(requested: number | null, ceiling: number | null): ComposedBudget {
+  if (ceiling === null) {
+    return { requested, ceiling, effective: requested, clamped: false }
+  }
+  if (requested === null) {
+    return { requested, ceiling, effective: ceiling, clamped: false }
+  }
+  return {
+    requested,
+    ceiling,
+    effective: Math.min(requested, ceiling),
+    clamped: requested > ceiling
+  }
+}

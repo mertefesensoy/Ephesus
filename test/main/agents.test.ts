@@ -108,7 +108,7 @@ interface RigOptions {
   readonly onGrantsMissing?: (agentId: string, missing: readonly string[]) => void
   readonly onLogEvent?: AgentManagerOptions['onLogEvent']
   readonly authProbe?: AgentManagerOptions['authProbe']
-  readonly defaultDailyTokens?: AgentManagerOptions['defaultDailyTokens']
+  readonly maxDailyTokens?: AgentManagerOptions['maxDailyTokens']
   /**
    * Which engine the spawn names. Codex is registered too when it is asked
    * for, because its BinarySpec declares NO auth probe — which is the case
@@ -158,7 +158,7 @@ async function rig(
     ...(extra.onGrantsMissing ? { onGrantsMissing: extra.onGrantsMissing } : {}),
     ...(extra.onLogEvent ? { onLogEvent: extra.onLogEvent } : {}),
     ...(extra.authProbe ? { authProbe: extra.authProbe } : {}),
-    ...(extra.defaultDailyTokens ? { defaultDailyTokens: extra.defaultDailyTokens } : {}),
+    ...(extra.maxDailyTokens ? { maxDailyTokens: extra.maxDailyTokens } : {}),
     ...(extra.respawnBlocked ? { respawnBlocked: extra.respawnBlocked } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
@@ -869,18 +869,22 @@ describe('the default-ceiling dial (ADR-0029)', () => {
     expect(card.dailyTokens).toBeNull()
   })
 
-  it('applies the dial to a hire that declares none', async () => {
-    const r = await rig(undefined, undefined, { defaultDailyTokens: () => 4_000_000 })
+  it('applies the company ceiling to a hire that declares none', async () => {
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
     const card = await r.manager.spawn(r.request)
     expect(card.dailyTokens).toBe(4_000_000)
   })
 
-  it('lets the hire’s OWN figure outrank the dial', async () => {
-    // The dial fills silence; it never overrides a stated intent. Reversing this
-    // would let a config quietly rewrite a number somebody wrote in a file they
-    // read before activating.
-    const r = await rig(undefined, undefined, { defaultDailyTokens: () => 4_000_000 })
+  it('CLAMPS a hire that declares more than the company allows', async () => {
+    // The half that makes it a limit rather than a suggestion.
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
     const card = await r.manager.spawn({ ...r.request, budget: { dailyTokens: 11_000_000 } })
-    expect(card.dailyTokens).toBe(11_000_000)
+    expect(card.dailyTokens).toBe(4_000_000)
+  })
+
+  it('leaves a hire that declares LESS alone', async () => {
+    const r = await rig(undefined, undefined, { maxDailyTokens: () => 4_000_000 })
+    const card = await r.manager.spawn({ ...r.request, budget: { dailyTokens: 1_000_000 } })
+    expect(card.dailyTokens).toBe(1_000_000)
   })
 })

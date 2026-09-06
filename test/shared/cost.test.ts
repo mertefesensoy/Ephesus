@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  composeBudget,
   dayKey,
   dayOfFact,
   evaluateBudget,
@@ -321,5 +322,61 @@ describe('evaluateBudget — post-hoc enforcement plus the pre-flight projection
     })
     expect(verdict.state).toBe('ok')
     expect(verdict.projected).toBeNull()
+  })
+})
+
+/**
+ * The company's daily ceiling, composed with a hire's own (2026-09-06).
+ *
+ * Autonomy has clamped since ADR-0012 — a profile may sit under the company
+ * ceiling and never above it. The budget ceiling did not exist, so a
+ * company-wide figure could be quietly overruled by any hire declaring a bigger
+ * number: a setting that looks like a limit and is not. These are the same kind
+ * of decision and now behave the same way.
+ */
+describe('composeBudget — stricter wins, in both directions', () => {
+  it('gives a hire that declared nothing the company ceiling', () => {
+    // "Cap this company" must not require editing every hire file.
+    expect(composeBudget(null, 5_000_000)).toEqual({
+      requested: null,
+      ceiling: 5_000_000,
+      effective: 5_000_000,
+      clamped: false
+    })
+  })
+
+  it('CLAMPS a hire that asked for more, and says it clamped', () => {
+    // The half without which the setting is a suggestion.
+    expect(composeBudget(60_000_000, 5_000_000)).toEqual({
+      requested: 60_000_000,
+      ceiling: 5_000_000,
+      effective: 5_000_000,
+      clamped: true
+    })
+  })
+
+  it('leaves a hire that asked for LESS alone', () => {
+    // Stricter wins in both directions: a permissive company never loosens a
+    // careful hire.
+    expect(composeBudget(1_000_000, 5_000_000)).toEqual({
+      requested: 1_000_000,
+      ceiling: 5_000_000,
+      effective: 1_000_000,
+      clamped: false
+    })
+  })
+
+  it('is not "clamped" when the two figures agree', () => {
+    // Equal is not exceeded — reporting it as clamped would put a warning on
+    // the activation screen for a hire that asked for exactly what it may have.
+    expect(composeBudget(5_000_000, 5_000_000).clamped).toBe(false)
+  })
+
+  it('leaves everything alone when the company set no ceiling', () => {
+    expect(composeBudget(9_000_000, null).effective).toBe(9_000_000)
+    // And a hire with none stays unbudgeted (ADR-0029) rather than becoming a
+    // zero, which the Watch would read as an immediate breach.
+    expect(composeBudget(null, null).effective).toBeNull()
+    expect(composeBudget(null, null).clamped).toBe(false)
   })
 })

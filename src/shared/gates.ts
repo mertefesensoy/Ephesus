@@ -138,6 +138,28 @@ export const gatePolicySchema = z
     schemaVersion: z.literal(GATE_SCHEMA_VERSION),
     /** The company-wide ceiling. A profile may only go lower (ADR-0012). */
     autonomy: autonomyLevelSchema,
+    /**
+     * The company-wide DAILY TOKEN ceiling, in tokens, or absent for none.
+     *
+     * Beside `autonomy` because it is the same kind of thing and must behave
+     * the same way: a ceiling the Architect sets that a profile may sit under
+     * and never exceed. The autonomy ceiling has clamped since ADR-0012; the
+     * budget one did not exist, so a company-wide figure could be quietly
+     * overruled by any hire that declared a bigger number — a setting that
+     * looks like a limit and is not.
+     *
+     * One knob, two jobs, deliberately. Set, it is BOTH the figure a hire with
+     * no budget of its own receives AND the most any hire may have. Absent,
+     * hires are unbudgeted unless they declare otherwise (ADR-0029). Splitting
+     * "default" from "maximum" into two settings would ask the Architect to
+     * reason about their interaction to answer one question — "is this company
+     * capped?" — which is the question they actually have.
+     *
+     * Tokens for the same reason `maxSpendTokens` is: the durable ledger
+     * reports tokens, so a currency field would be compared against a token
+     * count and mean nothing.
+     */
+    maxDailyTokens: z.number().int().positive().max(1_000_000_000).optional(),
     rules: z
       .array(gateRuleSchema)
       .max(64)
