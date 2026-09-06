@@ -399,6 +399,38 @@ export interface AgentShutdownReport {
   readonly failed: readonly { readonly agentId: string; readonly error: string }[]
 }
 
+/**
+ * Contract: throws when the engine cannot enforce the autonomy that was
+ * composed for this spawn (ADR-0031). Pure apart from the throw.
+ *
+ * ## Why this refuses rather than warns
+ *
+ * `autonomy` is a CEILING the Architect set and the Watch composed (ADR-0012).
+ * On an engine that declares `none`, nothing carries it to the process — the
+ * engine's own configuration decides, and that configuration is the operator's
+ * rather than the harness's. So a `manual` hire on such an engine runs at
+ * whatever the operator's config says while every surface in the app reports
+ * `manual`. That is invariant §7's failure in its worst form: a safety control
+ * displaying as applied.
+ *
+ * `autonomous` is the one level that is safe to allow through, because it is
+ * the loosest the Architect can ask for — an engine doing something stricter
+ * of its own accord costs a stalled turn, not an unpermitted action, and the
+ * stall is visible. Anything stricter is refused, which is the deny-by-default
+ * direction FR-11.1 requires a default to fail in.
+ */
+export function assertAutonomyEnforceable(
+  adapter: Pick<EngineAdapter, 'id' | 'autonomySupport'>,
+  autonomy: AgentSpawnConfig['autonomy']
+): void {
+  if (adapter.autonomySupport === 'enforced' || autonomy === 'autonomous') return
+  throw new Error(
+    `agents: ${adapter.id} cannot enforce "${autonomy}" autonomy, so this hire would run at ` +
+      `whatever ${adapter.id} is configured to do — raise the ceiling to "autonomous" if that is ` +
+      'what you intend, or hire on an engine that maps it'
+  )
+}
+
 export class AgentManager {
   private readonly agents = new Map<string, LiveAgent>()
   /** Seats handed out this session; the roster is the durable copy. */
@@ -504,6 +536,7 @@ export class AgentManager {
     // second one's hook token would silently orphan the first agent's hooks —
     // observed live before this reservation existed.
     const cfg = this.spawnConfig(request)
+    assertAutonomyEnforceable(adapter, cfg.autonomy)
     const card = this.newCard(request, adapter, null)
     this.agents.set(request.agentId, {
       card,

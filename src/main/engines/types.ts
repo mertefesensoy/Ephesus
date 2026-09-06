@@ -1,6 +1,6 @@
 import type { CapacityLimit } from '../../shared/capacity'
 import type { ResolvedTools } from '../../shared/engine-tools'
-import type { EngineId, HookSupport } from '../../shared/engines'
+import type { AutonomySupport, EngineId, HookSupport } from '../../shared/engines'
 
 /**
  * The engine adapter surface — normative in ADR-0009, with the runtime notes of
@@ -337,6 +337,18 @@ export interface EngineAdapter {
   spawnArgs(cfg: AgentSpawnConfig): SpawnPlan
   /** Declared hook fidelity; the conformance suite checks it against reality. */
   readonly hooks: HookSupport
+  /**
+   * Whether this integration can enforce `AgentSpawnConfig.autonomy`
+   * (ADR-0031). Conformance checks it against reality in BOTH directions: an
+   * `enforced` adapter must produce a different plan for a different level, and
+   * a `none` adapter must produce an identical one — a declaration that is
+   * wrong in either direction is worse than no declaration.
+   *
+   * A hire whose composed autonomy is stricter than `autonomous` is REFUSED on
+   * a `none` engine, because the alternative is a company that reports a
+   * ceiling it does not apply.
+   */
+  readonly autonomySupport: AutonomySupport
   wireHooks(cfg: AgentSpawnConfig): HookPlan
   /**
    * Arranges for `identity.md` + `PROTOCOL.md` context to reach the agent —

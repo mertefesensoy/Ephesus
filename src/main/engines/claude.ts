@@ -1044,6 +1044,8 @@ export class ClaudeAdapter implements EngineAdapter {
    * the floor reflects what actually happened rather than a guess at it.
    */
   readonly hooks = 'native' as const
+  /** ADR-0031: every level reaches the engine as `--permission-mode`. */
+  readonly autonomySupport = 'enforced' as const
 
   constructor(private readonly deps: ClaudeAdapterDeps) {}
 

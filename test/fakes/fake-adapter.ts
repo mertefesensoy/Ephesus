@@ -121,6 +121,7 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
   return {
     id: 'custom',
     hooks: options.hooks ?? 'native',
+    autonomySupport: 'enforced',
 
     binary(): BinarySpec {
       return {
@@ -133,7 +134,16 @@ export function makeFakeAdapter(options: FakeAdapterOptions): EngineAdapter {
 
     spawnArgs(cfg: AgentSpawnConfig): SpawnPlan {
       return {
-        argv: [process.execPath, FAKE_ENGINE_CLI, '--script', options.scriptPath],
+        argv: [
+          process.execPath,
+          FAKE_ENGINE_CLI,
+          '--script',
+          options.scriptPath,
+          // ADR-0031: declared `enforced`, so the level must actually reach the
+          // process — conformance checks the declaration in both directions.
+          '--autonomy',
+          cfg.autonomy
+        ],
         cwd: cfg.cwd,
         env: {
           ...baseAgentEnv(),

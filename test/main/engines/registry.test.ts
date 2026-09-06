@@ -16,6 +16,7 @@ function dummyAdapter(id: EngineId): EngineAdapter {
   return {
     id,
     hooks: 'native',
+    autonomySupport: 'enforced',
     binary: () => ({
       name: id,
       install: { command: 'npm', args: ['i', '-g', id] },

@@ -35,6 +35,8 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0027](./ADR-0027-what-survives-a-restart.md) | What survives a restart, and what deliberately does not | accepted |
 | [ADR-0028](./ADR-0028-the-company-does-not-upgrade-its-own-engine.md) | The company does not upgrade its own engine | accepted |
 | [ADR-0029](./ADR-0029-unbudgeted-is-the-default.md) | Unbudgeted is the default | accepted |
+| [ADR-0030](./ADR-0030-the-outbound-draft-survives-with-its-gate.md) | The outbound draft survives with its gate | accepted |
+| [ADR-0031](./ADR-0031-an-engine-declares-whether-it-can-enforce-autonomy.md) | An engine declares whether it can enforce autonomy | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):

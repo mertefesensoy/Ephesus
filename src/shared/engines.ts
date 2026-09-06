@@ -38,6 +38,28 @@ export const HOOK_SUPPORT_RANK: Readonly<Record<HookSupport, number>> = {
 }
 
 /**
+ * Whether an engine integration can enforce the autonomy the harness composed
+ * (ADR-0031). Declared beside `HookSupport` and for the same reason: an
+ * integration that cannot deliver something says so, and the harness acts on
+ * the declaration rather than on an assumption.
+ *
+ * - `enforced` — every level reaches the engine as a flag or setting, so what
+ *   the Watch composed is what the process runs at.
+ * - `none` — the adapter has no way to say "ask me less" to this engine, so
+ *   the engine's own configuration decides, and that configuration belongs to
+ *   the operator rather than to the harness.
+ *
+ * There is deliberately no middle grade. A partial mapping is the dangerous
+ * shape — it looks enforced and holds for some levels — so an integration that
+ * cannot map ALL THREE declares `none` until it can.
+ */
+export const AUTONOMY_SUPPORTS = ['enforced', 'none'] as const
+
+export const autonomySupportSchema = z.enum(AUTONOMY_SUPPORTS)
+
+export type AutonomySupport = z.infer<typeof autonomySupportSchema>
+
+/**
  * Contract: returns the `EngineId` for a well-known id, or null for anything
  * else. Never throws — callers decide whether an unknown id is a validation
  * error (IPC boundary) or a "no adapter installed" state (registry lookup).

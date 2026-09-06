@@ -110,6 +110,15 @@ The company-wide ceiling is in the Watch panel, beside the budget one, and both 
 profile: a profile may sit under a ceiling and never above it. Changing either takes effect on the
 next spawn — no restart — so you can tighten a company that is already running.
 
+**The dial is only as good as the engine behind it.** Ephesus maps autonomy onto Claude Code's
+`--permission-mode`; the `codex` and `gemini` adapters map nothing, and neither redirects the
+engine's config directory, so on those two the *operator's own* engine configuration decides how
+much the agent asks. Since ADR-0031 an adapter declares whether it can enforce a ceiling, and a
+`manual` or `supervised` hire on one that cannot is **refused at spawn** rather than run at a
+level nobody chose. What is still owed is the isolation half: an agent on `codex` or `gemini`
+reads whatever MCP servers and settings are in your own config. Hire those two at `autonomous`
+on a repository you own, or stay on `claude` until that lands.
+
 ### 6.3 Spend is bounded by your attention, not by default
 
 As of ADR-0029, hires ship **unbudgeted**. Ceilings kept firing on ordinary work and stopping the

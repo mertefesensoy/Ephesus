@@ -5084,8 +5084,8 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       anchors only. Docs: ADR-0025 (extends 0021 — ADRs are append-only and this
       widens an accepted security decision), SDD §1.1 `engines/` row and §3, the
       M8.7 trust implementation doc. OWED, RECORDED NOT FIXED: no profile has been
-      activated against a real repository in the shipped app under these rules, so
-      SECOND CLEARANCE, same audit: the quit's DISARM
+      activated against a real repository in the shipped app under these rules.*
+      **SECOND CLEARANCE, same audit: the quit's DISARM
       phase. M8.6 registered `crew.stop()` among the quit's `steps` with a
       comment reading "Before the unwind, not after"; `QuitSequence.execute`
       runs closing → unwind → `steps`, so `steps` is LAST and every ladder was
@@ -5094,8 +5094,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       RUNS in. `disarm()` now runs between closing time and the unwind, isolated
       like `steps` and with its own degradation cause; `Artemis.stop()` joined
       it, having had zero production callers. 5 tests, 3 semantic mutations
-      killed (2 survivors were deliberate no-op anchor controls). the end-to-end claim rests on the key-equality test rather than observation
-      — M7's exit, still open.
+      killed (2 survivors were deliberate no-op anchor controls).**
 
 - [x] **M8.7a Engine isolation, and whose autonomy hinge it is** — B13, first
       half. Every hire now runs its OWN engine install: one config directory per
@@ -5144,6 +5143,32 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       fixed:** the engine warns that the mailbox grant's `Write(<dir>/**)` rule
       "is not matched by file permission checks — only `Edit(...)`" — predates
       this package, owed to whoever next touches `mailboxPermissions`.
+
+      *AUDIT (2026-09-06, working toward a releasable MVP): the trust half is now
+      confirmed BY OBSERVATION, which is what this block recorded as missing.
+      `~/.ephesus/engines/claude/agent.skeleton-crew-musahit-*/.claude.json`
+      carries two trusted keys per crew agent — the target repo AND that agent's
+      own `~/.ephesus/worktrees/<agentId>` — and those worktrees exist;
+      `agent.artemis`'s isolated config holds real `lastCost` and token counts,
+      so `CLAUDE_CONFIG_DIR` demonstrably took effect. In the other direction the
+      operator's own `~/.claude.json` has 111 project keys and NOT ONE agent
+      worktree among them, and both `trustWorkspace` call sites use per-agent
+      config dirs, so nothing writes trust into the shared config any more. The
+      lockdown flags are on the plan and `beforeHires` is wired with degradations
+      on both failure paths. **What the audit found instead: M8.7's two central
+      claims are CLAUDE-ONLY and nothing said so.** Proved by execution — the
+      `codex` and `gemini` adapters carry no autonomy signal anywhere in argv or
+      env and redirect no config directory, so the operator's own engine config
+      decided how much a hire asked while the app reported the composed ceiling.
+      Closed by ADR-0031: an adapter DECLARES whether it can enforce autonomy,
+      the declaration is conformance-checked in both directions, and a `manual`
+      or `supervised` hire on an engine that cannot is refused at spawn.
+      `autonomous` is allowed through, because an engine being stricter of its
+      own accord costs a stalled turn rather than an unpermitted action. 8
+      mutations, all killed. OWED, now visible rather than implied: real config
+      isolation and autonomy mapping for those two, which needs their flags
+      established by EXECUTION the way ADR-0026 established Claude's — never
+      guessed. Also repaired two spliced sentences in this block's own prose.*
 
 - [x] **M8.7b The harness re-supplies the tools, by name** - B13, second half.
       The M8.7a lockdown also hides a target repository's own skills and
