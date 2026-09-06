@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { CapacityView } from '../../shared/capacity'
-import type { AgoraHealth, ConfigSnapshot, HooksState } from '../../shared/ipc'
+import type { AgoraHealth, HooksState } from '../../shared/ipc'
 import { degradationLine } from '../../shared/degradation'
 import type { ModeView } from '../../shared/mode-view'
+import { stallOf } from '../../shared/freshness'
 import { loadPixelFonts, PIXEL_FACES, type FontStatus } from './fonts'
-import { CapacityBadge, CountBadge } from './StatusBadge'
+import { BridgeBadge, CapacityBadge, CountBadge, type BridgeState } from './StatusBadge'
 import { ActivityPanel } from './ActivityPanel'
 import { AgentDock } from './AgentDock'
 import { AgentPanel } from './AgentPanel'
@@ -22,11 +23,6 @@ import { LedgerPanel } from './LedgerPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { WatchPanel } from './WatchPanel'
 import { FloorCanvas } from './floor/FloorCanvas'
-
-type BridgeState =
-  | { kind: 'loading' }
-  | { kind: 'ready'; snapshot: ConfigSnapshot }
-  | { kind: 'unavailable'; reason: string }
 
 /**
  * Flattens the data-plane health into one visible line per issue.
@@ -54,6 +50,19 @@ const HOOKS_POLL_MS = 2000
 
 export function App(): ReactElement {
   const [bridge, setBridge] = useState<BridgeState>({ kind: 'loading' })
+  /**
+   * The clock the strip's staleness is measured against (B15).
+   *
+   * A stall is time passing with no answer, so nothing that only reacts to an
+   * ANSWER can notice one — a hung main sends no event to re-render on. This
+   * ticks on its own, and it is the only thing that makes "no answer in 12s"
+   * count upward instead of freezing at whatever the last answer left behind.
+   */
+  const [now, setNow] = useState(() => Date.now())
+  /** When this window began watching, so a poll that NEVER answers still ages. */
+  const [watchingSince] = useState(() => Date.now())
+  /** The last capacity read that actually answered; the poll holds its value. */
+  const [capacityOkAt, setCapacityOkAt] = useState<number | null>(null)
   const [hooks, setHooks] = useState<HooksState | null>(null)
   const [health, setHealth] = useState<AgoraHealth | null>(null)
   const [fonts, setFonts] = useState<FontStatus | null>(null)
@@ -156,11 +165,18 @@ export function App(): ReactElement {
       eph.watch
         .capacity()
         .then((view) => {
-          if (!cancelled) setCapacity(view)
+          if (!cancelled) {
+            setCapacity(view)
+            // Stamped only on an ANSWER. The badge holds its last value on
+            // failure (below) and now discloses how old that value is, so a
+            // held reading can no longer pass for a current one.
+            setCapacityOkAt(Date.now())
+          }
         })
         .catch(() => {
           // Held, not cleared: a failed read must never repaint a parked
-          // company as a working one.
+          // company as a working one. `capacityOkAt` is deliberately NOT
+          // stamped here, which is what turns the hold into a visible one.
         })
       // The status strip counts open gates (UI-DESIGN §4). It rides the same
       // slow poll so the badge is right even when the push was missed.
@@ -203,7 +219,10 @@ export function App(): ReactElement {
       eph.watch
         .capacity()
         .then((view) => {
-          if (!cancelled) setCapacity(view)
+          if (!cancelled) {
+            setCapacity(view)
+            setCapacityOkAt(Date.now())
+          }
         })
         .catch(() => {
           /* held, not cleared — see the poll */
@@ -216,6 +235,24 @@ export function App(): ReactElement {
     }
   }, [])
 
+  /**
+   * The bridge heartbeat (B15).
+   *
+   * This used to run ONCE, at mount. `bridge: ready` therefore meant "main
+   * answered when this window opened", and it went on saying so for as long as
+   * the window stayed open — through a main process that died an hour later,
+   * on a company whose entire premise is that you leave it running. A
+   * degradation rendered as good news is the one direction invariant §7 does
+   * not allow, and that one could not be cleared by anything short of a reload.
+   *
+   * Two failures, and only one of them announces itself. A main process that
+   * THREW rejects the invoke and the `catch` has always handled it. A main
+   * process whose loop is BLOCKED does neither: the invoke never settles, so a
+   * `.catch()` heartbeat would sit silent through exactly the failure it was
+   * written for. The deadline in `stallOf` is what covers the second — the
+   * probe is re-sent on every tick and `lastOkAt` only advances on an answer,
+   * so a hung main is a silence that grows rather than an event to wait for.
+   */
   useEffect(() => {
     const eph = window.eph
     if (!eph) {
@@ -223,10 +260,33 @@ export function App(): ReactElement {
       setBridge({ kind: 'unavailable', reason: 'window.eph bridge not exposed' })
       return
     }
-    eph.config
-      .get()
-      .then((snapshot) => setBridge({ kind: 'ready', snapshot }))
-      .catch((err: unknown) => setBridge({ kind: 'unavailable', reason: String(err) }))
+    let cancelled = false
+    const probe = (): void => {
+      eph.config
+        .get()
+        .then((snapshot) => {
+          if (!cancelled) setBridge({ kind: 'ready', snapshot, lastOkAt: Date.now() })
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setBridge({ kind: 'unavailable', reason: String(err) })
+        })
+    }
+    probe()
+    const timer = setInterval(probe, HOOKS_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
+
+  /**
+   * The strip's own clock. Nothing else advances it: a stall is the ABSENCE of
+   * events, so a component that only re-renders on one cannot show a silence
+   * growing.
+   */
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), HOOKS_POLL_MS)
+    return () => clearInterval(timer)
   }, [])
 
   /**
@@ -272,6 +332,21 @@ export function App(): ReactElement {
     return () => clearInterval(timer)
   }, [])
 
+  /**
+   * Which strip readings have stopped answering (B15).
+   *
+   * One rule, one place: both readings use `stallOf`, so there is a single
+   * deadline to argue about rather than a per-badge one that drifts. The
+   * `unavailable` bridge deliberately reports no stall — it already says what
+   * went wrong, and a second warning about the same fact is noise.
+   */
+  const bridgeStall = stallOf({
+    lastOkAt: bridge.kind === 'ready' ? bridge.lastOkAt : null,
+    watchingSince,
+    now
+  })
+  const capacityStall = stallOf({ lastOkAt: capacityOkAt, watchingSince, now })
+
   return (
     <main
       style={{
@@ -287,23 +362,7 @@ export function App(): ReactElement {
         <h1 style={{ fontFamily: 'var(--eph-face-display)', fontSize: '16px', margin: 0 }}>
           Ephesus
         </h1>
-        <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
-          {bridge.kind === 'loading' && 'bridge: connecting…'}
-          {bridge.kind === 'ready' && (
-            <>
-              {`bridge: ready · config schema v${bridge.snapshot.config.schemaVersion}`}
-              {bridge.snapshot.warning && (
-                <span style={{ color: 'var(--eph-status-blocked)' }}>
-                  {' '}
-                  · {bridge.snapshot.warning}
-                </span>
-              )}
-            </>
-          )}
-          {bridge.kind === 'unavailable' && (
-            <span style={{ color: 'var(--eph-status-blocked)' }}>bridge: {bridge.reason}</span>
-          )}
-        </span>
+        <BridgeBadge state={bridge} stallFor={bridgeStall} />
         <span style={{ fontFamily: 'var(--eph-face-data)', fontSize: '12px' }}>
           {hooks === null && 'events: …'}
           {hooks !== null && hooks.endpoint === null && (
@@ -342,7 +401,7 @@ export function App(): ReactElement {
             stopped taking turns, every other count on this line has stopped
             changing too, and reading them without this one is how an Architect
             concludes the company is merely quiet. */}
-        <CapacityBadge view={capacity} />
+        <CapacityBadge view={capacity} staleFor={capacityStall} />
         <CountBadge
           label="gates"
           count={openGates}

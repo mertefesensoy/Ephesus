@@ -233,6 +233,7 @@
       "members": [
         "src/renderer/src/",
         "src/shared/badges.ts",
+   "src/shared/freshness.ts",
         "src/shared/fonts.ts",
         "src/shared/contrast.ts"
       ]
