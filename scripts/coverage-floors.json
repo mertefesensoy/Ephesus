@@ -890,6 +890,121 @@
                 "statements": 47.26
               }
             }
+          },
+          {
+            "at": "2026-09-07T20:57:11.457Z",
+            "commit": "ef5f4a1",
+            "ref": "feature/m8-12-exit-review",
+            "tree": "ffa20b55b23a",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-07T20:57:11.349Z",
+            "floors": {
+              "boot": {
+                "lines": 28.05,
+                "branches": 17.46,
+                "functions": 13.24,
+                "statements": 27.1
+              },
+              "engines": {
+                "lines": 94.88,
+                "branches": 87.07,
+                "functions": 91.11,
+                "statements": 92.89
+              },
+              "hermes": {
+                "lines": 98.65,
+                "branches": 91.33,
+                "functions": 98.88,
+                "statements": 96.87
+              },
+              "agora": {
+                "lines": 97.09,
+                "branches": 88.32,
+                "functions": 96.41,
+                "statements": 95.83
+              },
+              "artemis": {
+                "lines": 97.66,
+                "branches": 91.78,
+                "functions": 91.67,
+                "statements": 97.08
+              },
+              "library": {
+                "lines": 90.39,
+                "branches": 78.7,
+                "functions": 86.51,
+                "statements": 88.62
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
+              },
+              "watch": {
+                "lines": 96.16,
+                "branches": 87.06,
+                "functions": 90.2,
+                "statements": 94.84
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.69,
+                "branches": 92.92,
+                "functions": 94.64,
+                "statements": 96.26
+              },
+              "home": {
+                "lines": 71.93,
+                "branches": 70.18,
+                "functions": 58.06,
+                "statements": 71.09
+              },
+              "panels": {
+                "lines": 46.77,
+                "branches": 46.57,
+                "functions": 34.41,
+                "statements": 44.9
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
           }
         ]
       },
