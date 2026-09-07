@@ -75,6 +75,16 @@ export interface AgoraOptions {
   onSlowRead?(info: { readonly entries: number; readonly bytes: number; readonly ms: number }): void
   /** Default 50 ms — a read that costs more than a frame on the main loop. */
   readonly slowReadMs?: number
+  /**
+   * Bytes the live `log.jsonl` may reach before the next append seals it into
+   * the archive (D3, M8.10). Defaults to `ROTATE_AT_BYTES`.
+   *
+   * Injectable for the same reason `slowReadMs` is: a test that had to write
+   * four megabytes to cross one boundary would be too slow to keep, and the
+   * readers that must survive a rotation — the incident board, the standup,
+   * the org metrics — are exactly the ones worth testing across one.
+   */
+  readonly rotateAtBytes?: number
 }
 
 /**
@@ -143,7 +153,10 @@ export class Agora {
     this.git = options.git ?? new ExecGitRunner()
     this.maxAttempts = options.maxAttempts ?? 5
     this.backoffMs = options.backoffMs ?? 25
-    this.log = new EventLog(this.pathOf(LOG_REL))
+    this.log = new EventLog(
+      this.pathOf(LOG_REL),
+      options.rotateAtBytes === undefined ? {} : { rotateAtBytes: options.rotateAtBytes }
+    )
   }
 
   /** Files that failed to parse this run — a visible state, not a silent default. */
@@ -259,6 +272,18 @@ export class Agora {
   /** Every readable entry, oldest first. See `readLogSince`. */
   readLogAll(): readonly LogEntry[] {
     return this.readLogSince(0)
+  }
+
+  /**
+   * Sealed log segments, oldest first (D3, M8.10).
+   *
+   * Exposed so a caller can SEE that the book of record spans more than one
+   * file. Nothing in the read path needs it — `readLogAll` already spans the
+   * archive — but a test that asserts a reader survived a rotation has to be
+   * able to establish that a rotation happened, or it proves nothing.
+   */
+  logSegments(): readonly string[] {
+    return this.log.segments()
   }
 
   /** The roster (SDD §4.1). A corrupt file yields the empty roster + a warning. */
