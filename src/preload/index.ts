@@ -20,6 +20,7 @@ import {
 import type { UsageSnapshot } from '../shared/ipc'
 import type { AgentCard, SpawnRequest } from '../shared/agents'
 import type { CommandState } from '../shared/commands'
+import type { ConsentGrantOutcome, ConsentView } from '../shared/consent'
 import type { BreakerState, BreakerStopsView } from '../shared/breaker'
 import type { CapacityView } from '../shared/capacity'
 import type { AgentSpend } from '../shared/cost'
@@ -65,6 +66,12 @@ import type { TaskLedger } from '../shared/tasks'
 const eph: EphApi = {
   config: {
     get: () => ipcRenderer.invoke(IpcChannels.configGet) as Promise<ConfigSnapshot>
+  },
+  // First-launch consent (DD-6, M8.12). `grant` carries no argument: what is
+  // being consented to is main's to state, so the window cannot widen it.
+  consent: {
+    get: () => ipcRenderer.invoke(IpcChannels.consentGet) as Promise<ConsentView>,
+    grant: () => ipcRenderer.invoke(IpcChannels.consentGrant) as Promise<ConsentGrantOutcome>
   },
   agents: {
     list: () => ipcRenderer.invoke(IpcChannels.agentsList) as Promise<readonly AgentCard[]>,

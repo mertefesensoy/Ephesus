@@ -75,6 +75,8 @@ import type { Agora } from './agora'
 import type { AvatarDirector } from './avatars'
 import type { CommandQueue } from './commands'
 import { getHome } from './config'
+import type { CompanyStart } from './consent'
+import type { ConsentGrantOutcome, ConsentView } from '../shared/consent'
 import type { PtyManager } from './pty'
 import type { GateManager } from './watch/gates'
 import type { SecretBroker } from './watch/secrets'
@@ -206,6 +208,14 @@ const agentSendSchema = z.object({ agentId: agentIdSchema, text: z.string().max(
  */
 export interface IpcDeps {
   readonly ptyManager: PtyManager
+  /**
+   * The first-launch consent gate (DD-6, M8.12).
+   *
+   * Passed as the class rather than as two closures so the handler cannot
+   * accidentally grant without starting, or start without recording: the
+   * ordering is `CompanyStart`'s and there is one copy of it.
+   */
+  readonly consent: CompanyStart
   readonly agents: AgentManager
   readonly avatars: AvatarDirector
   readonly commands: CommandQueue
@@ -593,6 +603,12 @@ export function registerIpc(deps: IpcDeps): void {
     const home = getHome()
     return { config: home.config, warning: home.configWarning }
   })
+
+  // First-launch consent (DD-6, M8.12). No payload crosses either channel: what
+  // consent COVERS is main's to state and the renderer's to display, so there
+  // is nothing here for a compromised window to widen.
+  ipcMain.handle(IpcChannels.consentGet, (): ConsentView => deps.consent.view())
+  ipcMain.handle(IpcChannels.consentGrant, (): ConsentGrantOutcome => deps.consent.grant())
 
   ipcMain.handle(IpcChannels.agentsList, () => agents.list())
 

@@ -74,6 +74,12 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
 
     registerIpc({
       ptyManager: {} as never,
+      // Not a consent fixture: neither rig below ever calls `consent:get` or
+      // `consent:grant`. It is `{} as never` for the same reason `ptyManager` is
+      // — the handler table needs the field, and inventing a granted record here
+      // would be a test quietly answering the question a stranger has to answer
+      // (DD-6, M8.12).
+      consent: {} as never,
       agents: {} as never,
       avatars: { list: () => new Map() } as never,
       commands: { list: () => [] } as never,

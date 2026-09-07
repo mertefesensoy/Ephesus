@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { companyModeSchema } from './mode'
+import { consentRecordSchema } from './consent'
 
 /**
  * App config (`~/.ephesus/config.json`, SDD §2). Carries no secrets — ever
@@ -27,6 +28,23 @@ export const configSchema = z
      * initiative does not.
      */
     mode: companyModeSchema.optional(),
+    /**
+     * First-launch consent (DD-6, M8.12): whether the Architect has said the
+     * company may start working. Written only when they grant it.
+     *
+     * It lives HERE rather than in a file of its own for the reason invariant
+     * §9 exists — `config.json` already declares a `schemaVersion` and already
+     * validates in `src/shared/`, and a second durable file would be a second
+     * thing to migrate, seed and keep honest for one boolean's worth of state.
+     *
+     * Optional, and absent means ASK. Every home that predates M8.12 has no
+     * record, and `ensureHarnessHome` seeds only what is ABSENT, so this field
+     * will never be written onto an existing install by the harness — exactly
+     * the shape that left the Architect's `gate-policy.json` three days behind
+     * DD-1. `undefined` therefore has to mean "nobody has been asked", never
+     * "assume yes"; `decideConsent` is where that is enforced and tested.
+     */
+    consent: consentRecordSchema.optional(),
     /**
      * Whether `improving` has EVER been enabled. The proof gate (SRS §6.9) is a
      * first-enable check (FR-14.3): once the company has proved the loop works,

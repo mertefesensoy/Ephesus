@@ -1,6 +1,7 @@
 import type { AgentCard, SpawnRequest } from './agents'
 import type { AvatarSnapshot } from './avatar'
 import type { CommandState } from './commands'
+import type { ConsentGrantOutcome, ConsentView } from './consent'
 import type { LogEntry } from './log'
 import type { KnowledgeDoc, MemoryView } from './memory'
 import type { OrgNode } from './org'
@@ -71,6 +72,8 @@ import type { EphConfig } from './config'
  */
 export const IpcChannels = {
   configGet: 'config:get',
+  consentGet: 'consent:get',
+  consentGrant: 'consent:grant',
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
   agentsList: 'agents:list',
@@ -335,6 +338,20 @@ export interface AgoraHealth {
 export interface EphApi {
   config: {
     get: () => Promise<ConfigSnapshot>
+  }
+  /**
+   * First-launch consent (DD-6, M8.12). Two channels and no more: what the
+   * company would do, and the Architect saying go.
+   *
+   * There is deliberately no `revoke`. Consent authorises the company to START;
+   * stopping it is what the breaker, the quit sequence and killing an agent are
+   * for, and a second way to stop that only worked at the next boot would be a
+   * fourth answer to a question that already has three.
+   */
+  consent: {
+    get: () => Promise<ConsentView>
+    /** Records the grant and starts the company in THIS process. */
+    grant: () => Promise<ConsentGrantOutcome>
   }
   agents: {
     list: () => Promise<readonly AgentCard[]>

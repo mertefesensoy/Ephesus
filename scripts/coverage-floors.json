@@ -42,6 +42,7 @@
         "src/renderer/src/main.tsx",
         "src/renderer/src/App.tsx",
         "src/main/restore.ts",
+        "src/main/consent.ts",
         "src/main/state-store.ts",
         "src/shared/restart.ts"
       ]
@@ -224,6 +225,7 @@
         "src/main/config.ts",
         "src/main/db.ts",
         "src/shared/config.ts",
+        "src/shared/consent.ts",
         "src/shared/window-state.ts",
         "src/shared/renderer-health.ts",
         "src/shared/ipc.ts"
@@ -255,53 +257,53 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-06T23:57:17.611Z",
-        "commit": "1919a3f",
+        "at": "2026-09-07T20:37:28.829Z",
+        "commit": "6fdcad2",
         "ref": "local",
-        "tree": "d2cddb05c4db",
+        "tree": "ffa20b55b23a",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
         "command": "npm run test:coverage"
       },
       "candidate": {
-        "tree": "d2cddb05c4db",
-        "map": "7b5d1c6d43f5",
+        "tree": "ffa20b55b23a",
+        "map": "52cf59a4bc05",
         "runs": [
           {
-            "at": "2026-09-06T23:20:34.131Z",
-            "commit": "efc24a9",
+            "at": "2026-09-07T20:33:15.228Z",
+            "commit": "6fdcad2",
             "ref": "local",
-            "tree": "d2cddb05c4db",
+            "tree": "ffa20b55b23a",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T23:20:33.453Z",
+            "report": "2026-09-07T20:33:15.043Z",
             "floors": {
               "boot": {
-                "lines": 26.69,
-                "branches": 16.57,
-                "functions": 12.75,
-                "statements": 25.87
+                "lines": 28.05,
+                "branches": 17.46,
+                "functions": 13.24,
+                "statements": 27.1
               },
               "engines": {
-                "lines": 95.41,
-                "branches": 87.79,
-                "functions": 92.51,
-                "statements": 93.2
+                "lines": 95.45,
+                "branches": 87.93,
+                "functions": 92.59,
+                "statements": 93.25
               },
               "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.59
+                "lines": 98.65,
+                "branches": 91.33,
+                "functions": 98.88,
+                "statements": 96.67
               },
               "agora": {
-                "lines": 97.99,
-                "branches": 88.69,
-                "functions": 97.37,
-                "statements": 96.68
+                "lines": 98.06,
+                "branches": 89.27,
+                "functions": 97.6,
+                "statements": 96.93
               },
               "artemis": {
                 "lines": 97.66,
@@ -310,10 +312,10 @@
                 "statements": 97.08
               },
               "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
+                "lines": 90.39,
+                "branches": 78.7,
+                "functions": 86.51,
+                "statements": 88.62
               },
               "odeon": {
                 "lines": 92.5,
@@ -328,10 +330,10 @@
                 "statements": 89.38
               },
               "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
+                "lines": 96.16,
+                "branches": 87.06,
                 "functions": 90.2,
-                "statements": 94.85
+                "statements": 94.84
               },
               "terraces": {
                 "lines": 76.39,
@@ -352,22 +354,22 @@
                 "statements": 95.5
               },
               "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
+                "lines": 97.69,
+                "branches": 92.92,
+                "functions": 94.64,
+                "statements": 96.26
               },
               "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
+                "lines": 71.93,
+                "branches": 70.18,
+                "functions": 58.06,
+                "statements": 71.09
               },
               "panels": {
-                "lines": 42.43,
-                "branches": 44.57,
-                "functions": 30.61,
-                "statements": 40.75
+                "lines": 46.77,
+                "branches": 46.57,
+                "functions": 34.41,
+                "statements": 44.9
               },
               "herald": {
                 "lines": 93.05,
@@ -384,39 +386,39 @@
             }
           },
           {
-            "at": "2026-09-06T23:40:53.239Z",
-            "commit": "efc24a9",
+            "at": "2026-09-07T20:35:23.524Z",
+            "commit": "6fdcad2",
             "ref": "local",
-            "tree": "d2cddb05c4db",
+            "tree": "ffa20b55b23a",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T23:40:43.770Z",
+            "report": "2026-09-07T20:35:23.315Z",
             "floors": {
               "boot": {
-                "lines": 26.69,
-                "branches": 16.57,
-                "functions": 12.75,
-                "statements": 25.87
+                "lines": 28.05,
+                "branches": 17.46,
+                "functions": 13.24,
+                "statements": 27.1
               },
               "engines": {
-                "lines": 95.41,
-                "branches": 87.79,
-                "functions": 92.51,
-                "statements": 93.2
+                "lines": 95.45,
+                "branches": 87.93,
+                "functions": 92.59,
+                "statements": 93.25
               },
               "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.59
+                "lines": 98.65,
+                "branches": 91.33,
+                "functions": 98.88,
+                "statements": 96.67
               },
               "agora": {
-                "lines": 97.99,
-                "branches": 88.69,
-                "functions": 97.37,
-                "statements": 96.68
+                "lines": 98.06,
+                "branches": 89.27,
+                "functions": 97.6,
+                "statements": 96.93
               },
               "artemis": {
                 "lines": 97.66,
@@ -425,10 +427,10 @@
                 "statements": 97.08
               },
               "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
+                "lines": 90.39,
+                "branches": 78.7,
+                "functions": 86.51,
+                "statements": 88.62
               },
               "odeon": {
                 "lines": 92.5,
@@ -443,10 +445,10 @@
                 "statements": 89.38
               },
               "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
+                "lines": 96.16,
+                "branches": 87.06,
                 "functions": 90.2,
-                "statements": 94.85
+                "statements": 94.84
               },
               "terraces": {
                 "lines": 76.39,
@@ -467,22 +469,22 @@
                 "statements": 95.5
               },
               "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
+                "lines": 97.69,
+                "branches": 92.92,
+                "functions": 94.64,
+                "statements": 96.26
               },
               "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
+                "lines": 71.93,
+                "branches": 70.18,
+                "functions": 58.06,
+                "statements": 71.09
               },
               "panels": {
-                "lines": 42.43,
-                "branches": 44.57,
-                "functions": 30.61,
-                "statements": 40.75
+                "lines": 46.77,
+                "branches": 46.57,
+                "functions": 34.41,
+                "statements": 44.9
               },
               "herald": {
                 "lines": 93.05,
@@ -499,39 +501,39 @@
             }
           },
           {
-            "at": "2026-09-06T23:57:17.611Z",
-            "commit": "1919a3f",
+            "at": "2026-09-07T20:37:28.829Z",
+            "commit": "6fdcad2",
             "ref": "local",
-            "tree": "d2cddb05c4db",
+            "tree": "ffa20b55b23a",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T23:57:16.899Z",
+            "report": "2026-09-07T20:37:28.642Z",
             "floors": {
               "boot": {
-                "lines": 26.69,
-                "branches": 16.57,
-                "functions": 12.75,
-                "statements": 25.87
+                "lines": 28.05,
+                "branches": 17.46,
+                "functions": 13.24,
+                "statements": 27.1
               },
               "engines": {
-                "lines": 95.41,
-                "branches": 87.79,
-                "functions": 92.51,
-                "statements": 93.2
+                "lines": 95.45,
+                "branches": 87.93,
+                "functions": 92.59,
+                "statements": 93.25
               },
               "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.59
+                "lines": 98.65,
+                "branches": 91.33,
+                "functions": 98.88,
+                "statements": 96.67
               },
               "agora": {
-                "lines": 97.99,
-                "branches": 88.69,
-                "functions": 97.37,
-                "statements": 96.68
+                "lines": 98.06,
+                "branches": 89.27,
+                "functions": 97.6,
+                "statements": 96.93
               },
               "artemis": {
                 "lines": 97.66,
@@ -540,10 +542,10 @@
                 "statements": 97.08
               },
               "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
+                "lines": 90.39,
+                "branches": 78.7,
+                "functions": 86.51,
+                "statements": 88.62
               },
               "odeon": {
                 "lines": 92.5,
@@ -558,10 +560,10 @@
                 "statements": 89.38
               },
               "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
+                "lines": 96.16,
+                "branches": 87.06,
                 "functions": 90.2,
-                "statements": 94.85
+                "statements": 94.84
               },
               "terraces": {
                 "lines": 76.39,
@@ -582,22 +584,22 @@
                 "statements": 95.5
               },
               "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
+                "lines": 97.69,
+                "branches": 92.92,
+                "functions": 94.64,
+                "statements": 96.26
               },
               "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
+                "lines": 71.93,
+                "branches": 70.18,
+                "functions": 58.06,
+                "statements": 71.09
               },
               "panels": {
-                "lines": 42.43,
-                "branches": 44.57,
-                "functions": 30.61,
-                "statements": 40.75
+                "lines": 46.77,
+                "branches": 46.57,
+                "functions": 34.41,
+                "statements": 44.9
               },
               "herald": {
                 "lines": 93.05,
@@ -617,31 +619,31 @@
       },
       "floors": {
         "boot": {
-          "lines": 26.69,
-          "branches": 16.57,
-          "functions": 12.75,
-          "statements": 25.87,
-          "files": 10
+          "lines": 28.05,
+          "branches": 17.46,
+          "functions": 13.24,
+          "statements": 27.1,
+          "files": 11
         },
         "engines": {
           "lines": 95.66,
-          "branches": 87.87,
-          "functions": 92.51,
-          "statements": 93.22,
+          "branches": 87.93,
+          "functions": 92.59,
+          "statements": 93.25,
           "files": 25
         },
         "hermes": {
-          "lines": 98.61,
-          "branches": 91.16,
-          "functions": 98.86,
-          "statements": 96.59,
+          "lines": 98.65,
+          "branches": 91.33,
+          "functions": 98.88,
+          "statements": 96.67,
           "files": 7
         },
         "agora": {
           "lines": 98.07,
-          "branches": 88.91,
-          "functions": 97.37,
-          "statements": 96.68,
+          "branches": 89.27,
+          "functions": 97.6,
+          "statements": 96.93,
           "files": 11
         },
         "artemis": {
@@ -652,10 +654,10 @@
           "files": 2
         },
         "library": {
-          "lines": 90.22,
+          "lines": 90.39,
           "branches": 78.75,
-          "functions": 86.4,
-          "statements": 88.42,
+          "functions": 86.51,
+          "statements": 88.62,
           "files": 8
         },
         "odeon": {
@@ -701,25 +703,25 @@
           "files": 5
         },
         "company": {
-          "lines": 97.66,
-          "branches": 92.63,
-          "functions": 94.48,
-          "statements": 96.08,
+          "lines": 97.69,
+          "branches": 92.92,
+          "functions": 94.64,
+          "statements": 96.26,
           "files": 13
         },
         "home": {
-          "lines": 55.43,
-          "branches": 44.12,
-          "functions": 40.74,
-          "statements": 55.34,
-          "files": 7
+          "lines": 71.93,
+          "branches": 70.18,
+          "functions": 58.06,
+          "statements": 71.09,
+          "files": 8
         },
         "panels": {
-          "lines": 42.43,
-          "branches": 44.57,
-          "functions": 30.61,
-          "statements": 40.75,
-          "files": 27
+          "lines": 46.77,
+          "branches": 46.57,
+          "functions": 34.41,
+          "statements": 44.9,
+          "files": 28
         },
         "herald": {
           "lines": 93.05,
@@ -738,7 +740,6 @@
       },
       "untested": [
         "shims/eph-usage.mjs",
-        "src/main/config.ts",
         "src/main/db.ts",
         "src/main/index.ts",
         "src/main/library-fts-sqlite.ts",
