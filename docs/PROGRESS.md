@@ -6213,6 +6213,82 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       spent no measurable tokens, because the scratch boot was stopped before any
       turn completed (zero `cost` rows).*
 
+- [x] **M8.13 The report you read when nobody was watching** — *added after the
+      M8 exit run, by Architect decision 2026-09-08: "during testing I may not be
+      present at the computer, so the project must prepare itself for the
+      scenario that I will have to record the issue properly so another agent can
+      see what is working, what is not working, why is it not working properly."*
+
+      The harness now writes **`DIAGNOSIS.md`** into the harness home — at boot,
+      every sixty seconds, and once more in the quit path. Every area reads
+      `WORKING`, `BROKEN`, `WAITING FOR YOU` or **`NOT EXERCISED`**, and the
+      fourth is the one that earns the package: a report calling an untouched
+      subsystem "ok" would be the check-that-cannot-fail this codebase keeps
+      finding, dressed as a diagnostic. The file says so in its own body, and a
+      mutation deleting that sentence is killed.
+
+      *It stores nothing.* `AgoraHealth.runtime` already carries the M8.2
+      degradation ring — one row per CAUSE with `count`, `since` and
+      `live`/`carried` — and `log.jsonl` already carries every positive event;
+      this is a reading of both, never a second copy (the M8.9 B14 rule). No CLI:
+      `scripts/*.cjs` cannot import `src/shared/*.ts`, so an offline script would
+      re-implement `parseLogLine` and the degradation vocabulary, and a TS runner
+      is a new dependency. The cost is stated rather than hidden — if the app
+      never starts there is no fresh report — and paid for by writing often and
+      by putting the file's own age in its FIRST line.
+
+      *Evidence: 225 files / 4231 passed / 0 failed; typecheck, lint, invariants
+      (reachability 180/190 → **182/192**, both new modules reached from
+      production with no allowlist), coverage floors ok with none lowered and no
+      ratchet needed, README currency and attribution all green. **16 mutants, 15
+      killed, and the sixteenth is a planted no-op** (`minutes < 1` →
+      `minutes <= 0` on an integer) which survived as designed.*
+
+      **THREE DEFECTS THE FIRST LIVE BOOT EXPOSED, all mine and all invisible to
+      a green suite** — which is why PROVE is a step of the loop and not a
+      formality. (a) It rendered withheld consent as `BROKEN`; it is the designed
+      state, and a BROKEN on every healthy first launch teaches a reader to skip
+      the column. Fixed with a fourth verdict declared per probe, so
+      `consent/unwritable` — same source — still reads `broken`. (b) It said "no
+      schedule is armed, by design" and then listed five: `scheduler.armed()`
+      reports REGISTERED triggers and the clock is behind the consent gate, so on
+      a withheld company that list is a forecast. (c) Worst: the rewrite trigger
+      was on the **company scheduler**, whose clock is also behind that gate — so
+      on a machine stuck at the consent gate, the state a stranger is most likely
+      to be in, the report would have been written once and never again. It now
+      runs on its own unref'd `setInterval`. **Proved live: 22:31:28 → 22:32:28,
+      sixty seconds apart, with `triggers.json` never created.**
+
+      *A surviving mutant was read rather than patched around, and was a missing
+      test again (the third package running): `carried = conditions.slice()`
+      survived because nothing asserted the REVERSE direction — that a LIVE
+      condition never appears in the carried section, where it would be described
+      as "true when we stopped and not re-checked since". Test added, mutant
+      re-run, killed. And the `agora` coverage floor caught a design smell rather
+      than a testing gap: `DiagnosisWriter.at()` had no production caller, so the
+      fix was deletion — the writer now has no clock at all, and renders against
+      the instant its own snapshot was taken.*
+
+      **PLUS the five defects the M8 exit run found, four of them in documents
+      merged hours earlier.** `IncidentsPanel` renders inside `ProfilesPanel`
+      deliberately (UI-DESIGN §4 has no Incidents tab; the code says "do not
+      invent UI") and there is **no Harbor surface at all** — yet the README and
+      `docs/EXIT-M8.md` both sent a stranger to an "INCIDENTS tab", and the exit
+      script's pre-flight checkpoint told them to verify readiness by reading a
+      HARBOR panel that has never existed. The code was right and the prose
+      invented UI. Also: "Node 20" against a lockfile where fifteen packages want
+      `^20.19.0 || >=22.12.0` (`@electron/rebuild` at `>=22.12.0`, on the
+      postinstall path) with no `engines` field to catch it; "Nothing else"
+      falsified on first boot by two MemPalace degradations; and `EPH_HOME`
+      documented nowhere while `EXIT-M8.md` demanded a clean home without saying
+      how to get one. All six fixed.
+
+      *NOT proved: the quit-path write. Stopping Electron by process — which is
+      what the README correctly tells you to do — never reaches `before-quit`, so
+      that write is covered by `test/main/diagnosis-writer.test.ts` and not by a
+      live run. It matters little: the sixty-second cadence bounds staleness at a
+      minute either way, and the file's first line states its own age.*
+
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
 those were settled by work that had already landed.** The list below is the

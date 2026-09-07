@@ -43,9 +43,15 @@ running**. Package-by-package state with evidence is in
 
 ## Quick start
 
-You need **Node 20** ([`.nvmrc`](./.nvmrc)), a toolchain that can compile native
-modules (`node-pty` and `better-sqlite3` are built on install), and at least one
-agent CLI on your `PATH`.
+You need **Node 20.19+ or 22.12+**, a toolchain that can compile native modules
+(`node-pty` and `better-sqlite3` are built on install), and at least one agent
+CLI on your `PATH`.
+
+[`.nvmrc`](./.nvmrc) says `20`, which is the major line — but fifteen packages
+in the lockfile, `@electron/rebuild` among them, require `^20.19.0 || >=22.12.0`.
+On an older 20.x you will get a wall of `EBADENGINE` warnings from `npm install`
+and a native rebuild that may not work. Nothing refuses the install, so check
+`node -v` yourself.
 
 ```bash
 git clone https://github.com/mertefesensoy/Ephesus.git
@@ -205,7 +211,14 @@ Ephesus asks this itself at every spawn. An agent whose engine has no session
 is shown as **needs-login** with the command to run, rather than started and
 left sitting at a login prompt while its card claims it is working.
 
-**3. Nothing else.** On first launch the harness creates `~/.ephesus/` and
+**3. Nothing else is required** — though the first boot will tell you about one
+optional extra. Semantic recall uses [MemPalace](https://github.com/mempalace/mempalace)
+(ADR-0016), and without it the Library reports two degradations naming
+`pip install mempalace` and falls back to a full-text rung. That is the harness
+working as designed — a missing optional is disclosed, never silently absent —
+and you can ignore it or install it.
+
+On first launch the harness creates `~/.ephesus/` and
 writes the files it needs, then tells you it did:
 
 | File | What it decides | If you delete it |
@@ -217,6 +230,25 @@ writes the files it needs, then tells you it did:
 
 `~/.ephesus/` is **yours**. Ephesus writes a file there only when it is absent
 and never edits one you already have, so anything you change stays changed.
+
+**To run against a different home**, set `EPH_HOME` to any directory:
+
+```bash
+EPH_HOME=/tmp/eph-scratch npm run dev
+```
+
+```powershell
+$env:EPH_HOME = "$env:TEMP\eph-scratch"; npm run dev
+```
+
+That is how you get a genuinely clean company without touching the one you
+already have — useful for trying something out, and required by
+[the M8 exit script](./docs/EXIT-M8.md).
+
+**And whatever goes wrong, read `DIAGNOSIS.md` in that home first.** The
+harness rewrites it every minute and once more on the way out: what is working,
+what is not and why, and — the part that matters — what has simply never been
+exercised, which is not the same as fine.
 
 **4. Say go.** Nothing is hired until you do. On first launch the app shows a
 banner above everything else saying the company is not working yet, and
@@ -301,7 +333,9 @@ reports as a degradation rather than as silence.
 nothing runs in your own checkout, and each on its own engine install so no
 agent inherits your CLI's memory, plugins or hooks. From here on, a CI failure
 on the watched repository becomes an incident, the incident is routed to whoever
-is on call for it, and what they report comes back to the **INCIDENTS** tab —
+is on call for it, and what they report comes back to the **INCIDENTS**
+section at the bottom of the **PROFILES** tab (it lives there rather than on
+a tab of its own because an incident belongs to a profile instance) —
 including every refusal, shown as a refusal.
 
 To take it all down: deactivate the instance from PROFILES. To watch a second
@@ -366,7 +400,7 @@ mid-run. That run has not happened, so the row is open — as M7's own exit has
 been since 2026-09-01, for the same reason. The script for it is
 [`docs/EXIT-M8.md`](./docs/EXIT-M8.md).
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11 M8.12
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11 M8.12 M8.13
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -462,6 +496,23 @@ a duplicate sequence number left behind by two harness instances sharing one
 home, and [`docs/EXIT-M8.md`](./docs/EXIT-M8.md) is a script somebody who has
 never seen this repository can follow, with the place each acceptance clause's
 evidence lands named by hand.
+
+And, added after the first attempt at that exit run: **the company writes down
+what is wrong with it.** Every harness home now carries a `DIAGNOSIS.md`,
+rewritten at boot, every minute, and once more on the way out. It says what is
+working, what is broken and why, what is waiting on you — and, the part that
+earns it, what has simply **never been exercised**, which is not the same as
+fine. Nothing is stored to produce it: it is a reading of the degradation
+channel and the book of record, both of which already existed, and it keeps
+writing even while the company itself is stopped, because a diagnostic that
+stops when its subject stops is not a diagnostic. The point is that when you
+come back to a machine you left running — or hand it to somebody else — the
+first file they open already answers the question, instead of them guessing from
+a quiet screen.
+
+That same exit attempt found this README sending people to two panels that do
+not exist, and a Node version the lockfile does not accept. Both are fixed here,
+which is what the exercise is for.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8. The same run is owed to both.

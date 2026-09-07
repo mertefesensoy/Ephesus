@@ -51,9 +51,23 @@ Follow [README → Setting it up](../README.md#setting-it-up) and
 [Your first crew](../README.md#your-first-crew). Do not read ahead in this file
 for setup help — if the README leaves you stuck, that is the finding.
 
+**Use a clean HOME as well as a clean clone.** A fresh checkout pointed at a
+`~/.ephesus/` somebody has already used is not a clean install — it inherits
+their crew, roster and book of record. Set `EPH_HOME` to an empty directory and
+keep it set for every command in this run:
+
+```bash
+export EPH_HOME=/tmp/eph-exit-run
+```
+
+```powershell
+$env:EPH_HOME = "$env:TEMP\eph-exit-run"
+```
+
 You will end §1 with:
 
-- the app running from a clean clone (`npm install && npm run dev`);
+- the app running from a clean clone (`npm install && npm run dev`) against that
+  fresh home;
 - `claude auth status` reporting a logged-in session;
 - the consent banner answered — the app hires nobody until you press **START THE
   COMPANY**, and what it says it will do is what it does;
@@ -70,12 +84,18 @@ better than a real one for a first run.
 |---|---|
 | the crew is hired and running | the agent dock along the bottom |
 | the instance is watching your repository by name | PROFILES → the activated instance |
-| `gh` answers | HARBOR: your open pull requests and recent CI runs are listed |
+| `gh` answers | `gh auth status` in a terminal, and — after the first ingest — `remote` rows in `agora/log.jsonl` naming your repository |
 | nothing is already degraded | the status strip says `agora: ok` |
 
-If HARBOR is empty, the crew can ingest nothing and the run will prove nothing.
-Fix that before continuing — it is the single most common way this run wastes
-an hour.
+There is **no Harbor panel** — the ingest has no UI surface, so the log is where
+you look. If no `remote` row ever appears, the crew can ingest nothing and the
+run will prove nothing. Fix that before continuing; it is the single most common
+way this run wastes an hour.
+
+Quicker than either: open `DIAGNOSIS.md` in the home. The harness rewrites it
+every minute, and its *watching a repository* row says `WORKING`, `BROKEN` with
+the reason, or `NOT EXERCISED` — which at this point in setup is what you expect
+and is not a pass.
 
 ---
 
@@ -159,8 +179,7 @@ is the designed behaviour, not a failure, and the run continues from there.
 
 ## 5. At the hour: where each clause's evidence lives
 
-`log.jsonl` is the book of record. On Windows it is
-`%USERPROFILE%\.ephesus\agora\log.jsonl`; elsewhere `~/.ephesus/agora/log.jsonl`.
+`log.jsonl` is the book of record. It lives in the harness home — `%USERPROFILE%\.ephesus\agora\log.jsonl` by default on Windows, `~/.ephesus/agora/log.jsonl` elsewhere, or under whatever directory you set `EPH_HOME` to in §1.
 It is JSON Lines — one object per line, append-only. Read it with the ACTIVITY
 tab, or:
 
@@ -180,7 +199,7 @@ grep '"kind":"profile"' ~/.ephesus/agora/log.jsonl | tail -40
 | CI failure ingested | `log.jsonl`: `kind: "remote"`, `inbound: "ci-run"`, `conclusion: "failure"`, with your repo and run id |
 | routed to somebody on call | `kind: "profile"`, `event: "incident-raised"` — carries `incident`, `repo`, `oncall` |
 | a triage report came back | `kind: "profile"`, `event: "incident-triaged"` — carries `severity` |
-| on screen | the **INCIDENTS** tab |
+| on screen | the **INCIDENTS** section at the bottom of the **PROFILES** tab |
 
 **A refusal is a result, not a gap.** `event: "incident-triage-refused"` carries
 a `reasons` array. If triage was refused, the run has found something: read the
