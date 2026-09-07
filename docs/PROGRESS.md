@@ -5712,6 +5712,22 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       34.5 -> 42.43, branches 40.26 -> 44.57, statements 33.36 -> 40.75, and
       boot lines 20.63 -> 26.69 on the App import graph.*
 
+      ***Merged main on 2026-09-07 and it found a defect neither side had.***
+      *`main` had moved seven commits during the build (nothing local said so —
+      it surfaced as a coverage number that would not reproduce). The merge
+      conflicted only in the append-only DECISIONS-LOG, kept both sides. But
+      main's new `profiles-panel-dom.test.tsx` mounts the real `ProfilesPanel`
+      with a bridge stub carrying `profiles` alone, and M8.9 had just made
+      `IncidentsPanel` a CHILD of it — so the Profiles tab died with "Cannot
+      read properties of undefined (reading 'incidents')". Never a live crash
+      (the shipped preload always exposes `harbor`), but the wrong shape: a
+      child panel that throws in its mount effect takes its parent down. It now
+      renders the FAILURE state it already had, not an empty board. Two
+      mutations, both killed. `README.md` also gained M8.9's line, because main
+      added `scripts/check-readme-current.cjs` mid-package and CI would have
+      gone red on a gate this branch had never seen. Merged suite: 213 files /
+      4022 passed / 0 failed; every gate green.*
+
       *PROVED against the real book of record, not only fixtures: `foldIncidents`
       over the Architect's own `log.jsonl` (2689 entries) returns **7 incidents,
       2 unclaimed and all 15 refusals** — four incidents nobody ever triaged,
