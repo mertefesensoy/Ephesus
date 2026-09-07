@@ -175,7 +175,7 @@ describe('S-MEETING — minutes and action items on close', () => {
     eph.meetings.close()
 
     const closed = eph.agora
-      .readLog()
+      .readLogAll()
       .find((row) => row['kind'] === 'meeting' && row['event'] === 'closed')
     expect(closed).toMatchObject({ unheard: 1 })
   })

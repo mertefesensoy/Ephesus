@@ -333,7 +333,7 @@ describe('S-BREAKER — rung 3 gives the work back (ADR-0011, M5.1)', () => {
 
     // …and why, reconstructible from `log.jsonl` alone (NFR-13).
     const stalled = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((row) => row['kind'] === 'task' && row['event'] === 'stalled')
       .at(-1)
     expect(stalled).toMatchObject({

@@ -393,13 +393,13 @@ describe('S-BLACKOUT — killed mid-commit', () => {
       sendStep(scenarioMessage({ from: 'agent.a', to: 'agent.b' }))
     ])
     await company.hermes.sweep()
-    const before = company.agora.readLog().map((e) => e.seq)
+    const before = company.agora.readLogAll().map((e) => e.seq)
     expect(before.length).toBeGreaterThan(0)
 
     const restarted = await restartOver(company.home)
 
     // Every earlier event is still readable, and numbering carries on.
-    expect(restarted.agora.readLog().map((e) => e.seq)).toEqual(before)
+    expect(restarted.agora.readLogAll().map((e) => e.seq)).toEqual(before)
     const next = restarted.agora.appendLog({ kind: 'spawn', agentId: 'agent.c' })
     expect(next.seq).toBe((before.at(-1) ?? 0) + 1)
   })

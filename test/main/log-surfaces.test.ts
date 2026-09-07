@@ -12,7 +12,7 @@ import { removeTempDir } from '../tmpdir'
  * The surfaces that read `log.jsonl` (M8.3).
  *
  * Every case here runs against a log LARGER than the old default window,
- * because that window is the defect: `readLog()` returns the OLDEST 500
+ * because that window is the defect: `readLog(0, 500)` returns the OLDEST 500
  * entries, and every fixture in this repository was smaller than that, so
  * nothing could see it. On the Architect's machine 676 of 1,177 entries were
  * invisible to the standup, the org metrics were folded from 500 rows, and the
@@ -57,7 +57,9 @@ describe('reading the whole book', () => {
     await store.ensureRepo()
     fill(store)
 
-    const windowed = store.readLog()
+    // Explicit now: `readLog`'s arguments are required since the M8.3 audit,
+    // so the trap this case exists to describe cannot be entered by omission.
+    const windowed = store.readLog(0, 500)
     expect(windowed).toHaveLength(500)
     expect(windowed.at(-1)?.['n']).toBe(499)
 
@@ -75,7 +77,7 @@ describe('reading the whole book', () => {
     fill(store)
 
     const cursor = 500
-    const theOldWay = store.readLog().filter((entry) => entry.seq > cursor)
+    const theOldWay = store.readLog(0, 500).filter((entry) => entry.seq > cursor)
     expect(theOldWay).toEqual([])
 
     const since = store.readLogSince(cursor)

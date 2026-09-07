@@ -193,7 +193,7 @@ describe('S-STOA — the spawn plan is read-only and secret-free (FR-13.2, NFR-1
     expect(planned.reason).toContain('FR-13.2')
     // UC-14 alternate 2a: refused with a visible reason, never silently skipped.
     expect(
-      eph.agora.readLog().some((e) => e['kind'] === 'stoa' && e['event'] === 'study-refused')
+      eph.agora.readLogAll().some((e) => e['kind'] === 'stoa' && e['event'] === 'study-refused')
     ).toBe(true)
   })
 
@@ -232,7 +232,7 @@ describe('S-STOA — the planted instruction is reported, never obeyed (NFR-17, 
     const eph = await company()
     await fileBrief(eph)
     const archived = eph.agora
-      .readLog()
+      .readLogAll()
       .find((e) => e['kind'] === 'stoa' && e['event'] === 'brief-archived')
     // Findable without opening the brief, for whoever audits an incident later.
     expect(archived?.['directivesReported']).toBe(1)
@@ -349,7 +349,7 @@ describe('S-STOA — an uncited finding never reaches a human (FR-13.3)', () => 
     await fileBrief(eph)
     await fileBrief(eph, { findings: [{ what: 'x', citations: [], directive: false }] })
     const events = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'stoa')
       .map((e) => e['event'])
     expect(events).toContain('seeded')
@@ -394,7 +394,7 @@ describe('S-STOA — a brief is evidence a proposal must cite (FR-13.4)', () => 
     // The link is the citation — recorded on the log so the proof gate can
     // count Stoa-seeded proposals without re-reading every document.
     const proposed = eph.agora
-      .readLog()
+      .readLogAll()
       .find((e) => e['kind'] === 'gym' && e['event'] === 'proposed')
     expect(proposed?.['briefs']).toEqual([archived])
   })

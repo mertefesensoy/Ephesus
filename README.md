@@ -274,6 +274,14 @@ runs before shipping, because the suite was green while Closing Time had never
 once run in the shipped app, the standup read the oldest 500 log entries, and
 the dock showed an overnight run's first 300 events.
 
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8
+     Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
+     package ticked there must be listed here, and listing one is a claim that
+     the prose below actually says what it did. The check catches the oversight
+     — a package landing while nobody touched this file — which is the failure
+     that made this section two milestones stale at M8.4 and three packages
+     stale again by M8.9. It cannot catch someone editing this line without
+     writing the sentence, and is not meant to. -->
 Landed so far: a coverage baseline and the seam rule that enforces it (a wiring
 seam with no test is a defect, not a gap); a quit path that actually runs, with
 one door to the renderer and one ordered, isolated shutdown sequence; a
@@ -284,6 +292,22 @@ documented and reported, and an engine with no session says so instead of
 pretending to work; and a mission activated against a repository now actually
 watches it, because the checkout is asked which repository it is rather than a
 bundle that ships an empty list being the only source of the answer.
+
+Since then: **every hire works in its own git worktree**, so a crew no longer runs
+git operations and file edits concurrently in your checkout — a spawn that cannot
+be isolated is refused rather than quietly falling back into it — and a breaker
+stop at the top rung now outlives the process it stopped, so an exhausted budget
+stops instead of cycling. **Every hire also runs its own engine install**, with
+its own config directory: a hired agent does not inherit your CLI's memory,
+plugins, hooks or MCP servers, and the harness is the only author of the hooks
+that install runs. What a target repository legitimately offers — its skills and
+subagents — the harness re-supplies by name, because a hire template declares
+what it may read. And **a restart no longer silently un-hires the company**:
+active missions, open gates with their settled verdicts, the trigger clock and
+the drafts an outbound gate is holding all come back, with anything that could
+not be restored reported rather than absent. The agents themselves are not
+respawned automatically — engine session recovery is the follow-on — so you
+reactivate, and the company tells you that is what happened.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8.

@@ -85,6 +85,40 @@ export function parseRepoList(text: string): readonly string[] {
  * a different statement from "the Architect did not choose" — the first would
  * override a bundle's own declaration with nothing.
  */
+/**
+ * Contract: pure. The repository override that survives a move from `from` to
+ * `to` — the same text when the checkout has not changed, and **nothing** when
+ * it has (M8.5).
+ *
+ * ## Why this is a function and not two lines in the handler
+ *
+ * An override is an answer about ONE checkout: the fork whose two remotes
+ * `deriveRepo` refused to choose between. Letting it follow the Architect to a
+ * different target is how the company ends up watching the wrong repository —
+ * the exact outcome `deriveRepo` refuses to risk by guessing, arrived at from
+ * the other side, by a human instead of an algorithm.
+ *
+ * `deriveRepo`'s half of that hazard has fifty-odd cases. This half lived
+ * inside a `useCallback` where the renderer harness — `renderToStaticMarkup`,
+ * no effects and no handlers — could not reach it, so the rule that stops the
+ * Architect causing it had no test at all. That is the same lesson
+ * `parseRepoList` was extracted for, recorded in this file's own test docblock:
+ * *a one-line mapping inside a component is a mapping no table test can reach*.
+ *
+ * Any difference clears it, which is blunt in the safe direction: the plan is
+ * re-read before anything is activated, so a cleared box is visible and a
+ * re-typed one costs a moment. A followed-along one costs somebody else's
+ * repository receiving this company's incidents.
+ */
+export function overrideAfterRetarget(
+  from: TargetFields,
+  to: TargetFields,
+  override: string
+): string {
+  const sameCheckout = from.kind === to.kind && from.id === to.id && from.path === to.path
+  return sameCheckout ? override : ''
+}
+
 export function activationRequest(
   profile: string,
   fields: TargetFields,
@@ -425,9 +459,7 @@ export function ProfilesPanel(): ReactElement {
    */
   const retarget = useCallback(
     (next: TargetFields) => {
-      if (next.kind !== target.kind || next.id !== target.id || next.path !== target.path) {
-        setRepos('')
-      }
+      setRepos((typed) => overrideAfterRetarget(target, next, typed))
       setTarget(next)
     },
     [target]
