@@ -5902,7 +5902,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       could not be searched with the ordinary tool. Repaired byte-precisely to
       the escapes that were meant; nothing else in the record moved.*
 
-- [ ] **M8.11 Engine honesty** — DD-2, C1, C4. The highest-leverage decision in
+- [x] **M8.11 Engine honesty** — DD-2, C1, C4. The highest-leverage decision in
       the register, and it collapses five separate blockers into one small fix:
       ADR-0009 already says Claude Code is the reference adapter and the only one
       that may gate a release, and SRS FR-1.2 requires only the seam. **The docs
@@ -5931,6 +5931,140 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       case** — its absence is exactly why the silent drop survived two
       milestones, so that case is the part of this package that prevents a
       recurrence rather than merely recording one.*
+
+      *DONE 2026-09-07. Branch `feature/m8-11-engine-honesty`, cut from `main` at
+      `cb535b3`. Gate: typecheck PASS · lint PASS · invariants PASS (reachability
+      177/187 src modules reached, 10 unreachable by recorded decision) ·
+      **219 test files, 4136 passed, 8 skipped, 0 failed** · coverage floors PASS
+      across 17 subsystems, none lowered, no ratchet taken. Implementation doc:
+      `docs/implementations/2026-09-07-m8-11-engine-honesty.md`; decisions D1–D6
+      in `docs/DECISIONS-LOG.md` under 2026-09-07.*
+
+      *AUDITED BEFORE BUILT, and two of this row's own asks were already closed.
+      The Tests line above asks for the conformance table to "gain an autonomy
+      case". It has one — `describe('autonomy grade honesty (ADR-0031)')` at
+      `test/conformance/adapter-conformance.ts:280`, over all four subjects,
+      landed with ADR-0031 on 2026-09-06 — and `assertAutonomyEnforceable`
+      (`src/main/agents.ts:507`, called at `:631`) was there too. Neither was
+      rebuilt. `grep -rn "REFERENCE_ENGINE\|non-reference" src/` returned
+      nothing, which is what was actually open: there was no refusal path of any
+      kind, for any engine. Ten minutes of grep against an hour of duplicate
+      work, and the third instance of this in three packages.*
+
+      *THE HOLE ADR-0031 LEFT IS WHAT THIS ROW CLOSES. That guard returns EARLY
+      when the composed autonomy is `autonomous` — deliberately and correctly,
+      since `autonomous` is the loosest thing the Architect can ask for, so an
+      engine being stricter costs a stalled turn rather than an unpermitted
+      action. So it closed the SAFETY half and left an `autonomous` codex or
+      gemini hire spawning today, with every ADR-0024 failure mode still live:
+      no Stop hook, so no continuation loop, so one turn per wake; and a
+      confident `idle` on the floor for ever. **The refusal is placed to catch
+      exactly that case, and the test for an `autonomous` non-reference hire is
+      the most important assertion in the package.***
+
+      *PRODUCTION CALL PATH (ENGINEERING-STANDARDS §6.7). The refusal is in
+      `activationPlan` (`src/shared/profile-activation.ts`), called from
+      `src/main/profiles.ts:444` — the one function that is BOTH the activation
+      preview and the plan activation executes, so the screen and the outcome
+      cannot disagree about a refusal, and it runs before an agent id is claimed,
+      a worktree is cut or a trust record is written. Not `EngineRegistry.get`:
+      its question is "does this build carry an adapter", and folding "may a hire
+      run on it" into it would make the conformance suite — which constructs
+      `CodexAdapter` and `GeminiAdapter` DIRECTLY, on purpose — pass by
+      special-casing Claude, the one reading ADR-0024 forbids by name. That
+      registry refusal stays as the backstop for the `agents:spawn` IPC, which
+      never came through a profile.*
+
+      *THE RENAME IS A SCHEMA MIGRATION, and this machine would not have noticed
+      if it were wrong. `hookFidelity` is validated on every roster entry, and
+      `Agora.registry()` falls back to an EMPTY roster on a parse failure and
+      then refuses to overwrite the file it could not read — so dropping
+      `pty-heuristic` from the enum without accepting it on read costs a company
+      every seat on its roster at the first boot after an upgrade, reported as
+      one warning line. Bumping `schemaVersion` was rejected because it makes
+      that worse: `z.literal(2)` refuses every roster version 1 ever wrote.
+      `storedHookSupportSchema` accepts the retired spelling only where a durable
+      file is READ, kept separate from the schema the code writes with so
+      `pty-heuristic` does not re-enter the `HookSupport` type. The Architect's
+      live registry reads `{"native": 7}`, so nothing here would have broken
+      locally — which is luck; `test/main/engine-honesty.test.ts` writes a real
+      roster file carrying the old string and reads it back through a real
+      `Agora`, and its probe case writes a grade no build ever wrote to show what
+      the missing migration costs, so the migration test can fail.*
+
+      *THE WATCH PANEL'S SENTENCE WAS WRONG IN BOTH DIRECTIONS, so the fix is a
+      deletion rather than a longer list. "Blind to repetition, error-rate"
+      implied burn-rate still protects such an engine — it does not, because
+      burn-rate fires on a budget breach compiled from transcript rows an adapter
+      with no transcript reader never produces — and it implied hop-cap was lost,
+      which it is not, because hop-cap counts Hermes escalations and owes nothing
+      to hooks. The blind set is therefore not a function of the hook grade at
+      all, and a claim no engine in this build can demonstrate does not get
+      written down. `BreakerState.blindSignals` is deleted with it, so the wrong
+      sentence is not one `.join()` away from the panel again.*
+
+      *THE PACKAGE'S OWN RISK IS DELETION, so the seam's second implementation is
+      now a check rather than a habit. `CONFORMANCE_SUBJECTS` records every
+      subject the table runs and a case asserts it is exactly
+      `['fake engine', 'claude code', 'codex', 'gemini']`; a second case
+      constructs both unregistered adapters and holds them to the contract in the
+      same run. `scripts/reachability.cjs` carries the ADR-0024 §4 entry for each
+      adapter file and fails BOTH ways — if either becomes reachable again, or if
+      either stays unreachable without the entry. The tripwire this milestone
+      predicted at M8.0 fired exactly as written and was closed with the decision
+      it asked for, not with a widened rule.*
+
+      *TWO THINGS DELIBERATELY NOT DONE, and both are decisions rather than
+      omissions. `AVATAR_STATES` gains no `unknown`: ADR-0024's Decision has four
+      items and that is not one, because the confident `idle` exists only because
+      a hook-less engine produces no events and the refusal removes the hook-less
+      engine rather than giving its silence a nicer pose — and SDD §6 names ten
+      states, so an eleventh is an SDD amendment. `ENGINE_IDS` keeps `grok` and
+      `opencode`: the lie was that the string was accepted SILENTLY, and a `grok`
+      hire is now refused by the same sentence as a `codex` one (asserted for all
+      five non-reference ids); narrowing the roster would be an ADR-0009 edit,
+      would make ADR-0024's deliberate reversibility larger, and would empty the
+      conformance check that every adapter's id is in that roster.*
+
+      *NOT PROVED: the live app was not started — `npm run dev` boots against the
+      Architect's own `~/.ephesus`, spawning agents and spending tokens, which is
+      not a side effect to take unattended. And the refusal has not been observed
+      against a live codex or gemini install, because neither CLI is installed
+      and authenticated here — the same reason ADR-0031 declared `none` rather
+      than guessing a flag. Nothing in the refusal path depends on the engine
+      existing: it is decided from the hire's declared string before any process
+      is contemplated.*
+
+      *MUTATION PASS: 18 mutations, 17 killed, and the one survivor is the one
+      written to survive. Five against the predicate (inverted, always-true,
+      always-false, prefix-match, and shipping `codex` instead of `claude`); four
+      against the refusal at its call site (condition inverted, the `continue`
+      removed so a refused hire is still planned, the `reasons.push` silenced so
+      the refusal becomes a silent drop, and the whole block skipped); four
+      against the migration (the legacy value passed through untranslated, mapped
+      to `native`, the read vocabulary widened so any string becomes `none`, and
+      the roster validated with the WRITE schema); three against the breaker
+      disclosure (never reported, always reported, keyed on `native`); and one
+      that stops a conformance subject running. The eighteenth is a deliberate
+      no-op — `const shipped: string = REFERENCE_ENGINE; return shipped ===
+      engine` — included because a harness that reports every mutation killed
+      cannot tell you when it has stopped running your tests. It survived; the
+      other seventeen did not. **No survivor had to be argued about**, which is
+      the first M8 package where that is true, and it is a property of the
+      package rather than of the tests: a refusal is a pure predicate over a
+      declared string, so every state a mutation can reach is a state a table
+      test can build.*
+
+      *THE TRIPWIRE M8.0 PREDICTED FIRED, AND WAS PROVED TO BITE BOTH WAYS.
+      BUILD-PROMPT's build state says "when M8.11 unregisters `codex.ts`/
+      `gemini.ts` the walk WILL fail until they are allowlisted citing ADR-0024 —
+      that is the tripwire working, not a bug". It did, and it was closed with
+      the decision it asked for rather than a widened rule. The other direction
+      was then checked by execution rather than assumed: re-adding the
+      `CodexAdapter` import to `index.ts` makes `check-invariants.cjs` fail with
+      "allowlist entry 'src/main/engines/codex.ts' names nothing unreachable any
+      more". So the record cannot outlive the gap it records, and the gap cannot
+      re-open unrecorded.*
 
 - [ ] **M8.12 Exit review** — the milestone closes on a run, not on a checklist:
       SRS §6.1's action half on a real repository, performed by a developer who

@@ -240,7 +240,6 @@ export class Breaker {
       rung: agent.rung,
       firing: this.signals(agentId),
       reducedProtection: protection.reduced,
-      blindSignals: protection.blind,
       spanCount: agent.spans.length
     }
   }

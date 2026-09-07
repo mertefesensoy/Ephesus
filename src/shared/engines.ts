@@ -16,15 +16,51 @@ export const engineIdSchema = z.enum(ENGINE_IDS)
 export type EngineId = z.infer<typeof engineIdSchema>
 
 /**
- * Hook fidelity grade (ADR-0009): `native` > `wrapper` > `pty-heuristic`.
+ * Hook fidelity grade (ADR-0009): `native` > `wrapper` > `none`.
  * The grade is displayed on the agent card and scales down floor detail and
  * breaker sensitivity (SDD §3) — a degraded engine is honest about it (FR-2.3).
+ *
+ * The bottom grade was called `pty-heuristic` until M8.11. It named a mechanism
+ * that was never built — every occurrence was a declaration, a breaker
+ * downgrade or a comment, and no adapter ever inferred an event from a PTY
+ * stream. ADR-0024 §3 renamed it to what it is: an engine at this grade reports
+ * NO hook events at all, so the floor has nothing to animate from and the
+ * breaker's span-derived signals see nothing. A roster written before the
+ * rename still reads — see `storedHookSupportSchema`.
  */
-export const HOOK_SUPPORTS = ['native', 'wrapper', 'pty-heuristic'] as const
+export const HOOK_SUPPORTS = ['native', 'wrapper', 'none'] as const
 
 export const hookSupportSchema = z.enum(HOOK_SUPPORTS)
 
 export type HookSupport = z.infer<typeof hookSupportSchema>
+
+/**
+ * Grade names this build no longer writes, mapped to what they became.
+ *
+ * A hook grade is not only a value in memory: it is cached on every roster
+ * entry (`registry.json`'s `hookFidelity`), and the roster is a durable
+ * schema'd file the Agora refuses to overwrite when it cannot parse it. So
+ * dropping the old spelling from the enum without accepting it on READ would
+ * make a roster written by an older build fail validation, and the company
+ * would come up with an empty roster and a warning — losing every agent's seat
+ * to a rename. Accepted here; normalized on the next write.
+ */
+export const LEGACY_HOOK_SUPPORTS: Readonly<Record<string, HookSupport>> = {
+  'pty-heuristic': 'none'
+}
+
+/**
+ * The hook grade as it may appear in a file this build did not write.
+ *
+ * Deliberately separate from `hookSupportSchema`: the vocabulary the code
+ * SPEAKS is the enum above, and only the vocabulary it READS is widened. One
+ * schema doing both would put `pty-heuristic` back into `HookSupport` and hand
+ * every consumer a fourth case to handle forever.
+ */
+export const storedHookSupportSchema = z.preprocess(
+  (raw) => (typeof raw === 'string' ? (LEGACY_HOOK_SUPPORTS[raw] ?? raw) : raw),
+  hookSupportSchema
+)
 
 /**
  * Numeric encoding of the ADR-0009 ordering, so "declared grade matches
@@ -34,7 +70,7 @@ export type HookSupport = z.infer<typeof hookSupportSchema>
 export const HOOK_SUPPORT_RANK: Readonly<Record<HookSupport, number>> = {
   native: 2,
   wrapper: 1,
-  'pty-heuristic': 0
+  none: 0
 }
 
 /**
@@ -67,4 +103,36 @@ export type AutonomySupport = z.infer<typeof autonomySupportSchema>
 export function parseEngineId(raw: unknown): EngineId | null {
   const result = engineIdSchema.safeParse(raw)
   return result.success ? result.data : null
+}
+
+/**
+ * The engine the MVP ships, and the only one a hire may declare (ADR-0024).
+ *
+ * ADR-0009 already made Claude Code the reference adapter and the only one that
+ * may gate a release; SRS FR-1.2 requires only the seam. The normative
+ * documents held this position all along — the shipping surface disagreed with
+ * them, advertising five engines, two of which have no adapter in the tree at
+ * all. This constant is where the disagreement is settled, and it is
+ * deliberately ONE name rather than a list: an allowlist invites an entry, and
+ * the bar for a second entry is ADR-0024's Revisiting section (the conformance
+ * suite passing for that engine on autonomy, notification and trust), not a
+ * commit.
+ *
+ * It is NOT the registry's question. `EngineRegistry.get` asks "does this build
+ * carry an adapter"; this asks "may a hire run on it". Folding the second into
+ * the first would make the conformance suite — which constructs the
+ * unregistered adapters directly, on purpose — pass by special-casing Claude,
+ * which is the one reading ADR-0024 forbids.
+ */
+export const REFERENCE_ENGINE: EngineId = 'claude'
+
+/**
+ * Contract: whether `engine` is the engine this build ships (ADR-0024). Pure,
+ * total, and takes a plain string because a hire TEMPLATE may name anything —
+ * `grok` and `opencode` are in `ENGINE_IDS` for ADR-0009's seam and have never
+ * had an adapter, and an unknown string must get the same refusal rather than a
+ * different one.
+ */
+export function isReferenceEngine(engine: string): boolean {
+  return engine === REFERENCE_ENGINE
 }

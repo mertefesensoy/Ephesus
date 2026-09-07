@@ -101,11 +101,24 @@ in this harness is named for the part of the city that does the same job:
 
 ## What it is
 
-Ephesus is a desktop app (Electron) that wraps **real terminal-agent CLIs** — `claude`,
-`codex`, `gemini`, `grok`, `opencode`, and friends — as fully-capable agents with
-long-term memory, mailboxes, and desks on a 2D floor, coordinated by **Artemis**, the one
-agent you talk to. It works with the subscriptions you already pay for, on their limits,
-with bring-your-own keys and local LLMs as options.
+Ephesus is a desktop app (Electron) that wraps a **real terminal-agent CLI** as
+fully-capable agents with long-term memory, mailboxes, and desks on a 2D floor,
+coordinated by **Artemis**, the one agent you talk to. It works with the subscription
+you already pay for, on its limits.
+
+**The MVP ships one engine — `claude`**
+([ADR-0024](./docs/adr/ADR-0024-claude-only-for-the-mvp.md)). Engines reach the
+harness through an adapter seam: a fixed conformance surface every integration has
+to pass ([ADR-0009](./docs/adr/ADR-0009-engine-adapters.md)). That seam is real
+rather than aspirational — two further adapters, `codex` and `gemini`, live in the
+tree and are held to the same table on every run, because a conformance suite with
+one implementation only proves that implementation compiles. Neither is registered,
+and a hire declaring either is **refused at activation**, by name, with the reason:
+neither can yet carry a granted autonomy level to its process or report a single
+hook event, and a company that silently runs at one turn per wake is worse than one
+that will not start. Adding an engine is an adapter and a registration, and the bar
+is that suite passing for it on autonomy, notification and trust — not that it
+spawns.
 
 What makes it different from its inspiration:
 
@@ -274,7 +287,7 @@ runs before shipping, because the suite was green while Closing Time had never
 once run in the shipped app, the standup read the oldest 500 log entries, and
 the dock showed an overnight run's first 300 events.
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -340,6 +353,19 @@ finally records which mission profile hired each agent, and **mail addressed to
 an agent that is no longer running is now visible as such** — it is neither
 bounced nor dropped, because an agent can come back, but it is no longer a
 silence.
+
+And most recently, **the front door says what actually ships**. Ephesus registered
+three engines and advertised five, two of which have never had an adapter at all.
+That gap was not a missing feature but a set of silent wrong answers: on either
+partial adapter the autonomy ceiling you granted was dropped on the floor; with no
+Stop hook there was no continuation loop, so the agent stopped after one turn; and
+with no hook stream at all its avatar asserted a confident `idle` for it for ever.
+None of it failed — it just quietly happened, and the activation screen printed
+"on codex" without a word. A hire on any engine but `claude` is now **refused at
+activation**, naming the engine, the reason and the one edit that fixes it. The two
+partial adapters stay in the tree, unregistered, because they are what keeps the
+adapter seam honest. And the hook grade `pty-heuristic`, which named a mechanism
+nobody ever built, is now called `none`, which is what it is.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8.

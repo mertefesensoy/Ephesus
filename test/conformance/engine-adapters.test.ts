@@ -11,7 +11,7 @@ import { CLAUDE_HARNESS_SETTINGS_REL, ClaudeAdapter } from '../../src/main/engin
 import { CodexAdapter } from '../../src/main/engines/codex'
 import { GeminiAdapter } from '../../src/main/engines/gemini'
 import { PromptStore } from '../../src/main/prompts'
-import { conformanceRig, runAdapterConformance } from './adapter-conformance'
+import { CONFORMANCE_SUBJECTS, conformanceRig, runAdapterConformance } from './adapter-conformance'
 import { FAKE_SETTINGS_REL, makeFakeAdapter } from '../fakes/fake-adapter'
 import { removeTempDir } from '../tmpdir'
 
@@ -170,13 +170,13 @@ runAdapterConformance({
 
 /**
  * The suite's operational reading of ADR-0009's grades: `native` claims the
- * whole lifecycle reaches the harness, `wrapper` claims some of it, and
- * `pty-heuristic` claims none of it arrives as events at all. An adapter is
- * honest when what it demonstrated is at least what it declared.
+ * whole lifecycle reaches the harness, `wrapper` claims some of it, and `none`
+ * claims none of it arrives as events at all. An adapter is honest when what it
+ * demonstrated is at least what it declared.
  */
 function demonstratedGrade(events: ReadonlySet<string>): HookSupport {
   if (HOOK_EVENTS.every((event) => events.has(event))) return 'native'
-  return events.size > 0 ? 'wrapper' : 'pty-heuristic'
+  return events.size > 0 ? 'wrapper' : 'none'
 }
 
 interface LiveRun {
@@ -335,5 +335,36 @@ describe('conformance: fake engine — behavioral (TEST-STRATEGY §5)', () => {
     await plan.uninstall()
 
     expect(fs.readdirSync(rig.cwd)).toEqual(before)
+  })
+})
+
+describe('the seam still has a second implementation (ADR-0024)', () => {
+  it('runs the table against every adapter in the tree, registered or not', () => {
+    // ADR-0024 keeps `codex.ts` and `gemini.ts` in the tree, unregistered,
+    // precisely so this table has something other than Claude to hold to
+    // account — and its "What this decision is NOT" says that if a change makes
+    // conformance pass by special-casing Claude, the decision has been misread.
+    //
+    // The failure that would do it is not an argued deletion; it is a
+    // `runAdapterConformance` call quietly going away with the registration it
+    // looked like it belonged to. After that the suite is green, shorter, and
+    // proves only that one adapter compiles. This is the assertion that notices.
+    expect(CONFORMANCE_SUBJECTS).toEqual(['fake engine', 'claude code', 'codex', 'gemini'])
+  })
+
+  it('holds the unregistered adapters to the same declared surface', () => {
+    // Not merely "the name is in a list": the two subjects ADR-0024 unregisters
+    // are constructed and answer the contract, here, in this run.
+    for (const adapter of [
+      new CodexAdapter({
+        prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS)
+      }),
+      new GeminiAdapter({
+        prompts: new PromptStore(path.join(tempDir(), 'prompts'), BUNDLED_PROMPTS)
+      })
+    ]) {
+      expect(HOOK_SUPPORT_RANK[adapter.hooks]).toBeTypeOf('number')
+      expect(adapter.autonomySupport).toBe('none')
+    }
   })
 })

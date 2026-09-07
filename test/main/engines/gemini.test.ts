@@ -132,7 +132,7 @@ describe('honesty (ADR-0009, FR-2.3)', () => {
     // Gemini 0.57.0 HAS a documented hook plane, but its project settings file
     // is tracked (ADR-0009 permits only local/gitignored variants) and project
     // hooks are untrusted by default. So: no events claimed.
-    expect(rig().adapter.hooks).toBe('pty-heuristic')
+    expect(rig().adapter.hooks).toBe('none')
   })
 
   it('writes nothing into the agent repository, ever', async () => {

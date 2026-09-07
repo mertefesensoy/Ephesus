@@ -49,6 +49,7 @@ import {
 import { ENGINES_DIR, engineConfigDir } from './engines/engine-home'
 import { TOOLS_DIR, resolveToolGrants } from './engines/tool-grants'
 import { NO_TOOLS } from '../shared/engine-tools'
+import { REFERENCE_ENGINE } from '../shared/engines'
 import { ProfileActivations, ProfileStore, triggerWakeMessage } from './profiles'
 import { GitHubHarbor, HARBOR_INGEST_EVERY_MS } from './harbor/github'
 import { IncidentEndpoint, VERDICT_SUBJECT } from './incidents'
@@ -98,8 +99,6 @@ import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
-import { CodexAdapter } from './engines/codex'
-import { GeminiAdapter } from './engines/gemini'
 import { engines } from './engines'
 import { HookServer, type HookEventRecord } from './hooks'
 import { registerIpc } from './ipc'
@@ -1386,10 +1385,20 @@ async function boot(): Promise<void> {
     })
   )
   // ADR-0009's roster grows by an adapter and one registration; nothing in core
-  // learns anything (NFR-12). Codex declares `pty-heuristic` and the agent card
-  // says so — see the adapter's own comment for why.
-  engines.register(new CodexAdapter({ prompts }))
-  engines.register(new GeminiAdapter({ prompts }))
+  // learns anything (NFR-12). For the MVP the roster is ONE adapter long.
+  //
+  // `CodexAdapter` and `GeminiAdapter` were registered here until M8.11 and are
+  // NOT any more (ADR-0024 §4). They stay in the tree on purpose — they are the
+  // conformance suite's second implementation, and a suite with one
+  // implementation only proves that implementation compiles. Their
+  // unreachability from this entry point is a recorded decision in
+  // `scripts/reachability.cjs`, which is what stops it reading as rot.
+  //
+  // Re-registering them is not a line here: ADR-0024's Revisiting bar is the
+  // conformance suite passing for that engine on autonomy, notification and
+  // trust. Until then a hire naming either is refused at activation
+  // (`activationPlan`), and anything that reaches `AgentManager.spawn` with one
+  // anyway meets `EngineRegistry.get`'s "no adapter registered" as the backstop.
   // ADR-0013: the block cap is env-configurable; an invalid value can never
   // silently disable the cap — it is refused visibly and the default holds.
   const envCap = blockCapFromEnv(process.env)
@@ -3174,9 +3183,12 @@ async function boot(): Promise<void> {
   // Last, and not awaited: a company whose orchestrator is slow to start is
   // still a usable company, and her failure is a degradation rather than a
   // boot error (FR-5.4).
-  // The engine she is hired on is the registry's first registered adapter, so
-  // adding one never leaves this line naming an engine that is not there.
-  const orchestratorEngine = engines.list()[0]?.id
+  // The engine she is hired on is NAMED (ADR-0024's Consequences). This read
+  // `engines.list()[0]?.id` until M8.11, which is harmless under a single
+  // registered engine and is exactly why the ADR calls it out: reordering three
+  // adjacent registration lines would otherwise put the orchestrator on an
+  // engine the Architect's own profiles are refused for.
+  const orchestratorEngine = engines.has(REFERENCE_ENGINE) ? REFERENCE_ENGINE : null
   if (orchestratorEngine) {
     // ADR-0021/0025, for the one agent they never covered.
     //
@@ -3223,7 +3235,8 @@ async function boot(): Promise<void> {
       }
     }
     void artemis.start(orchestratorEngine)
-  } else reportDegradation('artemis/not-hired', 'no engine adapter registered; not hired')
+  } else
+    reportDegradation('artemis/not-hired', `no ${REFERENCE_ENGINE} adapter registered; not hired`)
 }
 
 /**

@@ -455,3 +455,126 @@ describe('what the instance would watch', () => {
     expect(planned.plan.reposFrom).toBe('bundle')
   })
 })
+
+describe('a non-reference engine is refused, not degraded (ADR-0024 §1)', () => {
+  const plan = (engine: string, autonomy: AutonomyLevel = 'supervised') =>
+    activationPlan(
+      bundle({ hires: [hire({ engine })] }),
+      TARGET,
+      autonomy,
+      () => [],
+      deriveRepo([])
+    )
+
+  it('plans a hire on the reference engine', () => {
+    // The other direction, and it goes first: a refusal nothing passes is a
+    // refusal that could be a typo in the predicate.
+    const planned = plan('claude')
+
+    if (!planned.ok) throw new Error(planned.reasons.join(' · '))
+    expect(planned.plan.hires).toHaveLength(1)
+    expect(planned.plan.hires[0]?.spawn.engine).toBe('claude')
+  })
+
+  it.each(['codex', 'gemini', 'grok', 'opencode', 'custom'])(
+    'refuses a hire on %s and says why',
+    (engine) => {
+      const planned = plan(engine)
+
+      expect(planned.ok).toBe(false)
+      if (planned.ok) return
+      const said = planned.reasons.join(' · ')
+      // A refusal has to teach the rule or it is billed every time: the engine
+      // that was declared, the decision that refuses it, what would have gone
+      // wrong, and the one edit that fixes it.
+      expect(said).toContain(`"${engine}"`)
+      expect(said).toContain('ADR-0024')
+      expect(said).toContain('ignore the autonomy it was granted')
+      expect(said).toContain('stop after one turn')
+      expect(said).toContain(`set the hire's engine to "claude"`)
+    }
+  )
+
+  it('refuses an AUTONOMOUS hire on a non-reference engine', () => {
+    // The hole ADR-0031 deliberately left. `assertAutonomyEnforceable` returns
+    // EARLY on `autonomous` — correctly, because it is the loosest level the
+    // Architect can ask for, so an engine being stricter costs a stalled turn
+    // rather than an unpermitted action. That closed the safety half and left
+    // the honesty half open: such a hire spawns today, drops its continuation
+    // loop and reports itself idle for ever. This is the check that catches it,
+    // and it is the single most important assertion in this file.
+    const planned = plan('codex', 'autonomous')
+
+    expect(planned.ok).toBe(false)
+    if (planned.ok) return
+    expect(planned.reasons.join(' · ')).toContain('"codex"')
+  })
+
+  it('refuses BEFORE planning anything the refusal would have to unwind', () => {
+    // Refuse, do not degrade: no hire, no trigger, no agent id. A plan that
+    // came back `ok: false` while still carrying hires would be a plan half of
+    // the app could act on.
+    const planned = activationPlan(
+      bundle({
+        hires: [hire({ name: 'oncall', engine: 'codex' })],
+        triggers: [
+          {
+            id: 'nightly',
+            kind: 'schedule',
+            hire: 'oncall',
+            everyMs: 3_600_000,
+            playbook: 'incident.md'
+          }
+        ]
+      }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
+
+    expect(planned.ok).toBe(false)
+  })
+
+  it('names EVERY offending hire, not just the first', () => {
+    // An Architect fixing a profile should need one pass, not one per hire.
+    const planned = activationPlan(
+      bundle({
+        hires: [
+          hire({ name: 'oncall', engine: 'codex' }),
+          hire({ name: 'scribe', engine: 'gemini' }),
+          hire({ name: 'mason', engine: 'claude' })
+        ]
+      }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
+
+    expect(planned.ok).toBe(false)
+    if (planned.ok) return
+    expect(planned.reasons).toHaveLength(2)
+    expect(planned.reasons.join(' · ')).toContain('"oncall"')
+    expect(planned.reasons.join(' · ')).toContain('"scribe"')
+    expect(planned.reasons.join(' · ')).not.toContain('"mason"')
+  })
+
+  it('refuses on the engine before it complains about anything else', () => {
+    // Ordering is a product decision, not an accident of the loop: a hire on a
+    // refused engine gets the sentence about the engine, so fixing the name
+    // first is never a wasted round trip.
+    const planned = activationPlan(
+      bundle({ hires: [hire({ name: 'a'.repeat(64), engine: 'codex' })] }),
+      TARGET,
+      'supervised',
+      () => [],
+      deriveRepo([])
+    )
+
+    expect(planned.ok).toBe(false)
+    if (planned.ok) return
+    expect(planned.reasons).toHaveLength(1)
+    expect(planned.reasons[0]).toContain('ADR-0024')
+  })
+})

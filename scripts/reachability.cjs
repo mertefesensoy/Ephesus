@@ -81,6 +81,9 @@ const UNIVERSE_DIR = 'src'
 const HERALD_DEFERRED =
   'M6.9 (wiring the Herald) is DEFERRED INDEFINITELY by Architect decision, 2026-08-30 — built and tested, not connected on purpose (BUILD-PROMPT build state; IMPLEMENTATION M6 amendment)'
 
+const ADR_0024_UNREGISTERED =
+  "ADR-0024 §4 (M8.11) — the MVP ships one engine, so this adapter is not registered in src/main/index.ts and the app cannot reach it. It stays in the tree ON PURPOSE: it is the conformance suite's second implementation (test/conformance/engine-adapters.test.ts constructs it directly), and a suite with one implementation only proves that implementation compiles. Deleting it is how the seam collapses; re-registering it is ADR-0024's Revisiting bar, not a commit"
+
 /**
  * Modules the application deliberately does not reach — one exact file per
  * entry and the decision that made the gap deliberate. Add an entry only with
@@ -88,6 +91,8 @@ const HERALD_DEFERRED =
  * will insist that you do.
  */
 const UNREACHABLE_ALLOWLIST = [
+  { file: 'src/main/engines/codex.ts', reason: ADR_0024_UNREGISTERED },
+  { file: 'src/main/engines/gemini.ts', reason: ADR_0024_UNREGISTERED },
   { file: 'src/main/herald/elevenlabs.ts', reason: HERALD_DEFERRED },
   { file: 'src/main/herald/narration.ts', reason: HERALD_DEFERRED },
   { file: 'src/main/herald/openai-realtime.ts', reason: HERALD_DEFERRED },

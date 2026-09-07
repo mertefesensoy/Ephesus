@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { agentIdSchema, budgetSchema } from './agents'
-import { engineIdSchema, hookSupportSchema } from './engines'
+import { engineIdSchema, storedHookSupportSchema } from './engines'
 
 /**
  * The roster (`agora/registry.json`, SDD §4.1) — the company's list of who
@@ -51,7 +51,15 @@ export const registryEntrySchema = z
 
     isOrchestrator: z.boolean().optional(),
     status: agentStatusSchema.optional(),
-    hookFidelity: hookSupportSchema.optional(),
+    /**
+     * The grade the adapter declared at spawn. Validated with the READ
+     * vocabulary, not the write one: M8.11 renamed `pty-heuristic` to `none`
+     * (ADR-0024 §3) and this file outlives a build. A roster carrying the old
+     * spelling parses and normalizes here; refusing it would fail
+     * `parseRegistry`, and the Agora never overwrites a roster it could not
+     * parse — so a rename would have cost the company every seat on it.
+     */
+    hookFidelity: storedHookSupportSchema.optional(),
     budget: budgetSchema.optional(),
     hire: hireSchema.optional(),
     spawnedAt: z.string().min(1).max(64).optional(),

@@ -336,11 +336,9 @@ describe('the M2 pathology signal is finally consumed', () => {
 })
 
 describe('reduced protection is surfaced, not hidden', () => {
-  it('flags a pty-heuristic engine on its state', () => {
-    const { breaker } = rig({ fidelity: 'pty-heuristic' })
-    const state = breaker.stateFor('agent.mason')
-    expect(state.reducedProtection).toBe(true)
-    expect(state.blindSignals).toEqual(['repetition', 'error-rate'])
+  it('flags a hook-less engine on its state', () => {
+    const { breaker } = rig({ fidelity: 'none' })
+    expect(breaker.stateFor('agent.mason').reducedProtection).toBe(true)
   })
 
   it('does not flag a native engine', () => {

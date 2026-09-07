@@ -19,7 +19,7 @@ import type {
  * `-r/--resume`, `--skip-trust`, `--include-directories`), its
  * `gemini hooks` subcommand, and its own bundled hook documentation.
  *
- * ## Why this adapter declares `pty-heuristic`
+ * ## Why this adapter declares `none`
  *
  * Gemini CLI has the best-documented hook plane in the roster after Claude
  * Code's — `SessionStart`, `SessionEnd`, `BeforeAgent`, `AfterAgent`,
@@ -42,7 +42,7 @@ import type {
  *     prevent (SDD §9).
  *
  * So this adapter writes nothing, claims no events, and the agent card says
- * `pty-heuristic`. The wiring is a small change away once the Architect rules
+ * `none`. The wiring is a small change away once the Architect rules
  * on the tracked-file question — and it owes a live demonstration before the
  * grade moves, which is what the grade means (FR-2.3).
  */
@@ -76,7 +76,7 @@ function composeIdentity(cfg: AgentSpawnConfig, prompts: PromptStore): string {
     .replace(/\n{3,}$/, '\n')
 }
 
-/** The honest plan for an adapter that declares `pty-heuristic`: install nothing. */
+/** The honest plan for an adapter that declares `none`: install nothing. */
 class NoSettingsPlan implements HookPlan {
   readonly injections: readonly never[] = []
 
@@ -93,7 +93,7 @@ export class GeminiAdapter implements EngineAdapter {
   readonly id = 'gemini' as const
 
   /** See the class comment: the grade this build can demonstrate is none. */
-  readonly hooks = 'pty-heuristic' as const
+  readonly hooks = 'none' as const
   /**
    * ADR-0031. This adapter has no flag to map autonomy onto, so the engine's
    * own configuration decides — and that configuration is the OPERATOR'S,
