@@ -218,6 +218,32 @@ writes the files it needs, then tells you it did:
 `~/.ephesus/` is **yours**. Ephesus writes a file there only when it is absent
 and never edits one you already have, so anything you change stays changed.
 
+**4. Say go.** Nothing is hired until you do. On first launch the app shows a
+banner above everything else saying the company is not working yet, and
+naming exactly what starting it would do: which agent gets hired on which
+engine, that its turns spend tokens against **your** subscription, what the
+company-wide daily ceiling is — or that there is none — and which schedules
+start and how often. Press **START THE COMPANY** and it begins in that same
+window; no restart, and you are never asked again.
+
+Leave it closed and everything else stays readable: the panels, the book of
+record, the settings. Nothing runs, and the status strip says so rather than
+looking like a company that has finished its work.
+
+**Stopping it.** Stop Electron by process, not by the `npm run dev` wrapper.
+Killing the wrapper leaves the Electron children alive, and a second
+`npm run dev` then runs a second harness against the same `~/.ephesus/` — two
+instances, one book of record, two committers where the design allows one
+([ADR-0004](./docs/adr/ADR-0004-agora-single-committer.md)).
+
+```powershell
+Get-Process electron | Where-Object { $_.Path -like "*ephesus*" } | Stop-Process -Force
+```
+
+```bash
+pkill -f 'electron.*ephesus'
+```
+
 ### What the shipped gate policy allows
 
 The ceiling ships at `autonomous` so a profile's own declaration governs, with
@@ -233,6 +259,53 @@ everything else                                                the profile decid
 Autonomy composes **stricter-wins**: a profile can only ever be more cautious
 than this file, never less. Edit `gate-policy.json` to tighten the whole
 company at once.
+
+### Your first crew
+
+The app is running and nobody is doing anything. That is correct — Ephesus
+ships with no crew, because which agents exist and what they are allowed to do
+is a decision, not a default. You get from here to a company watching your
+repository in four steps.
+
+**1. Check the orchestrator came up.** The agent dock along the bottom should
+show **artemis**. She is the only agent hired at boot; she routes work and
+scribes the board, and she does nothing on her own until there is something to
+route. If she is not there, the status strip will say why — most often
+`claude auth status` reporting no session.
+
+**2. Open PROFILES.** A *profile* is a mission bundle: the agents it hires,
+what each may do, and what wakes them
+([ADR-0012](./docs/adr/ADR-0012-mission-profiles.md)). Two ship with the app:
+
+| Profile | What it is for |
+|---|---|
+| **Skeleton Crew** | watches a repository's CI, turns failures into incidents, triages them and reports back |
+| **Front Office** | drafts outbound messages and holds them at a gate until you approve |
+
+Start with Skeleton Crew. It is the one M8's exit review is written around.
+
+**3. Point it at a checkout.** Choose the profile, then give it the path to a
+local clone of the repository you want watched — a real one, with CI that runs
+on push. The activation screen then shows you the whole plan **before anything
+happens**: which agents get hired, what each may do without asking, which
+triggers get armed, which declared secrets the broker cannot supply, and which
+repository it would watch. Read it. It is the last point at which nothing has
+started.
+
+You need `gh` installed and authenticated (`gh auth status`) for the repository
+half to work at all — that is how Ephesus reads CI runs, issues and pull
+requests. Without it the crew hires fine and ingests nothing, which the app
+reports as a degradation rather than as silence.
+
+**4. Activate.** The crew is hired, each agent in its own git worktree so
+nothing runs in your own checkout, and each on its own engine install so no
+agent inherits your CLI's memory, plugins or hooks. From here on, a CI failure
+on the watched repository becomes an incident, the incident is routed to whoever
+is on call for it, and what they report comes back to the **INCIDENTS** tab —
+including every refusal, shown as a refusal.
+
+To take it all down: deactivate the instance from PROFILES. To watch a second
+repository, activate the same profile again against a different checkout.
 
 ### Watching a repository
 
@@ -281,13 +354,19 @@ This repository is a complete, self-contained documentation suite. Read in this 
 
 ## Where the build stands
 
-**M8 in progress — the company you can leave running.** M6 and M7 landed the
-spoken company and the two outward missions; M8 is the hardening milestone that
-runs before shipping, because the suite was green while Closing Time had never
-once run in the shipped app, the standup read the oldest 500 log entries, and
-the dock showed an overnight run's first 300 events.
+**M8's thirteen packages have all landed — and M8 has not closed.** M6 and M7
+landed the spoken company and the two outward missions; M8 is the hardening
+milestone that runs before shipping, because the suite was green while Closing
+Time had never once run in the shipped app, the standup read the oldest 500 log
+entries, and the dock showed an overnight run's first 300 events. Its exit is
+not a checklist: it is [SRS §6.1](./docs/srs/SRS.md)'s one-hour company test on
+a real repository, run by **a developer who is not the author, from a clean
+clone, following only this README**, and surviving a deliberate restart
+mid-run. That run has not happened, so the row is open — as M7's own exit has
+been since 2026-09-01, for the same reason. The script for it is
+[`docs/EXIT-M8.md`](./docs/EXIT-M8.md).
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11 M8.12
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -367,8 +446,25 @@ partial adapters stay in the tree, unregistered, because they are what keeps the
 adapter seam honest. And the hook grade `pty-heuristic`, which named a mechanism
 nobody ever built, is now called `none`, which is what it is.
 
+And finally, **the company asks before it starts.** Booting Ephesus used to hire
+an agent: `artemis.start` ran unconditionally at the end of boot, the scheduler's
+first tick fired sixty seconds later, and nothing anywhere asked anybody first —
+on a machine where spending is unbudgeted by default and the tokens are yours.
+Now a first launch shows what starting the company would do, in the specifics of
+*your* configuration, and does nothing until you say go; the answer is
+remembered, and a withheld company is reported as a state rather than looking
+like one that has finished its work. Consent covers the schedules too, not only
+the hire — the two are different products, and a gate on the hire alone leaves
+the standup, the retro and the metric check firing on the first tick anyway.
+Alongside it, the README finally covers the gap between "the app booted" and "a
+crew is watching my repo", the book of record's readers no longer lose a row to
+a duplicate sequence number left behind by two harness instances sharing one
+home, and [`docs/EXIT-M8.md`](./docs/EXIT-M8.md) is a script somebody who has
+never seen this repository can follow, with the place each acceptance clause's
+evidence lands named by hand.
+
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
-of M8.
+of M8. The same run is owed to both.
 
 ---
 

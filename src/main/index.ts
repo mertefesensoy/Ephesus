@@ -95,6 +95,8 @@ import { UiBridge } from './ui-bridge'
 import { DegradationLog } from './degradations'
 import type { DegradationCause, DegradationRow } from '../shared/degradation'
 import { CommandQueue } from './commands'
+import { CompanyStart } from './consent'
+import type { ConsentDisclosure } from '../shared/consent'
 import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
 import { AppDb } from './db'
@@ -151,6 +153,12 @@ let db: AppDb | null = null
 let agentManager: AgentManager | null = null
 let agora: Agora | null = null
 let artemis: Artemis | null = null
+/**
+ * The first-launch consent gate (DD-6, M8.12). Module-scoped because the IPC
+ * handlers need it: the Architect grants consent from the running window, and
+ * the grant has to take effect in THIS process rather than at the next boot.
+ */
+let companyStart: CompanyStart | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
@@ -1751,7 +1759,11 @@ async function boot(): Promise<void> {
   scheduler.add(briefing.trigger(STANDUP_EVERY_MS))
   // The scheduler's third client (FR-11.5's scheduled retro).
   scheduler.add(org.trigger(RETRO_EVERY_MS))
-  scheduler.start()
+  // The clock is NOT started here any more (DD-6, M8.12). `companyStart.boot()`
+  // at the end of this function starts it, and only once consent is on file —
+  // starting it here would arm standup, retro and reflection sixty seconds
+  // behind a hire the Architect has not authorised, which is the second half of
+  // the problem the consent gate exists to close.
 
   // Closing time (GYM-003): constructed before Hermes so the endpoint below can
   // hand acknowledgments to it. It only mails, watches and reports — the quit
@@ -2826,8 +2838,141 @@ async function boot(): Promise<void> {
     onDegraded: (detail) => reportDegradation('artemis/driver', detail)
   })
 
+  // Last, and not awaited: a company whose orchestrator is slow to start is
+  // still a usable company, and her failure is a degradation rather than a
+  // boot error (FR-5.4).
+  // The engine she is hired on is NAMED (ADR-0024's Consequences). This read
+  // `engines.list()[0]?.id` until M8.11, which is harmless under a single
+  // registered engine and is exactly why the ADR calls it out: reordering three
+  // adjacent registration lines would otherwise put the orchestrator on an
+  // engine the Architect's own profiles are refused for.
+  /**
+   * The engine she is hired on, resolved at CALL time.
+   *
+   * A `const` computed once, until M8.12 — which was right when the hire was
+   * the last statement of boot and is wrong now that it has two callers and is
+   * constructed before the last engine registers.
+   */
+  const orchestratorEngineNow = (): typeof REFERENCE_ENGINE | null =>
+    engines.has(REFERENCE_ENGINE) ? REFERENCE_ENGINE : null
+  /**
+   * The hire itself, behind the consent gate (DD-6, M8.12).
+   *
+   * A closure rather than the straight-line code it replaced, because there are
+   * now TWO callers: `companyStart.boot()` on a machine that has already
+   * consented, and `companyStart.grant()` when the Architect says go in this
+   * session. A grant that only took effect at the next restart would make the
+   * button a lie.
+   *
+   * `artemis` and `agora` are re-read into locals because a closure loses the
+   * narrowing the straight-line code had; both are assigned earlier in this
+   * same function, so the null branch is unreachable in production and says so
+   * honestly rather than claiming the engine was missing.
+   */
+  const hireOrchestrator = (): void => {
+    const her = artemis
+    const inTheAgora = agora
+    const orchestratorEngine = orchestratorEngineNow()
+    if (orchestratorEngine === null || her === null || inTheAgora === null) {
+      reportDegradation(
+        'artemis/not-hired',
+        orchestratorEngine === null
+          ? `no ${REFERENCE_ENGINE} adapter registered; not hired`
+          : 'the orchestrator or the Agora was not constructed; not hired'
+      )
+      return
+    }
+    // ADR-0021/0025, for the one agent they never covered.
+    //
+    // Trust was written for an ACTIVATION's target and the worktrees it
+    // creates. Artemis belongs to no activation: she is hired at boot and works
+    // in the Agora (SDD §2, because `board.md` is hers to scribe), so nobody
+    // ever trusted that directory for her. Since M8.7a gave every agent its own
+    // engine config directory, hers starts with no trust record at all.
+    //
+    // What that cost, measured on 2026-09-05: she came up at the engine's
+    // "Quick safety check: is this a project you trust?" dialog, whose default
+    // is "No, exit". A wake writes its text and then the submit key — and that
+    // Enter answered the dialog. She exited 1 within a second of EVERY wake,
+    // 13 times in this machine's log, and because every incident is routed to
+    // the orchestrator first, the whole chain stopped there. Her own last words
+    // are what finally said so.
+    for (const adapter of engines.list()) {
+      if (!adapter.trustWorkspace) continue
+      const configDir = engineConfigDirFor(adapter.id, her.id())
+      const prepared = adapter.prepareConfigDir?.(configDir)
+      if (prepared !== undefined && !prepared.ok) {
+        reportDegradation(
+          `artemis/engine-config:${adapter.id}`,
+          `${adapter.id}: the orchestrator's config directory is unusable — ${prepared.because}`
+        )
+        continue
+      }
+      const trusted = adapter.trustWorkspace(configDir, inTheAgora.root, 'must-exist')
+      inTheAgora.appendLog({
+        kind: 'orchestrator',
+        event: 'workspace-trusted',
+        engine: adapter.id,
+        agentId: her.id(),
+        path: inTheAgora.root,
+        ...(trusted.ok ? { alreadyTrusted: trusted.alreadyTrusted } : { because: trusted.because })
+      })
+      if (!trusted.ok) {
+        reportDegradation(
+          `artemis/workspace-trust:${adapter.id}`,
+          `${adapter.id}: ${inTheAgora.root} is not trusted for the orchestrator — ` +
+            `${trusted.because} — she will meet the engine's trust prompt and the ` +
+            'first wake will answer it with "No, exit"'
+        )
+      }
+    }
+    void her.start(orchestratorEngine)
+  }
+
+  /**
+   * What granting consent would actually do, read off the live configuration.
+   *
+   * Same `orchestratorEngineNow()` the hire uses, the scheduler's own trigger
+   * table, and the ceiling from `gate-policy.json` — so the consent screen
+   * cannot promise something this build does not do. A disclosure written as
+   * prose in a component goes stale the first time a trigger is added, and
+   * consent obtained against a stale description is not consent.
+   */
+  const discloseConsent = (): ConsentDisclosure => {
+    const engine = orchestratorEngineNow()
+    const her = artemis
+    return {
+      hire: engine === null || her === null ? null : { agentId: her.id(), engine },
+      triggers: scheduler.armed(),
+      dailyCeiling: loadGatePolicy(gatePolicyPath).policy.maxDailyTokens ?? null
+    }
+  }
+
+  /**
+   * The first-launch consent gate (DD-6, M8.12) — the only thing between a
+   * clean clone and a company that spends money.
+   *
+   * Everything about the decision lives outside `index.ts`: `decideConsent` in
+   * `src/shared/consent.ts` says whether work may start, and `CompanyStart` in
+   * `src/main/consent.ts` owns the ordering. Constructed here so `registerIpc`
+   * below can hand the Architect's grant to it; ASKED at the end of boot, once
+   * everything it would start exists.
+   */
+  companyStart = new CompanyStart({
+    record: () => getHome().config.consent,
+    save: (record) => {
+      saveConfig({ consent: record })
+    },
+    disclose: discloseConsent,
+    hire: hireOrchestrator,
+    startSchedule: () => scheduler.start(),
+    report: reportDegradation,
+    clear: (cause) => degradations.clear(cause)
+  })
+
   registerIpc({
     ptyManager,
+    consent: companyStart,
     agents: agentManager,
     avatars: avatarDirector,
     commands: commandQueue,
@@ -3180,63 +3325,16 @@ async function boot(): Promise<void> {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
-  // Last, and not awaited: a company whose orchestrator is slow to start is
-  // still a usable company, and her failure is a degradation rather than a
-  // boot error (FR-5.4).
-  // The engine she is hired on is NAMED (ADR-0024's Consequences). This read
-  // `engines.list()[0]?.id` until M8.11, which is harmless under a single
-  // registered engine and is exactly why the ADR calls it out: reordering three
-  // adjacent registration lines would otherwise put the orchestrator on an
-  // engine the Architect's own profiles are refused for.
-  const orchestratorEngine = engines.has(REFERENCE_ENGINE) ? REFERENCE_ENGINE : null
-  if (orchestratorEngine) {
-    // ADR-0021/0025, for the one agent they never covered.
-    //
-    // Trust was written for an ACTIVATION's target and the worktrees it
-    // creates. Artemis belongs to no activation: she is hired at boot and works
-    // in the Agora (SDD §2, because `board.md` is hers to scribe), so nobody
-    // ever trusted that directory for her. Since M8.7a gave every agent its own
-    // engine config directory, hers starts with no trust record at all.
-    //
-    // What that cost, measured on 2026-09-05: she came up at the engine's
-    // "Quick safety check: is this a project you trust?" dialog, whose default
-    // is "No, exit". A wake writes its text and then the submit key — and that
-    // Enter answered the dialog. She exited 1 within a second of EVERY wake,
-    // 13 times in this machine's log, and because every incident is routed to
-    // the orchestrator first, the whole chain stopped there. Her own last words
-    // are what finally said so.
-    for (const adapter of engines.list()) {
-      if (!adapter.trustWorkspace) continue
-      const configDir = engineConfigDirFor(adapter.id, artemis.id())
-      const prepared = adapter.prepareConfigDir?.(configDir)
-      if (prepared !== undefined && !prepared.ok) {
-        reportDegradation(
-          `artemis/engine-config:${adapter.id}`,
-          `${adapter.id}: the orchestrator's config directory is unusable — ${prepared.because}`
-        )
-        continue
-      }
-      const trusted = adapter.trustWorkspace(configDir, agora.root, 'must-exist')
-      agora.appendLog({
-        kind: 'orchestrator',
-        event: 'workspace-trusted',
-        engine: adapter.id,
-        agentId: artemis.id(),
-        path: agora.root,
-        ...(trusted.ok ? { alreadyTrusted: trusted.alreadyTrusted } : { because: trusted.because })
-      })
-      if (!trusted.ok) {
-        reportDegradation(
-          `artemis/workspace-trust:${adapter.id}`,
-          `${adapter.id}: ${agora.root} is not trusted for the orchestrator — ` +
-            `${trusted.because} — she will meet the engine's trust prompt and the ` +
-            'first wake will answer it with "No, exit"'
-        )
-      }
-    }
-    void artemis.start(orchestratorEngine)
-  } else
-    reportDegradation('artemis/not-hired', `no ${REFERENCE_ENGINE} adapter registered; not hired`)
+  const consent = companyStart.boot()
+  // In the book of record, because "nothing happened" and "nothing was supposed
+  // to happen" are the two states a quiet company can be in and only one of
+  // them is a problem (invariant §7).
+  agora.appendLog({
+    kind: 'orchestrator',
+    event: consent.mayStartWork ? 'consented' : 'awaiting-consent',
+    state: consent.state,
+    because: consent.because
+  })
 }
 
 /**

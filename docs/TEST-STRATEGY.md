@@ -203,3 +203,25 @@ Nightly: full E2E · live engine suite · bench.
 Weekly: soak · evals · mutation (rotating).
 Release: everything + S-suite full pass + E-BRIEF-FAITH gate + `npm audit` policy +
 signed builds smoke-launched on all three OSes.
+
+## 9. The one criterion no suite can cover
+
+[SRS §6.1](./srs/SRS.md) — the one-hour company test — asks whether a real agent
+handed a real broken test triages it correctly within the hour. Every level above
+runs against the fake-engine rig, deterministically, which is exactly what makes
+them useful and exactly why none of them can answer that question: judgment is
+what the rig replaces. M8 adds two more conditions no fixture can satisfy — the
+run must be performed by **a developer who is not the author, from a clean clone,
+following only the README**, and it must survive a deliberate restart mid-run.
+
+So it is executed by a person, and the record of that execution is the evidence.
+The runbook is **[`docs/EXIT-M8.md`](./EXIT-M8.md)**: it names, for each clause,
+the log `kind`/`event` its evidence lands under, the panel it appears in, and
+what a *vacuous* pass looks like written down — because "filed the required memo
+if the fix crossed policy" is satisfied when nothing crossed policy, and a tired
+person writes nothing rather than saying so.
+
+It lives in its own file rather than here for the reason this document exists:
+§1–§8 say what tests are owed and which level owns them; that is an operator
+runbook for one human doing one run by hand. Folding it in would make this
+document answer two questions in one voice.

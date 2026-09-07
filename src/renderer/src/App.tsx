@@ -11,6 +11,7 @@ import { AgentDock } from './AgentDock'
 import { AgentPanel } from './AgentPanel'
 import { AutonomyBadge } from './AutonomyBadge'
 import { CommandBar } from './CommandBar'
+import { ConsentGate } from './ConsentGate'
 import { BriefsPanel } from './BriefsPanel'
 import { MeetingPanel } from './MeetingPanel'
 import { GymPanel } from './GymPanel'
@@ -448,6 +449,10 @@ export function App(): ReactElement {
           <AutonomyBadge />
         </span>
       </header>
+      {/* Above the tabs, because until it is answered nothing behind them is
+          doing anything (DD-6, M8.12). It renders nothing once consent is on
+          file, so this costs a granted company one IPC call at mount. */}
+      <ConsentGate />
       <nav style={{ display: 'flex', gap: '4px' }}>
         {(
           [

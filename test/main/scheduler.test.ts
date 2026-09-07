@@ -194,3 +194,42 @@ describe('the mode gate (ADR-0018, FR-14.4, SDD §9)', () => {
     expect(fired).toBe(1)
   })
 })
+
+/**
+ * What the consent screen is allowed to promise (DD-6, M8.12).
+ *
+ * The disclosure is read off this table rather than written beside it, so a
+ * cadence added later is disclosed without anyone remembering to say so — and a
+ * cadence that cannot fire is not promised.
+ */
+describe('armed()', () => {
+  it('reports every registered trigger with its interval, sorted', () => {
+    const scheduler = new Scheduler()
+    scheduler.add({ id: 'standup', everyMs: 1_800_000, run: () => {} })
+    scheduler.add({ id: 'gym-metric-check', everyMs: 3_600_000, run: () => {} })
+    expect(scheduler.armed()).toEqual([
+      { id: 'gym-metric-check', everyMs: 3_600_000 },
+      { id: 'standup', everyMs: 1_800_000 }
+    ])
+  })
+
+  it('leaves out a cadence its own `enabled()` currently refuses', () => {
+    // The Stoa cadence cannot fire in `directed`; naming it would over-promise
+    // exactly as badly as omitting a live one would under-promise.
+    const scheduler = new Scheduler()
+    scheduler.add({ id: 'stoa-cadence', everyMs: 1, enabled: () => false, run: () => {} })
+    scheduler.add({ id: 'retro', everyMs: 2, run: () => {} })
+    expect(scheduler.armed().map((row) => row.id)).toEqual(['retro'])
+  })
+
+  it('fires nothing and stamps no clock', async () => {
+    let fired = 0
+    const scheduler = new Scheduler({ now: () => new Date(0) })
+    scheduler.add({ id: 'a', everyMs: 1000, run: () => void (fired += 1) })
+    scheduler.armed()
+    expect(fired).toBe(0)
+    // The clock is untouched, so the first real tick still fires it.
+    await scheduler.tick()
+    expect(fired).toBe(1)
+  })
+})

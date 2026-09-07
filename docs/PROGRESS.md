@@ -6082,7 +6082,9 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       more". So the record cannot outlive the gap it records, and the gap cannot
       re-open unrecorded.*
 
-- [ ] **M8.12 Exit review** — the milestone closes on a run, not on a checklist:
+- [x] **M8.12 Exit review** — *the three attached pieces of work are BUILT and
+      THE EXIT ROW ITSELF IS NOT TICKED.* The milestone closes on a run, not on a
+      checklist:
       SRS §6.1's action half on a real repository, performed by a developer who
       is not the author, from a clean clone, following only the README — and
       surviving a deliberate restart mid-run. PROGRESS and docs re-synced.
@@ -6126,6 +6128,91 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       driven, rotation never triggered at 688 KB, and the roster `profile` field
       and the hook-grade migration were both unexercised because nothing spawned.
 
+      *Evidence (2026-09-07): **the consent gate is live, on both halves.** Boot
+      no longer hires the orchestrator or starts the trigger clock until the
+      Architect consents. The decision is a pure function (`decideConsent`,
+      `src/shared/consent.ts`); the ordering is `CompanyStart`
+      (`src/main/consent.ts`) with every effect injected; `index.ts` keeps the
+      construction (`:2961`) and one `boot()` call (`:3328`). Recorded as
+      [ADR-0032](adr/ADR-0032-the-company-asks-before-it-starts.md).*
+
+      *PROVED IN THE LIVE APP, against the Architect's own `~/.ephesus` — which
+      had no consent record and, since the 2026-09-07 stop-clearing, nothing
+      refusing Artemis. The refusal: `log.jsonl` seq 2774
+      `kind: degradation / source: consent / cause: consent/not-granted`, seq
+      2775 `kind: orchestrator / event: awaiting-consent / state: never-asked`.
+      **Zero `spawn` rows, zero `workspace-trusted` rows, zero `cost` rows**, and
+      227 seconds — four scheduler ticks — with no `brief`, `retro` or
+      reflection row. `config.json` was byte-identical afterwards: a boot that
+      refuses writes nothing. The consented direction was proved on a scratch
+      `EPH_HOME` carrying a hand-written grant — `orchestrator/workspace-trusted`
+      then `orchestrator/consented (state: granted)` then `spawn agent.artemis`
+      at t+0, and `triggers.json` at t+60s holding `gym-metric-check`,
+      `library.reflection`, `retro` and `standup` at ONE timestamp: the
+      register's second observation, reproduced, now behind consent.*
+
+      *The suite: 4194 passed / 0 failed across 223 files, with typecheck, lint,
+      invariants, attribution and `check-readme-current` green;
+      `check-coverage.cjs` ratcheted after **three corroborating runs of one
+      frozen tree** (`ffa20b55b23a`) which agreed to the hundredth — `home`
+      55.43% to 71.93% lines, because `src/shared/consent.ts` joined it and
+      `src/main/config.ts` is now reached by a test. **Mutation pass: 20 mutants,
+      19 killed, and the twentieth is a PLANTED NO-OP** (`minutes < 1` to
+      `minutes <= 0` on an integer) which survived — a harness that reports every
+      mutation killed cannot tell you when it has stopped running your tests. The
+      consent predicate was mutated in all four directions the package names
+      (absent, stale terms, granted, corrupt), and the mutant that guards only the
+      hire is killed by name.*
+
+      *F1 DECIDED — readers tolerate a duplicate `seq` explicitly. The cause is in
+      the writer, not the data: `EventLog.seq` is an in-memory counter recovered at
+      `open()`, so two processes on one home both stamp `highest + 1`, and the
+      class comment's claim that `O_APPEND` "covers the case of a second harness
+      process" is true of the bytes and false of the counter. `read` now treats
+      its cursor as a POSITION in the file. What decided it against "accept as a
+      scar" is who loses the row: `BriefingJob.gather(sinceSeq)` pages from a
+      cursor, and SRS §6.1 asks for "the next briefing narrates the incident
+      accurately from the log". **Two residuals are pinned by tests rather than
+      hidden** — a cursor on the row immediately before the duplicate still misses
+      it (one value, down from three), and a duplicate inside an already-skipped
+      archive segment is still lost. Re-measured on the Architect's log after this
+      session's two boots: 2792 rows, exactly two seq breaks, both the known
+      pre-existing pair.*
+
+      *F2 PARTIALLY DECIDED. The documentation half is done — the README's setup
+      section and `docs/EXIT-M8.md` §4 both say to stop Electron by process, in
+      PowerShell and POSIX form. The design half — whether the harness should
+      REFUSE to boot on a home another instance holds — touches ADR-0004's
+      single-committer rule and is a §8.3 must-ask in the session report, not
+      something built on this package's own initiative.*
+
+      *THE EXIT IS RUNNABLE BY A STRANGER, and that is what the rest of the
+      package bought. The README gained the two things missing between "the app
+      booted" and "a crew is watching my repo": **Say go** (the consent banner,
+      and how to stop the app by process) and **Your first crew** — what a profile
+      is, which two ship, that `gh` must be authenticated, and that the activation
+      screen shows the whole plan before anything happens.
+      [`docs/EXIT-M8.md`](EXIT-M8.md) is the followable script: who may run it and
+      what it means if you cannot, setup, the ceiling to set before walking away,
+      the break to introduce, where the restart goes, and — for every §6.1 clause
+      — the exact `kind`/`event` its evidence lands under, the panel it appears
+      in, and what a vacuous pass looks like written down. The two clauses a tired
+      person skips are called out by name: "filed the required memo IF the fix
+      crossed policy" gets a three-step check whose "no memo was required,
+      because…" is a pass and whose silence is not, and "zero un-gated destructive
+      actions" gets the only method that works — enumerate the gates that opened,
+      then go looking for what should have opened one and did not.*
+
+      *WHAT THIS PACKAGE DID NOT ESTABLISH. Nobody who is not the author has run
+      §6.1, from a clean clone, following only the README, surviving a restart
+      mid-run. The exit row above stays unticked for exactly the reason M7's has
+      since 2026-09-01. Also unproved here: no UI was clicked — the consent
+      banner's behaviour is covered by `test/renderer/consent-gate.test.tsx`
+      driving the real component, and the live evidence is the book of record on
+      both sides of the gate rather than a screenshot; and the granted direction
+      spent no measurable tokens, because the scratch boot was stopped before any
+      turn completed (zero `cost` rows).*
+
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
 those were settled by work that had already landed.** The list below is the
@@ -6159,12 +6246,17 @@ and in `docs/implementations/2026-09-07-m8-live-verification.md` §3.
   `onPathology` when `isPathological(blocks)` (`PATHOLOGY_SIGNAL_AT = 10`), wired
   at `index.ts:2082` to `breaker.notePathology`; `blockCap`
   (`DEFAULT_BLOCK_CAP = 20`) reaches `decideStop` via `index.ts:2040`.
-- **DD-6 consent on first launch** — **STILL OPEN, and now M8.12's work by
-  Architect decision (2026-09-07).** Confirmed live: no consent machinery exists
-  anywhere in the tree, `artemis.start` runs unconditionally once the reference
-  engine is registered, and `~/.ephesus/triggers.json` shows `standup`, `retro`
-  and `gym-metric-check` sharing the timestamp `1788631795998` — so the first
-  tick does fire them together. See the M8.12 row.
+- **DD-6 consent on first launch** — **DECIDED AND BUILT in M8.12 (2026-09-07)**,
+  recorded as [ADR-0032](adr/ADR-0032-the-company-asks-before-it-starts.md).
+  Consent covers the company STARTING WORK, not just the hire: both
+  `artemis.start` and `scheduler.start()` wait for it, so the first tick can no
+  longer fire `standup`, `retro` and `gym-metric-check` together sixty seconds
+  behind a boot nobody authorised. The record lives in `config.json` (invariant
+  §9 — it already carries a `schemaVersion` and a validator), is optional so
+  every existing home stays valid, and **absent means ASK** — never "assume
+  yes", which would make the gate a no-op on every machine anybody has, and
+  never a durable "no". Corrupt reads as ask too, because `configSchema` is
+  strict. Both directions are proved live; see the M8.12 row.
 - **DD-7 whether a settings surface is in scope at all** — **MOSTLY ANSWERED.**
   `SettingsPanel` ships the two company-wide ceilings and is reachable
   (`App.tsx` → `WatchPanel` → `SettingsPanel`). The `rules` table is deliberately

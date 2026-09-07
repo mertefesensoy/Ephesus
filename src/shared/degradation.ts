@@ -50,6 +50,11 @@ export const DEGRADATION_SOURCES = [
   // healthy: the process is up, the session is live, and the only thing wrong
   // is that a keystroke went somewhere else.
   'commands',
+  // The company is not working because nobody has said go (DD-6, M8.12). Its
+  // own source rather than `artemis`, because nothing is broken: the
+  // orchestrator is not down, she was never hired, and the Architect acts on
+  // this by answering a question rather than by repairing anything.
+  'consent',
   'engines',
   'gates',
   'harbor',

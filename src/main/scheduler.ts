@@ -141,6 +141,31 @@ export class Scheduler {
   }
 
   /**
+   * Contract: the cadences that would actually start running, with their
+   * intervals, sorted by id. Pure — it fires nothing and stamps no clock.
+   *
+   * This exists for the first-launch consent disclosure (DD-6, M8.12), which
+   * has to say what granting consent starts. Read off the LIVE table rather
+   * than written down beside it, because a hand-maintained list of triggers is
+   * a promise that goes stale the first time someone adds one — and consent
+   * obtained against a stale description is not consent.
+   *
+   * A trigger its own `enabled()` currently refuses is left OUT: the Stoa
+   * cadence cannot fire in `directed` mode and the Harbor ingest cannot fire
+   * with nothing being watched, so naming them would over-promise exactly as
+   * badly as omitting a live one would under-promise.
+   */
+  armed(): readonly { readonly id: string; readonly everyMs: number }[] {
+    return [...this.triggers.values()]
+      .filter((registered) => registered.trigger.enabled?.() !== false)
+      .map((registered) => ({
+        id: registered.trigger.id,
+        everyMs: registered.trigger.everyMs
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  }
+
+  /**
    * Fires every trigger whose interval has elapsed and which is not already
    * running.
    *

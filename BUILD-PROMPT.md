@@ -130,6 +130,43 @@ Within a milestone, execute the work packages below in order. Track progress in
 `docs/PROGRESS.md` (create it; a checklist per milestone; update it every session —
 it is how the next session knows where to resume).
 
+> **Build state (updated 2026-09-07, M8.12):** **M8's THIRTEEN PACKAGES ARE ALL
+> BUILT AND M8 HAS NOT CLOSED.** Its exit is not a checklist — it is SRS §6.1's
+> action half on a real repository, run by **a developer who is not the author,
+> from a clean clone, following only the README**, and surviving a deliberate
+> restart mid-run. Nobody has done that, so the row is open, exactly as M7's has
+> been since 2026-09-01; the same run is owed to both, and ticking either on the
+> author's own rehearsal is the one thing this milestone must not do. **The
+> script for that run is `docs/EXIT-M8.md`** — who may run it, the setup, the
+> ceiling to set first, the break to introduce, where the restart goes, and for
+> every §6.1 clause the exact `kind`/`event` its evidence lands under.
+>
+> **M8.12 also landed three things the Architect attached to it.** A
+> **first-launch consent gate** (DD-6, ADR-0032): boot hires nobody and starts
+> no schedule until the Architect consents, the answer is persisted in
+> `config.json`, the disclosure is computed from the live configuration rather
+> than written as prose, and a withheld company is a visible degradation
+> (`source: consent`) rather than an empty floor. **Absent means ASK** — every
+> home that predates this has no record, and `ensureHarnessHome` will never
+> give one, so `undefined` reading as "granted" would have made the gate a
+> no-op on every machine that exists. Consent covers `scheduler.start()` as
+> well as `artemis.start`, because those are different products. **F1**: a
+> duplicate `seq` in the book of record is now tolerated by `EventLog.read`,
+> whose cursor is a position in the file rather than a numeric threshold — the
+> cause is the in-memory `seq` counter two harness processes each recover for
+> themselves, and two residuals are pinned by tests rather than hidden. **F2**:
+> the README says to stop Electron by process, not by the `npm run dev`
+> wrapper; whether the harness should refuse to boot on a home another instance
+> holds is an open must-ask against ADR-0004.
+>
+> Suite at M8.12: **4194 passed / 0 failed** across 223 files, typecheck, lint,
+> invariants, attribution and `check-readme-current` green, coverage floors
+> ratcheted on three corroborating runs of one frozen tree. Note the recorded
+> environment hazard: `npm run test:coverage` can exit non-zero on an EPERM
+> tearing down `coverage/.tmp` after every test has passed — read the "Test
+> Files" line before believing the exit code, and never weaken the gate for it
+> (DECISIONS-LOG 2026-09-07).
+
 > **Build state (updated 2026-09-02):** **M7's seven packages are DONE and
 > MERGED; M7's EXIT IS STILL OPEN; the current milestone is M8.** `main` and
 > `origin/main` are level at `d427d28`, the tree is clean, and the suite is
