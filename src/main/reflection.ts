@@ -50,6 +50,20 @@ export interface ReflectionOptions {
   now?(): Date
 }
 
+/**
+ * What one sweep did — asked, and could not ask.
+ *
+ * Returned rather than only logged because "reflection stopped for six agents"
+ * has to be a claim a test can make. `trigger()` ignores it: the scheduler has
+ * nothing to decide, and the degradation seam is what the Architect reads.
+ */
+export interface ReflectionSweepReport {
+  /** Agents asked to condense this sweep, in iteration order. */
+  readonly asked: readonly string[]
+  /** Agents whose turn threw, with the reason each one failed. */
+  readonly failed: readonly { readonly agentId: string; readonly reason: string }[]
+}
+
 /** What the job is waiting for, per agent. */
 interface Outstanding {
   readonly messageId: string
@@ -90,26 +104,69 @@ export class ReflectionJob {
    * mid-turn must not leave its memory growing forever, and asking twice is
    * harmless because the endpoint applies whichever answer arrives against the
    * plan as it stands then.
+   *
+   * **One agent's failure never costs another its reflection.** The loop used
+   * to run unguarded, and the throw is not hypothetical: `ask` composes a real
+   * `Message`, and `messageSchema` caps `body` at 200 000 characters — so an
+   * agent whose condensing sections exceed that cap throws on validation. The
+   * iteration order is `reachableAgents()`, which is sorted, so one oversized
+   * memory silently stopped reflection for **every agent after it
+   * alphabetically**, every hour, for as long as the memory stayed oversized.
+   * The agents that lost their reflection were chosen by their names.
+   *
+   * That is precisely the shape invariant §7 forbids. The failure is now
+   * REPORTED per agent, naming the agent and the reason, and the sweep carries
+   * on. The returned report is what makes "reflection stopped for six agents"
+   * assertable rather than a silence.
    */
-  sweep(): void {
+  sweep(): ReflectionSweepReport {
     const nowMs = this.now().getTime()
+    const asked: string[] = []
+    const failed: { agentId: string; reason: string }[] = []
     for (const agentId of this.options.reachableAgents()) {
-      const plan = this.options.library.reflectionPlan(agentId)
-      if (!plan.due) continue
-
-      const waiting = this.outstanding.get(agentId)
-      if (waiting && nowMs - waiting.askedAtMs < REFLECTION_RETRY_MS) continue
-      if (waiting) {
+      try {
+        if (!this.considerOne(agentId, nowMs)) continue
+        asked.push(agentId)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        failed.push({ agentId, reason })
+        // Named, not counted. A count would say "reflection failed" without
+        // saying WHOSE memory stopped being condensed, and an unreflected
+        // memory grows until the injection budget eats it (ADR-0006).
         this.options.onDegraded?.(
-          `reflection: ${agentId} has not answered since ${new Date(waiting.askedAtMs).toISOString()}; asking again`
+          `reflection: ${agentId} could not be asked to condense its memory — ${reason}; every other agent was still swept`
         )
       }
-      this.ask(
-        agentId,
-        plan.condensing.map((section) => section.text).join('\n\n'),
-        plan.condensing.length
+    }
+    return { asked, failed }
+  }
+
+  /**
+   * Considers one agent. Returns whether it was asked this sweep.
+   *
+   * Split out so the guard in `sweep` wraps the WHOLE of one agent's turn —
+   * the plan, the retry decision and the ask — rather than one call inside it.
+   * `reflectionPlan` reads a file and `ask` renders a prompt, composes a
+   * validated message and delivers it; any of those can fail, and which one
+   * failed does not change what the sweep must do about it.
+   */
+  private considerOne(agentId: string, nowMs: number): boolean {
+    const plan = this.options.library.reflectionPlan(agentId)
+    if (!plan.due) return false
+
+    const waiting = this.outstanding.get(agentId)
+    if (waiting && nowMs - waiting.askedAtMs < REFLECTION_RETRY_MS) return false
+    if (waiting) {
+      this.options.onDegraded?.(
+        `reflection: ${agentId} has not answered since ${new Date(waiting.askedAtMs).toISOString()}; asking again`
       )
     }
+    this.ask(
+      agentId,
+      plan.condensing.map((section) => section.text).join('\n\n'),
+      plan.condensing.length
+    )
+    return true
   }
 
   /**
