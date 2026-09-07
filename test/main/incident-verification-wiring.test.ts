@@ -2,9 +2,10 @@ import fs from 'node:fs'
 import { deriveRepo } from '../../src/shared/repo-remote'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { IncidentEndpoint, VERDICT_SUBJECT, type IncidentBinding } from '../../src/main/incidents'
 import { PromptStore } from '../../src/main/prompts'
+import { removeTempDir } from '../tmpdir'
 import { ProfileStore } from '../../src/main/profiles'
 import {
   activationPlan,
@@ -40,8 +41,25 @@ import type { InboundItem } from '../../src/shared/harbor'
 
 const REPO = path.join(__dirname, '..', '..')
 
+/**
+ * A temp home that is actually taken away again.
+ *
+ * This helper made one directory per test and removed none of them: 1 391 of
+ * the 3 279 `eph-*` directories found in `%TEMP%` on 2026-09-07 came from here,
+ * the single largest source. Nothing failed because of it — the cost is
+ * unbounded metadata growth on the Architect's disk, six directories per suite
+ * run, forever.
+ */
+const homes: string[] = []
+
+afterEach(() => {
+  for (const home of homes.splice(0)) removeTempDir(home)
+})
+
 function tempHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'eph-verify-'))
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-verify-'))
+  homes.push(home)
+  return home
 }
 
 const BINDING: IncidentBinding = {
