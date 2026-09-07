@@ -366,7 +366,8 @@ export interface EngineAdapter {
    *
    * OPTIONAL, and absent on purpose for engines whose only route past their own
    * trust prompt is a bypass flag: DECISIONS-LOG 2026-08 pinned codex and gemini
-   * at `pty-heuristic` rather than pass `--dangerously-bypass-hook-trust` or
+   * at the bottom hook grade (`none` since ADR-0024 §3 renamed it) rather than
+   * pass `--dangerously-bypass-hook-trust` or
    * `--skip-trust`, and this hook does not reopen that. It exists for engines
    * that keep a per-workspace record a human's decision can be written into,
    * which today means Claude Code alone.

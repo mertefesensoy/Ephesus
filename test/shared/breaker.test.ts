@@ -12,6 +12,7 @@ import {
   type SignalInput,
   type Span
 } from '../../src/shared/breaker'
+import { HOOK_SUPPORTS } from '../../src/shared/engines'
 
 /**
  * The breaker's signals and ladder (ADR-0011) as pure functions, on scripted
@@ -219,17 +220,26 @@ describe('several signals at once', () => {
 })
 
 describe('reduced protection on weaker engines (ADR-0011’s consequence)', () => {
-  it('flags a pty-heuristic engine and names what it cannot see', () => {
-    // No tool events means no spans, so two of the four signals see nothing.
+  it('flags a hook-less engine', () => {
+    // No tool events means no spans, so the span-derived signals see nothing.
     // ADR-0011 requires this to be surfaced on the agent card, not hidden.
-    expect(protectionFor('pty-heuristic')).toEqual({
-      reduced: true,
-      blind: ['repetition', 'error-rate']
-    })
+    expect(protectionFor('none')).toEqual({ reduced: true })
   })
 
   it.each(['native', 'wrapper'])('does not flag a %s engine', (grade) => {
-    expect(protectionFor(grade)).toEqual({ reduced: false, blind: [] })
+    expect(protectionFor(grade)).toEqual({ reduced: false })
+  })
+
+  // ADR-0024. The old answer enumerated `['repetition', 'error-rate']` and the
+  // Watch panel printed it, which was wrong in both directions at once: it
+  // omitted burn-rate (blind too, because it fires on a budget breach compiled
+  // from transcript rows an adapter with no transcript reader never produces)
+  // and it implied hop-cap was lost, which it is not. The grade cannot answer
+  // that question, so it no longer pretends to.
+  it('names no signals, because the grade does not determine them', () => {
+    for (const grade of HOOK_SUPPORTS) {
+      expect(Object.keys(protectionFor(grade))).toEqual(['reduced'])
+    }
   })
 })
 

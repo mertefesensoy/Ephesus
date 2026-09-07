@@ -30,6 +30,7 @@ import {
 } from './isolation'
 import { DEFAULT_EXIT_POLICY, exitPolicySchema, type ExitPolicy } from './respawn'
 import { toolGrantSchema, type ToolGrant } from './engine-tools'
+import { REFERENCE_ENGINE, isReferenceEngine } from './engines'
 import type { RepoDerivation } from './repo-remote'
 
 /**
@@ -500,6 +501,50 @@ export function activationPlan(
 
   const hires: PlannedHire[] = []
   for (const hire of bundle.hires) {
+    // ADR-0024 §1, and the first thing asked about a hire because it is the one
+    // fault that depends on neither the target, the name, nor the ceiling.
+    //
+    // ## Refuse, do not degrade
+    //
+    // The alternative was to plan the hire and warn. That is what the app did
+    // for two milestones, and it is worse than not starting: on an engine
+    // without an autonomy mapping the granted ceiling is dropped, without a
+    // Stop hook there is no continuation loop so the agent stops after one
+    // turn, and with no hook stream at all the floor asserts a confident `idle`
+    // for it for ever. Three silent wrong answers, none of which surfaces as a
+    // failure. A company that quietly runs at one turn per wake is worse than
+    // one that will not start.
+    //
+    // ## Why HERE, and not only at spawn
+    //
+    // This function is both the activation preview and the plan activation
+    // executes (see its contract above), so a refusal written here cannot
+    // disagree with the screen that shows it. `AgentManager.spawn` is the
+    // backstop, not the gate: by the time it runs, agent ids are claimed,
+    // worktrees are cut and trust records are written, and the refusal would
+    // arrive as a half-activated company.
+    //
+    // ## The hole this closes, which ADR-0031 deliberately left open
+    //
+    // `assertAutonomyEnforceable` (ADR-0031) already refuses a `manual` or
+    // `supervised` hire on an engine declaring `autonomySupport: 'none'`, and
+    // returns early on `autonomous` — correctly, because `autonomous` is the
+    // loosest thing the Architect can ask for, so an engine being stricter of
+    // its own accord costs a stalled turn rather than an unpermitted action.
+    // That closed the SAFETY half. It leaves an `autonomous` hire on such an
+    // engine spawning today, and for that hire every failure above is still
+    // live. This is the check that catches it — which is why the test for an
+    // `autonomous` non-reference hire is the one that matters most here.
+    if (!isReferenceEngine(hire.engine)) {
+      reasons.push(
+        `hire "${hire.name}" declares engine "${hire.engine}", which this build refuses: ` +
+          `the MVP ships ${REFERENCE_ENGINE} only (ADR-0024), and on any other engine this ` +
+          'hire would ignore the autonomy it was granted, stop after one turn for want of a ' +
+          "continuation hook, and report itself idle for ever — set the hire's engine to " +
+          `"${REFERENCE_ENGINE}"`
+      )
+      continue
+    }
     const agentId = agentIdForHire(bundle.name, target, hire.name)
     if (agentId === null) {
       reasons.push(
@@ -539,9 +584,11 @@ export function activationPlan(
         role: hire.role,
         // The registry types `engine` as an `EngineId`; the hire template types
         // it as a string, because a template may name an engine this build does
-        // not carry. `AgentManager.spawn` validates it against the registry and
-        // refuses an unknown one, which is where that check belongs — here it
-        // would be a second, drifting list of engines.
+        // not carry. Narrowed by the ADR-0024 check above, which is the only
+        // reason this cast is sound: nothing reaches here that is not
+        // `REFERENCE_ENGINE`. `AgentManager.spawn`'s own "no adapter
+        // registered" refusal still stands behind it, for the spawn paths that
+        // never came through a profile at all.
         engine: hire.engine as SpawnRequest['engine'],
         cwd: target.path,
         capabilities: [...hire.capabilities],

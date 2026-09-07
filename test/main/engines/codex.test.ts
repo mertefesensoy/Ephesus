@@ -125,7 +125,7 @@ describe('honesty (ADR-0009, FR-2.3)', () => {
     // Codex 0.150.1 HAS a hook plane, but its events reach nobody without
     // persisted hook trust, and this adapter will not lower that default on the
     // Architect's behalf. So: no events claimed.
-    expect(rig().adapter.hooks).toBe('pty-heuristic')
+    expect(rig().adapter.hooks).toBe('none')
   })
 
   it('writes nothing into the agent repository, ever', async () => {

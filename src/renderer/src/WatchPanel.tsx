@@ -352,9 +352,14 @@ export function WatchPanel(): ReactElement {
                 </td>
                 <td style={{ padding: '0 0 4px 0' }}>
                   {/* ADR-0011's stated consequence: a weaker engine's reduced
-                      protection is surfaced here, never hidden. */}
+                      protection is surfaced here, never hidden. The signal names
+                      that used to follow came out at M8.11 (ADR-0024) — they
+                      omitted burn-rate and implied hop-cap was lost, so the
+                      sentence was wrong in both directions. See
+                      `protectionFor` for which signal each grade actually
+                      costs. */}
                   {agent.reducedProtection
-                    ? `⚠ reduced · blind to ${agent.blindSignals.join(', ')}`
+                    ? '⚠ reduced protection — this engine reports no hook events'
                     : `full · ${String(agent.spanCount)} spans`}
                 </td>
               </tr>

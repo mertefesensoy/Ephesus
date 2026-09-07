@@ -288,19 +288,31 @@ export function actionsFor(rung: Rung): RungActions {
 
 /**
  * Whether an engine's hook grade weakens the breaker (ADR-0011's stated
- * consequence: "on `pty-heuristic` engines its repetition signal is weaker —
+ * consequence: "on a hook-less engine its repetition signal is weaker —
  * surfaced as reduced protection on the agent card").
+ *
+ * ## Why this says "reduced" and no longer names the signals
+ *
+ * It used to answer `blind: ['repetition', 'error-rate']`, and the Watch panel
+ * printed that list. Both halves of the sentence were wrong (ADR-0024):
+ *
+ *  - It implied the OTHER two signals still protect such an engine. Half true.
+ *    `hop-cap` does — it counts Hermes escalations, which owe nothing to hooks.
+ *    `burn-rate` does not: it fires on `budgetState === 'breached'`, and a
+ *    budget breaches on ledger rows compiled from the engine's TRANSCRIPT, which
+ *    an adapter with no transcript reader never produces.
+ *  - So the blind set is not a function of the hook grade at all. It is a
+ *    function of two independent adapter properties, and folding them into one
+ *    lookup is what made the enumeration confidently wrong.
+ *
+ * The grade honestly answers one question — is this engine's breaker weaker —
+ * and that is what it now answers. Naming the signals correctly would need a
+ * claim per adapter that no engine in this build can demonstrate, and a claim
+ * this repository cannot establish by execution does not get written down.
  */
-export function protectionFor(hookFidelity: string): {
-  readonly reduced: boolean
-  /** Signals that cannot be computed at this grade. */
-  readonly blind: readonly TripSignal[]
-} {
-  if (hookFidelity === 'pty-heuristic') {
-    // No tool events means no spans, so two of the four signals see nothing.
-    return { reduced: true, blind: ['repetition', 'error-rate'] }
-  }
-  return { reduced: false, blind: [] }
+export function protectionFor(hookFidelity: string): { readonly reduced: boolean } {
+  // No tool events means no spans, so the span-derived signals see nothing.
+  return { reduced: hookFidelity === 'none' }
 }
 
 /** The breaker's state for one agent, as the UI and the log see it. */
@@ -311,7 +323,6 @@ export interface BreakerState {
   readonly firing: readonly SignalHit[]
   /** Whether this engine's grade weakens the breaker. */
   readonly reducedProtection: boolean
-  readonly blindSignals: readonly TripSignal[]
   /** Spans captured for this agent this session (FR-11.6). */
   readonly spanCount: number
 }

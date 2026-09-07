@@ -132,7 +132,22 @@ function planHaystack(adapter: EngineAdapter, cfg: AgentSpawnConfig): string {
   ].join('\n')
 }
 
+/**
+ * Every subject this table has been run against, in registration order.
+ *
+ * It exists for one failure and it is the failure ADR-0024 warns about by
+ * name. M8.11 unregisters `codex.ts` and `gemini.ts` from the application, and
+ * the whole reason they stay in the tree is that they are this suite's SECOND
+ * implementation — "a suite with one implementation only proves that
+ * implementation compiles". The way that value is lost is not a deletion
+ * anybody would argue for; it is a subject quietly ceasing to run, after which
+ * conformance passes by special-casing Claude and says nothing. A count in a
+ * scroll-back is not a check, so the expectation is written down.
+ */
+export const CONFORMANCE_SUBJECTS: string[] = []
+
 export function runAdapterConformance(subject: ConformanceSubject): void {
+  CONFORMANCE_SUBJECTS.push(subject.name)
   describe(`conformance: ${subject.name}`, () => {
     describe('declared surface (ADR-0009)', () => {
       it('declares a known engine id and a known hook grade', () => {

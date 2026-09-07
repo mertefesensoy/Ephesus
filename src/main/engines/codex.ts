@@ -20,7 +20,7 @@ import type {
  * `codex resume [SESSION_ID] [PROMPT]`. Nothing below is inferred from how
  * another engine works.
  *
- * ## Why this adapter declares `pty-heuristic`
+ * ## Why this adapter declares `none`
  *
  * ADR-0009 grades hook fidelity and FR-2.3 requires the grade to be honest:
  * **declared must be what is demonstrated**, and the conformance suite exists
@@ -42,7 +42,7 @@ import type {
  *     improvisation BUILD-PROMPT §7 forbids.
  *
  * So this adapter writes **no settings at all** and claims the grade that
- * matches: `pty-heuristic`, no events. The agent card says so, the breaker
+ * matches: `none`, no events. The agent card says so, the breaker
  * scales its sensitivity down accordingly (ADR-0011), and nothing is left in
  * anyone's repository. Raising the grade is a later package's job, and it owes
  * a live demonstration first — that is what the grade means.
@@ -92,7 +92,7 @@ function composeIdentity(cfg: AgentSpawnConfig, prompts: PromptStore): string {
  * A `HookPlan` that installs nothing.
  *
  * Not a stub: it is the honest plan for an adapter that declares
- * `pty-heuristic`. ADR-0009's settings-hygiene rule is about what an adapter
+ * `none`. ADR-0009's settings-hygiene rule is about what an adapter
  * leaves behind, and the strongest possible answer is nothing. `uninstall()` is
  * safe before, after and twice, which is what the conformance table checks.
  */
@@ -112,7 +112,7 @@ export class CodexAdapter implements EngineAdapter {
   readonly id = 'codex' as const
 
   /** See the class comment: the grade this build can demonstrate is none. */
-  readonly hooks = 'pty-heuristic' as const
+  readonly hooks = 'none' as const
   /**
    * ADR-0031. This adapter has no flag to map autonomy onto, so the engine's
    * own configuration decides — and that configuration is the OPERATOR'S,
