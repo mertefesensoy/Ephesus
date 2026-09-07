@@ -220,10 +220,28 @@ describe('an import cannot widen a profile already installed here', () => {
 
 describe('the sharing surface cannot activate anything', () => {
   it('exposes exactly four sharing channels, and none of them activates', () => {
+    /**
+     * The Harbor's channels that only READ, named one by one.
+     *
+     * A blanket "anything that does not look like sharing" would defeat the
+     * pin below: the point is that a NEW harbor channel has to be looked at by
+     * a person and put on one of these two lists deliberately. Both entries
+     * here have been: `repos` returns the port's queues, and `incidents`
+     * (M8.9) folds `log.jsonl` and writes nothing — there is no incident store
+     * for it to write to, by ADR-0027 §5.
+     */
+    const readOnly = ['harbor:incidents', 'harbor:repos']
     const sharing = Object.entries(IpcChannels)
-      .filter(([, channel]) => channel.startsWith('harbor:') && channel !== 'harbor:repos')
+      .filter(([, channel]) => channel.startsWith('harbor:') && !readOnly.includes(channel))
       .map(([, channel]) => channel)
       .sort()
+
+    // The read list is pinned too, or "exclude the reads" becomes the hole.
+    expect(
+      Object.values(IpcChannels)
+        .filter((channel) => readOnly.includes(channel))
+        .sort()
+    ).toEqual(readOnly)
 
     // Pinned, the S-SECRETS way: a future channel that imported AND activated
     // in one call — or any sharing channel at all — fails here by name rather

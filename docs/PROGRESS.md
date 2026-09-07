@@ -5562,7 +5562,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       back pending). `FrontOffice.held` was the only gate-keyed payload outside
       `GateManager`, so this closes the class, not one instance.*
 
-- [ ] **M8.9 Seeing the work** — B14, B15, and the integration of
+- [x] **M8.9 Seeing the work** — B14, B15, and the integration of
       `feature/usage-aware-pacing` (9d66df5).
       *Docs: UI-DESIGN §5, ADR-0023, SDD §4.3 (the incident log kinds this reads).
       Tests: a stale poll renders as stale rather than as its last good value;
@@ -5633,6 +5633,135 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       **Suggested order for the build session:** the two refusal defects (small,
       stop live waste), then B15's heartbeat and re-checking bridge probe
       (smaller than B14, and it is what makes the rest believable), then B14.
+
+      **DONE 2026-09-07** on `feature/m8-9-seeing-the-work`, in the audit's own
+      order. Suite **212 files / 4014 passed / 0 failed / 8 skipped**; typecheck,
+      lint, invariants (`reachability 179/187`) and attribution green. **43
+      mutations over every guard added, 43 killed.** The implementation doc is
+      `docs/implementations/2026-09-07-m8-9-seeing-the-work.md`; the design
+      decisions are in `docs/DECISIONS-LOG.md` under 2026-09-07.
+
+      *Item (1), the pacing merge — CONFIRMED already landed in thirty seconds
+      and not rebuilt, exactly as the audit said. What it owed was the typed
+      fixtures, and every fixture this package wrote is typed against the real
+      schema or the real `EphApi` by `Pick`; `agent-dock.test.tsx`'s three
+      `as never` casts are UNTOUCHED, because this package touched no dock
+      fixture and rewriting them would have been work the register did not ask
+      for. **Still owed, carry it forward.***
+
+      *The two refusal defects (`26d380b`). The orchestrator's reply is refused
+      with the RULE, from `prompts/harbor/incident-not-your-triage.md`, instead
+      of a JSON parse error. The guard is narrow ON PURPOSE — the live log has
+      Artemis REASSIGNING a triage ("reassigned to you; on-call agent is out of
+      budget"), so the obvious rule (only `incident.agentId` may report) would
+      refuse honest work to fix a courtesy reply. **Decided and recorded for the
+      over-length verdict: REFUSE with the limit named, do not truncate** —
+      truncating rewrites a verifier's reasoning, and a `because` cut
+      mid-qualification is a claim nobody made. It is the cheap option because
+      `refuseVerdict` never clears `awaitingVerdict`, so the thread stays open
+      and the shortened answer lands; that property is now a test rather than an
+      implementation detail. Three parts, because the message alone would not
+      have stopped it: the verify PROMPT now states the limits (a limit an agent
+      is never told is a trap), the reason names what was sent AND the cap, and
+      the advice says the question is still open — deliberately absent on the
+      three paths where nothing is awaiting an answer.*
+
+      *B15 (`efc24a9`). The bridge probe
+      is a heartbeat with a DEADLINE, not a re-check with a catch: a main process
+      that throws rejects the invoke, but one whose loop is blocked never settles
+      it at all, so a `.catch()` heartbeat would have sat silent through the
+      exact failure it was written for. The strip carries its own clock, because
+      a stall is the ABSENCE of events. The owed test is
+      `test/renderer/bridge-heartbeat.test.tsx`, which mounts the real shell in
+      jsdom on a fake clock — the freshness unit test and the badge test would
+      BOTH have stayed green with the one-shot probe still in place.*
+
+      *B14. **The design question was answered before anything was drawn, and
+      ADR-0027 had already answered it**: §5's first bullet names incident
+      correlation as state the harness deliberately does NOT persist, and its
+      closing line forbids persisting what a live subsystem re-derives from a
+      durable source. So the surface is DERIVED — `foldIncidents` over
+      `Agora.readLogAll()`, one read channel (`harbor:incidents`, documented in
+      SDD §5), no new record and no new writer. **What had to be fixed first:** a
+      refusal row named no incident, so twelve refusals could be counted and not
+      attributed — the key was added in the refusal commit, before the surface.
+      A refusal the log cannot attribute gets its OWN section rather than being
+      dropped, because the parse-failure path is exactly where the key is
+      unknowable and a surface that under-reports is the absence it replaces.
+      It renders inside PROFILES, not a fourteenth tab: UI-DESIGN §4 lists no
+      Incidents tab, and the on-call binding that raises these already lives
+      there.*
+
+      *One mutation survivor, read before it was patched: removing the re-raise
+      guard left the incident COUNT right (a Map key overwrites) and moved
+      `raisedAt` to the re-raise, so a build failing since Monday would restamp
+      as raised this morning. A missing assertion, not an equivalent mutant.
+      Two tripwires fired and both were working: `hires-exchange.test.ts` refused
+      a fifth `harbor:` channel by name (reviewed, confirmed a read, added to a
+      PINNED read-only list so "exclude the reads" cannot become the hole), and
+      `check-coverage.cjs` refused each new shared module until the subsystem map
+      claimed it.*
+
+      *Coverage, with its condition. The `panels` BRANCH floor was already
+      failing on `main` before this package — `main` at `956b434` produces the
+      identical 39.91% against a floor of 40.26% recorded at `ca1158a`, because
+      `SettingsPanel.tsx` landed after that measurement. Attributed by running
+      the gate on `main` itself rather than assumed. It no longer fails, because
+      `src/renderer/src/App.tsx` is covered for the first time and has left the
+      record's `untested` list (21 modules, down from 22): panels lines
+      34.5 -> 42.43, branches 40.26 -> 44.57, statements 33.36 -> 40.75, and
+      boot lines 20.63 -> 26.69 on the App import graph.*
+
+      ***Merged main on 2026-09-07 and it found a defect neither side had.***
+      *`main` had moved seven commits during the build (nothing local said so —
+      it surfaced as a coverage number that would not reproduce). The merge
+      conflicted only in the append-only DECISIONS-LOG, kept both sides. But
+      main's new `profiles-panel-dom.test.tsx` mounts the real `ProfilesPanel`
+      with a bridge stub carrying `profiles` alone, and M8.9 had just made
+      `IncidentsPanel` a CHILD of it — so the Profiles tab died with "Cannot
+      read properties of undefined (reading 'incidents')". Never a live crash
+      (the shipped preload always exposes `harbor`), but the wrong shape: a
+      child panel that throws in its mount effect takes its parent down. It now
+      renders the FAILURE state it already had, not an empty board. Two
+      mutations, both killed. `README.md` also gained M8.9's line, because main
+      added `scripts/check-readme-current.cjs` mid-package and CI would have
+      gone red on a gate this branch had never seen. Merged suite: 213 files /
+      4022 passed / 0 failed; every gate green.*
+
+      *PROVED against the real book of record, not only fixtures: `foldIncidents`
+      over the Architect's own `log.jsonl` (2689 entries) returns **7 incidents,
+      2 unclaimed and all 15 refusals** — four incidents nobody ever triaged,
+      three root causes sent for verification and never answered, two owed
+      Herald announcements on the severity-1, the nine `not JSON` bounces from
+      `agent.artemis` and the three `Too big` verdict refusals. Every one of
+      those was in the log the whole time with nowhere to see it. All 15 land in
+      the unattributed section, correctly: those rows predate the `incident`
+      field on a refusal event, so the log genuinely cannot say which incident
+      they were about — new ones carry it and attach, proved end to end in
+      `incident-surface-wiring.test.ts`. 32 `incident-raised` rows fold to 7
+      incidents, which is ADR-0027 §5's re-raise collapsing as designed. **NOT
+      proved: the live app was not started** — `npm run dev` boots the real
+      harness against the Architect's own `~/.ephesus`, spawning agents and
+      spending tokens, which is not a side effect to take unattended. Two jsdom
+      tests mount the REAL components instead.*
+
+      *The win32 floors are RATCHETED on tree `d2cddb05c4db`, three corroborating
+      runs, rising only to their lowest: panels lines 34.5 -> 42.43, branches
+      40.26 -> 44.57, functions 27.35 -> 30.61, statements 33.36 -> 40.75; boot
+      lines 20.63 -> 26.69, branches 8.59 -> 16.57, functions 8.19 -> 12.75,
+      statements 19.75 -> 25.87; stoa statements 95.16 -> 95.5. A plain
+      `node scripts/check-coverage.cjs` is green.*
+
+      ***A machine condition worth recording, because it cost an hour and looked
+      like a regression.*** *Free memory fell to **0.11 GB of 16.8 GB** partway
+      through the session and vitest's forks began dying mid-run ("Worker exited
+      unexpectedly"), producing runs with 15 and then 39 "failures" that were
+      nothing of the kind — no coverage report was written at all. Two things
+      settled it rather than a code hunt: the same tree ran green at
+      `--maxWorkers=4` with **byte-identical totals** (8174/10625 lines), which
+      is also the evidence that worker count does not move this measurement; and
+      the run succeeded normally once memory returned to 2.78 GB. **Read
+      `os.freemem()` before believing a suite that started failing in batches.***
 
 - [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
       read parses from byte zero: a synthetic overnight measured 28.4 MB and

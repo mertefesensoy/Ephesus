@@ -35,6 +35,14 @@ function bridge(): void {
       profiles: {
         list: async () => [],
         instances: async () => []
+      },
+      // `IncidentsPanel` renders inside this panel (M8.9), so mounting
+      // `ProfilesPanel` mounts it too. Stubbed here rather than left out, so
+      // this test exercises the panel the Architect actually sees — a fixture
+      // that quietly renders less than production is the shape of check this
+      // repository keeps catching in itself.
+      harbor: {
+        incidents: async () => ({ incidents: [], unclaimed: [], unattributedRefusals: [] })
       }
     }
   })

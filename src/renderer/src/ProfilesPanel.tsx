@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { ProfileInstanceView, ProfileSummary } from '../../shared/profile-view'
 import type { ActivationPlan, ComposedAutonomy } from '../../shared/profile-activation'
 import { describeToolGrants } from '../../shared/engine-tools'
+import { IncidentsPanel } from './IncidentsPanel'
 
 /**
  * The Profiles tab — the activation desk (ADR-0012, FR-9.1/9.4, UI-DESIGN §4).
@@ -652,6 +653,13 @@ export function ProfilesPanel(): ReactElement {
       {instances.map((instance) => (
         <InstanceRow key={instance.instanceId} instance={instance} onDeactivate={deactivate} />
       ))}
+
+      {/* B14. It lives here rather than on a tab of its own because the
+          incident path is a profile instance's: the on-call binding above is
+          what raises these, and UI-DESIGN §4's tab list has no Incidents in it
+          (BUILD-PROMPT §7 — do not invent UI). `SecretsPanel` and
+          `SettingsPanel` inside the Watch are the same shape. */}
+      <IncidentsPanel />
     </section>
   )
 }

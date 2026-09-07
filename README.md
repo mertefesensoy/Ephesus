@@ -274,7 +274,7 @@ runs before shipping, because the suite was green while Closing Time had never
 once run in the shipped app, the standup read the oldest 500 log entries, and
 the dock showed an overnight run's first 300 events.
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -308,6 +308,20 @@ the drafts an outbound gate is holding all come back, with anything that could
 not be restored reported rather than absent. The agents themselves are not
 respawned automatically — engine session recovery is the follow-on — so you
 reactivate, and the company tells you that is what happened.
+
+And most recently, **the work the company does is something you can see**. An
+incident the crew was handed now has a surface: what was raised, who is on call,
+what they reported in their own words, whether anybody checked the diagnosis —
+and, above all, **every refusal, shown as a refusal rather than as an absence**.
+That last part is why the panel was worth building: on the first repository this
+was pointed at, twelve of twenty-one triage attempts were refused and every
+root-cause verdict the company ever received was thrown away for being too long,
+and all of it was written down where nobody would ever look. Those two refusals
+now say what rule they are enforcing and what to do about it, instead of
+answering an agent's plain English with a JSON parse error. The status strip also
+learned to tell a hung harness from an idle one: it asks the main process
+whether it is still there, on a deadline rather than a promise, because a
+harness whose event loop is stuck never answers and never fails either.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8.

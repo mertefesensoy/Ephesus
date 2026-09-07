@@ -152,6 +152,7 @@ describe('S-SECRETS — the broker is write-only (FR-11.4, ADR-0010)', () => {
         unavailable: 'no Harbor in this rig',
         repos: []
       }),
+      incidentBoard: () => ({ incidents: [], unclaimed: [], unattributedRefusals: [] }),
       profilesInstances: () => [],
       orgChart: () => [],
       orgMetrics: () => ({ metrics: [], findings: [] }),

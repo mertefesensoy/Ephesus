@@ -138,7 +138,9 @@
         "src/main/known-targets.ts",
         "src/shared/harbor.ts",
         "src/shared/incident.ts",
+        "src/shared/incident-view.ts",
         "src/shared/known-targets.ts",
+        "src/shared/parse-reasons.ts",
         "src/shared/outbound.ts",
         "src/shared/root-cause.ts",
         "src/shared/gh-token.ts",
@@ -232,6 +234,7 @@
       "members": [
         "src/renderer/src/",
         "src/shared/badges.ts",
+        "src/shared/freshness.ts",
         "src/shared/fonts.ts",
         "src/shared/contrast.ts"
       ]
@@ -252,41 +255,41 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-06T15:17:39.374Z",
-        "commit": "ca1158a",
+        "at": "2026-09-06T23:57:17.611Z",
+        "commit": "1919a3f",
         "ref": "local",
-        "tree": "6d009e038f82",
+        "tree": "d2cddb05c4db",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
         "command": "npm run test:coverage"
       },
       "candidate": {
-        "tree": "6d009e038f82",
-        "map": "aa81e9bd1306",
+        "tree": "d2cddb05c4db",
+        "map": "7b5d1c6d43f5",
         "runs": [
           {
-            "at": "2026-09-06T15:07:48.977Z",
-            "commit": "ca1158a",
+            "at": "2026-09-06T23:20:34.131Z",
+            "commit": "efc24a9",
             "ref": "local",
-            "tree": "6d009e038f82",
+            "tree": "d2cddb05c4db",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T15:07:48.560Z",
+            "report": "2026-09-06T23:20:33.453Z",
             "floors": {
               "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
               },
               "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
+                "lines": 95.41,
+                "branches": 87.79,
+                "functions": 92.51,
+                "statements": 93.2
               },
               "hermes": {
                 "lines": 98.61,
@@ -295,10 +298,10 @@
                 "statements": 96.59
               },
               "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
+                "lines": 97.99,
+                "branches": 88.69,
+                "functions": 97.37,
+                "statements": 96.68
               },
               "artemis": {
                 "lines": 97.66,
@@ -319,10 +322,10 @@
                 "statements": 90.14
               },
               "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
               },
               "watch": {
                 "lines": 96.17,
@@ -344,9 +347,9 @@
               },
               "stoa": {
                 "lines": 96.48,
-                "branches": 84.11,
+                "branches": 84.77,
                 "functions": 98.31,
-                "statements": 95.16
+                "statements": 95.5
               },
               "company": {
                 "lines": 97.66,
@@ -361,10 +364,10 @@
                 "statements": 55.34
               },
               "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
+                "lines": 42.43,
+                "branches": 44.57,
+                "functions": 30.61,
+                "statements": 40.75
               },
               "herald": {
                 "lines": 93.05,
@@ -381,27 +384,27 @@
             }
           },
           {
-            "at": "2026-09-06T15:14:38.913Z",
-            "commit": "ca1158a",
+            "at": "2026-09-06T23:40:53.239Z",
+            "commit": "efc24a9",
             "ref": "local",
-            "tree": "6d009e038f82",
+            "tree": "d2cddb05c4db",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T15:14:38.512Z",
+            "report": "2026-09-06T23:40:43.770Z",
             "floors": {
               "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
               },
               "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
+                "lines": 95.41,
+                "branches": 87.79,
+                "functions": 92.51,
+                "statements": 93.2
               },
               "hermes": {
                 "lines": 98.61,
@@ -410,10 +413,10 @@
                 "statements": 96.59
               },
               "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
+                "lines": 97.99,
+                "branches": 88.69,
+                "functions": 97.37,
+                "statements": 96.68
               },
               "artemis": {
                 "lines": 97.66,
@@ -434,10 +437,10 @@
                 "statements": 90.14
               },
               "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
               },
               "watch": {
                 "lines": 96.17,
@@ -459,9 +462,9 @@
               },
               "stoa": {
                 "lines": 96.48,
-                "branches": 84.11,
+                "branches": 84.77,
                 "functions": 98.31,
-                "statements": 95.16
+                "statements": 95.5
               },
               "company": {
                 "lines": 97.66,
@@ -476,10 +479,10 @@
                 "statements": 55.34
               },
               "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
+                "lines": 42.43,
+                "branches": 44.57,
+                "functions": 30.61,
+                "statements": 40.75
               },
               "herald": {
                 "lines": 93.05,
@@ -496,27 +499,27 @@
             }
           },
           {
-            "at": "2026-09-06T15:17:39.374Z",
-            "commit": "ca1158a",
+            "at": "2026-09-06T23:57:17.611Z",
+            "commit": "1919a3f",
             "ref": "local",
-            "tree": "6d009e038f82",
+            "tree": "d2cddb05c4db",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-06T15:17:38.938Z",
+            "report": "2026-09-06T23:57:16.899Z",
             "floors": {
               "boot": {
-                "lines": 20.63,
-                "branches": 8.59,
-                "functions": 8.19,
-                "statements": 19.75
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
               },
               "engines": {
-                "lines": 95.46,
-                "branches": 87.87,
-                "functions": 92.48,
-                "statements": 93.22
+                "lines": 95.41,
+                "branches": 87.79,
+                "functions": 92.51,
+                "statements": 93.2
               },
               "hermes": {
                 "lines": 98.61,
@@ -525,10 +528,10 @@
                 "statements": 96.59
               },
               "agora": {
-                "lines": 97.96,
-                "branches": 88.91,
-                "functions": 97.33,
-                "statements": 96.62
+                "lines": 97.99,
+                "branches": 88.69,
+                "functions": 97.37,
+                "statements": 96.68
               },
               "artemis": {
                 "lines": 97.66,
@@ -549,10 +552,10 @@
                 "statements": 90.14
               },
               "harbor": {
-                "lines": 89.38,
-                "branches": 75.12,
-                "functions": 89.19,
-                "statements": 87.87
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
               },
               "watch": {
                 "lines": 96.17,
@@ -574,9 +577,9 @@
               },
               "stoa": {
                 "lines": 96.48,
-                "branches": 84.11,
+                "branches": 84.77,
                 "functions": 98.31,
-                "statements": 95.16
+                "statements": 95.5
               },
               "company": {
                 "lines": 97.66,
@@ -591,10 +594,10 @@
                 "statements": 55.34
               },
               "panels": {
-                "lines": 34.5,
-                "branches": 40.26,
-                "functions": 27.35,
-                "statements": 33.36
+                "lines": 42.43,
+                "branches": 44.57,
+                "functions": 30.61,
+                "statements": 40.75
               },
               "herald": {
                 "lines": 93.05,
@@ -614,16 +617,16 @@
       },
       "floors": {
         "boot": {
-          "lines": 20.63,
-          "branches": 8.59,
-          "functions": 8.19,
-          "statements": 19.75,
+          "lines": 26.69,
+          "branches": 16.57,
+          "functions": 12.75,
+          "statements": 25.87,
           "files": 10
         },
         "engines": {
           "lines": 95.66,
           "branches": 87.87,
-          "functions": 92.48,
+          "functions": 92.51,
           "statements": 93.22,
           "files": 25
         },
@@ -637,8 +640,8 @@
         "agora": {
           "lines": 98.07,
           "branches": 88.91,
-          "functions": 97.33,
-          "statements": 96.62,
+          "functions": 97.37,
+          "statements": 96.68,
           "files": 11
         },
         "artemis": {
@@ -663,519 +666,11 @@
           "files": 8
         },
         "harbor": {
-          "lines": 89.38,
-          "branches": 75.12,
-          "functions": 89.19,
-          "statements": 87.87,
-          "files": 15
-        },
-        "watch": {
-          "lines": 96.17,
-          "branches": 87.1,
-          "functions": 90.2,
-          "statements": 94.85,
-          "files": 20
-        },
-        "terraces": {
-          "lines": 76.39,
-          "branches": 72.91,
-          "functions": 85.22,
-          "statements": 76.4,
-          "files": 22
-        },
-        "gymnasium": {
-          "lines": 95.19,
-          "branches": 78.46,
-          "functions": 95.12,
-          "statements": 92.96,
-          "files": 4
-        },
-        "stoa": {
-          "lines": 96.48,
-          "branches": 84.11,
-          "functions": 98.31,
-          "statements": 95.16,
-          "files": 5
-        },
-        "company": {
-          "lines": 97.66,
-          "branches": 92.63,
-          "functions": 94.48,
-          "statements": 96.08,
-          "files": 13
-        },
-        "home": {
-          "lines": 55.43,
-          "branches": 44.12,
-          "functions": 40.74,
-          "statements": 55.34,
-          "files": 7
-        },
-        "panels": {
-          "lines": 34.5,
-          "branches": 40.26,
-          "functions": 27.35,
-          "statements": 33.36,
-          "files": 25
-        },
-        "herald": {
-          "lines": 93.05,
-          "branches": 77.96,
-          "functions": 88,
-          "statements": 89.17,
-          "files": 7
-        },
-        "shims": {
-          "lines": 47.62,
-          "branches": 41.5,
-          "functions": 46.3,
-          "statements": 47.26,
-          "files": 5
-        }
-      },
-      "untested": [
-        "shims/eph-usage.mjs",
-        "src/main/config.ts",
-        "src/main/db.ts",
-        "src/main/index.ts",
-        "src/main/library-fts-sqlite.ts",
-        "src/main/pty.ts",
-        "src/main/watch/cipher.ts",
-        "src/preload/index.ts",
-        "src/renderer/src/App.tsx",
-        "src/renderer/src/BriefsPanel.tsx",
-        "src/renderer/src/CommandBar.tsx",
-        "src/renderer/src/DecksPanel.tsx",
-        "src/renderer/src/GymPanel.tsx",
-        "src/renderer/src/LedgerPanel.tsx",
-        "src/renderer/src/MeetingPanel.tsx",
-        "src/renderer/src/MemoryPanel.tsx",
-        "src/renderer/src/MemosPanel.tsx",
-        "src/renderer/src/OrgPanel.tsx",
-        "src/renderer/src/TerminalPanel.tsx",
-        "src/renderer/src/floor/vfx-art.ts",
-        "src/renderer/src/fonts.ts",
-        "src/renderer/src/main.tsx"
-      ]
-    },
-    "linux": {
-      "measured": {
-        "at": "2026-09-06T21:07:07.745Z",
-        "commit": "bc79e0b",
-        "ref": "26/merge",
-        "tree": "8ff9fcc84a5f",
-        "platform": "linux",
-        "node": "v20.20.2",
-        "os": "Linux 6.17.0-1022-azure",
-        "command": "npm run test:coverage"
-      },
-      "candidate": {
-        "tree": "8ff9fcc84a5f",
-        "map": "aa81e9bd1306",
-        "runs": [
-          {
-            "at": "2026-09-06T20:58:56.684Z",
-            "commit": "edf00cd",
-            "ref": "26/merge",
-            "tree": "8ff9fcc84a5f",
-            "platform": "linux",
-            "node": "v20.20.2",
-            "os": "Linux 6.17.0-1022-azure",
-            "command": "npm run test:coverage",
-            "report": "2026-09-06T20:58:56.558Z",
-            "floors": {
-              "boot": {
-                "lines": 21.21,
-                "branches": 9.13,
-                "functions": 8.27,
-                "statements": 20.26
-              },
-              "engines": {
-                "lines": 94.84,
-                "branches": 86.91,
-                "functions": 91.01,
-                "statements": 92.84
-              },
-              "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.79
-              },
-              "agora": {
-                "lines": 96.91,
-                "branches": 87.7,
-                "functions": 96.05,
-                "statements": 95.44
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 89.82,
-                "branches": 75.74,
-                "functions": 89.74,
-                "statements": 88.38
-              },
-              "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
-                "functions": 90.2,
-                "statements": 94.85
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
-              },
-              "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
-              },
-              "panels": {
-                "lines": 34.41,
-                "branches": 39.91,
-                "functions": 27.35,
-                "statements": 33.28
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-06T21:03:15.413Z",
-            "commit": "a778b1e",
-            "ref": "26/merge",
-            "tree": "8ff9fcc84a5f",
-            "platform": "linux",
-            "node": "v20.20.2",
-            "os": "Linux 6.17.0-1022-azure",
-            "command": "npm run test:coverage",
-            "report": "2026-09-06T21:03:15.318Z",
-            "floors": {
-              "boot": {
-                "lines": 21.21,
-                "branches": 9.13,
-                "functions": 8.27,
-                "statements": 20.26
-              },
-              "engines": {
-                "lines": 94.84,
-                "branches": 86.91,
-                "functions": 91.01,
-                "statements": 92.84
-              },
-              "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.79
-              },
-              "agora": {
-                "lines": 96.91,
-                "branches": 87.7,
-                "functions": 96.05,
-                "statements": 95.44
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 89.82,
-                "branches": 75.74,
-                "functions": 89.74,
-                "statements": 88.38
-              },
-              "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
-                "functions": 90.2,
-                "statements": 94.85
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
-              },
-              "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
-              },
-              "panels": {
-                "lines": 34.41,
-                "branches": 39.91,
-                "functions": 27.35,
-                "statements": 33.28
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-06T21:07:07.745Z",
-            "commit": "bc79e0b",
-            "ref": "26/merge",
-            "tree": "8ff9fcc84a5f",
-            "platform": "linux",
-            "node": "v20.20.2",
-            "os": "Linux 6.17.0-1022-azure",
-            "command": "npm run test:coverage",
-            "report": "2026-09-06T21:07:07.620Z",
-            "floors": {
-              "boot": {
-                "lines": 21.21,
-                "branches": 9.13,
-                "functions": 8.27,
-                "statements": 20.26
-              },
-              "engines": {
-                "lines": 94.84,
-                "branches": 86.91,
-                "functions": 91.01,
-                "statements": 92.84
-              },
-              "hermes": {
-                "lines": 98.61,
-                "branches": 91.16,
-                "functions": 98.86,
-                "statements": 96.79
-              },
-              "agora": {
-                "lines": 96.91,
-                "branches": 87.7,
-                "functions": 96.05,
-                "statements": 95.44
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.22,
-                "branches": 78.75,
-                "functions": 86.4,
-                "statements": 88.42
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 89.82,
-                "branches": 75.74,
-                "functions": 89.74,
-                "statements": 88.38
-              },
-              "watch": {
-                "lines": 96.17,
-                "branches": 87.1,
-                "functions": 90.2,
-                "statements": 94.85
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.66,
-                "branches": 92.63,
-                "functions": 94.48,
-                "statements": 96.08
-              },
-              "home": {
-                "lines": 55.43,
-                "branches": 44.12,
-                "functions": 40.74,
-                "statements": 55.34
-              },
-              "panels": {
-                "lines": 34.41,
-                "branches": 39.91,
-                "functions": 27.35,
-                "statements": 33.28
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          }
-        ]
-      },
-      "floors": {
-        "boot": {
-          "lines": 21.21,
-          "branches": 9.13,
-          "functions": 8.27,
-          "statements": 20.26,
-          "files": 10
-        },
-        "engines": {
-          "lines": 95,
-          "branches": 86.91,
-          "functions": 91.01,
-          "statements": 92.84,
-          "files": 25
-        },
-        "hermes": {
-          "lines": 98.61,
-          "branches": 91.16,
-          "functions": 98.86,
-          "statements": 96.79,
-          "files": 7
-        },
-        "agora": {
-          "lines": 96.95,
-          "branches": 87.7,
-          "functions": 96.05,
-          "statements": 95.44,
-          "files": 11
-        },
-        "artemis": {
-          "lines": 97.66,
-          "branches": 91.78,
-          "functions": 91.67,
-          "statements": 97.08,
-          "files": 2
-        },
-        "library": {
-          "lines": 90.22,
-          "branches": 78.75,
-          "functions": 86.4,
-          "statements": 88.42,
-          "files": 8
-        },
-        "odeon": {
-          "lines": 92.5,
-          "branches": 78.8,
-          "functions": 95.61,
-          "statements": 90.14,
-          "files": 8
-        },
-        "harbor": {
-          "lines": 89.82,
-          "branches": 75.74,
-          "functions": 89.74,
-          "statements": 88.38,
-          "files": 15
+          "lines": 90.99,
+          "branches": 76.63,
+          "functions": 90.7,
+          "statements": 89.38,
+          "files": 17
         },
         "watch": {
           "lines": 96.17,
@@ -1220,11 +715,11 @@
           "files": 7
         },
         "panels": {
-          "lines": 34.41,
-          "branches": 39.91,
-          "functions": 27.35,
-          "statements": 33.28,
-          "files": 25
+          "lines": 42.43,
+          "branches": 44.57,
+          "functions": 30.61,
+          "statements": 40.75,
+          "files": 27
         },
         "herald": {
           "lines": 93.05,
@@ -1250,7 +745,513 @@
         "src/main/pty.ts",
         "src/main/watch/cipher.ts",
         "src/preload/index.ts",
-        "src/renderer/src/App.tsx",
+        "src/renderer/src/BriefsPanel.tsx",
+        "src/renderer/src/CommandBar.tsx",
+        "src/renderer/src/DecksPanel.tsx",
+        "src/renderer/src/GymPanel.tsx",
+        "src/renderer/src/LedgerPanel.tsx",
+        "src/renderer/src/MeetingPanel.tsx",
+        "src/renderer/src/MemoryPanel.tsx",
+        "src/renderer/src/MemosPanel.tsx",
+        "src/renderer/src/OrgPanel.tsx",
+        "src/renderer/src/TerminalPanel.tsx",
+        "src/renderer/src/floor/vfx-art.ts",
+        "src/renderer/src/fonts.ts",
+        "src/renderer/src/main.tsx"
+      ]
+    },
+    "linux": {
+      "measured": {
+        "at": "2026-09-07T08:00:14.556Z",
+        "commit": "9e85828",
+        "ref": "28/merge",
+        "tree": "2e643ac7ef60",
+        "platform": "linux",
+        "node": "v20.20.2",
+        "os": "Linux 6.17.0-1022-azure",
+        "command": "npm run test:coverage"
+      },
+      "candidate": {
+        "tree": "2e643ac7ef60",
+        "map": "7b5d1c6d43f5",
+        "runs": [
+          {
+            "at": "2026-09-07T07:51:41.307Z",
+            "commit": "9fe9e0e",
+            "ref": "feature/m8-9-seeing-the-work",
+            "tree": "2e643ac7ef60",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-07T07:51:41.162Z",
+            "floors": {
+              "boot": {
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
+              },
+              "engines": {
+                "lines": 94.84,
+                "branches": 86.91,
+                "functions": 91.01,
+                "statements": 92.84
+              },
+              "hermes": {
+                "lines": 98.61,
+                "branches": 91.16,
+                "functions": 98.86,
+                "statements": 96.79
+              },
+              "agora": {
+                "lines": 96.93,
+                "branches": 88.31,
+                "functions": 96.08,
+                "statements": 95.61
+              },
+              "artemis": {
+                "lines": 97.66,
+                "branches": 91.78,
+                "functions": 91.67,
+                "statements": 97.08
+              },
+              "library": {
+                "lines": 90.22,
+                "branches": 78.75,
+                "functions": 86.4,
+                "statements": 88.42
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
+              },
+              "watch": {
+                "lines": 96.17,
+                "branches": 87.1,
+                "functions": 90.2,
+                "statements": 94.85
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.66,
+                "branches": 92.63,
+                "functions": 94.48,
+                "statements": 96.08
+              },
+              "home": {
+                "lines": 55.43,
+                "branches": 44.12,
+                "functions": 40.74,
+                "statements": 55.34
+              },
+              "panels": {
+                "lines": 45.29,
+                "branches": 45.74,
+                "functions": 32.99,
+                "statements": 43.31
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
+          },
+          {
+            "at": "2026-09-07T07:52:34.485Z",
+            "commit": "e2c2806",
+            "ref": "28/merge",
+            "tree": "2e643ac7ef60",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-07T07:52:34.366Z",
+            "floors": {
+              "boot": {
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
+              },
+              "engines": {
+                "lines": 94.84,
+                "branches": 86.91,
+                "functions": 91.01,
+                "statements": 92.84
+              },
+              "hermes": {
+                "lines": 98.61,
+                "branches": 91.16,
+                "functions": 98.86,
+                "statements": 96.79
+              },
+              "agora": {
+                "lines": 96.93,
+                "branches": 88.31,
+                "functions": 96.08,
+                "statements": 95.61
+              },
+              "artemis": {
+                "lines": 97.66,
+                "branches": 91.78,
+                "functions": 91.67,
+                "statements": 97.08
+              },
+              "library": {
+                "lines": 90.22,
+                "branches": 78.75,
+                "functions": 86.4,
+                "statements": 88.42
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
+              },
+              "watch": {
+                "lines": 96.17,
+                "branches": 87.1,
+                "functions": 90.2,
+                "statements": 94.85
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.66,
+                "branches": 92.63,
+                "functions": 94.48,
+                "statements": 96.08
+              },
+              "home": {
+                "lines": 55.43,
+                "branches": 44.12,
+                "functions": 40.74,
+                "statements": 55.34
+              },
+              "panels": {
+                "lines": 45.29,
+                "branches": 45.74,
+                "functions": 32.99,
+                "statements": 43.31
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
+          },
+          {
+            "at": "2026-09-07T08:00:14.556Z",
+            "commit": "9e85828",
+            "ref": "28/merge",
+            "tree": "2e643ac7ef60",
+            "platform": "linux",
+            "node": "v20.20.2",
+            "os": "Linux 6.17.0-1022-azure",
+            "command": "npm run test:coverage",
+            "report": "2026-09-07T08:00:14.400Z",
+            "floors": {
+              "boot": {
+                "lines": 26.69,
+                "branches": 16.57,
+                "functions": 12.75,
+                "statements": 25.87
+              },
+              "engines": {
+                "lines": 94.84,
+                "branches": 86.91,
+                "functions": 91.01,
+                "statements": 92.84
+              },
+              "hermes": {
+                "lines": 98.61,
+                "branches": 91.16,
+                "functions": 98.86,
+                "statements": 96.79
+              },
+              "agora": {
+                "lines": 96.93,
+                "branches": 88.31,
+                "functions": 96.08,
+                "statements": 95.61
+              },
+              "artemis": {
+                "lines": 97.66,
+                "branches": 91.78,
+                "functions": 91.67,
+                "statements": 97.08
+              },
+              "library": {
+                "lines": 90.22,
+                "branches": 78.75,
+                "functions": 86.4,
+                "statements": 88.42
+              },
+              "odeon": {
+                "lines": 92.5,
+                "branches": 78.8,
+                "functions": 95.61,
+                "statements": 90.14
+              },
+              "harbor": {
+                "lines": 90.99,
+                "branches": 76.63,
+                "functions": 90.7,
+                "statements": 89.38
+              },
+              "watch": {
+                "lines": 96.17,
+                "branches": 87.1,
+                "functions": 90.2,
+                "statements": 94.85
+              },
+              "terraces": {
+                "lines": 76.39,
+                "branches": 72.91,
+                "functions": 85.22,
+                "statements": 76.4
+              },
+              "gymnasium": {
+                "lines": 95.19,
+                "branches": 78.46,
+                "functions": 95.12,
+                "statements": 92.96
+              },
+              "stoa": {
+                "lines": 96.48,
+                "branches": 84.77,
+                "functions": 98.31,
+                "statements": 95.5
+              },
+              "company": {
+                "lines": 97.66,
+                "branches": 92.63,
+                "functions": 94.48,
+                "statements": 96.08
+              },
+              "home": {
+                "lines": 55.43,
+                "branches": 44.12,
+                "functions": 40.74,
+                "statements": 55.34
+              },
+              "panels": {
+                "lines": 45.29,
+                "branches": 45.74,
+                "functions": 32.99,
+                "statements": 43.31
+              },
+              "herald": {
+                "lines": 93.05,
+                "branches": 77.96,
+                "functions": 88,
+                "statements": 89.17
+              },
+              "shims": {
+                "lines": 47.62,
+                "branches": 41.5,
+                "functions": 46.3,
+                "statements": 47.26
+              }
+            }
+          }
+        ]
+      },
+      "floors": {
+        "boot": {
+          "lines": 26.69,
+          "branches": 16.57,
+          "functions": 12.75,
+          "statements": 25.87,
+          "files": 10
+        },
+        "engines": {
+          "lines": 95,
+          "branches": 86.91,
+          "functions": 91.01,
+          "statements": 92.84,
+          "files": 25
+        },
+        "hermes": {
+          "lines": 98.61,
+          "branches": 91.16,
+          "functions": 98.86,
+          "statements": 96.79,
+          "files": 7
+        },
+        "agora": {
+          "lines": 96.95,
+          "branches": 88.31,
+          "functions": 96.08,
+          "statements": 95.61,
+          "files": 11
+        },
+        "artemis": {
+          "lines": 97.66,
+          "branches": 91.78,
+          "functions": 91.67,
+          "statements": 97.08,
+          "files": 2
+        },
+        "library": {
+          "lines": 90.22,
+          "branches": 78.75,
+          "functions": 86.4,
+          "statements": 88.42,
+          "files": 8
+        },
+        "odeon": {
+          "lines": 92.5,
+          "branches": 78.8,
+          "functions": 95.61,
+          "statements": 90.14,
+          "files": 8
+        },
+        "harbor": {
+          "lines": 90.99,
+          "branches": 76.63,
+          "functions": 90.7,
+          "statements": 89.38,
+          "files": 17
+        },
+        "watch": {
+          "lines": 96.17,
+          "branches": 87.1,
+          "functions": 90.2,
+          "statements": 94.85,
+          "files": 20
+        },
+        "terraces": {
+          "lines": 76.39,
+          "branches": 72.91,
+          "functions": 85.22,
+          "statements": 76.4,
+          "files": 22
+        },
+        "gymnasium": {
+          "lines": 95.19,
+          "branches": 78.46,
+          "functions": 95.12,
+          "statements": 92.96,
+          "files": 4
+        },
+        "stoa": {
+          "lines": 96.48,
+          "branches": 84.77,
+          "functions": 98.31,
+          "statements": 95.5,
+          "files": 5
+        },
+        "company": {
+          "lines": 97.66,
+          "branches": 92.63,
+          "functions": 94.48,
+          "statements": 96.08,
+          "files": 13
+        },
+        "home": {
+          "lines": 55.43,
+          "branches": 44.12,
+          "functions": 40.74,
+          "statements": 55.34,
+          "files": 7
+        },
+        "panels": {
+          "lines": 45.29,
+          "branches": 45.74,
+          "functions": 32.99,
+          "statements": 43.31,
+          "files": 27
+        },
+        "herald": {
+          "lines": 93.05,
+          "branches": 77.96,
+          "functions": 88,
+          "statements": 89.17,
+          "files": 7
+        },
+        "shims": {
+          "lines": 47.62,
+          "branches": 41.5,
+          "functions": 46.3,
+          "statements": 47.26,
+          "files": 5
+        }
+      },
+      "untested": [
+        "shims/eph-usage.mjs",
+        "src/main/config.ts",
+        "src/main/db.ts",
+        "src/main/index.ts",
+        "src/main/library-fts-sqlite.ts",
+        "src/main/pty.ts",
+        "src/main/watch/cipher.ts",
+        "src/preload/index.ts",
         "src/renderer/src/BriefsPanel.tsx",
         "src/renderer/src/CommandBar.tsx",
         "src/renderer/src/DecksPanel.tsx",

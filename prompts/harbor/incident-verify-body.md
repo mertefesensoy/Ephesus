@@ -66,6 +66,15 @@ file if you need to tell those apart.
 a verdict on files nobody claimed is an answer to a different question. For
 `cannot-tell` it may be empty; `because` may not.
 
+**The two sizes the harbor will hold you to.** `because` may be up to 2000
+characters and `read` may carry up to 16 citations, with each `quote` up to 400
+characters. They are stated here because a limit you are never told is a limit
+you can only discover by losing a turn to it. `because` is your reasoning, not
+a transcript of the reading — the lines you opened belong in `read`, and quoting
+a whole file into `because` is what makes an answer overrun. If the reading
+genuinely needs more than sixteen citations, send the sixteen that decide it and
+say in `because` what else you looked at.
+
 `cannot-tell` is a real answer and costs you nothing. An `agree` you are not
 sure of costs the company the thing it asked you for.
 

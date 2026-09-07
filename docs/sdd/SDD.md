@@ -556,8 +556,17 @@ odeon:    briefs() decks() deck(ref) comment(ref, text) memos(queue) verdict(mem
 herald:   pttStart() pttStop() speakBrief(id) config()
 watch:    approvals() approve(gateId, v) budgets() humanQueue() dismiss(id) waterfall(id) breakerState()
           breakerStops() clearBreakerStop(agentId, expectedAt)
-harbor:   repos() bridgeStatus()
+harbor:   repos() bridgeStatus() incidents()
           hireExport(profile, hire) profileExport(name)
+          // incidents() is a READ of the book of record, folded per call
+          // (`shared/incident-view.ts`). There is no incident store to ask,
+          // deliberately: ADR-0027 §5 records incident correlation as state
+          // the harness does NOT persist, and its closing line forbids
+          // persisting what a live subsystem re-derives from a durable
+          // source. Refusals the log cannot tie to an incident come back in
+          // their own list rather than being dropped — 12 of 21 triage
+          // attempts on the first real repository were refused, and a
+          // surface that under-reports them is the absence it replaces (M8.9)
           importInspect(blob) importInstall(blob)
           // FR-10.4's export/import, split because the requirement is: "import
           // only pre-fills the spawn form — a human always confirms". INSPECT

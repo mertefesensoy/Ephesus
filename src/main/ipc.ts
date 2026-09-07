@@ -33,6 +33,7 @@ import {
 import type { KnowledgeDoc, MemoryView } from '../shared/memory'
 import type { OrgNode } from '../shared/org'
 import type { HarborView } from '../shared/harbor'
+import type { IncidentBoard } from '../shared/incident-view'
 import type { ShareExport, ShareInspection, ShareInstall } from '../shared/share-view'
 import type { GymDecided, GymRowView } from '../shared/gym-view'
 import type { BriefView, SourceView, StoaCurated } from '../shared/stoa-view'
@@ -286,6 +287,15 @@ export interface IpcDeps {
   profilesInstances(): readonly ProfileInstanceView[]
   /** What the Harbor holds; reading touches no network (FR-10.1). */
   harborRepos(): HarborView
+  /**
+   * The incident path, folded from the book of record (B14).
+   *
+   * A method rather than a store handed in, because there IS no store:
+   * the fold is over `Agora.readLogAll()` and the whole decision (ADR-0027
+   * §5 — derived, never held) would be quietly reversed by anything here
+   * that cached it.
+   */
+  incidentBoard(): IncidentBoard
   harborHireExport(profile: string, hire: string): ShareExport
   harborProfileExport(name: string): ShareExport
   harborImportInspect(blob: string): ShareInspection
@@ -525,6 +535,8 @@ export function registerIpc(deps: IpcDeps): void {
     deps.profilesInstances()
   )
   ipcMain.handle(IpcChannels.harborRepos, (): HarborView => deps.harborRepos())
+
+  ipcMain.handle(IpcChannels.harborIncidents, (): IncidentBoard => deps.incidentBoard())
   ipcMain.handle(IpcChannels.harborHireExport, (_ev, raw: unknown): ShareExport => {
     const { profile, hire } = hireExportSchema.parse(raw)
     return deps.harborHireExport(profile, hire)

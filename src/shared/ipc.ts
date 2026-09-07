@@ -14,6 +14,7 @@ import type {
 } from './profile-view'
 import type { ActivationPlanResult, ActivationRequest } from './profile-activation'
 import type { HarborView } from './harbor'
+import type { IncidentBoard } from './incident-view'
 import type { PaceVerdict, UsageReport } from './pacing'
 
 /**
@@ -146,6 +147,15 @@ export const IpcChannels = {
   // network — the scheduler drives ingestion, so a panel opening cannot make
   // the company shell out to `gh`.
   harborRepos: 'harbor:repos',
+  /**
+   * The incident path, folded from the book of record (B14, M8.9).
+   *
+   * A READ of `log.jsonl` and nothing else. There is no incident store to
+   * ask, deliberately — ADR-0027 §5 records incident correlation as state
+   * the harness does NOT persist, and its closing line forbids persisting
+   * what a live subsystem re-derives from a durable source.
+   */
+  harborIncidents: 'harbor:incidents',
   // Sharing (SDD §5 `harbor: hireExport(role) hireImport(blob)`, FR-10.4 — M7.6).
   // FOUR channels where the SDD's abridged list names two, recorded in
   // DECISIONS-LOG with SDD §5 updated to name them (the M3.1 rule).
@@ -479,6 +489,15 @@ export interface EphApi {
      * one with nothing open must not look alike (invariant §7).
      */
     repos: () => Promise<HarborView>
+    /**
+     * Every incident the book of record holds, with its refusals attached.
+     *
+     * Derived on every call rather than cached: the log is the record, and a
+     * cache here would be a second answer to a question that already has one.
+     * A refusal the log cannot tie to an incident comes back in its own list —
+     * a surface that under-reports refusals is the absence it replaces.
+     */
+    incidents: () => Promise<IncidentBoard>
     /** One role template as a shareable blob (FR-10.4). */
     hireExport: (profile: string, hire: string) => Promise<ShareExport>
     /** A whole ADR-0012 bundle, as the FILES it is made of. */

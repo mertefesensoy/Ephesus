@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { InboundItem } from './harbor'
+import { reasonsFor } from './parse-reasons'
 import { rootCauseSchema } from './root-cause'
 
 /**
@@ -277,13 +278,7 @@ export function parseTriageReport(body: string): TriageParse {
   }
   const parsed = triageReportSchema.safeParse(raw)
   if (parsed.success) return { ok: true, report: parsed.data }
-  return {
-    ok: false,
-    reasons: parsed.error.issues.map((issue) => {
-      const where = issue.path.length > 0 ? issue.path.join('.') : 'triage report'
-      return `${where}: ${issue.message}`
-    })
-  }
+  return { ok: false, reasons: reasonsFor(parsed.error, 'triage report', raw) }
 }
 
 /**
