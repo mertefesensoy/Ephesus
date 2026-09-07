@@ -6283,11 +6283,50 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       documented nowhere while `EXIT-M8.md` demanded a clean home without saying
       how to get one. All six fixed.
 
-      *NOT proved: the quit-path write. Stopping Electron by process — which is
-      what the README correctly tells you to do — never reaches `before-quit`, so
-      that write is covered by `test/main/diagnosis-writer.test.ts` and not by a
-      live run. It matters little: the sixty-second cadence bounds staleness at a
-      minute either way, and the file's first line states its own age.*
+      **TWO MORE DEFECTS CAME OUT OF PROVING IT — five in total, every one found
+      by running it rather than by testing it.** (d) The FIRST report of a
+      consented company said `consent: granted` in its header and `consent NOT
+      EXERCISED` in its table: the header used the direct fact, the row scanned
+      the log for a `orchestrator/consented` the boot had not appended yet. Two
+      readings of one question from two sources is one bug waiting for a timing
+      difference; consent is now settled by the fact the input already carries.
+      (e) `spend` read `BROKEN` on a stock install, because `budgets/state:*`
+      fires whenever the state is not `ok` and `unbudgeted` is the SHIPPED
+      DEFAULT (ADR-0029) — so every default install would have reported a broken
+      subsystem. A breach arrives through the same cause and must still read
+      `broken`, which the exact-match list could not express, so it became a
+      predicate. **The underlying gap is flagged, not fixed:** the degradation
+      channel carries no SEVERITY, so a deliberate default, a state waiting on a
+      human and a genuine fault all arrive in one shape, and this report is the
+      first consumer that has to tell them apart — by matching another module's
+      wording, which is the "two things that must agree" smell in a new place.
+
+      *EVERYTHING IS NOW PROVED LIVE.* The quit path writes a final report —
+      boot 22:42:34.081Z, final 22:42:53.560Z, nineteen seconds apart and well
+      inside the sixty-second interval, so it can only be the quit path, with
+      `quit: no live agents; unwound 0; 12/12 stops` beside it. A consented
+      company yields four `WORKING` rows (consent, orchestrator, the crew, the
+      book of record), `Schedules running`, and `spend WAITING FOR YOU`. A
+      restart populates the carried section with both conditions from the
+      previous boot, correctly labelled as not evidence about now. Zero `cost`
+      rows across every proof run, and the Architect's own `~/.ephesus` is
+      untouched at 2792 rows with no consent record.
+
+      *An observation, not a product defect: a deep `EPH_HOME` breaks the Agora's
+      git commits on Windows (`Filename too long`, MAX_PATH). It came from the
+      proof's own choice of a nested temp directory and vanished at
+      `%USERPROFILE%\ephproof` — but the README now tells people to set
+      `EPH_HOME` and does not warn them, which is worth a sentence and possibly a
+      boot-time check. Neither built here.*
+
+      *The quit-path write was listed here as unproved and is no longer. Stopping
+      Electron BY PROCESS — which is what the README correctly tells you to do —
+      never reaches `before-quit`, so it was proved by closing the main window
+      gracefully instead (`taskkill` without `/F`), which is the other way a
+      person ends the app. What remains genuinely unproved is the UI: no panel
+      has been driven in any Ephesus verification, and this report is written by
+      main and read from disk, so it observes nothing about the renderer — which
+      the report says about itself, in its own body.*
 
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of

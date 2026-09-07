@@ -3386,9 +3386,6 @@ async function boot(): Promise<void> {
   }, DiagnosisWriter.EVERY_MS).unref?.()
 
   const consent = companyStart.boot()
-  // Written immediately, before anything else can go wrong, so the first thing
-  // in the home is an explanation of the state the app is actually in.
-  diagnosisWriter.write()
   // In the book of record, because "nothing happened" and "nothing was supposed
   // to happen" are the two states a quiet company can be in and only one of
   // them is a problem (invariant §7).
@@ -3398,6 +3395,12 @@ async function boot(): Promise<void> {
     state: consent.state,
     because: consent.because
   })
+  // AFTER the verdict reaches the log, not before. Written at boot so the first
+  // thing in the home explains the state the app is actually in — and written
+  // here rather than a few lines earlier because the first live report was
+  // produced before this row existed, and so described a company whose consent
+  // it could not yet see.
+  diagnosisWriter.write()
 }
 
 /**

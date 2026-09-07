@@ -353,3 +353,66 @@ describe('what the first live report got wrong', () => {
     expect(text).not.toContain('none of these are running')
   })
 })
+
+/**
+ * Two more defects the live runs exposed, both the same shape as the first
+ * three: a DESIGNED state rendered as a fault, and two readings of one question
+ * taken from different sources.
+ */
+describe('a designed default is never a fault', () => {
+  it('does not call an unbudgeted agent BROKEN — it is the shipped default', () => {
+    // `budgets/state:<agent>` fires whenever the state is not `ok`, and
+    // `unbudgeted` is what ADR-0029 ships. Every default install would have
+    // reported "spend BROKEN".
+    const d = diagnose(
+      input({
+        conditions: [
+          condition({
+            source: 'budgets',
+            cause: 'budgets/state:agent.artemis',
+            detail: 'agent.artemis budget unbudgeted (no-budget)'
+          })
+        ]
+      })
+    )
+    expect(find(d, 'spend')?.verdict).toBe('waiting')
+  })
+
+  it('still calls a BREACHED budget broken — same cause, different meaning', () => {
+    const d = diagnose(
+      input({
+        conditions: [
+          condition({
+            source: 'budgets',
+            cause: 'budgets/state:agent.artemis',
+            detail: 'agent.artemis budget breached (102% of 40,000,000)'
+          })
+        ]
+      })
+    )
+    expect(find(d, 'spend')?.verdict).toBe('broken')
+  })
+})
+
+describe('the header and the consent row cannot contradict each other', () => {
+  it('reads consent from the FACT, not from a log row', () => {
+    // The first live report said "consent: granted" in the header and
+    // "consent NOT EXERCISED" in the table, because the row was written before
+    // `orchestrator/consented` reached the log. Two readings of one question
+    // from two sources is one bug waiting for a timing difference.
+    const d = diagnose(input({ consented: true, events: [] }))
+    expect(find(d, 'consent')?.verdict).toBe('working')
+    expect(find(d, 'consent')?.because).toContain('config.json')
+  })
+
+  it('and says so consistently in the rendered report', () => {
+    const text = renderDiagnosis(diagnose(input({ consented: true, events: [] })), 5_000_000)
+    expect(text).toContain('granted — the company may work')
+    expect(text).not.toContain('| consent | NOT EXERCISED |')
+  })
+
+  it('an un-consented company still reads not-exercised, not working', () => {
+    const d = diagnose(input({ consented: false, events: [] }))
+    expect(find(d, 'consent')?.verdict).toBe('not-exercised')
+  })
+})

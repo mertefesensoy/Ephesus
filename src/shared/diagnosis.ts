@@ -75,18 +75,39 @@ interface Probe {
   /** Degradation sources that mean THIS area is broken. */
   readonly sources: readonly string[]
   /**
-   * Causes that mean "waiting for the Architect", not "wrong".
+   * Conditions that mean "waiting for the Architect", not "wrong".
    *
-   * `consent/not-granted` is reported through the degradation channel because
-   * invariant §7 demands every give-up be visible — but a company waiting to be
-   * started is not a company that is broken, and rendering it BROKEN on every
-   * single first launch is how a reader learns to skip the column. Declared per
-   * probe rather than special-cased in the fold, so the table stays the one
-   * place that says what each condition MEANS.
+   * The degradation channel carries **no severity**. Invariant §7 says disclose
+   * every give-up, and it is right to, but that puts a deliberate default and a
+   * genuine fault through the same pipe under the same shape — so any consumer
+   * that wants to tell them apart has to decide for itself. This report is the
+   * first such consumer, and this predicate is where that decision lives.
+   *
+   * Two designed states are known to reach it, and BOTH were rendered as
+   * `BROKEN` by the first live runs of this report:
+   *
+   *  - `consent/not-granted` — a company waiting to be started is not broken,
+   *    and a BROKEN on every healthy first launch teaches a reader to skip the
+   *    column;
+   *  - `budgets/state:<agent>` reporting `unbudgeted` — which fires whenever the
+   *    state is not `ok`, and `unbudgeted` is the SHIPPED DEFAULT (ADR-0029). A
+   *    breached budget goes through the same cause and must still read `broken`.
+   *
+   * That the discrimination has to happen here, by reading another module's
+   * wording, is a smell rather than a design — recorded in DECISIONS-LOG as a
+   * question about giving the channel a severity of its own. Until then, keeping
+   * it declarative and in the table is the smallest honest thing.
    */
-  readonly waitingCauses?: readonly string[]
+  waitingWhen?(condition: Condition): boolean
   /** `kind:event` pairs, or a bare `kind`, that prove it did its job. */
   readonly proves: readonly string[]
+  /**
+   * A fact that settles the area without consulting the log at all.
+   *
+   * Used where the input already KNOWS the answer. Reading it from a log row
+   * instead would be indirection that can only go wrong, and did.
+   */
+  provenDirectly?(input: DiagnosisInput): string | null
   /** What the reader would have to do to find out. */
   readonly wouldExercise: string
 }
@@ -103,7 +124,13 @@ const PROBES: readonly Probe[] = [
   {
     area: 'consent',
     sources: ['consent'],
-    waitingCauses: ['consent/not-granted'],
+    waitingWhen: (c) => c.cause === 'consent/not-granted',
+    // Proven by the FACT, not by a log row. The header line and this row are two
+    // readings of one question, and when they read it from different places they
+    // contradicted each other: the first live report said "consent: granted" in
+    // the header and `NOT EXERCISED` in the table, because the row was written
+    // before `orchestrator/consented` reached the log.
+    provenDirectly: (i) => (i.consented ? 'the grant recorded in config.json' : null),
     proves: ['orchestrator:consented'],
     wouldExercise: 'pressing START THE COMPANY on the banner at the top of the app'
   },
@@ -146,6 +173,9 @@ const PROBES: readonly Probe[] = [
   {
     area: 'spend',
     sources: ['budgets', 'ledger', 'usage'],
+    // `unbudgeted` is the shipped default (ADR-0029) and is not a fault; a
+    // breach comes through the same cause and is.
+    waitingWhen: (c) => c.cause.startsWith('budgets/state:') && c.detail.includes('unbudgeted'),
     proves: ['cost'],
     wouldExercise: 'an agent taking a turn'
   },
@@ -260,7 +290,7 @@ export function diagnose(input: DiagnosisInput): Diagnosis {
   const rows = PROBES.map((probe): Row => {
     const broken = live.find((c) => probe.sources.includes(c.source))
     if (broken) {
-      const waiting = probe.waitingCauses?.includes(broken.cause) ?? false
+      const waiting = probe.waitingWhen?.(broken) ?? false
       return {
         area: probe.area,
         verdict: waiting ? 'waiting' : 'broken',
@@ -268,6 +298,10 @@ export function diagnose(input: DiagnosisInput): Diagnosis {
           broken.count > 1 ? ` (reported ${String(broken.count)} times)` : ''
         }`
       }
+    }
+    const direct = probe.provenDirectly?.(input) ?? null
+    if (direct !== null) {
+      return { area: probe.area, verdict: 'working', because: direct }
     }
     const proof = provenBy(input.events, probe.proves)
     if (proof) {
