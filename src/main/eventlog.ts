@@ -17,7 +17,14 @@ import { formatLogLine, parseLogLine, type LogEntry, type LogEntryDraft } from '
  *
  * Only main writes it (ADR-0004), so appends are already serialised by the
  * single-threaded event loop; `O_APPEND` covers the case of a second harness
- * process pointed at the same home.
+ * process pointed at the same home — **for the bytes, and only for the bytes**.
+ * It does not serialise `seq`, which is an in-memory counter each process
+ * recovers for itself at `open()`. Two harness instances on one home therefore
+ * both stamp `highest + 1` and the numbering collides; the Architect's own log
+ * carries one such pair from 2026-08-29 (`seq: 143` at lines 142 and 177).
+ * `read` tolerates it explicitly (see below) and the README says to stop
+ * Electron by process rather than by the `npm run dev` wrapper, which is how
+ * two instances came to share a home in the first place (F2, M8.12).
  *
  * ## Rotation (D3, M8.10)
  *
@@ -219,13 +226,53 @@ export class EventLog {
    */
   read(afterSeq = 0, limit = 500): readonly LogEntry[] {
     const out: LogEntry[] = []
+    /**
+     * Whether the walk has passed the cursor's POSITION (F1, M8.12).
+     *
+     * This was `entry.seq > afterSeq`, applied to every line, which is correct
+     * only while `seq` strictly increases in file order. The Architect's own
+     * `log.jsonl` shows it does not: `seq: 143` appears twice, at line 142 and
+     * again at line 177. The cause is in this class rather than in the data —
+     * `this.seq` is an in-memory counter recovered at `open()`, so two harness
+     * processes pointed at one home each recover the same high-water mark and
+     * both stamp `highest + 1`. `O_APPEND` makes their WRITES atomic; it does
+     * nothing for their counters.
+     *
+     * Under the old rule a reader paging from 143 skipped BOTH rows, so the
+     * later one — an `exit` — was invisible to every cursor-based consumer,
+     * including `BriefingJob.gather(sinceSeq)`. That is SRS §6.1's own "the
+     * next briefing narrates the incident accurately from the log", so this is
+     * not a cosmetic wart in the record.
+     *
+     * The cursor is therefore a position: skip the leading run of entries at or
+     * behind it, and once the walk has begun returning, return everything after
+     * it in FILE order — which is the order history actually happened in. On a
+     * strictly increasing log (every log this harness will write from now on,
+     * absent a second process) the two rules agree line for line.
+     *
+     * Two residuals, stated so nobody assumes otherwise. A cursor sitting on
+     * the row IMMEDIATELY BEFORE the duplicate still misses it, because the
+     * position is found by the first entry ahead of the cursor and there is
+     * none until after the duplicate — one cursor value, down from three.
+     * Closing that too costs three interacting conditions in the reader every
+     * consumer shares, to recover one row; a consumer paging continuously gets
+     * the row in an earlier batch and never holds that cursor. And
+     * `sourcesFrom` skips whole segments by filename, so a duplicate inside a
+     * segment the cursor has already passed is still lost — opening segments to
+     * find out is exactly the cost rotation exists to avoid. Both trades are
+     * taken deliberately and pinned in `test/main/log-duplicate-seq.test.ts`.
+     */
+    let past = false
     for (const file of this.sourcesFrom(afterSeq)) {
       for (const line of linesOf(file)) {
         const entry = parseLogLine(line)
-        if (entry && entry.seq > afterSeq) {
-          out.push(entry)
-          if (out.length >= limit) return out
+        if (!entry) continue
+        if (!past) {
+          if (entry.seq <= afterSeq) continue
+          past = true
         }
+        out.push(entry)
+        if (out.length >= limit) return out
       }
     }
     return out
