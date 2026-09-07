@@ -10,6 +10,17 @@ export default defineConfig({
   test: {
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
     /**
+     * Two preconditions, before any test runs (`test/global-setup.ts`).
+     *
+     * It refuses to start when the machine has too little free memory, because
+     * a suite whose forks die reports 15, then 39, then 43 unrelated test
+     * failures and never mentions memory — an hour was lost to reading that as
+     * a regression on 2026-09-07. And it sweeps the `eph-*` temp directories
+     * earlier runs left behind, age-gated so a concurrent worktree's live run
+     * is never touched.
+     */
+    globalSetup: ['test/global-setup.ts'],
+    /**
      * Coverage (M8.0, the seam rule — ENGINEERING-STANDARDS §6.7). Off unless
      * asked for (`npm run test:coverage`); the provider is `@vitest/coverage-v8`,
      * an Architect-approved dev dependency pinned to vitest's exact version

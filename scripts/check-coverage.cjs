@@ -107,6 +107,41 @@ const DEFAULT_FLOORS = path.join('scripts', 'coverage-floors.json')
 const SCHEMA_VERSION = 3
 const METRICS = ['lines', 'branches', 'functions', 'statements']
 const COMMAND = 'npm run test:coverage'
+
+/**
+ * The half of "there is no report" that the obvious message gets wrong.
+ *
+ * "Run `npm run test:coverage` first" is right when you have not run it and
+ * actively misleading when you just did — which is exactly the case that
+ * matters, because the way a run produces no report at all is that vitest's
+ * worker forks DIED. On 2026-09-07 that happened repeatedly with free memory at
+ * 0.11 GB of 16.8, and from the outside it looks like 15, then 39, then 43
+ * unrelated tests failing, a different set each time, with no mention of memory
+ * anywhere. An hour went into reading that as a regression.
+ *
+ * `test/global-setup.ts` now refuses to start the suite below a measured floor,
+ * so this should be rare. It stays because the floor cannot catch a machine
+ * that fills up mid-run, and because a checker whose advice is wrong in the one
+ * case that matters is worse than no advice at all.
+ */
+function missingReportHint() {
+  const free = os.freemem()
+  const total = os.totalmem()
+  const gb = (bytes) => (bytes / 1e9).toFixed(2)
+  const tight = free < 2_000_000_000
+  return (
+    `
+
+  If the suite DID just run, its worker forks may have died rather than its` +
+    `
+  tests having failed — that produces a scattered set of failures and no` +
+    `
+  report at all. Free memory right now is ${gb(free)} GB of ${gb(total)} GB` +
+    (tight
+      ? `, which is below the ~2 GB this suite needs; close something and run again.`
+      : `, which is enough, so look at the run's own output for the real failure.`)
+  )
+}
 /** A window wider than this is a policy nobody would run; see `corroboratingRuns`. */
 const MAX_WINDOW_RUNS = 10
 /** A source extension electron-vite would bundle that neither list below names. */
@@ -964,7 +999,8 @@ function run(options = {}) {
       reportMtimeMs = fs.statSync(summaryPath).mtimeMs
     } catch (err) {
       return fail(
-        `coverage could not be established: no report at ${slashed(path.relative(root, summaryPath))} (${err instanceof Error ? err.message : String(err)}) — run \`${COMMAND}\` first`
+        `coverage could not be established: no report at ${slashed(path.relative(root, summaryPath))} (${err instanceof Error ? err.message : String(err)}) — run \`${COMMAND}\` first` +
+          missingReportHint()
       )
     }
     const newest = newestSource(root)
