@@ -6090,16 +6090,86 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       can only be met by execution. M7's exit remains OPEN and M8 does not close
       it; the two are independent, and §6.1's action half is owed to both.*
 
-**Design decisions carried into M8, all the Architect's** (register DD-1…DD-7):
-the shipped gate policy's defaults (M8.4); claude-only or three engines (M8.11);
-the shipped hire budgets, which measured a breach inside one working day for
-every hire (M8.6/M8.7); whether a company-wide daily ceiling exists at all;
-whether the block cap and pathology signal are dead code or a wrong early return
-(both currently unreachable by construction); consent on first launch, since boot
-starts an agent unconditionally and the first tick fires standup, reflection and
-retro together sixty seconds later; and whether a settings surface is in scope at
-all — its absence is *why* four separate packages are "hand-write a file you were
-never told about".
+      **PLUS, by Architect decision 2026-09-07: the first-launch consent gate
+      (DD-6).** It is put here rather than deferred to M7b because a stranger's
+      first afternoon is exactly what this exit review measures, and today that
+      afternoon begins with the harness hiring an agent before anyone has said
+      go. *Scope, from what was confirmed live: boot must not hire the
+      orchestrator until the Architect consents; the answer is persisted so the
+      question is asked once; and while consent is withheld the state is a
+      VISIBLE degradation rather than an empty floor (invariant §7). Note the
+      second half of the same problem — `~/.ephesus/triggers.json` shows
+      `standup`, `retro` and `gym-metric-check` sharing the timestamp
+      `1788631795998`, so the first tick fires all three together sixty seconds
+      in; a consent gate that only guards the hire still lets that happen on the
+      first tick after consent.* **Two live findings are owed a decision in this
+      package** and are written up in
+      `docs/implementations/2026-09-07-m8-live-verification.md` §7: a duplicate
+      `seq` in the Architect's book of record (F1 — cursor-based readers key on
+      `seq`, and `log.jsonl` is append-only, so this is a reader question, not a
+      repair), and the fact that stopping `npm run dev` leaves Electron running
+      so two harness instances can share one home (F2).
+
+      *A LIVE VERIFICATION PASS RAN FIRST (2026-09-07) and is not a substitute
+      for this row.* Two boots against the Architect's own `~/.ephesus`, no agent
+      spawned and no tokens spent, by the author — so it meets none of §6.1's
+      "not the author, clean clone, README only" conditions. What it did settle,
+      by execution rather than argument: the gate policy seeds and does not
+      re-seed; the trigger clock and a `down` crew come back on both boots; a
+      durable rung-3 stop refuses the orchestrator with a reason that teaches the
+      rule; three stranded mailboxes are disclosed and their mail left in place;
+      the Harbor holds 4 real pull requests and 7 CI runs; the incident fold
+      carries 7 incidents with 12 triage refusals out of 21 attempts; and
+      M8.11's engine refusal fires against a real bundle installed on disk, at
+      `autonomous`, which is the one level ADR-0031 lets past the spawn guard.
+      What it explicitly did NOT prove is listed in that doc's §6.3 — no UI was
+      driven, rotation never triggered at 688 KB, and the roster `profile` field
+      and the hook-grade migration were both unexercised because nothing spawned.
+
+**Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
+**AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
+those were settled by work that had already landed.** The list below is the
+corrected one; the original wording is preserved in the git history of this file
+and in `docs/implementations/2026-09-07-m8-live-verification.md` §3.
+
+- **DD-1 the shipped gate policy's defaults** (M8.4) — **DECIDED 2026-09-04**,
+  shipped as `shippedGatePolicy` (`src/shared/gates.ts`). *And acted on again on
+  2026-09-07: the Architect's own `gate-policy.json` predated the decision, and
+  because `home.ts` seeds only when the file is ABSENT it had never received it.
+  Three divergences, all LOOSER than shipped — no `outbound` rule at all (so
+  outbound composed at the top-level `autonomous` and posts went out ungated),
+  `needs-human` at `supervised` rather than `manual`, and a spend ceiling of
+  50,000,000 against 200,000. Architect decision: bring it to the shipped
+  default. Done by backing the file up and letting BOOT re-seed it, so the value
+  written is the one `gates.ts` holds; verified identical to the literal, and
+  verified untouched by a second boot.*
+- **DD-2 claude-only or three engines** (M8.11) — **DECIDED**, ADR-0024, and
+  implemented in M8.11.
+- **DD-3 the shipped hire budgets** (M8.6/M8.7) — **still open, and narrower than
+  written.** The shipped bundles declare NO budget at all; the 5M–60M figures
+  that breached are the Architect's own, set by hand on this machine. So the
+  question is not "are the shipped budgets right" but "should a shipped bundle
+  carry a budget at all".
+- **DD-4 whether a company-wide daily ceiling exists at all** — **ANSWERED: it
+  exists.** `maxDailyTokens` (ADR-0029), validated by `maxDailyTokensSchema`,
+  composed stricter-wins, and settable in `SettingsPanel`. The Architect has set
+  none, which reads as `unbudgeted` by design.
+- **DD-5 whether the block cap and pathology signal are dead code** — **ANSWERED:
+  the "unreachable by construction" claim is STALE.** `hermes.ts:1179` fires
+  `onPathology` when `isPathological(blocks)` (`PATHOLOGY_SIGNAL_AT = 10`), wired
+  at `index.ts:2082` to `breaker.notePathology`; `blockCap`
+  (`DEFAULT_BLOCK_CAP = 20`) reaches `decideStop` via `index.ts:2040`.
+- **DD-6 consent on first launch** — **STILL OPEN, and now M8.12's work by
+  Architect decision (2026-09-07).** Confirmed live: no consent machinery exists
+  anywhere in the tree, `artemis.start` runs unconditionally once the reference
+  engine is registered, and `~/.ephesus/triggers.json` shows `standup`, `retro`
+  and `gym-metric-check` sharing the timestamp `1788631795998` — so the first
+  tick does fire them together. See the M8.12 row.
+- **DD-7 whether a settings surface is in scope at all** — **MOSTLY ANSWERED.**
+  `SettingsPanel` ships the two company-wide ceilings and is reachable
+  (`App.tsx` → `WatchPanel` → `SettingsPanel`). The `rules` table is deliberately
+  NOT there, with the reason written into the panel's own header. What remains
+  open is only whether anything beyond those two dials is owed.
 
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
