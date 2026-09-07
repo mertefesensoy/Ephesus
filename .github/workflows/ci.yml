@@ -54,6 +54,12 @@ jobs:
             exit 1
           fi
           echo "append-only holds: only additions under docs/adr/ (or no ADR changes)"
+      - name: The README's landed list keeps up with the register
+        # M8.4 fixed a README that was "two milestones stale" and by M8.9 the
+        # same section was three packages behind, because nothing was watching.
+        # This compares the README's own `<!-- landed: -->` marker against the
+        # packages ticked in docs/PROGRESS.md; it does not read the prose.
+        run: node scripts/check-readme-current.cjs
 
   code:
     name: Typecheck · lint · test

@@ -44,7 +44,7 @@ describe('S-WAKE', () => {
     expect(company.inflight('agent.b')).toHaveLength(1)
     expect(company.done('agent.b')).toEqual([])
 
-    expect(company.agora.readLog().filter((e) => e['event'] === 'wake')).toHaveLength(1)
+    expect(company.agora.readLogAll().filter((e) => e['event'] === 'wake')).toHaveLength(1)
   })
 
   it('suppresses a stale nudge — an agent mid-turn is left alone', async () => {

@@ -449,7 +449,7 @@ describe('Agora.tailLog — what is true NOW, not what happened first', () => {
       since: 1
     })
 
-    const head = agora.readLog()
+    const head = agora.readLog(0, 500)
     expect(head[0]?.['n']).toBe(0)
     expect(head.some((entry) => entry.kind === 'degradation')).toBe(false)
 

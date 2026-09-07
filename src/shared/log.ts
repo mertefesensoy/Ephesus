@@ -157,7 +157,17 @@ export function logRowSummary(entry: LogEntry): string {
   const line = kindParts(entry)
     .filter((part) => part.length > 0)
     .join(' · ')
-  return line.length > 0 ? line : otherFields(entry)
+  if (line.length > 0) return line
+  const other = otherFields(entry)
+  if (other.length > 0) return other
+  // The guarantee, now enforced rather than stated: a row in the book of
+  // record never renders as a blank line. `otherFields` skips ts/seq/kind
+  // and drops object-valued fields, so a row carrying nothing else — an
+  // older format, a hand-edit, a future kind whose payload is a nested
+  // object — reached the Activity panel as an empty row. That IS B3, the
+  // defect this module was written to close, arriving from disk instead of
+  // from a misspelt field name.
+  return `${entry.kind} #${String(entry.seq)}`
 }
 
 /** A string, number or boolean field, or '' when absent or of another shape. */
@@ -166,6 +176,21 @@ function ref(entry: LogEntry, name: string): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return ''
+}
+
+/**
+ * `label value`, or '' when there is no value.
+ *
+ * A bare label is worse than a blank part, because the row still LOOKS
+ * populated — which is the failure this module already carries a comment
+ * about: reading `signal` for `signals` left the breaker row rendering while
+ * saying nothing. `exit ` and `rung ` were doing the same thing on any row
+ * missing that field, and they were the two sites here that guarded the value
+ * ad hoc or not at all while their five siblings each did it differently.
+ * One helper, so the next label cannot be the one somebody forgot.
+ */
+function labelled(label: string, value: string): string {
+  return value.length > 0 ? `${label} ${value}` : ''
 }
 
 /** A list field (`signals`, `acked`, `attendees`), joined; '' when absent. */
@@ -222,13 +247,13 @@ function kindParts(entry: LogEntry): readonly string[] {
     case 'delivery':
       return [flow(entry), at('act'), at('subject')]
     case 'bounce':
-      return [flow(entry), at('reason'), at('divertedTo') && `diverted to ${at('divertedTo')}`]
+      return [flow(entry), at('reason'), labelled('diverted to', at('divertedTo'))]
     case 'spawn':
       return [at('agentId'), `${at('engine')} ${at('engineVersion')}`.trim(), at('role')]
     case 'exit':
-      return [at('agentId'), at('engine'), `exit ${at('exitCode')}`]
+      return [at('agentId'), at('engine'), labelled('exit', at('exitCode'))]
     case 'ghost':
-      return [at('agentId'), at('engine'), at('resumable') && `resumable ${at('resumable')}`]
+      return [at('agentId'), at('engine'), labelled('resumable', at('resumable'))]
     case 'hook':
       return [at('agentId'), at('event'), at('decision'), at('because')]
     case 'task':
@@ -251,7 +276,7 @@ function kindParts(entry: LogEntry): readonly string[] {
     case 'breaker':
       // `signals`, plural and an array — the emitter has always written it that
       // way, and reading `signal` blanked the reason on every breaker row.
-      return [at('agentId'), at('action'), list(entry, 'signals'), `rung ${at('rung')}`]
+      return [at('agentId'), at('action'), list(entry, 'signals'), labelled('rung', at('rung'))]
     case 'budget':
       return [at('agentId'), at('event') || at('state'), at('because'), at('spent')]
     case 'memory':
@@ -270,7 +295,7 @@ function kindParts(entry: LogEntry): readonly string[] {
     case 'stoa':
       return [at('event'), at('sourceId') || at('briefId'), at('url') || at('pin'), at('by')]
     case 'shutdown':
-      return [at('event'), at('agentId'), acked && `acked ${acked}`, missing && `silent ${missing}`]
+      return [at('event'), at('agentId'), labelled('acked', acked), labelled('silent', missing)]
     case 'capacity':
       return [at('event'), at('agentId'), at('limitKind'), at('detail')]
     case 'respawn':
@@ -279,7 +304,7 @@ function kindParts(entry: LogEntry): readonly string[] {
       return [
         at('event'),
         at('agentId'),
-        at('attempt') === '' ? '' : `attempt ${at('attempt')}`,
+        labelled('attempt', at('attempt')),
         at('because') || at('waitMs')
       ]
     case 'error':

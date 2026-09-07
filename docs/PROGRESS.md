@@ -4634,6 +4634,38 @@ structural rather than a habit.
       metric due 2026-09-16), the M8.0 implementation doc. Owed, recorded not
       built: export-level dead code (the M3 `effectivePolicy` shape) is
       invisible to both halves. Branch `feature/m8-0-coverage-seam-rule`,
+
+      *AUDIT (2026-09-07): **clean — and the one package whose real evidence is the
+      other nine audits.** Both gates were PROVEN by planted probe rather than
+      trusted, because a tripwire that finds nothing looks exactly like one that
+      passes. A new `src/shared/audit-probe.ts` — mapped to no subsystem, entered by
+      no test, imported by nothing — was refused with exit 1 and a sentence naming
+      the file and its three remedies (wire it, delete it, or allowlist it WITH the
+      decision). The coverage check fails CLOSED on the same tree: asked to judge
+      without a report it refuses rather than passes. Probe removed, both green.
+      **Neither allowlist has been gamed.** `UNREACHABLE_ALLOWLIST` is untouched
+      since the commit that created it — still the Herald ×7 and `contrast.ts`, each
+      with its reason — and the untested-module record has FALLEN from 24 to 22, is
+      identical on both platforms, and contains nothing added in this session.
+      **What the gate caught in one day of audit work:** `agora` statements diluted
+      by an unreachable catch, `agora` branches diluted by a duplicated error
+      ternary, `renderer-health.ts` belonging to no subsystem, and the stale linux
+      record — that last from CI, which is the half this machine cannot measure.
+      Three of the four were in code written the same day.
+      **CORRECTION to the standing finding above:** it says `main` has NO branch
+      protection, so "every CI gate is advisory until required checks are enabled".
+      That is no longer true and was verified through the API rather than assumed:
+      `main` requires "Typecheck · lint · test", "Docs integrity" and "Commit
+      attribution", with `strict: true` — which is what refused a merge on 2026-09-06
+      until the branch was brought up to date — and `enforce_admins: false`, so the
+      Architect can still override deliberately. The gates are REQUIRED, not advisory.
+      **One honest observation about these audit notes rather than about the gate:**
+      the M8.1 block restates the rule as "figures live in
+      `scripts/coverage-floors.json`, never in prose", and this session’s notes and
+      commit messages do quote moved floors. They carry their condition, and
+      `check-coverage.cjs` reads only the JSON, so they are history rather than a
+      competing record — but they will go stale where the record will not. Read the
+      file, never a note, for what a floor is now.*
       pushed, UNMERGED — merging is the Architect's. FOUND BY CI, RECORDED
       NOT FIXED: runs `33629903392` and `33633478191` (both docs-only
       commits — two of the branch's six runs) failed
@@ -4708,6 +4740,29 @@ structural rather than a habit.
       as a CHARACTERIZATION case in S-CLOSING that passes today because the loss
       is real, for M8.8 to flip. Branch `feature/m8-1-quit-path`.*
 
+      *AUDIT (2026-09-07): **clean — no defect found, and the fix is verified in
+      production against this package’s own measurement.** The register said the
+      book of record held "exactly one shutdown event (`closing-begin`, no ack, no
+      complete, ever)". It now holds BOTH sides: seq 1175 (2026-09-01) is that
+      orphan `closing-begin` with nothing after it, and seq 2646-2667 (2026-09-06)
+      is `closing-begin` → three `closing-ack`, one per live crew agent →
+      `closing-complete` with `missing: []` and `timedOut: false`, 52 seconds later.
+      The defect and its repair sit in the same file.
+      **Rule 5 was re-proven by a planted probe rather than trusted**, because a
+      tripwire that finds nothing looks exactly like a tripwire that passes: a
+      `webContents.send` added to `agora.ts` produced the named failure AND exit
+      code 1, and the tree was restored. The bridge forgets its window on `closed`,
+      checks `isDestroyed()` on both objects, and wraps even that read — reading
+      `isDestroyed` off a torn-down native object can itself throw. `before-quit`
+      guards the double gesture and lets only the ending quit through; the phase
+      order is closing → disarm → unwind → steps, with M8.7’s DISARM in the place
+      that clearance put it.
+      **The D12 rig discipline was not only kept but extended by a later package:**
+      the scenario builds the SHIPPED `QuitSequence`, and when M8.7 added the disarm
+      phase the rig gained it *present and empty* with the reason written down —
+      "an absent seam is how a rig starts drifting from production without anybody
+      deciding that it should".*
+
 - [x] **M8.2 The degradation channel** — B2, D9. `reportDegradation` is a console
       line plus a 50-entry in-memory ring surfaced only in a tooltip: it never
       reaches `log.jsonl`, it is gone at restart, and the wake-deferral emitter
@@ -4765,6 +4820,32 @@ structural rather than a habit.
       renders each entry through `degradationLine`. Docs: SDD §4.3 (the kind and
       its semantics) and §1.1 (the module). Branch `feature/m8-2-degradations`.*
 
+      *AUDIT (2026-09-07): **the channel verifies against its own data, with no
+      code change.** The bounded LADDER is visible in production —
+      `agora/log-size` was written at `count: 1` and again at `count: 10`, a power
+      of ten apart with nothing between — and `usage/pacing` shows the raise
+      followed by its `cleared` row, which is the pair a condition-shaped kind
+      exists to make possible. 59 degradation rows across 41 distinct causes,
+      per-agent conditions carrying the agent as designed. The dedupe’s load-bearing
+      property was re-checked by INVENTORY rather than by test: every dynamic cause
+      in `src/` embeds a bounded identity — an agent, adapter, instance, gate, task,
+      trigger or check id, or a settings path — and none embeds a message, a
+      timestamp or free text, so nothing can defeat the dedupe by making each report
+      unique. `report` never throws and the append is caught.
+      **The channel also disproved a claim this register made the same day.** The
+      M8.4 audit note said `home/seeded-config` had never fired; `log.jsonl` seq 1177
+      says otherwise, and that note is corrected in place. The mistake was reading a
+      `.most_common(12)` and treating a truncated list as an absent one — the second
+      time in one day an audit concluded absence from a view it had narrowed itself
+      (the first surveyed rows by `event` and so could not see `kind: ’spawn’` rows).
+      Recorded in DECISIONS-LOG as a method rule.
+      **Also surfaced, for the Architect rather than fixed here:**
+      `incident/unmet-obligation` is live — *"severity-1 incident
+      mertefesensoy/MUSAHIT#ci-run:33986883947 owes an immediate spoken announcement;
+      the Herald is not wired (M6.9 deferred)"*. The company raised a severity-1 and
+      could not announce it, which is the kind of deferred-work consequence this
+      channel exists to keep visible.*
+
 - [x] **M8.3 The log-derived surfaces tell the truth** — B3, B4. `readLog()`
       defaults to the OLDEST 500 entries and three callers use the default, so
       the standup's cursor pins at 500 and every later brief filters to empty:
@@ -4821,6 +4902,38 @@ structural rather than a habit.
       `CompanyModes.gymEvents` → `readLogAll`; `ipcMain.handle(agoraLogTail)` →
       the panel’s first read. Docs: SDD §1.1 (`agora.ts`, `eventlog.ts`).
       Branch `feature/m8-3-log-surfaces`.*
+
+      *AUDIT (2026-09-07): **verified against the Architect's real book, which is
+      now 2,689 entries — more than twice the 1,177 this package was measured on
+      — and every claim holds.** `logRowSummary` renders all 2,689 rows with ZERO
+      blanks, including every kind added since by M8.6/M8.8 (`respawn`,
+      `restart`, `commands`, `workspace-trusted`). Exactly ONE `onAppend`
+      subscriber exists in production, which is the single subscription the 31
+      hand-written pushes collapsed into — no drift back. `agora/log-size` has
+      FIRED for real: "reading the whole log cost 89 ms on the main loop (1629
+      entries, 364 KiB)", then 115 ms, so the cost report this package built is
+      now reporting M8.10's problem, which is what it is for. No caller takes the
+      oldest-500 default. The Activity panel opens at the end, subscribes,
+      handles the tail-vs-append race and keeps `absorb` monotonic so a late page
+      cannot rewind to the company's first rows.
+      **The finding: a guarantee this block STATES was never enforced.** The
+      evidence says `logRowSummary` is "unable to return an empty string"; a test
+      three files away asserted the opposite (`toBe('')`), so the register
+      described something the code never did. Three of four degenerate shapes
+      rendered blank, and `{kind:'breaker', signals:[]}` rendered `"rung "` — a
+      label with no value, which is the same "looks populated and says nothing"
+      failure this package fixed for `signal` vs `signals`. Latent, not live: the
+      real log has no such row today, but rows come from DISK, so an older
+      format, a hand-edit or a future object-shaped payload reaches the panel as
+      an empty line, which IS B3. Fixed both ways — a `labelled()` helper so a
+      bare label cannot be emitted (seven sites unified; `exit` and `rung` were
+      the two that guarded it ad hoc or not at all), and a final fallback naming
+      the kind and seq. The contradicting test was REVERSED with the reason in
+      its body, M8.4's own precedent. **And `readLog`'s arguments are now
+      required**: the oldest-500 default that IS B3 was still there for the next
+      caller who did not think about it, and 57 test call sites were taking it —
+      every fixture smaller than the window, exactly as this block says. 5
+      mutations, 5 killed.*
 
 - [x] **M8.4 The setup cliff** — B5, B6, B8, B9, D11, D13. Four config files the
       harness requires, creates itself, and does not document; each absence is
@@ -4887,6 +5000,39 @@ structural rather than a habit.
       DESIGN on the stale linux floor with everything else green, its artifact
       ratcheted the block, and run `33811944369` on `8998918` is GREEN on all
       three jobs. Branch `feature/m8-4-setup-cliff`.*
+      *AUDIT (2026-09-07): **every claim verified, and the first-afternoon path
+      EXERCISED rather than trusted.** `ensureHarnessHome` against a fresh temp
+      root seeds exactly `gate-policy.json` and `authority.json`, NAMES both in
+      `seeded`, loads with `warning: null`, and seeds nothing on a second boot.
+      The shipped policy is DD-1 to the letter — `autonomous` with destructive,
+      prod-facing, scope-change, outbound and spend at `supervised`,
+      `needs-human` at `manual`, `tool-permission` absent — and unbudgeted by
+      default. On the Architect's own machine `authority.json` is FR-5.5's
+      example exactly: `route`/`task` on `*`, `memo` on test-code and docs, no
+      `gate` and no `spend`. The auth predicate still reads the denial BEFORE the
+      affirmation, which is the ordering whose mutant survived this package's
+      first pass, and `grantsUnavailable` is tested on both sides — the resolver
+      the sentence on the screen. **CORRECTED the same day by the M8.2 audit:**
+      this block first said `home/seeded-config` had never fired here. It has —
+      `log.jsonl` seq 1177 carries *"authority.json was missing and has been created
+      with the shipped default — review it at C:\Users\senso\.ephesus"*. The claim came
+      from reading `Counter(...).most_common(12)` and taking a truncated list for an
+      absent one; the row has count 1 and sat outside it. So the seeding report is
+      verified in PRODUCTION, not only by the first-run simulation. A `needs-login`
+      card genuinely has not fired, the engine having always been authenticated here.
+      **The finding: this package's OWN defect recurred.** M8.4 fixed a README
+      whose status was "two milestones stale"; by M8.9 the same section was three
+      packages behind — M8.6, M8.7a/b and M8.8 were absent, and grep across the
+      whole file returned `worktree` 0, `restart` 0, `respawn` 0. The front door
+      described a company without worktree isolation, without engine isolation
+      and without a survivable restart, which are precisely the things a
+      prospective installer needs to read. Fixed in both directions: the prose is
+      written, and `scripts/check-readme-current.cjs` now fails CI when a package
+      ticked in this file is missing from the README's `<!-- landed: -->` marker.
+      It deliberately does NOT read the prose — a check that guessed whether a
+      paragraph "describes" a package would block good writing or pass bad
+      writing — so it catches the oversight that actually happened twice, and
+      says so about what it cannot catch.*
 
 ### M8.3 / M8.4 defect clearance (2026-09-04) — 2 defects, 7 surviving mutants
 
@@ -4980,6 +5126,31 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       `profiles.ts`),
       `docs/implementations/2026-09-04-m8-5-mission-watches-repository.md`.
       Branch `feature/m8-5-mission-watches-repository`.*
+      *AUDIT (2026-09-07): **the central mechanism is now proven in production,
+      which is what this package could not claim when it closed.** All four
+      precedence rungs have run on the Architect's machine — `architect` x5,
+      `bundle` x2, `target` x1 — and the DERIVED one produced the right answer
+      against a real checkout (`reposFrom: "target"` -> `mertefesensoy/MUSAHIT`),
+      after which the Harbor ingested. The security claim holds precisely: a
+      remote URL is echoed on neither parse path, because the URL branch reads
+      `parsed.hostname` (WHATWG keeps userinfo in separate properties) and the
+      scp branch captures userinfo into a group it discards; both are tested
+      with a credential in that position, as is the Windows drive letter.
+      `watchedRepos` really is the single source for the Harbor's ingest list
+      AND the cadence's arming condition, and `onWatching` carries both
+      directions (raised on activate, cleared on deactivate), with degradations
+      replayed at boot as `carried` so a restored instance stays honest.
+      **The finding: the one half of the wrong-repository hazard the ARCHITECT
+      can cause had no test.** `deriveRepo` refuses to guess between a fork's two
+      remotes and that refusal has fifty-odd cases; the override is how the
+      Architect answers it, and the rule that stops that answer following them to
+      a different checkout lived in a `useCallback` the static-markup harness
+      cannot run. Extracted as `overrideAfterRetarget` and table-tested — the
+      same lesson `parseRepoList` was extracted for, recorded in this package's
+      own test docblock. The extraction alone was NOT the fix: a mutation that
+      stopped the panel consulting the rule at all still killed nothing, so a
+      jsdom seam test now mounts the panel, types an override, moves the target
+      and asserts the box cleared. 6 mutations, 6 killed.*
 
 - [x] **M8.6 Crew isolation and survival** — B10, B11, B12. The profile spawn
       path never requests worktree isolation (verified: zero `worktree`

@@ -176,7 +176,7 @@ describe('Hermes — delivery (ADR-0003, FR-3.2)', () => {
     r.send('agent.a', sent)
     await r.hermes.sweep()
 
-    const entry = r.agora.readLog().find((e) => e['kind'] === 'delivery')
+    const entry = r.agora.readLogAll().find((e) => e['kind'] === 'delivery')
     expect(entry).toMatchObject({
       kind: 'delivery',
       msgId: sent.id,
@@ -409,7 +409,7 @@ describe('Hermes — a message the router will not carry', () => {
     // the whole rig's, and an exact count would couple this case to anything
     // else that ever logs an error.
     const errors = r.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'error' && e['subsystem'] === 'hermes')
     for (const name of ['wrecked.json', 'shaped.json']) {
       const entry = errors.find((e) => String(e['file'] ?? '').endsWith(name))
@@ -437,7 +437,7 @@ describe('Hermes — a message the router will not carry', () => {
     // And the failure to notify is itself visible — a silent failure to break
     // the silence would be the same bug one level up.
     const failed = r.agora
-      .readLog()
+      .readLogAll()
       .find((e) => typeof e['reason'] === 'string' && e['reason'].includes('could not tell'))
     expect(failed).toBeDefined()
   })
@@ -478,7 +478,7 @@ describe('Hermes — a message the router will not carry', () => {
     await r.hermes.sweep()
 
     expect(
-      r.agora.readLog().some((e) => e['kind'] === 'error' && e['subsystem'] === 'hermes')
+      r.agora.readLogAll().some((e) => e['kind'] === 'error' && e['subsystem'] === 'hermes')
     ).toBe(true)
   })
 })
@@ -751,7 +751,7 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     expect(refusal.act).toBe('refuse')
     expect(refusal.in_reply_to).toBe(sent.id)
     expect(refusal.body).toContain('agent.ghost')
-    expect(r.agora.readLog().some((e) => e['kind'] === 'bounce')).toBe(true)
+    expect(r.agora.readLogAll().some((e) => e['kind'] === 'bounce')).toBe(true)
   })
 
   /**
@@ -777,7 +777,7 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     // Not dropped (FR-3.4): it is in the book of record, marked as an aside,
     // with the agent's own words.
     const entry = r.agora
-      .readLog()
+      .readLogAll()
       .find((e) => e['kind'] === 'delivery' && e['to'] === 'agent.odeon')
     expect(entry).toBeDefined()
     expect(entry?.['aside']).toBe(true)
@@ -881,12 +881,12 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     expect(r.inbox('agent.b')).toHaveLength(1)
     expect(r.inbox('agent.c')).toEqual([])
     const deliveries = r.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'delivery' && e['msgId'] === sent.id)
     expect(deliveries).toHaveLength(1)
     // The hold itself is in the log once, not once per sweep.
     const holds = r.agora
-      .readLog()
+      .readLogAll()
       .filter((e) => e['kind'] === 'breaker' && e['action'] === 'delivery-held')
     expect(holds).toHaveLength(1)
 
@@ -909,7 +909,7 @@ describe('Hermes — routing rules end to end (M2.4)', () => {
     const humanInbox = path.join(r.agora.pathOf('human'), 'inbox')
     expect(fs.readdirSync(humanInbox)).toEqual([`${sent.id}.json`])
 
-    const diverted = r.agora.readLog().find((e) => e['kind'] === 'bounce')
+    const diverted = r.agora.readLogAll().find((e) => e['kind'] === 'bounce')
     expect(diverted).toMatchObject({ divertedTo: 'human', hops: DEFAULT_HOP_CAP })
   })
 
@@ -1025,7 +1025,7 @@ describe('Hermes — the autonomy loop (ADR-0013, M2.5)', () => {
     await r.hermes.decideOnStop('agent.b', {})
     await r.hermes.decideOnStop('agent.c', {})
 
-    const stops = r.agora.readLog().filter((e) => e['kind'] === 'hook' && e['event'] === 'stop')
+    const stops = r.agora.readLogAll().filter((e) => e['kind'] === 'hook' && e['event'] === 'stop')
     expect(stops).toHaveLength(2)
     expect(stops[0]).toMatchObject({ agentId: 'agent.b', decision: 'block', pendingMail: 1 })
     expect(stops[1]).toMatchObject({ agentId: 'agent.c', decision: 'continue' })
@@ -1072,7 +1072,7 @@ describe('Hermes — one agent’s failed nudge must not silence the rest', () =
     // consumeInbox already archived it. A company that goes quiet must not do
     // so with nothing written down.
     const undelivered = r.agora
-      .readLog()
+      .readLogAll()
       .filter((row) => row.kind === 'hook' && row['event'] === 'wake-undelivered')
     expect(undelivered).toHaveLength(1)
     expect(undelivered[0]).toMatchObject({ agentId: 'agent.b' })
@@ -1138,7 +1138,9 @@ describe('Hermes — the inbox wake watchdog (ADR-0013, FR-3.5, S-WAKE)', () => 
     await r.hermes.sweep()
     await r.hermes.wakeCheck()
 
-    expect(r.agora.readLog().some((e) => e['kind'] === 'hook' && e['event'] === 'wake')).toBe(true)
+    expect(r.agora.readLogAll().some((e) => e['kind'] === 'hook' && e['event'] === 'wake')).toBe(
+      true
+    )
   })
 })
 
@@ -1439,7 +1441,7 @@ describe('Hermes — an assigned task wakes an idle agent', () => {
 
     await r.hermes.wakeCheck()
 
-    const wakes = r.agora.readLog().filter((e) => e['event'] === 'wake')
+    const wakes = r.agora.readLogAll().filter((e) => e['event'] === 'wake')
     expect(wakes).toHaveLength(1)
     expect(wakes[0]?.['pendingTasks']).toBe(2)
   })

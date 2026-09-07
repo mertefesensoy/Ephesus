@@ -6,8 +6,10 @@ import {
   InstanceRow,
   PlanView,
   activationRequest,
+  overrideAfterRetarget,
   parseRepoList,
-  targetReady
+  targetReady,
+  type TargetFields
 } from '../../src/renderer/src/ProfilesPanel'
 import type { ActivationPlan, ComposedAutonomy } from '../../src/shared/profile-activation'
 import type { ProfileInstanceView } from '../../src/shared/profile-view'
@@ -335,6 +337,58 @@ describe('the screen says what the instance will watch', () => {
  * mapping inside a component is a mapping no table test can reach.
  */
 describe('the repository the Architect names', () => {
+  /**
+   * The other half of the wrong-repository hazard, found by the M8.5 audit on
+   * 2026-09-07 and untested until then.
+   *
+   * `deriveRepo` refuses to GUESS which of a fork's two remotes to watch, and
+   * that refusal has fifty-odd cases. The override is how the Architect answers
+   * it — and an answer about one checkout following them to another checkout is
+   * the same wrong-repository outcome, reached by a human instead of an
+   * algorithm. The rule lived in a `useCallback` this harness cannot run.
+   */
+  const target = (over: Partial<TargetFields> = {}): TargetFields => ({
+    kind: 'repo',
+    id: 'musahit',
+    path: 'C:/checkouts/musahit',
+    ...over
+  })
+
+  it('keeps the override while the checkout is the same', () => {
+    expect(overrideAfterRetarget(target(), target(), 'owner/app')).toBe('owner/app')
+  })
+
+  it('drops it when ANY part of the target changes', () => {
+    // Each field on its own: a path edit is the obvious case, but an id change
+    // with the same path is a different instance of the same checkout, and a
+    // kind change is a different kind of target entirely.
+    for (const moved of [
+      { path: 'C:/checkouts/other' },
+      { id: 'other' },
+      { kind: 'app' as const }
+    ]) {
+      expect(
+        overrideAfterRetarget(target(), target(moved), 'owner/app'),
+        JSON.stringify(moved)
+      ).toBe('')
+    }
+  })
+
+  it('has nothing to drop when nothing was typed', () => {
+    expect(overrideAfterRetarget(target(), target({ path: 'elsewhere' }), '')).toBe('')
+    expect(overrideAfterRetarget(target(), target(), '')).toBe('')
+  })
+
+  it('drops rather than keeps when the move is between two forks', () => {
+    // The case the rule exists for, stated as a scenario: the Architect answers
+    // the fork refusal for one checkout, then points the form at another. The
+    // answer must not travel — a slug typed for `owner/app` naming the upstream
+    // would file this company's incidents against a repository nobody chose.
+    const answered = overrideAfterRetarget(target(), target(), 'upstream-owner/app')
+    expect(answered).toBe('upstream-owner/app')
+    expect(overrideAfterRetarget(target(), target({ id: 'a-different-fork' }), answered)).toBe('')
+  })
+
   it('splits a typed or pasted list on commas and whitespace', () => {
     expect(parseRepoList('owner/app')).toEqual(['owner/app'])
     expect(parseRepoList('owner/app, owner/other')).toEqual(['owner/app', 'owner/other'])

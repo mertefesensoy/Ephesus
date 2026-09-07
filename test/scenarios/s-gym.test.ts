@@ -118,7 +118,7 @@ describe('S-GYM — authority-widening is refused REGARDLESS of approver (FR-12.
     expect(eph.gymnasium.rows()).toEqual([])
     // Recorded on its own, because an attempt to widen authority is exactly
     // what a later reader will look for (NFR-13).
-    expect(eph.agora.readLog().some((row) => row['event'] === 'refused-widening')).toBe(true)
+    expect(eph.agora.readLogAll().some((row) => row['event'] === 'refused-widening')).toBe(true)
   })
 
   it('is refused before a verdict exists, so no approver can make it acceptable', async () => {
@@ -158,7 +158,7 @@ describe('S-GYM — a missed metric rolls back and ledgers `regressed` (FR-12.4)
     eph.gymnasium.measure('GYM-001', null)
 
     expect(eph.gymnasium.rows()[0]?.status).toBe('regressed')
-    const event = eph.agora.readLog().find((row) => row['event'] === 'regressed')
+    const event = eph.agora.readLogAll().find((row) => row['event'] === 'regressed')
     expect(event).toMatchObject({ kind: 'gym', rollback: true })
   })
 

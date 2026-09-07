@@ -154,6 +154,6 @@ describe('agora reads (SDD §5)', () => {
       to: 'agent.b',
       act: 'request'
     })
-    expect(agora.readLog()[0]).toMatchObject({ msgId: 'm-1', from: 'agent.a', to: 'agent.b' })
+    expect(agora.readLogAll()[0]).toMatchObject({ msgId: 'm-1', from: 'agent.a', to: 'agent.b' })
   })
 })

@@ -86,7 +86,7 @@ describe('S-CLOSING — everyone packs up and the floor closes clean', () => {
 
     // And the book of record can reconstruct the shutdown (NFR-13).
     const events = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((row) => row.kind === 'shutdown')
       .map((row) => row['event'])
     expect(events[0]).toBe('closing-begin')
@@ -128,7 +128,7 @@ describe('S-CLOSING — the deadline is a hard promise, and silence is named', (
     expect(report.missing).toEqual(['agent.tess'])
 
     const complete = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((row) => row.kind === 'shutdown')
       .find((row) => row['event'] === 'closing-complete')
     expect(complete).toMatchObject({ missing: ['agent.tess'], timedOut: true })
@@ -221,7 +221,7 @@ describe('S-CLOSING — the quit path, with the window already destroyed', () =>
 
     // And the book of record holds the whole exchange, not just its first line.
     const events = eph.agora
-      .readLog()
+      .readLogAll()
       .filter((row) => row.kind === 'shutdown')
       .map((row) => row['event'])
     expect(events[0]).toBe('closing-begin')
@@ -240,7 +240,7 @@ describe('S-CLOSING — the quit path, with the window already destroyed', () =>
     expect(report).toMatchObject({ offered: true, choice: 'now', closing: null })
     expect(eph.inbox('agent.mason')).toEqual([])
     expect(report.steps.filter((step) => !step.ok)).toEqual([])
-    expect(eph.agora.readLog().filter((row) => row.kind === 'shutdown')).toEqual([])
+    expect(eph.agora.readLogAll().filter((row) => row.kind === 'shutdown')).toEqual([])
   })
 
   it('runs once, however many times the Architect asks to quit', async () => {
@@ -282,7 +282,7 @@ describe('S-CLOSING — the quit path, with the window already destroyed', () =>
     await eph.quit.run()
 
     // The opening IS on the record — the log can say a gate was raised…
-    const logged = eph.agora.readLog().filter((row) => row.kind === 'gate')
+    const logged = eph.agora.readLogAll().filter((row) => row.kind === 'gate')
     expect(logged.length).toBeGreaterThan(0)
     // …but the gate itself lives only in this process's memory. Nothing wrote
     // it anywhere, so the company that comes back cannot answer it, while a
