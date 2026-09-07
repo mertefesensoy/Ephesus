@@ -83,6 +83,17 @@ function fatMemory(library: Library, sections = 12): void {
   }
 }
 
+/** `fatMemory` for an agent other than the default one. */
+function fatMemoryFor(library: Library, agentId: string, sections = 12): void {
+  for (let i = 0; i < sections; i += 1) {
+    library.note(
+      agentId,
+      agentId,
+      `Learning number ${String(i)}: ${'detail '.repeat(400)}marker-${String(i)}`
+    )
+  }
+}
+
 function condensation(core: string): string {
   return JSON.stringify({ schemaVersion: REFLECTION_SCHEMA_VERSION, core })
 }
@@ -293,5 +304,90 @@ describe('the scheduler drives it', () => {
     await scheduler.tick()
     // Still one: the agent has not answered, and the retry window has not passed.
     expect(r.delivered).toHaveLength(1)
+  })
+})
+
+/**
+ * D6 (M8.10) — one bad agent must not stop reflection for everyone after it.
+ *
+ * The failure is driven through the REAL path rather than a stub that throws:
+ * `ask` composes a `Message`, and `messageSchema` caps `body` at 200 000
+ * characters, so an agent whose condensing sections exceed that cap throws on
+ * validation inside the sweep. A stub that threw would have proved only that a
+ * try/catch catches; this proves the condition the guard was written for can
+ * actually occur, and that the guard catches THAT.
+ *
+ * Iteration order is `reachableAgents()`, which the harness sorts, so the
+ * agents that lost their reflection were the ones whose names sort after the
+ * oversized one. Both agents below are named so that ordering is explicit.
+ */
+describe('D6 — reflection survives one bad agent', () => {
+  const EARLY = 'agent.aaa-oversized'
+  const LATER = 'agent.zzz-healthy'
+
+  /** A memory whose condensing sections exceed the 200 000-char message cap. */
+  function oversizedMemory(library: Library, agentId: string): void {
+    for (let i = 0; i < 12; i += 1) {
+      library.note(agentId, agentId, `Chapter ${String(i)}: ${'x'.repeat(30_000)}`)
+    }
+  }
+
+  it('the oversized memory really does throw — the condition is reachable', () => {
+    const r = rig({ reachable: [EARLY] })
+    oversizedMemory(r.library, EARLY)
+    const plan = r.library.reflectionPlan(EARLY)
+    expect(plan.due).toBe(true)
+    const body = plan.condensing.map((section) => section.text).join('\n\n')
+    expect(body.length).toBeGreaterThan(200_000)
+  })
+
+  it('asks every other agent, and names the one it could not ask', () => {
+    const r = rig({ reachable: [EARLY, LATER] })
+    oversizedMemory(r.library, EARLY)
+    fatMemoryFor(r.library, LATER)
+
+    const report = r.job.sweep()
+
+    // The healthy agent is asked even though it sorts AFTER the broken one.
+    expect(report.asked).toEqual([LATER])
+    expect(r.delivered.map((message) => message.to)).toEqual([LATER])
+
+    // The failure is reported, not swallowed: the agent by name and the reason.
+    expect(report.failed).toHaveLength(1)
+    expect(report.failed[0]?.agentId).toBe(EARLY)
+    const detail = r.degradations.join('\n')
+    expect(detail).toContain(EARLY)
+    expect(detail).toContain('could not be asked to condense its memory')
+    // Not a silence: the line says the rest of the sweep still happened.
+    expect(detail).toContain('every other agent was still swept')
+  })
+
+  it('keeps asking the healthy agent on later sweeps', () => {
+    const r = rig({ reachable: [EARLY, LATER] })
+    oversizedMemory(r.library, EARLY)
+    fatMemoryFor(r.library, LATER)
+
+    r.job.sweep()
+    // The broken agent left no outstanding request, so it is retried; the
+    // healthy one is now awaiting an answer and is not asked twice.
+    const second = r.job.sweep()
+    expect(second.failed.map((row) => row.agentId)).toEqual([EARLY])
+    expect(r.delivered).toHaveLength(1)
+    expect(r.job.pending()).toEqual([LATER])
+  })
+
+  it('reports one line per failing agent, so six are six', () => {
+    const broken = ['agent.b1', 'agent.b2', 'agent.b3']
+    const r = rig({ reachable: [...broken, LATER] })
+    for (const agentId of broken) oversizedMemory(r.library, agentId)
+    fatMemoryFor(r.library, LATER)
+
+    const report = r.job.sweep()
+
+    expect(report.failed.map((row) => row.agentId)).toEqual(broken)
+    expect(report.asked).toEqual([LATER])
+    for (const agentId of broken) {
+      expect(r.degradations.filter((line) => line.includes(agentId))).toHaveLength(1)
+    }
   })
 })

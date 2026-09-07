@@ -669,6 +669,24 @@ export class ProfileActivations {
   }
 
   /**
+   * Contract: the NAME of the profile this agent was hired by, or null when it
+   * belongs to none.
+   *
+   * The name, not the instance id: SDD §4.1 caps the roster field at 64
+   * characters and documents it as the profile, while an instance id is
+   * `<profile>@<targetRef>` and would not reliably fit — nor is a target
+   * something the roster field claims to carry.
+   *
+   * Answers DURING a spawn, because `planFor` searches the in-flight plans as
+   * well as the live instances (M8.7b). That is the whole reason the roster
+   * write can know the answer: the entry is written before the instance is
+   * registered.
+   */
+  profileFor(agentId: string): string | null {
+    return this.planFor(agentId)?.profile ?? null
+  }
+
+  /**
    * Contract: puts previously-live instances back, with their crews DOWN, and
    * returns one sentence per instance describing what did and did not come
    * back (M8.8). Never spawns, never kills, never arms a trigger.

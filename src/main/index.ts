@@ -2057,6 +2057,16 @@ async function boot(): Promise<void> {
      */
     isIdle: (agentId) =>
       canDeliverWake(ptyManager.has(agentId), wakeClock?.runningMs(agentId) ?? null),
+    // D5 (M8.10). The bare "is there a process" question, which is NOT what
+    // `isIdle` answers: `canDeliverWake` is false for a busy agent too, and
+    // the watchdog treated "ask later" and "nobody is ever going to read
+    // this" as one silence.
+    hasSession: (agentId) => ptyManager.has(agentId),
+    onMailStranded: (agentId, detail) =>
+      reportDegradation(
+        `hermes/mail-stranded:${agentId}`,
+        `${String(detail.pendingMail)} message(s) waiting for ${agentId}, which has no session to read them`
+      ),
     // ADR-0013's pathology signal, emitted and logged from M2 with nothing
     // reading it — the M2 carried item. It now enters the breaker's ladder at
     // rung 1 like any other signal.
@@ -2109,6 +2119,10 @@ async function boot(): Promise<void> {
     autonomyFor: (agentId) =>
       activations?.autonomyFor(agentId, 'tool-permission') ??
       loadGatePolicy(gatePolicyPath).policy.autonomy,
+    // SDD §4.1 — which profile hired this agent, for the roster entry. The
+    // SAME resolver that answers autonomy above, so the roster and the gates
+    // can never disagree about which profile an agent belongs to.
+    profileFor: (agentId) => activations?.profileFor(agentId) ?? null,
     /**
      * Asks an engine whether it is logged in (M8.4). Same discipline as the
      * version probe: a shell on Windows because engine CLIs are `.cmd` shims,

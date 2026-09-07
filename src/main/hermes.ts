@@ -188,6 +188,36 @@ export interface HermesOptions {
   /** True when the agent has finished its turn and is waiting. */
   isIdle?(agentId: string): boolean
   /**
+   * True when the agent has a process at all (D5, M8.10).
+   *
+   * A DIFFERENT question from `isIdle`, and the difference is the whole
+   * defect: `isIdle` is false both for an agent that is mid-turn and for one
+   * that no longer exists, so the watchdog treated "busy, ask later" and
+   * "gone, nobody will ever read this" as the same silence. Mail addressed to
+   * a dead agent was delivered, sat in its inbox, and nothing in the book of
+   * record said so.
+   *
+   * Absent means the harness cannot tell, and the watchdog then behaves
+   * exactly as it did before this existed — an unknown must not manufacture a
+   * degradation.
+   */
+  hasSession?(agentId: string): boolean
+  /**
+   * Raised when mail is waiting for an agent that has no session to read it.
+   *
+   * The mail is NOT bounced and NOT dropped. An agent can come back — the
+   * respawn ladders exist — and its inbox is where its mail belongs until it
+   * does; bouncing would break the one case the ladder was built for. What was
+   * missing is not delivery, it is DISCLOSURE: the Architect could not see
+   * that a correspondent had been writing to nobody. Invariant §7.
+   *
+   * Raised once per stranded set, not once per tick: the sweep runs every
+   * second, and a condition that re-reports every second is a condition
+   * nobody reads. New mail for the same silent agent is a new set and is
+   * reported again.
+   */
+  onMailStranded?(agentId: string, detail: { pendingMail: number }): void
+  /**
    * The company's pace (ADR-0023). Both wake paths below consult it, because
    * both of them are where the harness *issues a wake* — and the wake, not the
    * token, is the unit of spend: a measured Artemis wake cost a median 485k
@@ -328,6 +358,12 @@ export class Hermes {
   private readonly nudgedTasks = new Map<string, ReadonlySet<string>>()
   /** (msgId, recipient) pairs whose hold is already in the log — no metronome. */
   private readonly heldLogged = new Set<string>()
+  /**
+   * Stranded mail already reported, per agent, keyed by the SET of files that
+   * was stranded. Holding the set rather than a flag is what lets new mail for
+   * a still-silent agent be reported again while the same mail stays quiet.
+   */
+  private readonly strandedReported = new Map<string, string>()
   /** Diverted msgIds already logged and signalled — one divert, one record. */
   private readonly divertNotified = new Set<string>()
   /** Agents whose deliveries the breaker is holding (rung 2, ADR-0011). */
@@ -1190,6 +1226,7 @@ export class Hermes {
       const pending = pendingFiles.length
       if (pending === 0) {
         this.nudged.delete(agentId)
+        this.strandedReported.delete(agentId)
         // No mail is not the same as nothing to do. Work assigned to an agent
         // that was ALREADY idle reaches it here or nowhere: `decideOnStop`
         // handles the agent that finishes a turn holding tasks, and an idle
@@ -1208,6 +1245,14 @@ export class Hermes {
       const told = this.nudged.get(agentId) ?? new Set<string>()
       const unannounced = pendingFiles.filter((name) => !told.has(name))
       if (unannounced.length === 0) continue
+      // D5 (M8.10). Checked BEFORE the idle test, because `isIdle` cannot
+      // tell a busy agent from a gone one and this is the case where waiting
+      // is not a plan: no session exists, so no nudge will ever be issued and
+      // nothing else in the harness looks at this inbox again.
+      if (this.options.hasSession && !this.options.hasSession(agentId)) {
+        this.noteStranded(agentId, pendingFiles)
+        continue
+      }
       if (this.options.isIdle && !this.options.isIdle(agentId)) continue
       // ADR-0023. Checked AFTER the "is there new mail" and "is it idle" tests
       // and BEFORE `nudged` is updated, so a deferred wake is not recorded as
@@ -1216,6 +1261,8 @@ export class Hermes {
       if (!this.wakeAllowed(agentId, pending)) continue
 
       this.nudged.set(agentId, new Set(pendingFiles))
+      // Somebody is reading again: a later silence is news once more.
+      this.strandedReported.delete(agentId)
       this.noteWoken(agentId)
       // Hand-over consumption: the nudge carries the mail itself, archived to
       // `inbox/.done/` in the same act (see decideOnStop).
@@ -1253,6 +1300,29 @@ export class Hermes {
       woken.push(agentId)
     }
     return woken
+  }
+
+  /**
+   * Records that an agent with no session is holding unread mail (D5, M8.10).
+   *
+   * Contract: reports at most once per stranded SET, through both seams that
+   * matter — the book of record, so the condition survives a restart and the
+   * boot replay can carry it, and the degradation surface, so the Architect
+   * sees it now. Never touches the mailbox: the mail stays exactly where it is,
+   * because an agent that comes back must find it.
+   */
+  private noteStranded(agentId: string, pendingFiles: readonly string[]): void {
+    const signature = [...pendingFiles].sort().join('|')
+    if (this.strandedReported.get(agentId) === signature) return
+    this.strandedReported.set(agentId, signature)
+    this.agora.appendLog({
+      kind: 'hook',
+      event: 'mail-stranded',
+      agentId,
+      pendingMail: pendingFiles.length,
+      because: 'no session is running for this agent, so nothing will read it'
+    })
+    this.options.onMailStranded?.(agentId, { pendingMail: pendingFiles.length })
   }
 
   /**

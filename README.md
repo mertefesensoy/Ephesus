@@ -274,7 +274,7 @@ runs before shipping, because the suite was green while Closing Time had never
 once run in the shipped app, the standup read the oldest 500 log entries, and
 the dock showed an overnight run's first 300 events.
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -322,6 +322,24 @@ answering an agent's plain English with a JSON parse error. The status strip als
 learned to tell a hung harness from an idle one: it asks the main process
 whether it is still there, on a deadline rather than a promise, because a
 harness whose event loop is stuck never answers and never fails either.
+
+And now **the company survives being left running**. The book of record rotates:
+`log.jsonl` is sealed into numbered archive segments once it grows past a few
+megabytes, which is a rename and nothing else — the segments and the live file
+concatenated are byte for byte the file that used to be there. **No surface sees
+less.** That was the whole design constraint, because the incident board drops an
+incident whose opening row it cannot find, so a rotation that quietly moved
+history out of view would have emptied the panel rather than aged it; every
+reader still folds the entire history, and the ones that only ever wanted the
+newest few rows stopped paying for all of it — on a 28 MB log, the Activity
+feed's read went from 200 ms to 26 ms, on the same loop that carries your agents'
+keystrokes. Alongside it: a spawn no longer re-reads a week of transcripts on
+every tick to work out what it has spent, one agent with an oversized memory no
+longer stops reflection for everyone whose name sorts after it, the roster
+finally records which mission profile hired each agent, and **mail addressed to
+an agent that is no longer running is now visible as such** — it is neither
+bounced nor dropped, because an agent can come back, but it is no longer a
+silence.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8.

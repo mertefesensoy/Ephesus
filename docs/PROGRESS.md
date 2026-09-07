@@ -5763,7 +5763,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       the run succeeded normally once memory returned to 2.78 GB. **Read
       `os.freemem()` before believing a suite that started failing in batches.***
 
-- [ ] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
+- [x] **M8.10 The long run** — D3, D4, D5, D6, D10. No log rotation and every
       read parses from byte zero: a synthetic overnight measured 28.4 MB and
       306 ms per parse ON THE MAIN LOOP, with the Agora's git at 2547 loose
       objects, no packs and no `gc` anywhere. Session ids never trim, so the
@@ -5777,6 +5777,130 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       caught); reflection survives one bad agent. Risk: rotation changes the book
       of record's shape — append-only must still mean append-only across a
       rotation boundary, and the reconcile must handle it.*
+
+      **DONE 2026-09-07** on `feature/m8-10-the-long-run`, in the register's own
+      order. Suite **218 files / 4096 passed / 0 failed / 8 skipped**; typecheck,
+      lint, invariants (`reachability 179/187`), coverage and README currency
+      green; attribution clean. **28 mutations over every guard added, 27 killed
+      and one deliberate no-op control.** The implementation doc is
+      `docs/implementations/2026-09-07-m8-10-the-long-run.md`; eleven design
+      decisions are in `docs/DECISIONS-LOG.md` under 2026-09-07.
+
+      *D5 was VERIFIED OPEN BY EXECUTION before anything was built for it, as
+      the register asked. `f6c9262` and the merged
+      `fix/mail-lost-when-a-woken-agent-dies` both address the agent that COMES
+      BACK; neither addresses the one that does not. A probe against the real
+      router: a message delivered into a dead agent's inbox, sitting there
+      across three wake ticks, nobody nudged, and exactly one row in the book of
+      record — `delivery`. The missing question is "is there a process at all",
+      which `isIdle` cannot answer: it is false for a busy agent AND for a gone
+      one, so "ask later" and "nobody will ever read this" arrived as the same
+      silence. The mail is NOT bounced and NOT dropped — an agent can come back
+      and its inbox is where its mail belongs until it does; what was missing is
+      not delivery but DISCLOSURE (invariant §7).*
+
+      *D3, and the design question was settled before a line was drawn. The
+      register named the hazard itself: `incident-view.ts` drops an incident
+      whose `raised` row is missing, so a rotation that left that row in an
+      unread archive would show an EMPTY incident board rather than a stale one.
+      All six readers of `readLogAll`/`readLogSince`/`tailLog` were enumerated —
+      incident board, standup, org metrics, Gymnasium history, degradation
+      replay, Activity feed — and every one needs the whole history, so **none
+      of them changed**. Rotation is a `rename` and nothing else: the
+      concatenation of the sealed segments and the live file IS the file that
+      used to be there, byte for byte, asserted on the LINES on disk rather than
+      on the entries a reader returns. **Measured at the reported production
+      size** (28.0 MB, 29 196 entries, median of three): `tailLog(200)` 200 ms →
+      26 ms, `readLogSince(recent)` 150 ms → 21 ms, `readLogAll()` 171 ms →
+      178 ms. That last figure is the honest cost and is reported rather than
+      hidden — the whole-history read now opens eight files instead of one, and
+      it is the read that must not get cheaper by seeing less. The boot
+      reconcile handles a rotated file: `open()` recovers the sequence from the
+      ARCHIVE when the live file is empty or gone, or a restart landing just
+      after a rotation renumbers from 1 and rewinds every cursor-based reader to
+      the beginning of time.*
+
+      *The git half of D3's line turned out to be nothing. "2547 loose objects,
+      no packs, no `gc`" invites adding a `gc` call; checked instead — the Agora
+      commits through porcelain `git commit`, which already runs `gc --auto`,
+      and `gc.auto` is unset, so git's default of 6700 governs and 2547 is
+      simply below it. Nothing was missing and no call was added. What was
+      actually wrong is the SIZE of those objects, and rotation fixes that at
+      its source: a sealed segment is one blob, written once, forever.*
+
+      *D4's retention rule, decided and recorded before it was written: keep the
+      newest eight, drop from the FRONT. Safe for two reasons that must hold
+      together — folded spend is durable, so a dropped id forgets where to look
+      for MORE rather than what was already found (invariant §11); and only the
+      newest session can still grow, because resume targets `at(-1)` and an
+      engine writes the session it is running. The owed test asserts the SPEND
+      rather than the rule: twelve sessions folded, four ids trimmed, every
+      token still counted.*
+
+      *D6's throw was never hypothetical, and the test drives the real path
+      rather than a stub: `ask` composes a real `Message` and `messageSchema`
+      caps `body` at 200 000 characters, so an oversized memory throws on
+      VALIDATION — and iteration order is sorted, so one such memory stopped
+      reflection for every agent after it ALPHABETICALLY, every hour. D10 is
+      resolved once at hire rather than at each write site, because
+      `onRosterChange` replaces the entry and the exit-time write can run after
+      the instance is released — a fresh lookup there would answer null and
+      erase what the hire recorded, the same erasure the `budget` field on the
+      next line is already commented to avoid.*
+
+      *THE SYNTHETIC MULTI-DAY LOG the register owed is part of the package, not
+      a follow-up, and every number above carries its condition. Two suites
+      generate one rather than assert against a stub: `log-rotation.test.ts`
+      writes ~1500 entries padded to 512 bytes across three sealed segments plus
+      a live file, and `log-readers-across-rotation.test.ts` runs a real `Agora`
+      and ASSERTS ITS OWN PREMISE in every case — that the row it cares about
+      has genuinely left the live file. **The suites rotate at 64/32 KiB rather
+      than the shipped 4 MiB**: at the shipped threshold the identical file took
+      99 seconds, and a suite nobody runs defends nothing. `rotateAtBytes` is a
+      constructor option, the same shape the Agora already uses for
+      `slowReadMs`, and two cases stop that convenience becoming the shipped
+      value.*
+
+      *Three mutation survivors on the first pass, all READ before a test was
+      touched, and two were missing tests rather than equivalent mutants.
+      Widening a cursor skip by one drops a segment whose LAST entry is the very
+      next one asked for — it survived because every cursor in the suite sat in
+      the middle of a segment, while the standup's cursor is wherever the last
+      brief ended. Deleting the refusal to seal onto an existing segment
+      survived because the harness cannot reach that state itself (`seq` only
+      rises); the honest conclusion was not "equivalent" but that the state
+      arrives from OUTSIDE — a restore, a file-sync client, the second process
+      this module's contract already takes seriously — so the test builds it
+      directly. The third was a deliberate no-op, included so the harness has to
+      prove it can still report a survivor. A fourth appeared in D5 and was also
+      a missing test: `consumeInbox` hands mail over by renaming it into
+      `.inflight/` and the exit seam returns it under the SAME filename, so mail
+      handed to a session that died holding it strands again with a
+      byte-identical signature — which the first, weaker test missed by sending
+      new mail instead.*
+
+      *The coverage seam rule earned its keep: it failed `company` on branches
+      and functions the moment D10 landed, and the cause was a new public method
+      with no test — `ProfileActivations.profileFor` — because the D10 tests
+      INJECT that seam into `AgentManager` and never exercise the real resolver.
+      Testing it cleared both floors on the next run, which settles the
+      attribution by execution rather than by argument. No floor was lowered and
+      no ratchet was taken.*
+
+      *NOT proved: the live app was not started. `npm run dev` boots the real
+      harness against the Architect's own `~/.ephesus`, spawning agents and
+      spending tokens, which is not a side effect to take unattended. Everything
+      above runs against real filesystems in temp directories, real `Agora`
+      instances, the real router and the real `EventLog`. Rotation has not yet
+      been observed on a live 4 MiB log — only on synthetic logs at the shipped
+      threshold and at reduced ones; the mechanism is byte-identical in both.*
+
+      *One record repair, in passing: `docs/DECISIONS-LOG.md` carried a literal
+      NUL and a literal backspace inside the 2026-09-07 entry that WARNS about
+      exactly this. `grep` therefore classified the whole file as binary and
+      printed "Binary file matches" with no lines, so the book of decisions
+      could not be searched with the ordinary tool. Repaired byte-precisely to
+      the escapes that were meant; nothing else in the record moved.*
 
 - [ ] **M8.11 Engine honesty** — DD-2, C1, C4. The highest-leverage decision in
       the register, and it collapses five separate blockers into one small fix:
