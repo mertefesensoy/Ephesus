@@ -5541,6 +5541,23 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       34.5 -> 42.43, branches 40.26 -> 44.57, statements 33.36 -> 40.75, and
       boot lines 20.63 -> 26.69 on the App import graph.*
 
+      *PROVED against the real book of record, not only fixtures: `foldIncidents`
+      over the Architect's own `log.jsonl` (2689 entries) returns **7 incidents,
+      2 unclaimed and all 15 refusals** — four incidents nobody ever triaged,
+      three root causes sent for verification and never answered, two owed
+      Herald announcements on the severity-1, the nine `not JSON` bounces from
+      `agent.artemis` and the three `Too big` verdict refusals. Every one of
+      those was in the log the whole time with nowhere to see it. All 15 land in
+      the unattributed section, correctly: those rows predate the `incident`
+      field on a refusal event, so the log genuinely cannot say which incident
+      they were about — new ones carry it and attach, proved end to end in
+      `incident-surface-wiring.test.ts`. 32 `incident-raised` rows fold to 7
+      incidents, which is ADR-0027 §5's re-raise collapsing as designed. **NOT
+      proved: the live app was not started** — `npm run dev` boots the real
+      harness against the Architect's own `~/.ephesus`, spawning agents and
+      spending tokens, which is not a side effect to take unattended. Two jsdom
+      tests mount the REAL components instead.*
+
       *The win32 floors are RATCHETED on tree `d2cddb05c4db`, three corroborating
       runs, rising only to their lowest: panels lines 34.5 -> 42.43, branches
       40.26 -> 44.57, functions 27.35 -> 30.61, statements 33.36 -> 40.75; boot

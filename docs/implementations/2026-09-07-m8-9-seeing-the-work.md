@@ -246,7 +246,45 @@ it runs the real endpoint against a real `Agora` in a temp directory and folds w
 `readLogAll()` returns, so a field the endpoint writes as `oncall` and the fold reads as
 `onCall` fails there rather than rendering an empty card in front of the Architect.
 
-**Coverage.** Two notes on what moved and why, and then what is still owed:
+**PROVE — the fold over the Architect's real book of record.** The strongest evidence available
+without starting the live company, and it is the run the whole package was designed from:
+`foldIncidents` over the actual `~/.ephesus/agora/log.jsonl` (2 689 entries, read through the
+real `parseLogLine`).
+
+```text
+entries read: 2689
+incidents: 7        unclaimed: 2        unattributed refusals: 15
+  MUSAHIT #34024984545  awaiting-triage  sev=null              refusals=0
+  MUSAHIT #34024986370  awaiting-triage  sev=null              refusals=0
+  MUSAHIT #34023090946  awaiting-triage  sev=null              refusals=0
+  MUSAHIT #34023107189  awaiting-triage  sev=null              refusals=0
+  MUSAHIT #34000060811  verifying        sev=2  asides=1       verified=null
+  MUSAHIT #33986883947  verifying        sev=1  asides=2 owed=2 verified=null
+  MUSAHIT #33440874791  verifying        sev=2  asides=2       verified=null
+refusals total: 15
+```
+
+Everything the audit said was invisible is on the surface: **four incidents nobody ever
+triaged**, **three root causes sent for verification and never answered** (`verified=null`, which
+the panel renders as *awaiting agent.skeleton-crew-musahit-verifier*), **two owed Herald
+announcements on the severity-1**, and **all 15 refusals** — the nine `not JSON` bounces from
+`agent.artemis`, two `no incident … is awaiting triage`, and the three
+`because: Too big: expected string to have <=2000 characters`.
+
+All 15 land in the unattributed section, which is correct and is the honest reading: those rows
+were written **before** `incident` existed on a refusal event, so the log genuinely cannot say
+which incident they were about. New refusals carry the key and attach — proved end to end in
+`test/main/incident-surface-wiring.test.ts`. Note also that 32 `incident-raised` rows fold to 7
+incidents, which is the ADR-0027 §5 re-raise collapsing as designed.
+
+**Not proved here, deliberately:** the package was not exercised by starting the live company.
+`npm run dev` boots the real harness against the Architect's own `~/.ephesus` — it spawns agents,
+spends provider tokens and writes to the real Agora — which is not a side effect to take
+unattended. What stands in its place is the fold above over real data, plus two jsdom tests that
+mount the **real** components: `bridge-heartbeat.test.tsx` mounts `App` itself, and
+`incidents-panel.test.tsx` mounts `IncidentsPanel` against boards the real fold produced.
+
+**Coverage.** Two notes on what moved and why:
 
 - the `panels` **branch** floor was failing on `main` **before this package** — `main` at
   `956b434` produces the identical `39.91%` against a floor of `40.26%` recorded at `ca1158a`,
