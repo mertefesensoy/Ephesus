@@ -6035,6 +6035,22 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       existing: it is decided from the hire's declared string before any process
       is contemplated.*
 
+      *GATE CAVEAT, recorded rather than smoothed over: on 2 of 3 full runs of
+      this identical tree, `npm run test:coverage` exited NON-ZERO after every
+      test passed and the coverage report was written — vitest fails tearing
+      down its own `coverage/.tmp`, `EPERM … rmdir`. That short-circuits the
+      Definition-of-Done `&&` chain, so the three checks after it never run and
+      the transcript reads as a failed gate. It is a handle race rather than a
+      permission fault (`coverage/.tmp` is empty and removable moments later,
+      and this worktree is on a OneDrive-synced path), but the holder was not
+      isolated and no cause is claimed. **Nothing was weakened to pass**: the
+      suite result above is the run's own, and `check-coverage`,
+      `check-readme-current` and `check-attribution` were run separately and are
+      green against THIS run's report (`coverage-summary.json`, 21:39:37). See
+      DECISIONS-LOG 2026-09-07; whether the gate should tell "the suite failed"
+      from "the runner could not tidy up" is a Gymnasium question, not a work
+      package's to settle.*
+
       *MUTATION PASS: 18 mutations, 17 killed, and the one survivor is the one
       written to survive. Five against the predicate (inverted, always-true,
       always-false, prefix-match, and shipping `codex` instead of `claude`); four
