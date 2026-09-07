@@ -153,6 +153,25 @@ describe('the incident panel', () => {
     expect(shown()).toContain('owed: herald-unwired')
   })
 
+  it('says the bridge is unavailable rather than throwing at its parent', async () => {
+    // The regression for the defect the M8.9/main merge exposed: this panel
+    // renders INSIDE `ProfilesPanel`, so a throw in its mount effect does not
+    // degrade this panel — it takes the whole Profiles tab down. A bridge with
+    // no harbor group must read as a failure, never as an empty board, and
+    // never as an exception.
+    Object.assign(window, { eph: { profiles: { list: async () => [] } } })
+    host = document.createElement('div')
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () => {
+      root?.render(<IncidentsPanel />)
+    })
+
+    expect(shown()).toContain('could not read the book of record')
+    expect(shown()).toContain('harbor bridge is not available')
+    expect(shown()).not.toContain('no incident has been raised')
+  })
+
   it('says so plainly when nothing has been raised', async () => {
     await mount(() => Promise.resolve({ incidents: [], unclaimed: [], unattributedRefusals: [] }))
     expect(shown()).toContain('no incident has been raised')

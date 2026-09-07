@@ -5,6 +5,7 @@ import type {
   IncidentRow,
   IncidentStage
 } from '../../shared/incident-view'
+import type { EphApi } from '../../shared/ipc'
 
 /**
  * The incident surface (B14, FR-9.2, UC-09, SDD §7.5).
@@ -158,8 +159,28 @@ export function IncidentsPanel(): ReactElement {
   useEffect(() => {
     const eph = window.eph
     if (!eph) return
+    /**
+     * The bridge group, read defensively, because `window.eph` is a surface the
+     * renderer does not own.
+     *
+     * The type says `harbor` is always there and in the shipped preload it is.
+     * This panel is a CHILD of another one, though, so anything that mounts
+     * `ProfilesPanel` mounts this too — and a throw here does not degrade this
+     * panel, it takes the whole Profiles tab down with it. That is not
+     * hypothetical: it happened the moment M8.9 met a `ProfilesPanel` test
+     * written on main that stubbed `profiles` and nothing else.
+     *
+     * So a missing group renders the failure state this panel already has,
+     * which is the same rule as the `.catch` below: "we could not read" is a
+     * fact worth showing, and it must never be shown as "nothing has happened".
+     */
+    const harbor: EphApi['harbor'] | undefined = eph.harbor
+    if (harbor === undefined) {
+      setFailure('the harbor bridge is not available')
+      return
+    }
     let cancelled = false
-    eph.harbor
+    harbor
       .incidents()
       .then((next) => {
         if (!cancelled) setBoard(next)
