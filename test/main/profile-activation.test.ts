@@ -156,6 +156,7 @@ function rig(options: RigOptions = {}) {
     agentId: string
     autonomy: AutonomyLevel | null
     tools: { grants: readonly unknown[]; targetPath: string } | null
+    profile: string | null
   }[] = []
   const persisted: (readonly ProfileInstance[])[] = []
 
@@ -177,7 +178,8 @@ function rig(options: RigOptions = {}) {
       atSpawn.push({
         agentId: request.agentId,
         autonomy: activations.autonomyFor(request.agentId, 'tool-permission'),
-        tools: activations.toolsFor(request.agentId)
+        tools: activations.toolsFor(request.agentId),
+        profile: activations.profileFor(request.agentId)
       })
       return Promise.resolve({})
     },
@@ -1633,3 +1635,54 @@ function restorable(targetPath: string): ProfileInstance {
     activatedAt: '2026-09-05T03:00:00.000Z'
   }
 }
+
+/**
+ * D10 (M8.10) — the resolver the roster write asks.
+ *
+ * `AgentManager` takes `profileFor` as a seam, and the tests for the roster
+ * entry inject it. That proves the manager writes what it is told and nothing
+ * about whether the harness can TELL it: the real answer comes from here, and
+ * the timing is the part that can be wrong. The roster entry is written during
+ * the spawn, BEFORE the instance is registered, so a resolver that only looked
+ * at live instances would answer null for every hire in the crew it is naming.
+ */
+describe('profileFor — which profile hired this agent (D10)', () => {
+  it('answers the profile NAME, not the instance id', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew')
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    // The name alone. SDD §4.1 caps the roster field at 64 characters and
+    // documents it as the profile; an instance id is `<profile>@<targetRef>`
+    // and carries a target the field does not claim to hold.
+    expect(r.activations.profileFor('agent.skeleton-crew-myapp-oncall')).toBe('skeleton-crew')
+  })
+
+  it('answers DURING the spawn, which is when the roster is written', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', { hires: ['oncall', 'deps'] })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    // Captured inside the spawn callback, which is where `AgentManager`
+    // resolves it. Asking after `activate()` returns is a different question.
+    expect(r.atSpawn.map((seen) => seen.profile)).toEqual(['skeleton-crew', 'skeleton-crew'])
+  })
+
+  it('answers null for an agent on no profile', () => {
+    const r = rig()
+    expect(r.activations.profileFor('agent.mason')).toBeNull()
+  })
+
+  it('answers null after a failed activation rolled the crew back', async () => {
+    const r = rig({ failOn: ['deps'] })
+    writeBundle(r.profiles, 'skeleton-crew', { hires: ['oncall', 'deps'] })
+    const result = await r.activations.activate({
+      profile: 'skeleton-crew',
+      target: target(r.targetDir)
+    })
+
+    expect(result.ok).toBe(false)
+    // Nothing was left behind that would answer for an agent that is not there.
+    expect(r.activations.profileFor('agent.skeleton-crew-myapp-oncall')).toBeNull()
+  })
+})

@@ -38,6 +38,64 @@ export function isOrchestratorRole(role: string): boolean {
   return role === 'orchestrator'
 }
 
+/**
+ * How many engine session ids one spawn keeps (D4, M8.10).
+ *
+ * ## Why there is a limit at all
+ *
+ * The Watch folds a transcript per retained id, twice a tick (`budgets.ts` and
+ * `capacity.ts` both call `transcriptFiles`), and it re-reads each file IN FULL
+ * every time. Measured on the Architect's machine that is 72 ms today; a spawn
+ * that accumulates ids for a week turns it into roughly a second per agent per
+ * tick, on the same event loop that carries PTY bytes and hook events
+ * (SDD §11, NFR-1/NFR-2). Unbounded, the harness gets slower every day it is
+ * left running, which is the whole subject of this milestone.
+ *
+ * ## Why dropping one is safe — the spend question, answered
+ *
+ * A trimmed id is a transcript the budget can no longer read, so this is a
+ * correctness question about money before it is a performance one. It is safe
+ * for two reasons that have to hold together:
+ *
+ *  1. **Folded spend is durable.** `CostLedger.fold` keeps a per-(agent, source)
+ *     cursor and appends only what is new, and `spendFor` totals rows read back
+ *     out of the STORE (invariant §11). Everything a dropped transcript already
+ *     contributed stays counted; dropping the id forgets where to look for
+ *     MORE, not what was already found.
+ *  2. **Only the newest session can still grow.** Resume targets
+ *     `sessionIds.at(-1)`, and an engine writes the session it is running. So
+ *     trimming from the FRONT can only ever drop transcripts that are finished.
+ *
+ * ## Why eight
+ *
+ * Two would satisfy the argument above — the live session, plus one for an
+ * engine that forks on resume. Eight is that minimum with a wide margin for
+ * engines that interleave sessions inside one spawn (a subagent, a compaction
+ * fork), because the cost of being wrong in that direction is a lost fold and
+ * the cost of being generous is seven file reads. It bounds the per-tick work
+ * at a constant instead of letting it grow with the age of the spawn.
+ */
+export const MAX_SESSION_IDS = 8
+
+/**
+ * Contract: `ids` with `next` recorded, keeping at most `MAX_SESSION_IDS`,
+ * oldest dropped first. Idempotent — an id already present is not re-recorded
+ * and nothing is dropped for it.
+ *
+ * Pure and exported so the rule can be tested as a rule. The order is
+ * first-seen and the newest is LAST, which is the invariant `at(-1)` relies on
+ * for resume; a trim that took from the end would silently break resumption.
+ */
+export function recordSession(
+  ids: readonly string[],
+  next: string,
+  limit: number = MAX_SESSION_IDS
+): readonly string[] {
+  if (ids.includes(next)) return ids
+  const grown = [...ids, next]
+  return grown.length <= limit ? grown : grown.slice(grown.length - limit)
+}
+
 /** What the Watch needs about one spawn to fold and budget it (ADR-0011). */
 export interface BudgetedSpawn {
   readonly agentId: string
@@ -216,6 +274,23 @@ export interface AgentManagerOptions {
    * disagree with the first — permissively.
    */
   autonomyFor?(agentId: string): 'manual' | 'supervised' | 'autonomous' | null
+  /**
+   * The mission profile this hire belongs to, or null for a standalone agent
+   * (SDD §4.1's `profile` field).
+   *
+   * Injected for exactly the reasons `autonomyFor` is, and answered by the SAME
+   * resolver: `ProfileActivations.planFor` looks in the live instances AND in
+   * the plans currently being spawned, which is what lets the question be asked
+   * DURING a spawn — the roster entry is written before the instance is
+   * registered.
+   *
+   * Resolved ONCE, at hire, and then carried on the live agent. It deliberately
+   * is not re-asked on later roster writes: `onRosterChange` replaces the whole
+   * entry, and an instance released while its agent is still winding down would
+   * answer null and quietly erase the profile the hire recorded — the same
+   * erasure the `budget` field below is already written to avoid.
+   */
+  profileFor?(agentId: string): string | null
   /** Notified whenever a card changes, for pushing `state:agents` to the renderer. */
   onChange?(card: AgentCard): void
   /**
@@ -372,7 +447,17 @@ interface LiveAgent {
    * Architect's own history there — otherwise land in whichever agent's ledger
    * ticked first.
    */
-  readonly sessionIds: string[]
+  sessionIds: readonly string[]
+  /**
+   * The mission profile that hired this agent, resolved ONCE at hire.
+   *
+   * Held rather than re-derived because the two roster write sites do not
+   * have the same view: the hire runs while the activation plan is in flight,
+   * and a later status write can run after the instance has been released. An
+   * agent does not change profile during its life, so one resolution is the
+   * whole truth and re-asking could only ever lose it.
+   */
+  readonly profile: string | null
   readonly adapter: EngineAdapter
   /**
    * Rebuilt at every `start()` so credentials are resolved AT SPAWN
@@ -450,10 +535,17 @@ export class AgentManager {
     return [...this.agents.values()].map((agent) => agent.card)
   }
 
-  /** Records an engine session id this spawn reported (from the event plane). */
+  /**
+   * Records an engine session id this spawn reported (from the event plane).
+   *
+   * Bounded by `MAX_SESSION_IDS` — see that constant for why a drop cannot
+   * lose spend. Before M8.10 this list only ever grew, and the Watch paid for
+   * every id on it twice a tick for the life of the spawn.
+   */
   noteSession(agentId: string, sessionId: string): void {
     const agent = this.agents.get(agentId)
-    if (agent && !agent.sessionIds.includes(sessionId)) agent.sessionIds.push(sessionId)
+    if (!agent) return
+    agent.sessionIds = recordSession(agent.sessionIds, sessionId)
   }
 
   /**
@@ -544,6 +636,9 @@ export class AgentManager {
       cfg,
       hookPlan: null,
       sessionIds: [],
+      // Asked HERE, while the plan is still in flight and the resolver can
+      // answer. See `profileFor` on the options.
+      profile: this.options.profileFor?.(request.agentId) ?? null,
       targetRepo: request.cwd
     })
     this.options.onChange?.(card)
@@ -587,7 +682,10 @@ export class AgentManager {
       ...(this.card(request.agentId).dailyTokens === null
         ? {}
         : { budget: { dailyTokens: this.card(request.agentId).dailyTokens as number } }),
-      profile: null,
+      // SDD §4.1. Hard-coded null until M8.10, which meant nothing downstream
+      // could ever ask which profile hired an agent — the roster said every
+      // hire was standalone, including a whole activated crew.
+      profile: this.agents.get(request.agentId)?.profile ?? null,
       target: request.cwd,
       status: 'idle',
       hookFidelity: adapter.hooks,
@@ -742,7 +840,11 @@ export class AgentManager {
       ...(agent.card.dailyTokens === null
         ? {}
         : { budget: { dailyTokens: agent.card.dailyTokens } }),
-      profile: null,
+      // The value the hire resolved, NOT a fresh lookup. `onRosterChange`
+      // replaces the whole entry, so re-asking here would erase the profile
+      // on any status write that happens after the instance was released —
+      // and an exit is exactly such a write.
+      profile: agent.profile,
       target: agent.card.cwd,
       status,
       hookFidelity: agent.card.hookFidelity,

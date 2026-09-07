@@ -2109,6 +2109,10 @@ async function boot(): Promise<void> {
     autonomyFor: (agentId) =>
       activations?.autonomyFor(agentId, 'tool-permission') ??
       loadGatePolicy(gatePolicyPath).policy.autonomy,
+    // SDD §4.1 — which profile hired this agent, for the roster entry. The
+    // SAME resolver that answers autonomy above, so the roster and the gates
+    // can never disagree about which profile an agent belongs to.
+    profileFor: (agentId) => activations?.profileFor(agentId) ?? null,
     /**
      * Asks an engine whether it is logged in (M8.4). Same discipline as the
      * version probe: a shell on Windows because engine CLIs are `.cmd` shims,
