@@ -2057,6 +2057,16 @@ async function boot(): Promise<void> {
      */
     isIdle: (agentId) =>
       canDeliverWake(ptyManager.has(agentId), wakeClock?.runningMs(agentId) ?? null),
+    // D5 (M8.10). The bare "is there a process" question, which is NOT what
+    // `isIdle` answers: `canDeliverWake` is false for a busy agent too, and
+    // the watchdog treated "ask later" and "nobody is ever going to read
+    // this" as one silence.
+    hasSession: (agentId) => ptyManager.has(agentId),
+    onMailStranded: (agentId, detail) =>
+      reportDegradation(
+        `hermes/mail-stranded:${agentId}`,
+        `${String(detail.pendingMail)} message(s) waiting for ${agentId}, which has no session to read them`
+      ),
     // ADR-0013's pathology signal, emitted and logged from M2 with nothing
     // reading it — the M2 carried item. It now enters the breaker's ladder at
     // rung 1 like any other signal.
