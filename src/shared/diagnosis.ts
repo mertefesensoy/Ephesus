@@ -188,10 +188,6 @@ const PROBES: readonly Probe[] = [
   {
     area: 'the book of record',
     sources: ['agora'],
-    // A busy home is not a fault: nothing has gone wrong, the harness refused
-    // to let it. Two instances would share one book and one committer, and the
-    // Architect acts on this by stopping the other one (ADR-0034).
-    waitingWhen: (c) => c.cause === 'agora/home-occupied',
     // It has always worked if anything at all was written, including this row.
     proves: ['degradation', 'orchestrator', 'spawn', 'message'],
     wouldExercise: 'anything at all — an empty log is itself the finding'
@@ -231,6 +227,14 @@ export interface DiagnosisInput {
   /** When this was taken. The report prints it and its own age. */
   readonly at: number
   readonly home: string
+  /**
+   * The process that produced this report (ADR-0034).
+   *
+   * In the header for the same reason the age is: a report that cannot say who
+   * wrote it can be misread. Two harnesses on one home each wrote this file and
+   * disagreed honestly, and nothing in it said which had won the last minute.
+   */
+  readonly pid: number
   /** The commit this build came from, when the harness knows it. */
   readonly version: string
   /** `AgoraHealth.runtime`, live and carried both. */
@@ -250,6 +254,7 @@ export interface DiagnosisInput {
 export interface Diagnosis {
   readonly at: number
   readonly home: string
+  readonly pid: number
   readonly version: string
   readonly rows: readonly Row[]
   /** Conditions true RIGHT NOW. */
@@ -338,6 +343,7 @@ export function diagnose(input: DiagnosisInput): Diagnosis {
   return {
     at: input.at,
     home: input.home,
+    pid: input.pid,
     version: input.version,
     rows,
     live,
@@ -384,7 +390,11 @@ export function renderDiagnosis(d: Diagnosis, readAt: number): string {
       'everything below describes the moment it stopped.'
   )
   out.push('')
-  out.push(`- home: \`${d.home}\``)
+  // Home AND process, because one home may be opened by more than one harness
+  // and only one of them owns it (ADR-0034). A blocked instance writes nothing,
+  // so in practice this names the owner — and when a reader finds a report they
+  // did not expect, the pid is what tells them whose it was.
+  out.push(`- home: \`${d.home}\` (written by process ${String(d.pid)})`)
   out.push(`- build: ${d.version}`)
   out.push(`- events in the book of record: ${String(d.events)}`)
   out.push(

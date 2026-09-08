@@ -382,9 +382,9 @@ describe('another harness is working on this home (ADR-0034)', () => {
     expect(r.hires).toEqual([])
     expect(r.schedules).toEqual([])
     expect(r.reported).toEqual([{ cause: 'agora/home-occupied', detail: BUSY }])
-    expect(r.logged).toEqual([
-      { kind: 'orchestrator', event: 'not-started', because: BUSY, from: 'boot' }
-    ])
+    // Reported, NOT logged. The condition is this process's to show; the book
+    // of record belongs to whoever owns the home (ADR-0034 second pass).
+    expect(r.logged).toEqual([])
   })
 
   it('records a grant given anyway, and refuses to claim the company started', () => {
@@ -397,7 +397,7 @@ describe('another harness is working on this home (ADR-0034)', () => {
     expect(outcome.reason).toBe(BUSY)
     expect(r.saved).toHaveLength(1)
     expect(r.hires).toEqual([])
-    expect(r.logged.map((entry) => entry['event'])).toEqual(['not-started'])
+    expect(r.logged).toEqual([])
   })
 
   it('refuses a grant on a home that had ALREADY consented, too', () => {
@@ -407,20 +407,15 @@ describe('another harness is working on this home (ADR-0034)', () => {
     expect(r.hires).toEqual([])
   })
 
-  it('does not latch: the company starts once the other harness stops', () => {
-    // The refusal must not mark the gate started, or a later grant would return
-    // early on a flag set by a refusal and the company would never come up.
-    let busy: string | null = BUSY
-    const r = rig({ record: consented, blockedBy: () => busy })
-    r.gate.boot()
-    expect(r.hires).toEqual([])
-    busy = null
-    const outcome = r.gate.grant()
-    expect(outcome.ok).toBe(true)
-    expect(r.hires).toHaveLength(1)
-    expect(r.schedules).toHaveLength(1)
-    expect(r.logged.map((entry) => entry['event'])).toEqual(['not-started', 'consented'])
-  })
+  // There was a test here asserting the gate "does not latch" — that a company
+  // blocked at boot starts once the other harness stops. It was DELETED rather
+  // than kept: in production `blockedBy` closes over a decision boot took once
+  // (`index.ts`, the `occupancy` const), so nothing can ever flip it inside a
+  // process, and the refusal tells the reader to restart. A green test for a
+  // path production cannot reach is worse than no test — it reports a guarantee
+  // the product does not make. Recorded rather than silently dropped, because
+  // the next reader of `startWork` will wonder why `started` is left false: it
+  // is because a block is not a start, not because recovery is offered.
 
   it('still starts normally when nothing is blocking', () => {
     const r = rig({ record: consented, blockedBy: () => null })

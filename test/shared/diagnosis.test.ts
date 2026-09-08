@@ -41,6 +41,7 @@ function input(over: Partial<DiagnosisInput> = {}): DiagnosisInput {
   return {
     at: 5_000_000,
     home: 'C:/home/.ephesus',
+    pid: 4321,
     version: 'abc1234',
     conditions: [],
     events: [],
@@ -204,42 +205,24 @@ describe('the control surface has its own row, and it is specific (M8.14)', () =
   })
 })
 
-describe('a busy home is waiting, not broken (ADR-0034)', () => {
-  it('reads WAITING FOR YOU on the book of record, with what to do', () => {
-    // Nothing has gone wrong: the harness refused to let two instances share
-    // one book of record. A BROKEN here would send the reader hunting for a
-    // corruption that has not happened.
-    const d = diagnose(
-      input({
-        conditions: [
-          condition({
-            source: 'agora',
-            cause: 'agora/home-occupied',
-            detail: 'another Ephesus harness is already working on this home (process 4321)'
-          })
-        ]
-      })
-    )
-    const book = find(d, 'the book of record')
-    expect(book?.verdict).toBe('waiting')
-    expect(book?.because).toContain('already working on this home')
-  })
-
-  it('still reads BROKEN for a real agora fault', () => {
-    // The predicate must discriminate, not blanket the source: a commit the
-    // single committer gave up on is a fault and has to stay one.
-    const d = diagnose(
-      input({
-        conditions: [
-          condition({ source: 'agora', cause: 'agora/commit-failed', detail: 'git gave up' })
-        ]
-      })
-    )
-    expect(find(d, 'the book of record')?.verdict).toBe('broken')
-  })
-})
+// The two tests that were here asserted a busy home reads WAITING FOR YOU on
+// *the book of record*. They were DELETED with the predicate they covered: a
+// blocked instance now writes no report at all (ADR-0034 second pass), so
+// `agora/home-occupied` can never appear in one — the owner never has the
+// condition, and the instance that has it never writes. A `waitingWhen` for a
+// cause that cannot reach a rendered row is a check that cannot fail, which is
+// the exact thing this report was built to refuse.
 
 describe('the rendered report', () => {
+  it('names the process that wrote it, beside the home', () => {
+    // Same reasoning as the age line above it: a report that cannot be
+    // attributed can be misread, and this whole rule came from two harnesses
+    // writing one file and disagreeing honestly (ADR-0034).
+    const text = renderDiagnosis(diagnose(input({ pid: 30580 })), 5_000_000)
+    expect(text).toContain('written by process 30580')
+    expect(text).toContain('C:/home/.ephesus')
+  })
+
   it('leads with its own age, because a stale report read as current is the failure', () => {
     const d = diagnose(input({ at: 1_000_000 }))
     const text = renderDiagnosis(d, 1_000_000 + 3 * 60 * 60 * 1000)
