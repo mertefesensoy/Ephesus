@@ -6213,6 +6213,179 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       spent no measurable tokens, because the scratch boot was stopped before any
       turn completed (zero `cost` rows).*
 
+- [x] **M8.13 The report you read when nobody was watching** — *added after the
+      M8 exit run, by Architect decision 2026-09-08: "during testing I may not be
+      present at the computer, so the project must prepare itself for the
+      scenario that I will have to record the issue properly so another agent can
+      see what is working, what is not working, why is it not working properly."*
+
+      The harness now writes **`DIAGNOSIS.md`** into the harness home — at boot,
+      every sixty seconds, and once more in the quit path. Every area reads
+      `WORKING`, `BROKEN`, `WAITING FOR YOU` or **`NOT EXERCISED`**, and the
+      fourth is the one that earns the package: a report calling an untouched
+      subsystem "ok" would be the check-that-cannot-fail this codebase keeps
+      finding, dressed as a diagnostic. The file says so in its own body, and a
+      mutation deleting that sentence is killed.
+
+      *It stores nothing.* `AgoraHealth.runtime` already carries the M8.2
+      degradation ring — one row per CAUSE with `count`, `since` and
+      `live`/`carried` — and `log.jsonl` already carries every positive event;
+      this is a reading of both, never a second copy (the M8.9 B14 rule). No CLI:
+      `scripts/*.cjs` cannot import `src/shared/*.ts`, so an offline script would
+      re-implement `parseLogLine` and the degradation vocabulary, and a TS runner
+      is a new dependency. The cost is stated rather than hidden — if the app
+      never starts there is no fresh report — and paid for by writing often and
+      by putting the file's own age in its FIRST line.
+
+      *Evidence: 225 files / 4231 passed / 0 failed; typecheck, lint, invariants
+      (reachability 180/190 → **182/192**, both new modules reached from
+      production with no allowlist), coverage floors ok with none lowered and no
+      ratchet needed, README currency and attribution all green. **16 mutants, 15
+      killed, and the sixteenth is a planted no-op** (`minutes < 1` →
+      `minutes <= 0` on an integer) which survived as designed.*
+
+      **THREE DEFECTS THE FIRST LIVE BOOT EXPOSED, all mine and all invisible to
+      a green suite** — which is why PROVE is a step of the loop and not a
+      formality. (a) It rendered withheld consent as `BROKEN`; it is the designed
+      state, and a BROKEN on every healthy first launch teaches a reader to skip
+      the column. Fixed with a fourth verdict declared per probe, so
+      `consent/unwritable` — same source — still reads `broken`. (b) It said "no
+      schedule is armed, by design" and then listed five: `scheduler.armed()`
+      reports REGISTERED triggers and the clock is behind the consent gate, so on
+      a withheld company that list is a forecast. (c) Worst: the rewrite trigger
+      was on the **company scheduler**, whose clock is also behind that gate — so
+      on a machine stuck at the consent gate, the state a stranger is most likely
+      to be in, the report would have been written once and never again. It now
+      runs on its own unref'd `setInterval`. **Proved live: 22:31:28 → 22:32:28,
+      sixty seconds apart, with `triggers.json` never created.**
+
+      *A surviving mutant was read rather than patched around, and was a missing
+      test again (the third package running): `carried = conditions.slice()`
+      survived because nothing asserted the REVERSE direction — that a LIVE
+      condition never appears in the carried section, where it would be described
+      as "true when we stopped and not re-checked since". Test added, mutant
+      re-run, killed. And the `agora` coverage floor caught a design smell rather
+      than a testing gap: `DiagnosisWriter.at()` had no production caller, so the
+      fix was deletion — the writer now has no clock at all, and renders against
+      the instant its own snapshot was taken.*
+
+      **PLUS the five defects the M8 exit run found, four of them in documents
+      merged hours earlier.** `IncidentsPanel` renders inside `ProfilesPanel`
+      deliberately (UI-DESIGN §4 has no Incidents tab; the code says "do not
+      invent UI") and there is **no Harbor surface at all** — yet the README and
+      `docs/EXIT-M8.md` both sent a stranger to an "INCIDENTS tab", and the exit
+      script's pre-flight checkpoint told them to verify readiness by reading a
+      HARBOR panel that has never existed. The code was right and the prose
+      invented UI. Also: "Node 20" against a lockfile where fifteen packages want
+      `^20.19.0 || >=22.12.0` (`@electron/rebuild` at `>=22.12.0`, on the
+      postinstall path) with no `engines` field to catch it; "Nothing else"
+      falsified on first boot by two MemPalace degradations; and `EPH_HOME`
+      documented nowhere while `EXIT-M8.md` demanded a clean home without saying
+      how to get one. All six fixed.
+
+      **TWO MORE DEFECTS CAME OUT OF PROVING IT — five in total, every one found
+      by running it rather than by testing it.** (d) The FIRST report of a
+      consented company said `consent: granted` in its header and `consent NOT
+      EXERCISED` in its table: the header used the direct fact, the row scanned
+      the log for a `orchestrator/consented` the boot had not appended yet. Two
+      readings of one question from two sources is one bug waiting for a timing
+      difference; consent is now settled by the fact the input already carries.
+      (e) `spend` read `BROKEN` on a stock install, because `budgets/state:*`
+      fires whenever the state is not `ok` and `unbudgeted` is the SHIPPED
+      DEFAULT (ADR-0029) — so every default install would have reported a broken
+      subsystem. A breach arrives through the same cause and must still read
+      `broken`, which the exact-match list could not express, so it became a
+      predicate. **The underlying gap is flagged, not fixed:** the degradation
+      channel carries no SEVERITY, so a deliberate default, a state waiting on a
+      human and a genuine fault all arrive in one shape, and this report is the
+      first consumer that has to tell them apart — by matching another module's
+      wording, which is the "two things that must agree" smell in a new place.
+
+      *EVERYTHING IS NOW PROVED LIVE.* The quit path writes a final report —
+      boot 22:42:34.081Z, final 22:42:53.560Z, nineteen seconds apart and well
+      inside the sixty-second interval, so it can only be the quit path, with
+      `quit: no live agents; unwound 0; 12/12 stops` beside it. A consented
+      company yields four `WORKING` rows (consent, orchestrator, the crew, the
+      book of record), `Schedules running`, and `spend WAITING FOR YOU`. A
+      restart populates the carried section with both conditions from the
+      previous boot, correctly labelled as not evidence about now. Zero `cost`
+      rows across every proof run, and the Architect's own `~/.ephesus` is
+      untouched at 2792 rows with no consent record.
+
+      *An observation, not a product defect: a deep `EPH_HOME` breaks the Agora's
+      git commits on Windows (`Filename too long`, MAX_PATH). It came from the
+      proof's own choice of a nested temp directory and vanished at
+      `%USERPROFILE%\ephproof` — but the README now tells people to set
+      `EPH_HOME` and does not warn them, which is worth a sentence and possibly a
+      boot-time check. Neither built here.*
+
+      *The quit-path write was listed here as unproved and is no longer. Stopping
+      Electron BY PROCESS — which is what the README correctly tells you to do —
+      never reaches `before-quit`, so it was proved by closing the main window
+      gracefully instead (`taskkill` without `/F`), which is the other way a
+      person ends the app. What remains genuinely unproved is the UI: no panel
+      has been driven in any Ephesus verification, and this report is written by
+      main and read from disk, so it observes nothing about the renderer — which
+      the report says about itself, in its own body.*
+
+- [ ] **M8.14 The controls are not buried in the window** — *Architect decision
+      2026-09-08, and it is what actually unblocks M8's exit.*
+
+      The first attempt at the exit run stalled at the last step of setup:
+      consent and profile activation exist ONLY in the renderer, so a runner who
+      was not a person at the machine could not reach them. Two workarounds were
+      offered — the Architect clicks, or the agent is given desktop control — and
+      both were refused in favour of naming the real defect: *"when it says
+      architect activates the crew it can also mean for my verbal approvement.
+      So we need to find a way for you to activate everything from CLI tools of
+      Ephesus that we need to build. Thus all controls should not be buried under
+      the UI of the application."* SRS §6.1 carries the matching amendment:
+      **"The Architect activates" is about authority, not about a mouse.**
+
+      **Scope — it OPERATES, it does not AUTHORISE.** In: consent, profile
+      activate/deactivate, convene a briefing, status/diagnosis reads, agent
+      lists. **Out, deliberately: gate approvals, memo verdicts, secrets, and
+      mode changes.** Those are the decisions the Watch exists to put in front of
+      a human, and a CLI that could approve a destructive gate would delete the
+      meaning of §6.1's own last clause by making the gate scriptable by the
+      automation it exists to bound. ADR-0010 and FR-14.2 already draw the same
+      line in their own areas. *A script may run the company; only a human may
+      authorise what the company is not otherwise allowed to do.*
+
+      **Transport — mirror the event plane, do not invent one.**
+      `hookEndpointFor` already solves this exactly: a `0600` socket in the home
+      on POSIX, and on Windows the LOCAL named-pipe namespace (libuv rejects
+      remote clients) with a per-home sha256 discriminator so two `EPH_HOME`s
+      cannot collide. **No token** — that would be a new secret to manage against
+      ADR-0010's write-only rule, and the endpoint trusts exactly what the hook
+      endpoint, `~/.ephesus` and the engine credentials already trust.
+      **Every control act is tagged `remote`** in the book of record, the way
+      FR-10.3 tags inbound items, so the log always distinguishes what the window
+      did from what a script did. That audit is what this surface adds beyond the
+      hook endpoint's guard.
+
+      **One implementation, two callers.** `registerIpc` already routes 79
+      handlers through a single `IpcDeps`; the control endpoint calls the SAME
+      deps rather than a parallel path, so the window and the CLI cannot drift
+      into disagreeing about what an action does.
+
+      *Tests owed: the endpoint refuses a remote client; the four excluded
+      actions are refused BY NAME with a reason that teaches the rule; every
+      accepted act writes a `remote`-tagged row; the surface works against a
+      running app and says so clearly when none is running. Plus a mutation pass
+      over the refusal list — a surface that silently gained `watch:approve`
+      would be the whole package undone.*
+
+**M8's exit is unblocked and its criterion amended (2026-09-08).** Three things
+were settled after the first attempt: a **fresh agent session satisfies "a
+developer who is not the author"** (recorded so the row can close on a stated
+standard — the absence of one is why M7 has been open since 2026-09-01); **the
+hour is Ephesus-side time**, excluding CI latency, because on the chosen target
+detection alone can eat half of it; and **the briefing may be convened by hand**,
+since a 24-hour standup was never going to land inside sixty minutes and the
+clause is about accuracy, not timing. All three are in SRS §6.1 and
+`docs/DECISIONS-LOG.md`, not only here. **The run itself waits for M8.14.**
+
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
 those were settled by work that had already landed.** The list below is the

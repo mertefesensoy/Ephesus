@@ -199,6 +199,21 @@ who is not the author, from a clean clone, following only the README**, and
 surviving a deliberate restart mid-run. M7's own exit remains open and
 independent; §6.1's action half is owed to both.
 
+*Architect decisions, 2026-09-08, after the first attempt at this run.* **A fresh
+agent session with no memory of building Ephesus satisfies "a developer who is
+not the author"** — it cannot remember which button to press, which is the
+property the clause exists to test. This is recorded because "we never decided
+what counts" is why M7's exit has been open since 2026-09-01, and one run now
+settles both. It is not a licence for the author to run it and call it a proxy:
+the runner declares which it is at the top of its record (`docs/EXIT-M8.md` §0).
+
+**The run waits for M8.14.** The first attempt stalled because consent and
+activation exist only in the renderer, so no runner could reach them without a
+person at the machine. Rather than work around that, the control surface is
+built first — so the exit is performed end to end by somebody who did not write
+the code, with nobody clicking anything. SRS §6.1 carries the matching
+amendment.
+
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
 
 **Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa

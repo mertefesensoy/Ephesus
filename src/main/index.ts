@@ -96,6 +96,7 @@ import { DegradationLog } from './degradations'
 import type { DegradationCause, DegradationRow } from '../shared/degradation'
 import { CommandQueue } from './commands'
 import { CompanyStart } from './consent'
+import { DiagnosisWriter } from './diagnosis'
 import type { ConsentDisclosure } from '../shared/consent'
 import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
@@ -159,6 +160,12 @@ let artemis: Artemis | null = null
  * the grant has to take effect in THIS process rather than at the next boot.
  */
 let companyStart: CompanyStart | null = null
+/**
+ * Writes `DIAGNOSIS.md` (M8.13) — what is working, what is not, and why, for
+ * whoever arrives after the Architect has walked away. Module-scoped because
+ * the quit path writes one last report on the way out.
+ */
+let diagnosisWriter: DiagnosisWriter | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
@@ -3325,6 +3332,59 @@ async function boot(): Promise<void> {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
+  /**
+   * `DIAGNOSIS.md` (M8.13) — the artifact somebody reads when the Architect was
+   * not at the machine.
+   *
+   * Every field is gathered FRESH on each write from the same surfaces the
+   * Watch panel reads, so the file cannot drift from what the app would show.
+   * It holds no state of its own: `degradations.list()` already carries the
+   * ring with its `live`/`carried` freshness, and `log.jsonl` already carries
+   * every positive event, so a second copy of either would be two things that
+   * must agree.
+   *
+   * Written at boot BEFORE the consent verdict is logged below, so a stranger
+   * whose company never started still finds a report explaining why — which is
+   * the state a first launch is most likely to be stuck in.
+   */
+  diagnosisWriter = new DiagnosisWriter({
+    home: home.root,
+    snapshot: () => ({
+      at: Date.now(),
+      home: home.root,
+      version: app.getVersion(),
+      conditions: degradations.list().map((entry) => ({
+        source: entry.source,
+        cause: entry.cause,
+        detail: entry.detail,
+        count: entry.count,
+        since: entry.since,
+        freshness: entry.freshness
+      })),
+      events: agora?.readLogAll() ?? [],
+      fileWarnings: agora?.fileWarnings() ?? [],
+      crew: (agentManager?.list() ?? []).map((card) => ({
+        agentId: card.agentId,
+        lifecycle: String(card.lifecycle)
+      })),
+      consented: companyStart?.verdict().mayStartWork ?? false,
+      armed: scheduler.armed()
+    }),
+    // The one channel whose contract is that reporting cannot fail.
+    onFailed: (detail) => reportDegradation('home/diagnosis', detail)
+  })
+  // Its OWN timer, deliberately NOT the company scheduler.
+  //
+  // The first live report exposed this: `scheduler.start()` is behind the
+  // consent gate (ADR-0032), so a diagnosis trigger registered there would
+  // never fire on a machine stuck at that gate -- which is precisely the state
+  // a stranger is most likely to be in, and precisely when the report is most
+  // needed. A diagnostic that stops when the subject stops is not a diagnostic.
+  // `unref` so it never holds the process open on its own.
+  setInterval(() => {
+    diagnosisWriter?.write()
+  }, DiagnosisWriter.EVERY_MS).unref?.()
+
   const consent = companyStart.boot()
   // In the book of record, because "nothing happened" and "nothing was supposed
   // to happen" are the two states a quiet company can be in and only one of
@@ -3335,6 +3395,12 @@ async function boot(): Promise<void> {
     state: consent.state,
     because: consent.because
   })
+  // AFTER the verdict reaches the log, not before. Written at boot so the first
+  // thing in the home explains the state the app is actually in — and written
+  // here rather than a few lines earlier because the first live report was
+  // produced before this row existed, and so described a company whose consent
+  // it could not yet see.
+  diagnosisWriter.write()
 }
 
 /**
@@ -3438,7 +3504,15 @@ app.on('before-quit', (event) => {
     .then((report) => {
       console.log(`quit: ${summarizeQuit(report)}`)
     })
-    .finally(() => app.quit())
+    .finally(() => {
+      // The LAST report, and the one that matters most (M8.13): it is the one
+      // read by whoever comes back to a company that stopped while nobody was
+      // watching. `write()` cannot throw, by contract, so it cannot keep the
+      // app from quitting -- a diagnostic that blocked the exit it is
+      // describing would be the worst possible member of this sequence.
+      diagnosisWriter?.write()
+      app.quit()
+    })
 })
 
 app.on('window-all-closed', () => {

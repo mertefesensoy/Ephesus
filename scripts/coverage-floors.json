@@ -87,6 +87,8 @@
         "src/main/agora.ts",
         "src/main/degradations.ts",
         "src/main/eventlog.ts",
+        "src/main/diagnosis.ts",
+        "src/shared/diagnosis.ts",
         "src/main/fsx.ts",
         "src/main/git.ts",
         "src/main/ledger.ts",
