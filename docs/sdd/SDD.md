@@ -26,6 +26,7 @@ Three OS-level tiers (ADR-0001, ADR-0002):
 │  pty.ts hermes.ts agora.ts artemis.ts library.ts odeon.ts herald/      │
 │  harbor/ watch/ engines/ hooks.ts scheduler.ts db.ts config.ts ipc.ts  │
 │  control.ts (the second front door — ADR-0033)                         │
+│  home-lock.ts (one harness per home — ADR-0034)                        │
 ├────────────────────────────────────────────────────────────────────────┤
 │ PRELOAD (contextBridge) → typed window.eph API — the ONLY renderer door │
 ├────────────────────────────────────────────────────────────────────────┤
@@ -81,6 +82,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `config.ts` | Harness home setup, config persistence (text assets are loaded by `prompts.ts`) | — |
 | `home.ts` | The harness home's shape: `HOME_DIRS`, creation, `config.json` load with a visible warning on a corrupt file, and the first-boot seeding of the files the harness requires — `gate-policy.json` and `authority.json`, written from schema-validated values, only when absent, and reported so the Architect learns they exist (M8.4) | — |
 | `fsx.ts` | `writeFileAtomic` — temp file + rename, the one write path for anything another process reads (invariant §3) | 0003 |
+| `home-lock.ts` | One harness per home (M8.14 follow-up, ADR-0034): `isListening` — the socket probe both endpoints and the boot check share — and `occupiedBy`, which answers whether another harness is already working on this home by probing what a live one would be serving. **No lockfile**: a pidfile would owe a schema, a stale-lock policy and a release on every exit route; two live sockets answer the same question and leave nothing behind after a crash. The address file is a courtesy that names the owner, never the authority | 0034, 0004 |
 | `degradations.ts` | The degradation channel (M8.2): one entry per CAUSE rather than per occurrence, the bounded ladder that decides what reaches `log.jsonl`, the clear, and the boot replay that marks a surviving condition as carried over. The model and the line the Architect reads are `shared/degradation.ts` | 0004 |
 | `state-store.ts` | `JsonStateStore<T>` — one mechanism for the app-local durable records a restart restores (ADR-0027): schema-validated on read AND before write, atomic through `fsx.ts`, and it distinguishes an ABSENT file (an ordinary first run) from a DAMAGED one (state exists that can no longer be read). Collapsing those two is how a restart that restored nothing looks healthy. `load` never throws, because boot runs before the window exists. `FileBreakerStopStore` is deliberately not migrated onto it — its `load` throws by design, which is a safety contract this class does not offer | 0027 |
 | `restore.ts` | The boot replay (ADR-0027): owns the ORDER the records come back in and what happens when one cannot be read — the two things no individual store can own. One damaged record costs its own subsystem and nothing else; every loss becomes a `restart/*` degradation naming its consequence. Also `activationsRecord`, the one place the live set is converted to its on-disk form | 0027, 0012 |

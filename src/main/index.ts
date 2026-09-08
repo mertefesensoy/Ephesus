@@ -96,7 +96,9 @@ import { DegradationLog } from './degradations'
 import type { DegradationCause, DegradationRow } from '../shared/degradation'
 import { CommandQueue } from './commands'
 import { CompanyStart } from './consent'
-import { ControlServer, startControlSurface } from './control'
+import { ControlServer, controlEndpointFor, startControlSurface } from './control'
+import { CONTROL_ADDRESS_FILE } from '../shared/control'
+import { HOME_OCCUPIED, occupiedBy } from './home-lock'
 import { DiagnosisWriter } from './diagnosis'
 import type { DiagnosisInput } from '../shared/diagnosis'
 import type { ConsentDisclosure } from '../shared/consent'
@@ -105,7 +107,7 @@ import { getHome, initHome, saveConfig } from './config'
 import { AppDb } from './db'
 import { ClaudeAdapter } from './engines/claude'
 import { engines } from './engines'
-import { HookServer, type HookEventRecord } from './hooks'
+import { HookServer, hookEndpointFor, type HookEventRecord } from './hooks'
 import { registerIpc } from './ipc'
 import { PromptStore } from './prompts'
 import { PtyManager } from './pty'
@@ -888,10 +890,23 @@ async function boot(): Promise<void> {
   // A stored ledger row that fails validation on read is dropped and reported,
   // never repaired — the ledger is append-only (invariant §5).
   db.onUnreadableRow = (detail) => reportDegradation('ledger/unreadable-row', detail)
+  // Is anybody else already working on this home? Asked ONCE, before either
+  // endpoint is bound (ADR-0034). Both endpoints refuse a served address on
+  // their own, but three degradations for one cause is a reader's problem: this
+  // decides it once, and the two starts below are skipped rather than attempted
+  // and reported. It is also what `CompanyStart.blockedBy` answers with, so a
+  // second instance hires nobody rather than merely losing its sockets.
+  const occupancy = await occupiedBy({
+    addressFile: path.join(home.root, CONTROL_ADDRESS_FILE),
+    endpoints: [hookEndpointFor(home.root), controlEndpointFor(home.root)]
+  })
+  if (occupancy.occupied) reportDegradation(HOME_OCCUPIED, occupancy.because)
+
   // Bound before any agent can spawn, so no spawn ever races its own hooks.
   // A failure here is a *visible* degraded state, never a dead app: agents still
   // run, the floor freezes, and the UI says why (SDD §10, invariant §7).
   try {
+    if (occupancy.occupied) throw new Error(occupancy.because)
     const endpoint = await hookServer.start(home.root)
     console.info(`hook endpoint listening on ${endpoint}`)
   } catch (err) {
@@ -2978,7 +2993,8 @@ async function boot(): Promise<void> {
     startSchedule: () => scheduler.start(),
     report: reportDegradation,
     clear: (cause) => degradations.clear(cause),
-    log: (draft) => agora?.appendLog(draft)
+    log: (draft) => agora?.appendLog(draft),
+    blockedBy: () => (occupancy.occupied ? occupancy.because : null)
   })
 
   /**
@@ -3410,11 +3426,13 @@ async function boot(): Promise<void> {
    * endpoint's is — the window still works, and the condition says the CLI
    * will not.
    */
-  controlServer = await startControlSurface({
-    deps: { ...ipcDeps, diagnosis: diagnosisWriter },
-    home: home.root,
-    report: reportDegradation
-  })
+  controlServer = occupancy.occupied
+    ? null
+    : await startControlSurface({
+        deps: { ...ipcDeps, diagnosis: diagnosisWriter },
+        home: home.root,
+        report: reportDegradation
+      })
 
   // The verdict reaches the book of record from inside `CompanyStart` (M8.14):
   // a grant given in THIS session used to write no row at all, so a company

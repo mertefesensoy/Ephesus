@@ -188,6 +188,10 @@ const PROBES: readonly Probe[] = [
   {
     area: 'the book of record',
     sources: ['agora'],
+    // A busy home is not a fault: nothing has gone wrong, the harness refused
+    // to let it. Two instances would share one book and one committer, and the
+    // Architect acts on this by stopping the other one (ADR-0034).
+    waitingWhen: (c) => c.cause === 'agora/home-occupied',
     // It has always worked if anything at all was written, including this row.
     proves: ['degradation', 'orchestrator', 'spawn', 'message'],
     wouldExercise: 'anything at all — an empty log is itself the finding'

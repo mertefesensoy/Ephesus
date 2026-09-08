@@ -59,6 +59,48 @@ function envelope(over: Partial<Parameters<typeof buildEnvelope>[0]> = {}) {
   })
 }
 
+describe('hook server — one harness per home (ADR-0034)', () => {
+  it('refuses an address another harness is already serving, and says so', async () => {
+    // The defect this closes: `start()` cleared a leftover socket
+    // UNCONDITIONALLY, so on POSIX a second instance deleted the FIRST one's
+    // live socket and bound over it — the first harness then received nothing
+    // while its agents' hooks reached the second. Windows refuses the duplicate
+    // pipe name on its own, which is exactly why the rule is asked on both
+    // platforms: a guard only one platform runs is a guard only one platform's
+    // tests can check.
+    const first = await startRig()
+    const second = new HookServer({ onEvent: () => undefined, onRejected: () => undefined })
+    rigs.push({ ...first, server: second })
+
+    await expect(second.start(first.home)).rejects.toThrow('already listening')
+    await expect(second.start(first.home)).rejects.toThrow('stop the first one')
+
+    // And the first one is untouched: still bound, and still the harness that
+    // hears the post. `rejections` is the load-bearing assertion — it belongs to
+    // the FIRST server, so a reply alone would not prove which one answered.
+    expect(first.server.endpoint()).toBe(first.endpoint)
+    await postRaw(first.endpoint, JSON.stringify(envelope()))
+    expect(first.rejections).toHaveLength(1)
+    expect(first.rejections[0]?.agentId).toBe('agent.mason')
+  })
+
+  it('still binds over a socket a CRASHED harness left behind', async () => {
+    // The regression the fix could have caused. On Windows the pipe dies with
+    // its process and there is nothing to leave behind, so the setup is
+    // POSIX-only while the assertion is not.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-home-stale-'))
+    homes.push(home)
+    const first = new HookServer({ onEvent: () => undefined, onRejected: () => undefined })
+    const endpoint = await first.start(home)
+    await first.stop()
+    if (process.platform !== 'win32') fs.writeFileSync(endpoint, 'nobody is listening on this')
+
+    const second = new HookServer({ onEvent: () => undefined, onRejected: () => undefined })
+    await expect(second.start(home)).resolves.toBe(endpoint)
+    await second.stop()
+  })
+})
+
 describe('hook server — transport (FR-2.1)', () => {
   it('listens on a per-home endpoint and reports it', async () => {
     const rig = await startRig()

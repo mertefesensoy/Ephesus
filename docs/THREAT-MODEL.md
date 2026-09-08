@@ -95,6 +95,7 @@ or whether the company identity can merge.
 | Human gates, deny-by-default | Irreversible actions taken alone | SDD §9, NFR-9 |
 | **Control surface refusal list** | A script approving a gate, filing a memo verdict, setting a secret or changing the company mode — the four are refused by name, in the harness, whatever client asks | ADR-0033 |
 | **`remote` tagging** | A control act being indistinguishable from an Architect at the keyboard | FR-10.3, ADR-0033 |
+| **One harness per home** | A second instance sharing one book of record and one single committer — and, on POSIX, silently taking either plane's socket from the first | ADR-0034, ADR-0004 |
 | Circuit breaker (4 signals) | Loops, repeated identical calls, hop-cap escalation, pathology | ADR-0011/0013/0023 |
 | Wall-clock wake cap | A single turn running away (10 min, then interrupt) | ADR-0023 |
 | Cost ledger | Spend being invisible — every token folded and reported | ADR-0011 |
