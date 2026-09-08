@@ -51,6 +51,7 @@ function rig(
     record?: ConsentRecord
     saveThrows?: Error
     termsVersion?: number
+    blockedBy?: () => string | null
   } = {}
 ): Rig {
   const hires: number[] = []
@@ -73,6 +74,7 @@ function rig(
     report: (cause, detail) => reported.push({ cause, detail }),
     clear: (cause) => cleared.push(cause),
     log: (draft) => logged.push(draft),
+    ...(options.blockedBy === undefined ? {} : { blockedBy: options.blockedBy }),
     now: () => new Date('2026-09-07T22:00:00.000Z'),
     ...(options.termsVersion === undefined ? {} : { termsVersion: options.termsVersion })
   })
@@ -364,5 +366,66 @@ describe('the book of record says the company started, whichever path started it
     expect(outcome.ok).toBe(false)
     expect(r.logged).toEqual([])
     expect(r.hires).toEqual([])
+  })
+})
+
+describe('another harness is working on this home (ADR-0034)', () => {
+  const BUSY = 'another Ephesus harness is already working on this home (process 4321)'
+  const consented = { grantedAt: '2026-09-01T00:00:00.000Z', terms: CONSENT_TERMS_VERSION }
+
+  it('boots, hires nobody, arms nothing, and says why', () => {
+    // Consent is ON FILE. Nothing is wrong with the answer the Architect gave;
+    // what is wrong is that a second instance would share one book of record
+    // and one single committer with the first.
+    const r = rig({ record: consented, blockedBy: () => BUSY })
+    r.gate.boot()
+    expect(r.hires).toEqual([])
+    expect(r.schedules).toEqual([])
+    expect(r.reported).toEqual([{ cause: 'agora/home-occupied', detail: BUSY }])
+    expect(r.logged).toEqual([
+      { kind: 'orchestrator', event: 'not-started', because: BUSY, from: 'boot' }
+    ])
+  })
+
+  it('records a grant given anyway, and refuses to claim the company started', () => {
+    // The Architect's answer is their answer; a busy home is not a reason to
+    // forget it. What must not happen is `ephctl consent:grant` printing
+    // "the company is starting" while nothing starts.
+    const r = rig({ blockedBy: () => BUSY })
+    const outcome = r.gate.grant()
+    expect(outcome.ok).toBe(false)
+    expect(outcome.reason).toBe(BUSY)
+    expect(r.saved).toHaveLength(1)
+    expect(r.hires).toEqual([])
+    expect(r.logged.map((entry) => entry['event'])).toEqual(['not-started'])
+  })
+
+  it('refuses a grant on a home that had ALREADY consented, too', () => {
+    const r = rig({ record: consented, blockedBy: () => BUSY })
+    const outcome = r.gate.grant()
+    expect(outcome.ok).toBe(false)
+    expect(r.hires).toEqual([])
+  })
+
+  it('does not latch: the company starts once the other harness stops', () => {
+    // The refusal must not mark the gate started, or a later grant would return
+    // early on a flag set by a refusal and the company would never come up.
+    let busy: string | null = BUSY
+    const r = rig({ record: consented, blockedBy: () => busy })
+    r.gate.boot()
+    expect(r.hires).toEqual([])
+    busy = null
+    const outcome = r.gate.grant()
+    expect(outcome.ok).toBe(true)
+    expect(r.hires).toHaveLength(1)
+    expect(r.schedules).toHaveLength(1)
+    expect(r.logged.map((entry) => entry['event'])).toEqual(['not-started', 'consented'])
+  })
+
+  it('still starts normally when nothing is blocking', () => {
+    const r = rig({ record: consented, blockedBy: () => null })
+    r.gate.boot()
+    expect(r.hires).toHaveLength(1)
+    expect(r.reported).toEqual([])
   })
 })

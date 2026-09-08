@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
-import net from 'node:net'
 import path from 'node:path'
 import {
   CONTROL_ADDRESS_FILE,
@@ -21,6 +20,7 @@ import { diagnose, renderDiagnosis, type DiagnosisInput } from '../shared/diagno
 import type { ActivationRequest } from '../shared/profile-activation'
 import type { IpcDeps } from './ipc'
 import { writeFileAtomic } from './fsx'
+import { isListening } from './home-lock'
 
 /**
  * Access mode for the socket file: owner only, exactly as the hook endpoint
@@ -105,9 +105,6 @@ export interface ControlServerOptions {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 256 * 1024
-
-/** How long to wait for a leftover socket to answer before calling it abandoned. */
-const SOCKET_PROBE_MS = 250
 
 /**
  * The one condition this surface reports (`src/shared/degradation.ts`). Stable,
@@ -689,31 +686,6 @@ export async function startControlSurface(options: {
     )
   }
   return server
-}
-
-/**
- * Contract: is anything answering on this endpoint right now?
- *
- * Never throws, and never waits long: an address nobody answers within the
- * budget is treated as abandoned, which is the same conclusion the
- * unconditional `rmSync` reached — only now it is a conclusion rather than an
- * assumption.
- *
- * Exported and tested directly, on both platforms, although only the POSIX
- * branch of `start()` calls it: a guard whose own answer nobody checks is the
- * shape that has already cost this repository a catch that guarded nothing.
- */
-export async function isListening(endpoint: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const socket = net.connect({ path: endpoint })
-    const settle = (answer: boolean): void => {
-      socket.destroy()
-      resolve(answer)
-    }
-    socket.setTimeout(SOCKET_PROBE_MS, () => settle(false))
-    socket.once('connect', () => settle(true))
-    socket.once('error', () => settle(false))
-  })
 }
 
 function ok(verb: ControlVerb, text: string, data: unknown): ControlAnswer {

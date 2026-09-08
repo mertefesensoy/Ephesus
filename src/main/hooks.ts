@@ -13,6 +13,7 @@ import {
   ghTokenRequestSchema,
   type GhTokenResponse
 } from '../shared/gh-token'
+import { isListening } from './home-lock'
 import {
   RECALL_ENDPOINT_PATH,
   recallRequestSchema,
@@ -172,6 +173,26 @@ export class HookServer {
     if (this.server) throw new Error('hooks: server already started')
     const endpoint = hookEndpointFor(homeRoot)
 
+    // Two rules, in this order, and the order is the fix (ADR-0034).
+    //
+    // 1. If something is ALREADY SERVING this address, refuse. Removing the
+    //    file first would delete a LIVE socket and bind over it, taking the
+    //    event plane from a harness that is still running — its agents' hooks
+    //    would then reach us, and its own floor would freeze. Asked on BOTH
+    //    platforms deliberately: Windows refuses the duplicate pipe name
+    //    anyway, but with `EADDRINUSE` instead of a sentence, and a rule only
+    //    one platform executes is a rule only one platform's tests can check.
+    // 2. Only then clear a leftover. A crashed harness leaves its socket behind
+    //    on POSIX and removing it is how the next boot binds (SDD §10); Windows
+    //    pipes die with their process, so there is nothing to clear.
+    //
+    // The control endpoint had the identical hole and CI found it there first
+    // (M8.14); this is the same defect in the plane the agents talk to.
+    if (await isListening(endpoint))
+      throw new Error(
+        `another harness is already listening on ${endpoint} — two instances on one ` +
+          'home share a book of record and a single committer; stop the first one'
+      )
     if (process.platform !== 'win32' && fs.existsSync(endpoint))
       fs.rmSync(endpoint, { force: true })
 

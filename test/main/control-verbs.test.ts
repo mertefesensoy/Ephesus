@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ControlServer,
   controlEndpointFor,
-  isListening,
   performVerb,
   startControlSurface,
   type ControlDeps
 } from '../../src/main/control'
+import { isListening } from '../../src/main/home-lock'
 import { DiagnosisWriter, DIAGNOSIS_FILE } from '../../src/main/diagnosis'
 import { CONTROL_ADDRESS_FILE, CONTROL_VERBS, type ControlVerb } from '../../src/shared/control'
 import type { DiagnosisInput } from '../../src/shared/diagnosis'

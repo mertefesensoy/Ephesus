@@ -8,6 +8,7 @@ import {
   type ConsentView
 } from '../shared/consent'
 import type { DegradationCause } from '../shared/degradation'
+import { HOME_OCCUPIED } from './home-lock'
 
 /**
  * The consent gate's wiring (DD-6, M8.12) — the one thing standing between boot
@@ -90,6 +91,20 @@ export interface CompanyStartOptions {
    * forget is a row that is right until the one path nobody re-read.
    */
   log(draft: { readonly kind: 'orchestrator' } & Record<string, unknown>): void
+  /**
+   * A reason work must NOT start that is not about consent, or null (ADR-0034).
+   *
+   * Today there is exactly one: another harness is already working on this home.
+   * It is asked here rather than checked beside the two callers because
+   * `startWork` is the single funnel both `boot()` and `grant()` pass through —
+   * a guard a caller can forget is a guard that holds until the one path nobody
+   * re-read, which is the shape this class was built to avoid.
+   *
+   * Deliberately NOT folded into `ConsentVerdict`. Consent is a standing answer
+   * the Architect gave; occupancy is a condition of this machine right now, and
+   * collapsing them would mean a busy home read as "nobody has said go".
+   */
+  blockedBy?(): string | null
   now?(): Date
   /** Overridable so a test can move the terms without editing the shipped one. */
   readonly termsVersion?: number
@@ -174,8 +189,10 @@ export class CompanyStart {
       // Never re-writes `grantedAt` — the record says when consent was FIRST
       // given, and overwriting it would quietly erase how long the company has
       // been authorised.
-      this.startWork('grant')
-      return { ok: true, reason: null, view: this.view() }
+      const blocked = this.startWork('grant')
+      return blocked === null
+        ? { ok: true, reason: null, view: this.view() }
+        : { ok: false, reason: blocked, view: this.view() }
     }
     const record: ConsentRecord = {
       grantedAt: this.now().toISOString(),
@@ -199,8 +216,14 @@ export class CompanyStart {
     }
     this.options.clear(CONSENT_UNWRITABLE)
     this.options.clear(CONSENT_WITHHELD)
-    this.startWork('grant')
-    return { ok: true, reason: null, view: this.view() }
+    // The grant is RECORDED either way: the Architect's answer to the consent
+    // question is their answer, and a busy home is not a reason to forget it.
+    // What is refused is starting, and the outcome says which happened rather
+    // than reporting a company that is not running as started.
+    const blocked = this.startWork('grant')
+    return blocked === null
+      ? { ok: true, reason: null, view: this.view() }
+      : { ok: false, reason: blocked, view: this.view() }
   }
 
   /**
@@ -208,8 +231,22 @@ export class CompanyStart {
    * at 03:14?" needs to know whether the company came up already consented or
    * whether somebody said go at 03:14, and those are different afternoons.
    */
-  private startWork(from: 'boot' | 'grant'): void {
-    if (this.started) return
+  private startWork(from: 'boot' | 'grant'): string | null {
+    if (this.started) return null
+    const blocked = this.options.blockedBy?.() ?? null
+    if (blocked !== null) {
+      // NOT marked started: the condition can clear (the other harness stops),
+      // and a later grant should then be able to start the company rather than
+      // returning early on a flag set by a refusal.
+      this.options.report(HOME_OCCUPIED, blocked)
+      this.options.log({
+        kind: 'orchestrator',
+        event: 'not-started',
+        because: blocked,
+        from
+      })
+      return blocked
+    }
     this.started = true
     const verdict = this.verdict()
     this.options.log({
@@ -221,5 +258,6 @@ export class CompanyStart {
     })
     this.options.hire()
     this.options.startSchedule()
+    return null
   }
 }

@@ -204,6 +204,41 @@ describe('the control surface has its own row, and it is specific (M8.14)', () =
   })
 })
 
+describe('a busy home is waiting, not broken (ADR-0034)', () => {
+  it('reads WAITING FOR YOU on the book of record, with what to do', () => {
+    // Nothing has gone wrong: the harness refused to let two instances share
+    // one book of record. A BROKEN here would send the reader hunting for a
+    // corruption that has not happened.
+    const d = diagnose(
+      input({
+        conditions: [
+          condition({
+            source: 'agora',
+            cause: 'agora/home-occupied',
+            detail: 'another Ephesus harness is already working on this home (process 4321)'
+          })
+        ]
+      })
+    )
+    const book = find(d, 'the book of record')
+    expect(book?.verdict).toBe('waiting')
+    expect(book?.because).toContain('already working on this home')
+  })
+
+  it('still reads BROKEN for a real agora fault', () => {
+    // The predicate must discriminate, not blanket the source: a commit the
+    // single committer gave up on is a fault and has to stay one.
+    const d = diagnose(
+      input({
+        conditions: [
+          condition({ source: 'agora', cause: 'agora/commit-failed', detail: 'git gave up' })
+        ]
+      })
+    )
+    expect(find(d, 'the book of record')?.verdict).toBe('broken')
+  })
+})
+
 describe('the rendered report', () => {
   it('leads with its own age, because a stale report read as current is the failure', () => {
     const d = diagnose(input({ at: 1_000_000 }))

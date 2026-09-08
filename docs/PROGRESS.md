@@ -6481,6 +6481,43 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       **`docs/EXIT-M8.md` §1 is now runnable without a mouse**, with the two
       blocked steps carrying their commands and a refusal to try on purpose.
 
+**One harness per home (2026-09-09, ADR-0034) — the must-ask M8.14 left open,
+answered.** M8.14's session report raised it: `src/main/hooks.ts` carried the
+identical unconditional `rmSync` that CI had just caught in the control plane, so
+a second instance on one home could take the EVENT plane from the first the same
+way. The Architect's answer went further than the report proposed — *guard **and**
+lock* — and it is the right call, because a refused endpoint only stops that plane
+being stolen: the second instance would still boot, still hire, and still commit
+through a second single committer, which is what actually produced the duplicate
+`seq` on 2026-09-07.
+
+So: both endpoints refuse an address something is already serving, **on both
+platforms**; and `CompanyStart.blockedBy()` — consulted in `startWork`, the one
+funnel `boot()` and `grant()` share — means a second instance boots, opens its
+window, **hires nobody and arms no schedule**, and reports `agora/home-occupied`
+naming the owning process. Consent given anyway is still recorded; what is refused
+is starting, and the outcome says so rather than letting `ephctl consent:grant`
+print "the company is starting" while nothing does.
+
+**No lockfile**, deliberately: a pidfile would owe a schema and validator
+(invariant §9), a stale-lock policy and a release on every exit route — including
+the ones that do not run, which is how stale locks are born. Liveness is probed
+from what a live harness is already serving. The address file `control-endpoint.json`
+names the owner and is *never* the authority: a stale one left by a crash does not
+make a home occupied, because refusing to start over a leftover file would turn
+every crash into an outage.
+
+*Proved live, two harnesses on one home:* A boots on a fresh home, is granted
+consent through `ephctl` and hires Artemis; B is then started against the SAME
+home and **refuses** — `agora: another Ephesus harness is already working on this
+home (process 30580) — it is answering on \.\pipe\ephesus-events-…`, with
+`orchestrator/not-started` at seq 18 in the shared book of record. Exactly ONE
+`agent.artemis` spawn exists across both, `ephctl` still reaches A, and
+`control-endpoint.json` still names A's pid — B took neither plane. *One
+observation, flagged rather than fixed:* both instances write `DIAGNOSIS.md`, so
+the shared report alternates between A's account and B's and says which instance
+wrote it nowhere. See `docs/DECISIONS-LOG.md`.
+
 **M8's exit is unblocked and its criterion amended (2026-09-08).** Three things
 were settled after the first attempt: a **fresh agent session satisfies "a
 developer who is not the author"** (recorded so the row can close on a stated
