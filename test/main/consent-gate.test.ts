@@ -43,6 +43,7 @@ interface Rig {
   readonly saved: ConsentRecord[]
   readonly reported: { cause: DegradationCause; detail: string }[]
   readonly cleared: DegradationCause[]
+  readonly logged: Record<string, unknown>[]
 }
 
 function rig(
@@ -57,6 +58,7 @@ function rig(
   const saved: ConsentRecord[] = []
   const reported: { cause: DegradationCause; detail: string }[] = []
   const cleared: DegradationCause[] = []
+  const logged: Record<string, unknown>[] = []
   let held = options.record
   const gate = new CompanyStart({
     record: () => held,
@@ -70,10 +72,11 @@ function rig(
     startSchedule: () => schedules.push(schedules.length + 1),
     report: (cause, detail) => reported.push({ cause, detail }),
     clear: (cause) => cleared.push(cause),
+    log: (draft) => logged.push(draft),
     now: () => new Date('2026-09-07T22:00:00.000Z'),
     ...(options.termsVersion === undefined ? {} : { termsVersion: options.termsVersion })
   })
-  return { gate, hires, schedules, saved, reported, cleared }
+  return { gate, hires, schedules, saved, reported, cleared, logged }
 }
 
 describe('boot on a machine nobody has consented on', () => {
@@ -307,5 +310,59 @@ describe('a home written before M8.12 existed', () => {
     expect(reread.config.consent).toEqual({ grantedAt: '2026-09-07T22:00:00.000Z', terms: 1 })
     // And the fields that were already there are still there.
     expect(reread.config.mode).toBe('directed')
+  })
+})
+
+describe('the book of record says the company started, whichever path started it', () => {
+  it('writes awaiting-consent when boot finds no grant', () => {
+    const r = rig()
+    r.gate.boot()
+    expect(r.logged).toHaveLength(1)
+    expect(r.logged[0]).toMatchObject({
+      kind: 'orchestrator',
+      event: 'awaiting-consent',
+      state: 'never-asked'
+    })
+  })
+
+  it('writes consented, marked `boot`, when boot finds one', () => {
+    const r = rig({
+      record: { grantedAt: '2026-09-01T00:00:00.000Z', terms: CONSENT_TERMS_VERSION }
+    })
+    r.gate.boot()
+    expect(r.logged).toHaveLength(1)
+    expect(r.logged[0]).toMatchObject({ event: 'consented', from: 'boot' })
+  })
+
+  it('writes consented, marked `grant`, when the Architect says go in this session', () => {
+    // The defect the live proof found: until M8.14 a grant given in THIS
+    // session wrote no row at all, so a company started from the banner — or
+    // from `ephctl` — produced four spawns with nothing above them saying why,
+    // and `orchestrator/consented` did not appear until the next restart.
+    const r = rig()
+    r.gate.boot()
+    r.gate.grant()
+    expect(r.logged.map((entry) => entry['event'])).toEqual(['awaiting-consent', 'consented'])
+    expect(r.logged[1]).toMatchObject({ event: 'consented', from: 'grant', state: 'granted' })
+  })
+
+  it('says the company started ONCE, however many times it is asked', () => {
+    const r = rig()
+    r.gate.grant()
+    r.gate.grant()
+    r.gate.boot()
+    expect(r.logged.filter((entry) => entry['event'] === 'consented')).toHaveLength(1)
+    expect(r.hires).toHaveLength(1)
+  })
+
+  it('writes nothing when the grant could not be recorded', () => {
+    // Work running under a consent the next boot will not find is worse than a
+    // button that reports its own failure — and a row claiming the company
+    // started would be the same lie in the book of record.
+    const r = rig({ saveThrows: new Error('EACCES: permission denied') })
+    const outcome = r.gate.grant()
+    expect(outcome.ok).toBe(false)
+    expect(r.logged).toEqual([])
+    expect(r.hires).toEqual([])
   })
 })

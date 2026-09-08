@@ -341,7 +341,17 @@ export interface IpcDeps {
   registerKnowledge(name: string, text: string): readonly KnowledgeDoc[]
 }
 
-export function registerIpc(deps: IpcDeps): void {
+/**
+ * Registers every handler behind the typed preload surface, and hands the deps
+ * back.
+ *
+ * The return is not decoration (M8.14): the control surface is served from the
+ * SAME object, and returning it from the one function that already owns it lets
+ * `index.ts` say so in a single statement instead of declaring a copy beside
+ * this call — which is the shape the boot row of `coverage-floors.json` exists
+ * to keep honest.
+ */
+export function registerIpc(deps: IpcDeps): IpcDeps {
   const { ptyManager, agents, avatars, commands, agora, secrets } = deps
 
   // ADR-0010, write-only: `set` is the only channel that carries a value, and
@@ -650,4 +660,5 @@ export function registerIpc(deps: IpcDeps): void {
     const { id, cols, rows } = ptyResizeSchema.parse(raw)
     ptyManager.resize(id, cols, rows)
   })
+  return deps
 }

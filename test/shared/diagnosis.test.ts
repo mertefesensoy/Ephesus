@@ -163,6 +163,47 @@ describe('a log row proves an area worked, and the report cites it', () => {
   })
 })
 
+describe('the control surface has its own row, and it is specific (M8.14)', () => {
+  it('is NOT exercised by the Harbor’s own remote rows', () => {
+    // `kind: 'remote'` is the Harbor's ingest and the outbound path as well as
+    // the control surface's audit row. A probe that matched the bare kind would
+    // read `working` the moment a repository was ingested — a check that cannot
+    // fail in the one way that matters, which is the defect class this report
+    // was built to refuse. A mutation pass found exactly that gap.
+    const d = diagnose(input({ events: [row('remote'), row('remote', 'outbound-posted')] }))
+    expect(find(d, 'the control surface')?.verdict).toBe('not-exercised')
+  })
+
+  it('reads working once a script has actually driven the company', () => {
+    const d = diagnose(input({ events: [row('remote', 'control')] }))
+    expect(find(d, 'the control surface')?.verdict).toBe('working')
+  })
+
+  it('reads broken, with the reason, when the endpoint would not bind', () => {
+    const d = diagnose(
+      input({
+        conditions: [
+          condition({
+            source: 'control',
+            cause: 'control/failed',
+            detail: 'the control surface is not listening'
+          })
+        ]
+      })
+    )
+    const surface = find(d, 'the control surface')
+    expect(surface?.verdict).toBe('broken')
+    expect(surface?.because).toContain('not listening')
+  })
+
+  it('names an ACT rather than a read as what would exercise it', () => {
+    // Reads are deliberately not logged, so naming one would send a reader to a
+    // command that cannot move this row.
+    const because = find(diagnose(input()), 'the control surface')?.because ?? ''
+    expect(because).toContain('consent:grant')
+  })
+})
+
 describe('the rendered report', () => {
   it('leads with its own age, because a stale report read as current is the failure', () => {
     const d = diagnose(input({ at: 1_000_000 }))

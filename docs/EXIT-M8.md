@@ -69,10 +69,65 @@ You will end §1 with:
 - the app running from a clean clone (`npm install && npm run dev`) against that
   fresh home;
 - `claude auth status` reporting a logged-in session;
-- the consent banner answered — the app hires nobody until you press **START THE
-  COMPANY**, and what it says it will do is what it does;
-- **Skeleton Crew activated against a repository you own**, with the activation
-  screen showing that repository by name.
+- consent answered — the app hires nobody until it is granted, and what it says
+  it will do is what it does;
+- **Skeleton Crew activated against a repository you own**, naming that
+  repository.
+
+### Doing it without a mouse
+
+Both of the last two used to be buttons and nothing else, and that is what
+stopped the first attempt at this run: a runner who was not a person at the
+keyboard could not reach them ([ADR-0033](./adr/ADR-0033-a-script-may-run-the-company.md)).
+Since M8.14 every step of this section has a command. In a second terminal, with
+the same `EPH_HOME` set and the app running:
+
+```bash
+node scripts/ephctl.cjs help
+```
+
+```bash
+node scripts/ephctl.cjs consent:status
+```
+
+That prints what granting would do — which agent is hired on which engine, the
+daily ceiling or that there is none, and the cadences that start. Read it, then:
+
+```bash
+node scripts/ephctl.cjs consent:grant
+```
+
+```bash
+node scripts/ephctl.cjs profile:activate --profile skeleton-crew --target repo:myapp --path /absolute/path/to/your/checkout
+```
+
+Substitute your own short name for `myapp` and the real path to your checkout.
+Add `--repo owner/name` if the harness cannot work out which GitHub repository
+the checkout belongs to (a fork has two answers and it will refuse to guess).
+The answer names the repositories the instance will watch; if it says `(none)`,
+fix that here rather than discovering it in §4.
+
+```bash
+node scripts/ephctl.cjs profile:instances
+```
+
+```bash
+node scripts/ephctl.cjs status
+```
+
+**What you cannot do from a script, by design:** approve a gate, decide a memo,
+set a secret, or change the company mode. Try one and read what comes back —
+that refusal is itself part of what this run checks, and §6.1's last clause
+would mean nothing if a script could approve the gates it is about.
+
+```bash
+node scripts/ephctl.cjs watch:approve --gateId anything
+```
+
+Every act performed this way is written to `agora/log.jsonl` tagged `remote`, so
+the record shows which steps a script took and which a person did. Say in your
+notes which you used; a run driven from the CLI satisfies §6.1 as amended
+(2026-09-08) — *"The Architect activates" is about authority, not about a mouse.*
 
 **The repository.** It must be one you own, on GitHub, with CI that runs on push
 and a test suite that fails when a test is broken. A scratch repository is
@@ -172,8 +227,22 @@ Confirm nothing is left, then `npm run dev` again.
 You are **not** asked to consent again: consent is persisted, and a restart that
 re-asked would be a defect.
 
-**Reactivate the crew** from PROFILES when the app tells you it is down — that
-is the designed behaviour, not a failure, and the run continues from there.
+**Reactivate the crew** when the app tells you it is down — that is the designed
+behaviour, not a failure, and the run continues from there. From PROFILES, or
+from the terminal:
+
+```bash
+node scripts/ephctl.cjs profile:instances
+```
+
+```bash
+node scripts/ephctl.cjs profile:activate --profile skeleton-crew --target repo:myapp --path /absolute/path/to/your/checkout
+```
+
+Activating an instance that came back `down` **takes it over** rather than being
+refused as a duplicate — that is deliberate ([ADR-0027](./adr/ADR-0027-what-survives-a-restart.md)),
+because a restore that blocked the reactivation would leave the crew down for
+good.
 
 ---
 
@@ -191,6 +260,11 @@ grep '"kind":"profile"' ~/.ephesus/agora/log.jsonl | tail -40
 > 2026-09-07 were greps on the wrong name — the incident board folds
 > `event: "incident-*"`, not `kind: "incident"`. The table below gives the key
 > that actually appears in the file.
+>
+> `kind: "remote"` now carries two different things: the Harbor's ingest and
+> outbound rows, and — since M8.14 — one row per act performed through
+> `ephctl`, which carry `event: "control"`. If you drove any step from the
+> terminal, `grep '"event":"control"'` is the record of which.
 
 ### 5.1 "the crew has detected the failure"
 

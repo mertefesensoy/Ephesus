@@ -153,9 +153,11 @@
       ]
     },
     "watch": {
-      "is": "Safety: gates, budgets and the durable ledger, the breaker, capacity and pacing, the secret broker, redaction",
+      "is": "Safety: gates, budgets and the durable ledger, the breaker, capacity and pacing, the secret broker, redaction, and the control surface's boundary on authority (M8.14)",
       "members": [
         "src/main/watch/",
+        "src/main/control.ts",
+        "src/shared/control.ts",
         "src/shared/gates.ts",
         "src/shared/breaker.ts",
         "src/shared/cost.ts",

@@ -96,7 +96,9 @@ import { DegradationLog } from './degradations'
 import type { DegradationCause, DegradationRow } from '../shared/degradation'
 import { CommandQueue } from './commands'
 import { CompanyStart } from './consent'
+import { ControlServer, startControlSurface } from './control'
 import { DiagnosisWriter } from './diagnosis'
+import type { DiagnosisInput } from '../shared/diagnosis'
 import type { ConsentDisclosure } from '../shared/consent'
 import { Hermes } from './hermes'
 import { getHome, initHome, saveConfig } from './config'
@@ -166,6 +168,7 @@ let companyStart: CompanyStart | null = null
  * the quit path writes one last report on the way out.
  */
 let diagnosisWriter: DiagnosisWriter | null = null
+let controlServer: ControlServer | null = null
 let ledger: LedgerEndpoint | null = null
 let odeon: Odeon | null = null
 let briefing: BriefingJob | null = null
@@ -2974,10 +2977,21 @@ async function boot(): Promise<void> {
     hire: hireOrchestrator,
     startSchedule: () => scheduler.start(),
     report: reportDegradation,
-    clear: (cause) => degradations.clear(cause)
+    clear: (cause) => degradations.clear(cause),
+    log: (draft) => agora?.appendLog(draft)
   })
 
-  registerIpc({
+  /**
+   * The one dependency object, named rather than inlined (M8.14).
+   *
+   * It used to be an anonymous literal handed straight to `registerIpc`. It is
+   * a `const` now because there are TWO callers: the window's bridge, and the
+   * control surface below. The control endpoint is handed THIS object, not a
+   * parallel set of closures — so the window and a script cannot drift into
+   * disagreeing about what an action does, which is the defect class this
+   * repository keeps meeting in new clothes.
+   */
+  const ipcDeps = registerIpc({
     ptyManager,
     consent: companyStart,
     agents: agentManager,
@@ -3349,7 +3363,7 @@ async function boot(): Promise<void> {
    */
   diagnosisWriter = new DiagnosisWriter({
     home: home.root,
-    snapshot: () => ({
+    snapshot: (): DiagnosisInput => ({
       at: Date.now(),
       home: home.root,
       version: app.getVersion(),
@@ -3385,16 +3399,28 @@ async function boot(): Promise<void> {
     diagnosisWriter?.write()
   }, DiagnosisWriter.EVERY_MS).unref?.()
 
-  const consent = companyStart.boot()
-  // In the book of record, because "nothing happened" and "nothing was supposed
-  // to happen" are the two states a quiet company can be in and only one of
-  // them is a problem (invariant §7).
-  agora.appendLog({
-    kind: 'orchestrator',
-    event: consent.mayStartWork ? 'consented' : 'awaiting-consent',
-    state: consent.state,
-    because: consent.because
+  /**
+   * The control surface (M8.14, ADR-0033) — the Architect's authority without
+   * the window.
+   *
+   * Started BEFORE the consent verdict below, and that ordering is the package:
+   * a surface that came up only on a consented company could not be used to
+   * consent, which is exactly the step the M8 exit run died on. A failure to
+   * bind is a visible degradation and never a dead app, exactly as the hook
+   * endpoint's is — the window still works, and the condition says the CLI
+   * will not.
+   */
+  controlServer = await startControlSurface({
+    deps: { ...ipcDeps, diagnosis: diagnosisWriter },
+    home: home.root,
+    report: reportDegradation
   })
+
+  // The verdict reaches the book of record from inside `CompanyStart` (M8.14):
+  // a grant given in THIS session used to write no row at all, so a company
+  // started from the banner or from `ephctl` produced spawns with nothing above
+  // them saying why. The ordering is the class's, so both callers get it.
+  companyStart.boot()
   // AFTER the verdict reaches the log, not before. Written at boot so the first
   // thing in the home explains the state the app is actually in — and written
   // here rather than a few lines earlier because the first live report was
@@ -3473,6 +3499,10 @@ const quit = new QuitSequence({
     // the harness wrote into somebody's repository (ADR-0009).
     { name: 'ptys', run: () => ptyManager.killAll() },
     { name: 'hooks', run: () => hookServer.stop() },
+    // Beside the hook endpoint, for the same reason: both are sockets in the
+    // home, and a control endpoint left listening past the quit would answer a
+    // CLI on behalf of a company that has packed up.
+    { name: 'control', run: () => controlServer?.stop() },
     // Last, in this order: a commit still in flight is a record the book has not
     // got yet (ADR-0004), and the database has to outlive the drain.
     { name: 'agora-drain', run: () => agora?.drained() },

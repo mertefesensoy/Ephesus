@@ -78,6 +78,18 @@ export interface CompanyStartOptions {
   startSchedule(): void
   report(cause: DegradationCause, detail: string): void
   clear(cause: DegradationCause): void
+  /**
+   * The book of record. The company starting is an event whichever path started
+   * it, and until M8.14 only BOOT wrote one: a grant given in this session —
+   * from the banner or from `ephctl` — produced spawns with nothing above them
+   * saying why, and `orchestrator/consented` did not appear until the next
+   * restart. Found by running it, not by testing it.
+   *
+   * It lives here rather than at the two call sites for the reason the whole
+   * class exists: the ordering is `CompanyStart`'s, and a row a caller can
+   * forget is a row that is right until the one path nobody re-read.
+   */
+  log(draft: { readonly kind: 'orchestrator' } & Record<string, unknown>): void
   now?(): Date
   /** Overridable so a test can move the terms without editing the shipped one. */
   readonly termsVersion?: number
@@ -129,7 +141,7 @@ export class CompanyStart {
   boot(): ConsentVerdict {
     const verdict = this.verdict()
     if (verdict.mayStartWork) {
-      this.startWork()
+      this.startWork('boot')
       return verdict
     }
     this.options.report(
@@ -137,6 +149,14 @@ export class CompanyStart {
       `the company is not working: ${verdict.because}. Grant it on the banner at the ` +
         'top of the app to hire the orchestrator and start the schedules'
     )
+    // "Nothing happened" and "nothing was supposed to happen" are the two states
+    // a quiet company can be in, and only one of them is a problem (invariant §7).
+    this.options.log({
+      kind: 'orchestrator',
+      event: 'awaiting-consent',
+      state: verdict.state,
+      because: verdict.because
+    })
     return verdict
   }
 
@@ -154,7 +174,7 @@ export class CompanyStart {
       // Never re-writes `grantedAt` — the record says when consent was FIRST
       // given, and overwriting it would quietly erase how long the company has
       // been authorised.
-      this.startWork()
+      this.startWork('grant')
       return { ok: true, reason: null, view: this.view() }
     }
     const record: ConsentRecord = {
@@ -179,13 +199,26 @@ export class CompanyStart {
     }
     this.options.clear(CONSENT_UNWRITABLE)
     this.options.clear(CONSENT_WITHHELD)
-    this.startWork()
+    this.startWork('grant')
     return { ok: true, reason: null, view: this.view() }
   }
 
-  private startWork(): void {
+  /**
+   * `from` is in the row on purpose: a reader asking "why did four agents spawn
+   * at 03:14?" needs to know whether the company came up already consented or
+   * whether somebody said go at 03:14, and those are different afternoons.
+   */
+  private startWork(from: 'boot' | 'grant'): void {
     if (this.started) return
     this.started = true
+    const verdict = this.verdict()
+    this.options.log({
+      kind: 'orchestrator',
+      event: 'consented',
+      state: verdict.state,
+      because: verdict.because,
+      from
+    })
     this.options.hire()
     this.options.startSchedule()
   }

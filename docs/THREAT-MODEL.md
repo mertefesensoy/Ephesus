@@ -49,6 +49,24 @@ setting (ADR-0020, ADR-0022).
 **Semi-trusted, and this is the honest part:** the **agents themselves**. They are language models
 following instructions. Ephesus bounds what they can reach; it does not verify their intent.
 
+**Trusted by standing, not by proof: any process running as you.** Three things already work this
+way and the fourth is new. `~/.ephesus/` is readable and writable by your account; the engine CLIs'
+own credentials live in your home; the hook endpoint is a `0600` socket (a local named pipe on
+Windows) that anything running as you can open. Since M8.14 the **control surface** is the fourth
+(ADR-0033) — same address scheme, same owner-only guard, no token.
+
+What that means concretely: **a process running as you can operate the company** — grant consent,
+activate or deactivate a mission, convene a briefing, read the log. It **cannot authorise** what
+the company is not otherwise allowed to do: gate approvals, memo verdicts, secrets and mode
+changes are refused by name, and refused by the harness rather than by the client, so a hand-rolled
+client gains nothing. A token was considered and rejected: it would be a new secret to manage
+against ADR-0010's write-only rule, for an attacker who — running as you — could already read
+`~/.ephesus`, use the engine's credentials and post to the hook endpoint.
+
+The surface's own answer to that standing is **audit**, not authentication: every act that changes
+something lands in `log.jsonl` tagged `remote` (FR-10.3), so the book of record always
+distinguishes what the window did from what a script did.
+
 ## 4. What an attacker controls
 
 Assume an adversary can write anything into a repository you point Ephesus at — a PR from a
@@ -75,6 +93,8 @@ or whether the company identity can merge.
 | Worktree isolation | Agents colliding, or touching the Agora's single working copy | ADR-0004, UC-01 2a |
 | Workspace trust + junction guard | A symlink redirecting a checkout somewhere unapproved | ADR-0021/0025 |
 | Human gates, deny-by-default | Irreversible actions taken alone | SDD §9, NFR-9 |
+| **Control surface refusal list** | A script approving a gate, filing a memo verdict, setting a secret or changing the company mode — the four are refused by name, in the harness, whatever client asks | ADR-0033 |
+| **`remote` tagging** | A control act being indistinguishable from an Architect at the keyboard | FR-10.3, ADR-0033 |
 | Circuit breaker (4 signals) | Loops, repeated identical calls, hop-cap escalation, pathology | ADR-0011/0013/0023 |
 | Wall-clock wake cap | A single turn running away (10 min, then interrupt) | ADR-0023 |
 | Cost ledger | Spend being invisible — every token folded and reported | ADR-0011 |
@@ -152,6 +172,26 @@ suppression is now in place; the *scan* covering targets is not built.
 Every control above assumes an agent that is *mistaken or manipulated*, not one that is
 deliberately adversarial and probing the harness. Ephesus is not a sandbox escape boundary. Agents
 run as your user, with your filesystem.
+
+### 6.8 The control surface is as strong as your user account
+
+Since M8.14 a local endpoint operates the company (ADR-0033). It is owner-only and local-only, and
+it has no token — so **anything running as you can operate the company from a script**: grant
+consent, activate a mission against a checkout, convene a briefing, tail the log.
+
+This is not a new capability so much as a newly explicit one. The same attacker could already read
+`~/.ephesus/`, use the engine CLI's own logged-in session, and post to the hook endpoint. What the
+surface adds is convenience for them as well as for you, and the honest statement is that the
+control plane's strength is your account's strength.
+
+What it deliberately does **not** give them is authority: gate approvals, memo verdicts, secrets
+and mode changes are refused by name, in the harness. So a script — yours or theirs — can make the
+company work, and cannot make it do the things the company is not otherwise allowed to do. And
+every act it performs is tagged `remote` in `log.jsonl`, which is what lets you tell afterwards
+that a script did it.
+
+**If you do not want it**, stop the harness: the endpoint lives only as long as the app, and the
+address file is removed on a clean quit.
 
 ## 7. Before you install
 

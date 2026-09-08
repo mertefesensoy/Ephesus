@@ -37,6 +37,8 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0029](./ADR-0029-unbudgeted-is-the-default.md) | Unbudgeted is the default | accepted |
 | [ADR-0030](./ADR-0030-the-outbound-draft-survives-with-its-gate.md) | The outbound draft survives with its gate | accepted |
 | [ADR-0031](./ADR-0031-an-engine-declares-whether-it-can-enforce-autonomy.md) | An engine declares whether it can enforce autonomy | accepted |
+| [ADR-0032](./ADR-0032-the-company-asks-before-it-starts.md) | The company asks before it starts | accepted |
+| [ADR-0033](./ADR-0033-a-script-may-run-the-company.md) | A script may run the company; only a human may authorise | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):

@@ -6328,7 +6328,7 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       main and read from disk, so it observes nothing about the renderer — which
       the report says about itself, in its own body.*
 
-- [ ] **M8.14 The controls are not buried in the window** — *Architect decision
+- [x] **M8.14 The controls are not buried in the window** — *Architect decision
       2026-09-08, and it is what actually unblocks M8's exit.*
 
       The first attempt at the exit run stalled at the last step of setup:
@@ -6376,6 +6376,111 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       over the refusal list — a surface that silently gained `watch:approve`
       would be the whole package undone.*
 
+      **BUILT.** Three layers and one policy. `src/shared/control.ts` is the
+      pure table — twelve verbs, their validators, and the refusal list with its
+      reasons — and it is the ONE place that says what is scriptable.
+      `src/main/control.ts` is the endpoint, mirroring `HookServer` exactly:
+      `<home>/control.sock` at 0600 on POSIX, the LOCAL named-pipe namespace
+      with a per-home sha256 discriminator on Windows, no TCP port, no token. A
+      SEPARATE address from the hook endpoint, deliberately — every agent's own
+      process is handed that one. `scripts/ephctl.cjs` is the client and holds
+      no verb table, no validators and no prose, which a test asserts by reading
+      its source.
+
+      **One implementation, two callers, enforced by the compiler.**
+      `ControlDeps = Pick<IpcDeps, …>` and `registerIpc` now RETURNS its deps, so
+      `index.ts` hands the control surface the same object the window is served
+      from in a single statement. A signature that changes on one side stops the
+      other compiling; the window and a script cannot drift.
+
+      **The four refusals are refused by name, with a reason that teaches the
+      rule** — `watch:approve`, `odeon:verdict`, `secrets:set`, `gym:set-mode`,
+      named after the channels the window uses so a caller who knows the app's
+      vocabulary lands on the lesson rather than on "no such verb". An unknown
+      verb gets BOTH lists, for the same reason.
+
+      **Audit.** Every act that CHANGES something writes
+      `kind: 'remote', event: 'control', channel: 'remote'`. Reads deliberately
+      do not: `log.jsonl` is append-only, so a polled `status` would push real
+      events out of a reader's view permanently. That decision is declarative —
+      `writes: boolean` sits in the same table as the refusal list — so a
+      mutation flipping it is killed rather than merely noticed. Refusals are
+      always logged, whether or not the caller could have known.
+
+      *Evidence: typecheck, lint, invariants (reachability 182/192 →
+      **184/194**, both new modules reached from production with no allowlist),
+      coverage floors ok with none lowered and no ratchet needed, README currency
+      and attribution green. **27 mutants, 26 killed and the twenty-seventh a
+      planted no-op** which survived as designed — and it leaked into the tree
+      once, which is the second thing a planted mutant is for.*
+
+      **TWO SURVIVORS, BOTH MISSING TESTS — the fourth consecutive package where
+      "equivalent" was the wrong reading.** (a) Consulting the ALLOWED table
+      before the refusal list survived, because with the shipped tables the two
+      orders are indistinguishable. That is precisely the guard's justification —
+      it exists to survive somebody "just adding the verb" that is already
+      refused — so the fix was to make the order a rule rather than an accident:
+      `resolveVerbIn(refused, allowed, name)` takes its tables, and a test drives
+      it with tables that DO overlap. (b) The new `DIAGNOSIS.md` probe matching
+      the bare kind `remote` instead of `remote:control` survived: it would have
+      read `WORKING` the moment any repository was ingested, since the Harbor
+      writes that kind too. A check that cannot fail in the one way that matters,
+      in the report built to refuse exactly that.
+
+      **TWO DEFECTS THE LIVE RUN EXPOSED, neither visible to a green suite.**
+      (a) **A grant given in THIS session wrote no row at all.** Only `boot()`
+      logged `orchestrator/consented`; the banner's grant and `ephctl`'s alike
+      produced four spawns with nothing above them saying why, and the row did
+      not appear until the next restart. M8.13 had already worked *around* this
+      — its consent probe reads `provenDirectly` from `config.json` precisely
+      because the log row was not there yet — so the gap was known and unclosed.
+      The emission moved INTO `CompanyStart`, where the ordering already lives,
+      so both callers get it; the row now carries `from: 'boot' | 'grant'`,
+      because "the company came up already consented" and "somebody said go at
+      03:14" are different afternoons to a reader asking why four agents
+      spawned. `index.ts` got shorter, not longer. (b) `profile:activate`'s usage
+      line advertised `--isolation worktree`, which is not one of the three
+      values `activationIsolationSchema` accepts — a help string sending a
+      stranger to a flag that would be refused.
+
+      *Proved live, twice, against fresh short homes and captured from the book
+      of record rather than stdout:* boot refuses to hire
+      (`orchestrator/awaiting-consent`, seq 6, no `triggers.json`); `ephctl
+      consent:grant` starts the company (`consented` `from: grant` seq 9, Artemis
+      `spawn` seq 13, `triggers.json` written 60 s later at 13:33:29 against a
+      grant at 13:32:29); `ephctl profile:activate` hires four agents against a
+      real checkout and the log names the repository
+      (`repos: ["mertefesensoy/aftershock"]`, *read from the target's origin
+      remote*); all four excluded verbs refused by name with the reason and
+      `exit=1`; **every one of those acts carries `kind: remote, event: control,
+      channel: remote`** and not one read does; and `DIAGNOSIS.md` moved to
+      `the control surface | WORKING | remote/control at seq 11`. Both no-harness
+      messages were proved too — a home with no address file, and a stale address
+      left by a killed harness — because those are the two most common failures
+      and `ECONNREFUSED` is an answer to neither.
+
+      **A THIRD DEFECT, and only CI could see it.** On POSIX a second harness
+      on one home **stole the control endpoint from the first**: `start()`
+      removes a leftover socket so a crashed run does not block the next boot,
+      and removing it unconditionally deletes a LIVE one. The first harness then
+      answers nobody while `ephctl` talks to the second — on a home that already
+      has one book of record and one single committer, which `EXIT-M8` §4 names
+      as a hazard for exactly that reason. On Windows the OS refuses a duplicate
+      pipe name, so `start()` failed on its own and the test asserting the
+      degradation was **green here and red on linux**. Now the address is probed
+      first, **on both platforms**, and a served one is refused with a sentence
+      rather than with `EADDRINUSE`; only then is a leftover cleared, and only on
+      the platform that has one. Running the rule everywhere is not tidiness: the
+      first fix put it inside the `win32` branch, and two mutations of it then
+      survived here **because no local test could reach them** — a rule only one
+      platform executes is a rule only one platform's tests can check.
+      `src/main/hooks.ts` carries the identical unconditional `rmSync` and is
+      deliberately **not** changed here — a §8 question, in
+      `docs/DECISIONS-LOG.md` for the Architect.
+
+      **`docs/EXIT-M8.md` §1 is now runnable without a mouse**, with the two
+      blocked steps carrying their commands and a refusal to try on purpose.
+
 **M8's exit is unblocked and its criterion amended (2026-09-08).** Three things
 were settled after the first attempt: a **fresh agent session satisfies "a
 developer who is not the author"** (recorded so the row can close on a stated
@@ -6384,7 +6489,11 @@ hour is Ephesus-side time**, excluding CI latency, because on the chosen target
 detection alone can eat half of it; and **the briefing may be convened by hand**,
 since a 24-hour standup was never going to land inside sixty minutes and the
 clause is about accuracy, not timing. All three are in SRS §6.1 and
-`docs/DECISIONS-LOG.md`, not only here. **The run itself waits for M8.14.**
+`docs/DECISIONS-LOG.md`, not only here. **M8.14 has landed, so the run no
+longer waits for anything**: every step of `docs/EXIT-M8.md` §1 has a command,
+and a script still cannot approve a gate. Both halves of that sentence are the
+criterion — if only the first were true, the surface would be worse than what
+it replaced.
 
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
