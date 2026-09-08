@@ -6328,6 +6328,64 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       main and read from disk, so it observes nothing about the renderer — which
       the report says about itself, in its own body.*
 
+- [ ] **M8.14 The controls are not buried in the window** — *Architect decision
+      2026-09-08, and it is what actually unblocks M8's exit.*
+
+      The first attempt at the exit run stalled at the last step of setup:
+      consent and profile activation exist ONLY in the renderer, so a runner who
+      was not a person at the machine could not reach them. Two workarounds were
+      offered — the Architect clicks, or the agent is given desktop control — and
+      both were refused in favour of naming the real defect: *"when it says
+      architect activates the crew it can also mean for my verbal approvement.
+      So we need to find a way for you to activate everything from CLI tools of
+      Ephesus that we need to build. Thus all controls should not be buried under
+      the UI of the application."* SRS §6.1 carries the matching amendment:
+      **"The Architect activates" is about authority, not about a mouse.**
+
+      **Scope — it OPERATES, it does not AUTHORISE.** In: consent, profile
+      activate/deactivate, convene a briefing, status/diagnosis reads, agent
+      lists. **Out, deliberately: gate approvals, memo verdicts, secrets, and
+      mode changes.** Those are the decisions the Watch exists to put in front of
+      a human, and a CLI that could approve a destructive gate would delete the
+      meaning of §6.1's own last clause by making the gate scriptable by the
+      automation it exists to bound. ADR-0010 and FR-14.2 already draw the same
+      line in their own areas. *A script may run the company; only a human may
+      authorise what the company is not otherwise allowed to do.*
+
+      **Transport — mirror the event plane, do not invent one.**
+      `hookEndpointFor` already solves this exactly: a `0600` socket in the home
+      on POSIX, and on Windows the LOCAL named-pipe namespace (libuv rejects
+      remote clients) with a per-home sha256 discriminator so two `EPH_HOME`s
+      cannot collide. **No token** — that would be a new secret to manage against
+      ADR-0010's write-only rule, and the endpoint trusts exactly what the hook
+      endpoint, `~/.ephesus` and the engine credentials already trust.
+      **Every control act is tagged `remote`** in the book of record, the way
+      FR-10.3 tags inbound items, so the log always distinguishes what the window
+      did from what a script did. That audit is what this surface adds beyond the
+      hook endpoint's guard.
+
+      **One implementation, two callers.** `registerIpc` already routes 79
+      handlers through a single `IpcDeps`; the control endpoint calls the SAME
+      deps rather than a parallel path, so the window and the CLI cannot drift
+      into disagreeing about what an action does.
+
+      *Tests owed: the endpoint refuses a remote client; the four excluded
+      actions are refused BY NAME with a reason that teaches the rule; every
+      accepted act writes a `remote`-tagged row; the surface works against a
+      running app and says so clearly when none is running. Plus a mutation pass
+      over the refusal list — a surface that silently gained `watch:approve`
+      would be the whole package undone.*
+
+**M8's exit is unblocked and its criterion amended (2026-09-08).** Three things
+were settled after the first attempt: a **fresh agent session satisfies "a
+developer who is not the author"** (recorded so the row can close on a stated
+standard — the absence of one is why M7 has been open since 2026-09-01); **the
+hour is Ephesus-side time**, excluding CI latency, because on the chosen target
+detection alone can eat half of it; and **the briefing may be convened by hand**,
+since a 24-hour standup was never going to land inside sixty minutes and the
+clause is about accuracy, not timing. All three are in SRS §6.1 and
+`docs/DECISIONS-LOG.md`, not only here. **The run itself waits for M8.14.**
+
 **Design decisions carried into M8, all the Architect's** (register DD-1…DD-7).
 **AUDITED BY EXECUTION 2026-09-07 — five of the seven are settled, and three of
 those were settled by work that had already landed.** The list below is the
