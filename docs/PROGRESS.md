@@ -6407,12 +6407,12 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       mutation flipping it is killed rather than merely noticed. Refusals are
       always logged, whether or not the caller could have known.
 
-      *Evidence: 229 files / 4343 passed / 0 failed; typecheck, lint, invariants
-      (reachability 182/192 → **184/194**, both new modules reached from
-      production with no allowlist), coverage floors ok, README currency and
-      attribution green. **20 mutants, 19 killed and the twentieth a planted
-      no-op** which survived as designed — and it leaked into the tree once,
-      which is the second thing a planted mutant is for.*
+      *Evidence: typecheck, lint, invariants (reachability 182/192 →
+      **184/194**, both new modules reached from production with no allowlist),
+      coverage floors ok with none lowered and no ratchet needed, README currency
+      and attribution green. **27 mutants, 26 killed and the twenty-seventh a
+      planted no-op** which survived as designed — and it leaked into the tree
+      once, which is the second thing a planted mutant is for.*
 
       **TWO SURVIVORS, BOTH MISSING TESTS — the fourth consecutive package where
       "equivalent" was the wrong reading.** (a) Consulting the ALLOWED table
@@ -6458,6 +6458,25 @@ was a misreading of GitHub's ordinary `Branch not protected`). Doc:
       messages were proved too — a home with no address file, and a stale address
       left by a killed harness — because those are the two most common failures
       and `ECONNREFUSED` is an answer to neither.
+
+      **A THIRD DEFECT, and only CI could see it.** On POSIX a second harness
+      on one home **stole the control endpoint from the first**: `start()`
+      removes a leftover socket so a crashed run does not block the next boot,
+      and removing it unconditionally deletes a LIVE one. The first harness then
+      answers nobody while `ephctl` talks to the second — on a home that already
+      has one book of record and one single committer, which `EXIT-M8` §4 names
+      as a hazard for exactly that reason. On Windows the OS refuses a duplicate
+      pipe name, so `start()` failed on its own and the test asserting the
+      degradation was **green here and red on linux**. Now the address is probed
+      first, **on both platforms**, and a served one is refused with a sentence
+      rather than with `EADDRINUSE`; only then is a leftover cleared, and only on
+      the platform that has one. Running the rule everywhere is not tidiness: the
+      first fix put it inside the `win32` branch, and two mutations of it then
+      survived here **because no local test could reach them** — a rule only one
+      platform executes is a rule only one platform's tests can check.
+      `src/main/hooks.ts` carries the identical unconditional `rmSync` and is
+      deliberately **not** changed here — a §8 question, in
+      `docs/DECISIONS-LOG.md` for the Architect.
 
       **`docs/EXIT-M8.md` §1 is now runnable without a mouse**, with the two
       blocked steps carrying their commands and a refusal to try on purpose.

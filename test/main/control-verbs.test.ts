@@ -4,12 +4,14 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ControlServer,
+  controlEndpointFor,
+  isListening,
   performVerb,
   startControlSurface,
   type ControlDeps
 } from '../../src/main/control'
 import { DiagnosisWriter, DIAGNOSIS_FILE } from '../../src/main/diagnosis'
-import { CONTROL_VERBS, type ControlVerb } from '../../src/shared/control'
+import { CONTROL_ADDRESS_FILE, CONTROL_VERBS, type ControlVerb } from '../../src/shared/control'
 import type { DiagnosisInput } from '../../src/shared/diagnosis'
 import { removeTempDir } from '../tmpdir'
 
@@ -528,6 +530,30 @@ describe('the fold has one owner', () => {
   })
 })
 
+describe('isListening', () => {
+  it('says yes to an endpoint a harness is serving', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-probe-'))
+    temps.push(home)
+    const server = await startControlSurface({
+      deps: deps(),
+      home,
+      report: () => undefined,
+      announce: () => undefined
+    })
+    servers.push(server)
+    await expect(isListening(controlEndpointFor(home))).resolves.toBe(true)
+  })
+
+  it('says no to an address nothing is serving, without throwing', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-noprobe-'))
+    temps.push(home)
+    // Never started: the answer must be a `false`, not a rejection, because the
+    // caller is deciding whether a leftover address is rubbish and an exception
+    // there would take the boot down over a file.
+    await expect(isListening(controlEndpointFor(home))).resolves.toBe(false)
+  })
+})
+
 describe('startControlSurface', () => {
   it('returns a listening server and announces where', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-boot-'))
@@ -585,7 +611,48 @@ describe('startControlSurface', () => {
     })
     servers.push(second)
     expect(degraded.join('\n')).toContain('the control surface is not listening')
+    // The SENTENCE, not just the failure: on Windows the OS would refuse the
+    // duplicate pipe name anyway, but with `EADDRINUSE`, and a reader cannot act
+    // on that. Asserting the words is also what makes the guard's absence
+    // detectable on a platform whose kernel happens to enforce the same rule.
+    expect(degraded.join(' ')).toContain('another harness is already listening')
+    expect(degraded.join(' ')).toContain('stop the first one')
     expect(second.endpoint()).toBeNull()
+    // And the FIRST one is untouched: it still holds the address and still answers.
+    expect(first.endpoint()).toBe(controlEndpointFor(home))
+    const advertised = JSON.parse(
+      fs.readFileSync(path.join(home, CONTROL_ADDRESS_FILE), 'utf8')
+    ) as { pid: number }
+    expect(advertised.pid).toBe(process.pid)
+  })
+
+  it('still binds over a socket a CRASHED harness left behind', async () => {
+    // The other half of the same branch, and the regression the fix could have
+    // caused: a leftover socket that answers nobody must not block the next
+    // boot. On Windows the pipe dies with its process and there is nothing to
+    // leave behind, so the setup is POSIX-only while the assertion is not.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-stale-'))
+    temps.push(home)
+    const first = await startControlSurface({
+      deps: deps(),
+      home,
+      report: () => undefined,
+      announce: () => undefined
+    })
+    await first.stop()
+    if (process.platform !== 'win32')
+      fs.writeFileSync(controlEndpointFor(home), 'a socket nobody is listening on')
+
+    const degraded: string[] = []
+    const second = await startControlSurface({
+      deps: deps(),
+      home,
+      report: (_cause, detail) => degraded.push(detail),
+      announce: () => undefined
+    })
+    servers.push(second)
+    expect(degraded).toEqual([])
+    expect(second.endpoint()).toBe(controlEndpointFor(home))
   })
 
   it('stops cleanly even when it never started', async () => {

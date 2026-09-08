@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import path from 'node:path'
 import {
   CONTROL_ADDRESS_FILE,
@@ -105,6 +106,9 @@ export interface ControlServerOptions {
 
 const DEFAULT_MAX_BODY_BYTES = 256 * 1024
 
+/** How long to wait for a leftover socket to answer before calling it abandoned. */
+const SOCKET_PROBE_MS = 250
+
 /**
  * The one condition this surface reports (`src/shared/degradation.ts`). Stable,
  * so a later clear finds it again.
@@ -182,6 +186,29 @@ export class ControlServer {
     if (this.server) throw new Error('control: server already started')
     const endpoint = controlEndpointFor(homeRoot)
 
+    // Two rules, in this order, and the order is the fix.
+    //
+    // 1. If something is ALREADY SERVING this address, refuse. Two harness
+    //    instances on one home share a book of record and a single committer
+    //    (EXIT-M8 §4 names it), and a control surface silently transferred to
+    //    the second one would answer `ephctl` for a company the caller did not
+    //    mean. Asked on BOTH platforms deliberately: Windows would refuse the
+    //    duplicate pipe name anyway, but with `EADDRINUSE` instead of a
+    //    sentence — and a rule that only runs on one platform is a rule only
+    //    one platform's tests can check.
+    // 2. Only then clear a leftover. A crashed harness leaves its socket file
+    //    behind on POSIX and removing it is how the next boot binds (SDD §10);
+    //    Windows pipes die with their process, so there is nothing to clear.
+    //
+    // The first rule was missing until CI found it: `rmSync` ran
+    // unconditionally, so on POSIX the second instance DELETED the first one's
+    // live socket and bound over it. On win32 the bind failed on its own, which
+    // is why the test asserting the degradation was green here and red there.
+    if (await isListening(endpoint))
+      throw new Error(
+        `another harness is already listening on ${endpoint} — two instances on one ` +
+          'home share a book of record and a single committer; stop the first one'
+      )
     if (process.platform !== 'win32' && fs.existsSync(endpoint))
       fs.rmSync(endpoint, { force: true })
 
@@ -662,6 +689,31 @@ export async function startControlSurface(options: {
     )
   }
   return server
+}
+
+/**
+ * Contract: is anything answering on this endpoint right now?
+ *
+ * Never throws, and never waits long: an address nobody answers within the
+ * budget is treated as abandoned, which is the same conclusion the
+ * unconditional `rmSync` reached — only now it is a conclusion rather than an
+ * assumption.
+ *
+ * Exported and tested directly, on both platforms, although only the POSIX
+ * branch of `start()` calls it: a guard whose own answer nobody checks is the
+ * shape that has already cost this repository a catch that guarded nothing.
+ */
+export async function isListening(endpoint: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.connect({ path: endpoint })
+    const settle = (answer: boolean): void => {
+      socket.destroy()
+      resolve(answer)
+    }
+    socket.setTimeout(SOCKET_PROBE_MS, () => settle(false))
+    socket.once('connect', () => settle(true))
+    socket.once('error', () => settle(false))
+  })
 }
 
 function ok(verb: ControlVerb, text: string, data: unknown): ControlAnswer {

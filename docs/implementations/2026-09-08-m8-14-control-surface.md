@@ -271,7 +271,7 @@ coverage`) before each run.
 
 ### Reproducing the mutation pass
 
-Twenty mutants over every guard this package adds, in both directions: a refused
+Twenty-seven mutants over every guard this package adds, in both directions: a refused
 verb that becomes allowed, an allowed verb that becomes refused, the refusal list
 consulted second, a refusal that answers `200 ok`, a refused act that leaves no
 trace, an act that lands untagged, reads that get logged, writes that do not, two
@@ -279,17 +279,21 @@ homes that collide on one pipe name, an endpoint that answers any path, a body
 larger than the limit, two schemas that stop being strict, an address file that
 survives the quit, a CLI that exits `0` on a refusal, an English failure that
 becomes an error code, a refusal that stops teaching the rule, and a probe that
-matches the bare kind `remote`.
+matches the bare kind `remote`, a company that starts with no row saying so, a
+mid-session grant recorded as if it had come up consented, an unconsented boot
+that says nothing at all, a usage line free to advertise a flag the schema
+refuses, a live endpoint stolen from the harness serving it, an abandoned socket
+called live, and a probe that answers `true` for an address nothing serves.
 
-**Nineteen killed. The twentieth is a planted no-op** — a cosmetic rename inside
+**Twenty-six killed. The twenty-seventh is a planted no-op** — a cosmetic rename inside
 `renderHelp` — which survived, as it must: a harness that reports every mutant
 killed cannot tell you when it has stopped running your tests. It earned its
 keep twice, because the planted mutant also *leaked into the tree* between runs
 and the second pass is what found it.
 
-### The two survivors, read rather than patched around
+### The survivors, read rather than patched around
 
-Both were missing tests. Fourth consecutive package where "equivalent mutant" was
+All were missing tests. Fourth consecutive package where "equivalent mutant" was
 the comfortable and wrong reading.
 
 1. **Consulting the allowed table before the refusal list.** With the shipped
@@ -302,6 +306,13 @@ the comfortable and wrong reading.
    read `WORKING` the moment any repository was ingested, because the Harbor
    writes that kind too — a check that cannot fail in the one way that matters,
    inside the report M8.13 built to refuse exactly that.
+3. **Two mutations of the endpoint guard, after the platform fix.** Both survived
+   *on win32 only*, because the first version of the guard sat inside the
+   `process.platform !== 'win32'` branch and nothing local could execute it. The
+   answer was not to accept a platform-conditional survivor but to make the rule
+   platform-independent, and to assert the SENTENCE a reader gets rather than
+   merely that the start failed — which is what makes the guard's absence
+   detectable on a platform whose kernel enforces the same thing by accident.
 
 ### Production call path (ENGINEERING-STANDARDS §6.7)
 
@@ -354,7 +365,7 @@ The harness may have stopped without tidying up. Start it with `npm run dev`
 and try again.
 ```
 
-### The two defects it exposed
+### The three defects it exposed
 
 **(a) A grant given in THIS session wrote no row at all.** Only `boot()` logged
 `orchestrator/consented`; the banner's grant and `ephctl`'s alike produced four
@@ -368,6 +379,22 @@ company came up already consented"* and *"somebody said go at 03:14"* are
 different afternoons to a reader asking why four agents spawned. `index.ts` lost
 a statement rather than gaining one, which is the direction the `boot` coverage
 row exists to keep true.
+
+**(c) On POSIX, a second harness on one home stole the control endpoint from the
+first** — and this one only CI could show. `start()` removes a leftover socket
+file so a crashed run does not block the next boot (SDD §10); removing it
+unconditionally deletes a LIVE one, and the first harness then answers nobody
+while `ephctl` talks to the second. Windows refuses a duplicate pipe name, so
+`start()` failed on its own and the test asserting the degradation was green on
+the machine it was written on and red on the other platform. A leftover socket is
+now probed with a 250 ms connect, **on both platforms**: a served address is
+refused with a sentence rather than with `EADDRINUSE`, and only then is a
+leftover cleared, on the platform that has one. Running it everywhere is not
+tidiness — the first fix put the probe inside the `win32` branch and two
+mutations of it survived here, *because no local test could reach them*. A guard
+only one platform executes is a guard only one platform's tests can check.
+`src/main/hooks.ts` has the identical unconditional `rmSync` and is deliberately
+not changed here — a §8 question, recorded rather than fixed.
 
 **(b) `profile:activate`'s usage line advertised `--isolation worktree`**, which
 `activationIsolationSchema` does not accept. A help string that sends a stranger
