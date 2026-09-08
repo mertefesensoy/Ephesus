@@ -11,8 +11,22 @@ import { ensureHarnessHome, type HarnessHome } from './home'
  */
 let home: HarnessHome | null = null
 
+/**
+ * Contract: pure. Where the harness home lives for a given environment.
+ *
+ * One expression, exported, because `scripts/ephctl.cjs` has to resolve the
+ * same home from outside the app and cannot import TypeScript. A CLI that
+ * pointed at a different directory than the app would report "no harness is
+ * running" against a harness that is (M8.14), so the two are pinned to each
+ * other by `test/scripts/ephctl.test.ts` rather than by a comment.
+ */
+export function harnessHomeRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['EPH_HOME']
+  return override === undefined || override === '' ? path.join(os.homedir(), '.ephesus') : override
+}
+
 export function initHome(): HarnessHome {
-  home ??= ensureHarnessHome(process.env['EPH_HOME'] ?? path.join(os.homedir(), '.ephesus'))
+  home ??= ensureHarnessHome(harnessHomeRoot())
   return home
 }
 

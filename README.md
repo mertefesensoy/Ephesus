@@ -341,6 +341,34 @@ including every refusal, shown as a refusal.
 To take it all down: deactivate the instance from PROFILES. To watch a second
 repository, activate the same profile again against a different checkout.
 
+### Doing all of that from a terminal
+
+Every step above is also a command, because **"the Architect activates" is about
+authority, not about a mouse**
+([ADR-0033](./docs/adr/ADR-0033-a-script-may-run-the-company.md)). With the app
+running, in another terminal with the same `EPH_HOME`:
+
+```bash
+node scripts/ephctl.cjs help
+```
+
+`consent:status` prints what starting the company would do; `consent:grant` says
+go; `profile:activate --profile skeleton-crew --target repo:myapp --path
+/path/to/checkout` hires the crew and tells you which repositories it will
+watch; `profile:instances`, `agents:list`, `status` and `log:tail` read.
+
+**Four things it will not do**, and it says so by name rather than pretending
+they do not exist: approve a gate, decide a memo, set a secret, or change the
+company mode. *A script may run the company; only a human may authorise what the
+company is not otherwise allowed to do.* Every act performed this way is written
+to the book of record tagged `remote`, so the log always distinguishes what the
+window did from what a script did.
+
+It is owner-only and local-only — a socket in the harness home, a local named
+pipe on Windows, no port and no token. That means anything running as you can
+operate the company; [`docs/THREAT-MODEL.md`](./docs/THREAT-MODEL.md) §6.8 says
+plainly what that is and is not.
+
 ### Watching a repository
 
 A mission profile is activated against a target repository from the **Profiles**
@@ -400,7 +428,7 @@ mid-run. That run has not happened, so the row is open — as M7's own exit has
 been since 2026-09-01, for the same reason. The script for it is
 [`docs/EXIT-M8.md`](./docs/EXIT-M8.md).
 
-<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11 M8.12 M8.13
+<!-- landed: M8.0 M8.1 M8.2 M8.3 M8.4 M8.5 M8.6 M8.7a M8.7b M8.8 M8.9 M8.10 M8.11 M8.12 M8.13 M8.14
      Checked by scripts/check-readme-current.cjs against docs/PROGRESS.md: every
      package ticked there must be listed here, and listing one is a claim that
      the prose below actually says what it did. The check catches the oversight
@@ -513,6 +541,22 @@ a quiet screen.
 That same exit attempt found this README sending people to two panels that do
 not exist, and a Node version the lockfile does not accept. Both are fixed here,
 which is what the exercise is for.
+
+And, the package that unblocked the exit run itself: **the controls are not
+buried in the window.** The first attempt stalled at the last step of setup —
+consent and profile activation existed only in the renderer, so a runner who was
+not a person at the keyboard could not reach them, and an hour's test died at
+minute two. Two workarounds were offered and both refused in favour of naming
+the real defect. Ephesus now carries a local control surface: consent, mission
+activation and deactivation, convening a briefing, and the reads, all available
+to a script through the same handlers the window calls — not a parallel
+implementation, which is why the two cannot drift. **It operates the company and
+it does not authorise anything the company is not otherwise allowed to do**:
+gate approvals, memo verdicts, secrets and mode changes are refused by name,
+with the reason, because a CLI that could approve a destructive gate would
+delete the meaning of the very clause the exit run is measuring. Every act it
+performs is tagged `remote` in the book of record, so an audit can always tell a
+script from a person at the keyboard.
 
 M7's own exit (SRS §6.1 on a real repository) remains open and is independent
 of M8. The same run is owed to both.

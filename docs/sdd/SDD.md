@@ -25,6 +25,7 @@ Three OS-level tiers (ADR-0001, ADR-0002):
 │ Electron MAIN (Node, privileged)                                        │
 │  pty.ts hermes.ts agora.ts artemis.ts library.ts odeon.ts herald/      │
 │  harbor/ watch/ engines/ hooks.ts scheduler.ts db.ts config.ts ipc.ts  │
+│  control.ts (the second front door — ADR-0033)                         │
 ├────────────────────────────────────────────────────────────────────────┤
 │ PRELOAD (contextBridge) → typed window.eph API — the ONLY renderer door │
 ├────────────────────────────────────────────────────────────────────────┤
@@ -87,6 +88,7 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `shutdown.ts` | The quit sequence (M8.1): closing time, then the agent unwind, then the stops, each phase isolated so one failure never skips the next; idempotent, Electron-free, and driven by the scenario suite as well as by `index.ts` | 0001 |
 | `ui-bridge.ts` | The one door from main to the renderer (M8.1): owns the window, forgets it when it closes, refuses to send to a destroyed one, and is the `PtySink` the terminal stream writes to. A `webContents.send` anywhere else fails `check-invariants` | 0001, 0014 |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
+| `control.ts` | The control surface (M8.14): a second front door onto the SAME `IpcDeps` the window is served from, so a script can run the company without the window. Owner-only socket / local named pipe mirroring `hooks.ts`, a separate address from it (agents hold that one); validates in main like any untrusted caller; refuses the four verbs only a human may perform, by name and with a reason; tags every act that CHANGES something `remote` in `log.jsonl` (FR-10.3) and deliberately logs no reads. `ControlDeps` is a `Pick<IpcDeps, …>`, which is what makes the window and the CLI unable to drift. The verb table, the refusal list and every rendered answer are pure, in `shared/control.ts`; the client is `scripts/ephctl.cjs` and holds none of them | 0033, 0010 |
 
 ---
 
@@ -120,6 +122,15 @@ The hook socket is `0600` with a per-spawn token in each payload.
   events.sock                # hook socket (0600) — also answers `POST /recall`
                              #  for the agent-facing `eph-recall` CLI (ADR-0006
                              #  layer 2): one socket, one per-spawn token registry
+  control.sock               # control socket (0600) — the Architect's own front door
+                             #  (M8.14, ADR-0033). A SEPARATE address from events.sock
+                             #  on purpose: every agent's process is handed that one
+  control-endpoint.json      # where control.sock is, written at boot and removed on a
+                             #  clean quit, so `scripts/ephctl.cjs` finds the harness
+                             #  without re-deriving the address — and so it can say
+                             #  "no harness is running" without a connection attempt
+  DIAGNOSIS.md               # what is working, what is not, and why (M8.13). Rewritten
+                             #  at boot, every minute, and once more on the way out
   db.sqlite                  # app-local + cost ledger
   prompts/                   # versioned text assets: artemis system prompt, block-reason
                              # template, reflection prompts, herald persona & phrase book

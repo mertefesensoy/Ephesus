@@ -197,6 +197,18 @@ const PROBES: readonly Probe[] = [
     sources: ['library'],
     proves: ['memory'],
     wouldExercise: 'an agent condensing its memory, which needs a running crew'
+  },
+  {
+    // M8.14. `remote:control` is the CONSUMER's spelling: every act that
+    // arrives over the control surface writes exactly that pair, so this row
+    // reads `working` only once a script has actually driven the company —
+    // never because the endpoint merely came up.
+    area: 'the control surface',
+    sources: ['control'],
+    proves: ['remote:control'],
+    // An act, not a read: reads are deliberately not logged, so naming one here
+    // would send a reader to a command that cannot move this row.
+    wouldExercise: 'running `node scripts/ephctl.cjs consent:grant` in a terminal'
   }
 ]
 

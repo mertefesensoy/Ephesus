@@ -55,6 +55,12 @@ export const DEGRADATION_SOURCES = [
   // orchestrator is not down, she was never hired, and the Architect acts on
   // this by answering a question rather than by repairing anything.
   'consent',
+  // The control surface (M8.14): the endpoint would not bind, or an act that
+  // reached it could not be written down. Its own source rather than `hooks`,
+  // because the two front doors fail independently and for different people —
+  // a dead hook endpoint costs an agent its lifecycle events, a dead control
+  // endpoint costs the Architect every command they cannot type in the window.
+  'control',
   'engines',
   'gates',
   'harbor',

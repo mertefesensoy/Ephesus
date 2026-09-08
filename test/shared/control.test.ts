@@ -1,0 +1,390 @@
+import { describe, expect, it } from 'vitest'
+import {
+  CONTROL_ADDRESS_FILE,
+  CONTROL_ENDPOINT_PATH,
+  CONTROL_SCHEMA_VERSION,
+  CONTROL_VERBS,
+  REFUSED_VERBS,
+  activationRequestFromArgs,
+  controlAddressSchema,
+  controlRequestSchema,
+  renderHelp,
+  renderRefusal,
+  renderUnknownVerb,
+  resolveControlVerb,
+  resolveVerbIn
+} from '../../src/shared/control'
+import { activationIsolationSchema } from '../../src/shared/isolation'
+
+/**
+ * The control surface's policy (M8.14).
+ *
+ * The most important block in this file is `the refused set`. A mutation that
+ * quietly moves `watch:approve` out of `REFUSED_VERBS` — or into `CONTROL_VERBS`
+ * — is the whole package undone, and it must fail here loudly rather than
+ * somewhere downstream. So the set is asserted in BOTH directions: exactly these
+ * four names are refused, and no refused name is also offered.
+ */
+
+const verbNames = (): readonly string[] => CONTROL_VERBS.map((verb) => verb.name)
+const argsFor = (name: string): (typeof CONTROL_VERBS)[number]['args'] => {
+  const verb = CONTROL_VERBS.find((entry) => entry.name === name)
+  if (!verb) throw new Error(`no verb "${name}" — the table changed and this test did not`)
+  return verb.args
+}
+
+describe('the refused set', () => {
+  it('is exactly the four decisions only a human may make', () => {
+    expect(REFUSED_VERBS.map((entry) => entry.name).sort()).toEqual([
+      'gym:set-mode',
+      'odeon:verdict',
+      'secrets:set',
+      'watch:approve'
+    ])
+  })
+
+  it('offers none of them as a verb', () => {
+    for (const refused of REFUSED_VERBS) expect(verbNames()).not.toContain(refused.name)
+  })
+
+  it('refuses each of them by name, whatever else the table holds', () => {
+    for (const refused of REFUSED_VERBS) {
+      const resolution = resolveControlVerb(refused.name)
+      expect(resolution.kind).toBe('refused')
+      if (resolution.kind !== 'refused') throw new Error('unreachable')
+      expect(resolution.refusal.name).toBe(refused.name)
+    }
+  })
+
+  it('teaches the rule rather than merely saying no', () => {
+    for (const refused of REFUSED_VERBS) {
+      const text = renderRefusal(refused)
+      // The three things a caller needs: that it is deliberate, why, and where
+      // a human does it instead. A refusal missing any of them bills you again.
+      expect(text).toContain('deliberately not scriptable')
+      expect(text).toContain(refused.because)
+      expect(text).toContain(refused.instead)
+      expect(text).toContain('only a human may')
+    }
+  })
+
+  it('names each refusal after the channel the window uses, so a caller lands on it', () => {
+    // The point of naming them this way: somebody who knows `watch:approve` from
+    // the app's own vocabulary gets the lesson, not "no such verb".
+    expect(REFUSED_VERBS.map((entry) => entry.name)).toContain('watch:approve')
+    expect(resolveControlVerb('watch:approve').kind).toBe('refused')
+  })
+})
+
+describe('resolveControlVerb', () => {
+  it('answers every verb in the table as allowed', () => {
+    for (const verb of CONTROL_VERBS) {
+      const resolution = resolveControlVerb(verb.name)
+      expect(resolution.kind).toBe('allowed')
+      if (resolution.kind !== 'allowed') throw new Error('unreachable')
+      expect(resolution.verb.name).toBe(verb.name)
+    }
+  })
+
+  it('answers a name in neither set as unknown', () => {
+    expect(resolveControlVerb('watch:approve-please').kind).toBe('unknown')
+    expect(resolveControlVerb('').kind).toBe('unknown')
+  })
+
+  it('prefers the refusal when a name is in BOTH tables', () => {
+    // Driven through `resolveVerbIn` with tables that DO overlap, because with
+    // the shipped ones the order is indistinguishable — which is what a
+    // mutation pass found, and why this test exists in this shape. The mistake
+    // it survives is somebody "just adding the verb" that is already refused.
+    const refusal = REFUSED_VERBS[0]
+    const allowed = CONTROL_VERBS[0]
+    if (!refusal || !allowed) throw new Error('a table is empty — that alone is the failure')
+    const collided = resolveVerbIn([refusal], [{ ...allowed, name: refusal.name }], refusal.name)
+    expect(collided.kind).toBe('refused')
+
+    // And the allowed table still answers a name the refusals do not claim.
+    expect(resolveVerbIn([refusal], [allowed], allowed.name).kind).toBe('allowed')
+    expect(resolveVerbIn([refusal], [allowed], 'neither').kind).toBe('unknown')
+  })
+})
+
+describe('an unknown verb', () => {
+  it('lists what is offered AND what is refused', () => {
+    const text = renderUnknownVerb('consent:revoke')
+    expect(text).toContain('no such verb: "consent:revoke"')
+    for (const verb of CONTROL_VERBS) expect(text).toContain(verb.name)
+    for (const refused of REFUSED_VERBS) expect(text).toContain(refused.name)
+    expect(text).toContain('only a human may')
+  })
+})
+
+describe('help', () => {
+  it('describes every verb and every refusal', () => {
+    const text = renderHelp()
+    for (const verb of CONTROL_VERBS) expect(text).toContain(verb.summary)
+    for (const refused of REFUSED_VERBS) expect(text).toContain(refused.name)
+  })
+
+  it('says what the surface is for in one sentence a stranger can act on', () => {
+    expect(renderHelp()).toContain('It operates the company.')
+  })
+})
+
+describe('the verb table', () => {
+  it('marks exactly the acts that change something as writes', () => {
+    // This decides what reaches the book of record. Reads are excluded on
+    // purpose: `log.jsonl` is append-only, and a polled `status` would push real
+    // events out of a reader's view for ever.
+    const writes = CONTROL_VERBS.filter((verb) => verb.writes).map((verb) => verb.name)
+    expect(writes.sort()).toEqual([
+      'consent:grant',
+      'odeon:convene',
+      'profile:activate',
+      'profile:deactivate'
+    ])
+  })
+
+  it('gives every verb a usage line and a summary', () => {
+    for (const verb of CONTROL_VERBS) {
+      expect(verb.summary.length).toBeGreaterThan(0)
+      expect(verb.usage).toContain(verb.name)
+    }
+  })
+
+  it('has no duplicate names', () => {
+    expect(new Set(verbNames()).size).toBe(CONTROL_VERBS.length)
+  })
+
+  it('offers no --isolation value the activation schema would refuse', () => {
+    // The live run found `[--isolation worktree]` in this usage line, and there
+    // is no such value. A help string that sends a stranger to a flag the
+    // harness refuses is worse than no help string, and it survived because the
+    // usage text was only ever asserted to CONTAIN the verb's name. Prose that
+    // describes an enum has to be checked against the enum.
+    const usage = CONTROL_VERBS.find((verb) => verb.name === 'profile:activate')?.usage ?? ''
+    const offered = /--isolation ([^\]]+)/.exec(usage)?.[1]?.split('|') ?? []
+    expect(offered.length).toBeGreaterThan(0)
+    for (const value of offered)
+      expect(activationIsolationSchema.safeParse(value.trim()).success).toBe(true)
+  })
+})
+
+describe('argument validation', () => {
+  it('refuses an unknown flag rather than ignoring it', () => {
+    // Strict schemas everywhere: a typo'd flag that was silently dropped would
+    // activate a profile against defaults the caller did not ask for.
+    expect(argsFor('consent:grant').safeParse({ force: 'yes' }).success).toBe(false)
+    expect(
+      argsFor('profile:activate').safeParse({
+        profile: 'skeleton-crew',
+        target: 'repo:myapp',
+        path: '/src/myapp',
+        isolatoin: 'worktree'
+      }).success
+    ).toBe(false)
+  })
+
+  it('coerces the command line’s strings, because a wire from a CLI is strings', () => {
+    const parsed = argsFor('log:tail').safeParse({ limit: '5' })
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data).toEqual({ limit: 5 })
+  })
+
+  it('defaults log:tail rather than demanding a limit', () => {
+    const parsed = argsFor('log:tail').safeParse({})
+    expect(parsed.success && parsed.data).toEqual({ limit: 40 })
+  })
+
+  it('refuses a limit outside the range the log will serve', () => {
+    expect(argsFor('log:tail').safeParse({ limit: '0' }).success).toBe(false)
+    expect(argsFor('log:tail').safeParse({ limit: '5000' }).success).toBe(false)
+    expect(argsFor('log:tail').safeParse({ limit: 'lots' }).success).toBe(false)
+  })
+
+  it('takes one attendee or many, because --attendee repeats', () => {
+    const one = argsFor('odeon:convene').safeParse({
+      attendee: 'agent.artemis',
+      agenda: 'the CI failure'
+    })
+    expect(one.success && one.data).toEqual({
+      attendee: ['agent.artemis'],
+      agenda: 'the CI failure'
+    })
+    const many = argsFor('odeon:convene').safeParse({
+      attendee: ['agent.artemis', 'agent.mason'],
+      agenda: 'the CI failure'
+    })
+    expect(many.success && many.data).toEqual({
+      attendee: ['agent.artemis', 'agent.mason'],
+      agenda: 'the CI failure'
+    })
+  })
+
+  it('refuses a briefing with no agenda and no attendees', () => {
+    expect(argsFor('odeon:convene').safeParse({ agenda: 'x' }).success).toBe(false)
+    expect(argsFor('odeon:convene').safeParse({ attendee: [], agenda: 'x' }).success).toBe(false)
+    expect(
+      argsFor('odeon:convene').safeParse({ attendee: 'agent.artemis', agenda: '' }).success
+    ).toBe(false)
+  })
+
+  it('refuses a deactivation of something that is not an instance id', () => {
+    expect(argsFor('profile:deactivate').safeParse({ instance: 'skeleton-crew' }).success).toBe(
+      false
+    )
+    expect(
+      argsFor('profile:deactivate').safeParse({ instance: 'skeleton-crew@repo:myapp' }).success
+    ).toBe(true)
+  })
+})
+
+describe('activationRequestFromArgs', () => {
+  it('splits repo:myapp into the target the IPC handler already validates', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp'
+    })
+    expect(built.ok).toBe(true)
+    expect(built.ok && built.request).toEqual({
+      profile: 'skeleton-crew',
+      target: { kind: 'repo', id: 'myapp', path: '/src/myapp' }
+    })
+  })
+
+  it('carries the repositories the Architect named', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      repo: ['me/myapp', 'me/other']
+    })
+    expect(built.ok && built.request).toMatchObject({ repos: ['me/myapp', 'me/other'] })
+  })
+
+  it('refuses a target with no kind, and says what one looks like', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'myapp',
+      path: '/src/myapp'
+    })
+    expect(built.ok).toBe(false)
+    expect(built.ok === false && built.reason).toContain('repo:myapp')
+  })
+
+  it('refuses a target kind the activation schema does not know', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'wharf:myapp',
+      path: '/src/myapp'
+    })
+    // Refused BY the schema, not by a second copy of its rules here.
+    expect(built.ok).toBe(false)
+    expect(built.ok === false && built.reason).toContain('target.kind')
+  })
+
+  it('takes one --repo as readily as several — normalised by the schema, not here', () => {
+    // The single-string case never reaches `activationRequestFromArgs`: the
+    // verb's own schema turns `--repo a` and `--repo a --repo b` into a list
+    // first, which is why the normalisation is asserted THERE. Asserting it
+    // here would be testing a call the production path cannot make.
+    const one = argsFor('profile:activate').safeParse({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      repo: 'me/myapp'
+    })
+    expect(one.success && one.data).toMatchObject({ repo: ['me/myapp'] })
+    const many = argsFor('profile:activate').safeParse({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      repo: ['me/one', 'me/two']
+    })
+    expect(many.success && many.data).toMatchObject({ repo: ['me/one', 'me/two'] })
+  })
+
+  it('carries the isolation override the Architect asked for', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      isolation: 'isolate-all'
+    })
+    expect(built.ok && built.request).toMatchObject({ isolation: 'isolate-all' })
+  })
+
+  it('refuses an isolation the activation schema does not know, naming the field', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      isolation: 'somewhere-else'
+    })
+    expect(built.ok).toBe(false)
+    expect(built.ok === false && built.reason).toContain('isolation')
+  })
+
+  it('refuses a repository that is not owner/name', () => {
+    const built = activationRequestFromArgs({
+      profile: 'skeleton-crew',
+      target: 'repo:myapp',
+      path: '/src/myapp',
+      repo: ['myapp']
+    })
+    expect(built.ok).toBe(false)
+  })
+})
+
+describe('the request envelope', () => {
+  it('accepts a verb with no arguments at all', () => {
+    const parsed = controlRequestSchema.safeParse({
+      schemaVersion: CONTROL_SCHEMA_VERSION,
+      verb: 'status'
+    })
+    expect(parsed.success && parsed.data.args).toEqual({})
+  })
+
+  it('accepts repeated flags as arrays', () => {
+    const parsed = controlRequestSchema.safeParse({
+      schemaVersion: CONTROL_SCHEMA_VERSION,
+      verb: 'profile:activate',
+      args: { repo: ['a/b', 'c/d'], profile: 'skeleton-crew' }
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('refuses a body with no verb, a bad version, or extra keys', () => {
+    expect(controlRequestSchema.safeParse({ schemaVersion: 1 }).success).toBe(false)
+    expect(controlRequestSchema.safeParse({ schemaVersion: 0, verb: 'status' }).success).toBe(false)
+    expect(
+      controlRequestSchema.safeParse({ schemaVersion: 1, verb: 'status', token: 'x' }).success
+    ).toBe(false)
+  })
+
+  it('refuses arguments that are not strings, so nothing arrives pre-typed', () => {
+    expect(
+      controlRequestSchema.safeParse({ schemaVersion: 1, verb: 'log:tail', args: { limit: 5 } })
+        .success
+    ).toBe(false)
+  })
+})
+
+describe('the address file', () => {
+  it('carries a schemaVersion and the endpoint, and refuses a stray key', () => {
+    const good = {
+      schemaVersion: CONTROL_SCHEMA_VERSION,
+      endpoint: '/tmp/home/control.sock',
+      path: CONTROL_ENDPOINT_PATH,
+      pid: 4321,
+      startedAt: '2026-09-08T10:00:00.000Z'
+    }
+    expect(controlAddressSchema.safeParse(good).success).toBe(true)
+    expect(controlAddressSchema.safeParse({ ...good, token: 'x' }).success).toBe(false)
+    expect(controlAddressSchema.safeParse({ ...good, endpoint: '' }).success).toBe(false)
+  })
+
+  it('is named so nobody mistakes it for configuration', () => {
+    expect(CONTROL_ADDRESS_FILE).toBe('control-endpoint.json')
+  })
+})

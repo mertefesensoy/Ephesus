@@ -54,6 +54,22 @@ export class DiagnosisWriter {
    */
   constructor(private readonly options: DiagnosisWriterOptions) {}
 
+  /**
+   * Contract: the fold's input, gathered fresh.
+   *
+   * Public since M8.14 because the control surface's `status` and `diagnosis`
+   * verbs are readings of THIS fold. They ask the writer rather than building a
+   * snapshot of their own: M8.13's decision is that the report adds no state,
+   * and a second builder over the same fields would be a second opinion about
+   * the same machine — disagreeing the first time one of them forgot a field.
+   *
+   * It does not catch: `write()` owns the never-throws contract, and a caller
+   * that asked for the snapshot directly wants to know it could not be taken.
+   */
+  snapshot(): DiagnosisInput {
+    return this.options.snapshot()
+  }
+
   /** Contract: never throws. Returns the path written, or null if it could not be. */
   write(): string | null {
     const target = path.join(this.options.home, DIAGNOSIS_FILE)
