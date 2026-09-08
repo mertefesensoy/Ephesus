@@ -29,6 +29,7 @@ function home(): string {
 const snapshot = (at = 1_000_000): DiagnosisInput => ({
   at,
   home: 'C:/home/.ephesus',
+  pid: 4321,
   version: 'abc1234',
   conditions: [],
   events: [],
@@ -151,5 +152,63 @@ describe('when writing goes wrong', () => {
         }
       }).write()
     ).not.toThrow()
+  })
+})
+
+describe('a harness that does not own this home writes nothing (ADR-0034)', () => {
+  it('writes no file at all when mayWrite says no', () => {
+    // All three call sites go through `write()` — boot, the minute timer and
+    // the quit path — so the rule is asked once and none of them can forget it.
+    const root = home()
+    let taken = 0
+    const writer = new DiagnosisWriter({
+      home: root,
+      snapshot: () => {
+        taken += 1
+        return snapshot()
+      },
+      onFailed: () => undefined,
+      mayWrite: () => false
+    })
+    expect(writer.write()).toBeNull()
+    expect(fs.existsSync(path.join(root, DIAGNOSIS_FILE))).toBe(false)
+    // Not even the fold is taken: a report nobody may write is work nobody asked
+    // for, and `snapshot()` reads the whole book of record.
+    expect(taken).toBe(0)
+  })
+
+  it('does not overwrite a report the owner already wrote', () => {
+    // The defect this closes. Two instances wrote this file and disagreed
+    // honestly — the owner's WORKING against the blocked one's WAITING FOR YOU
+    // — and whichever wrote last was what a reader saw.
+    const root = home()
+    const owner = new DiagnosisWriter({
+      home: root,
+      snapshot: () => snapshot(),
+      onFailed: () => undefined
+    })
+    expect(owner.write()).toBe(path.join(root, DIAGNOSIS_FILE))
+    const theirs = fs.readFileSync(path.join(root, DIAGNOSIS_FILE), 'utf8')
+
+    const blocked = new DiagnosisWriter({
+      home: root,
+      snapshot: () => snapshot(2_000_000),
+      onFailed: () => undefined,
+      mayWrite: () => false
+    })
+    expect(blocked.write()).toBeNull()
+    expect(fs.readFileSync(path.join(root, DIAGNOSIS_FILE), 'utf8')).toBe(theirs)
+  })
+
+  it('writes normally when nothing says otherwise', () => {
+    // The default is unchanged: an owner passes no predicate and still writes.
+    const root = home()
+    const writer = new DiagnosisWriter({
+      home: root,
+      snapshot: () => snapshot(),
+      onFailed: () => undefined,
+      mayWrite: () => true
+    })
+    expect(writer.write()).toBe(path.join(root, DIAGNOSIS_FILE))
   })
 })

@@ -47,6 +47,21 @@ export interface DegradationLogOptions {
   append(row: DegradationRow): void
   /** Developer console, kept because a terminal is where a developer looks. */
   warn?(line: string): void
+  /**
+   * May this process write to this home's book of record? Default: yes.
+   *
+   * A harness that found the home already in use (ADR-0034) keeps its ring and
+   * its window — invariant §7 still owes ITS user every condition — but writes
+   * nothing into a home it does not own. Two appenders on one append-only file
+   * is how the duplicate `seq` of 2026-09-07 happened, and until this existed a
+   * blocked instance was doing exactly that for its whole life: not one row,
+   * but every degradation it ever reported.
+   *
+   * Asked here rather than at the call sites because this class already has one
+   * private `append`, and a rule with one enforcement point cannot be forgotten
+   * at a second one.
+   */
+  mayAppend?(): boolean
   now?(): number
   /**
    * How many distinct causes to keep. A cap on conditions, not occurrences —
@@ -211,6 +226,9 @@ export class DegradationLog {
   }
 
   private append(row: DegradationRow): void {
+    // The ring already has the entry and the UI already shows it; what is
+    // withheld is the WRITE, and only into a home this process does not own.
+    if (this.options.mayAppend?.() === false) return
     try {
       this.options.append(row)
     } catch {

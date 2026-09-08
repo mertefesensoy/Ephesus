@@ -37,6 +37,7 @@ function home(prefix: string): string {
 const SNAPSHOT: DiagnosisInput = {
   at: 0,
   home: '',
+  pid: 4321,
   version: '0.0.1',
   conditions: [],
   events: [],

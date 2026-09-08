@@ -39,6 +39,21 @@ export interface DiagnosisWriterOptions {
   snapshot(): DiagnosisInput
   /** Best-effort disclosure of a write that failed. Must not throw. */
   onFailed(detail: string): void
+  /**
+   * May this process write this home's report? Default: yes.
+   *
+   * A harness that found the home already in use (ADR-0034) does not own this
+   * file. Both instances writing it made the report alternate between two
+   * honest and different accounts of one home — the owner's `WORKING` and the
+   * blocked one's `WAITING FOR YOU` — with nothing saying which had written
+   * last. That is the same failure the age line exists to prevent, in a second
+   * dimension: a report that cannot be attributed can be misread.
+   *
+   * Asked in `write()` so ALL THREE call sites are covered — boot, the minute
+   * timer, and the quit path — rather than at each of them, where the one
+   * nobody re-read would keep writing.
+   */
+  mayWrite?(): boolean
 }
 
 /** The file an agent arriving cold is told to read first. */
@@ -72,6 +87,7 @@ export class DiagnosisWriter {
 
   /** Contract: never throws. Returns the path written, or null if it could not be. */
   write(): string | null {
+    if (this.options.mayWrite?.() === false) return null
     const target = path.join(this.options.home, DIAGNOSIS_FILE)
     try {
       const input = this.options.snapshot()

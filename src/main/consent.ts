@@ -235,16 +235,18 @@ export class CompanyStart {
     if (this.started) return null
     const blocked = this.options.blockedBy?.() ?? null
     if (blocked !== null) {
-      // NOT marked started: the condition can clear (the other harness stops),
-      // and a later grant should then be able to start the company rather than
-      // returning early on a flag set by a refusal.
+      // Reported, NOT logged. The condition belongs in this process's ring and
+      // window (invariant §7 owes its user the truth), but the book of record
+      // belongs to whoever owns the home — and until ADR-0034's second pass a
+      // blocked instance appended `orchestrator/not-started` straight into a
+      // LIVE log it did not own, which is the shape that produced the duplicate
+      // `seq` of 2026-09-07.
+      //
+      // `started` stays false because the block is not a start, not because the
+      // company might come up later: in production `blockedBy` closes over a
+      // decision boot took once, and the refusal says to stop the other harness
+      // and restart.
       this.options.report(HOME_OCCUPIED, blocked)
-      this.options.log({
-        kind: 'orchestrator',
-        event: 'not-started',
-        because: blocked,
-        from
-      })
       return blocked
     }
     this.started = true

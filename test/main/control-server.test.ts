@@ -55,6 +55,7 @@ afterEach(async () => {
 const SNAPSHOT: DiagnosisInput = {
   at: Date.parse('2026-09-08T10:00:00.000Z'),
   home: 'C:\\eph',
+  pid: 4321,
   version: '0.0.1',
   conditions: [],
   events: [],

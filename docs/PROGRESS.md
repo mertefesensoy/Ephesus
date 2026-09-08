@@ -6507,6 +6507,38 @@ names the owner and is *never* the authority: a stale one left by a crash does n
 make a home occupied, because refusing to start over a leftover file would turn
 every crash into an outage.
 
+**Second pass, 2026-09-09 — a blocked instance writes NOTHING into a home it
+does not own.** The observation below was narrow (both instances write
+`DIAGNOSIS.md`); asked to fix it, the check found the larger half. The
+degradation channel appends every condition to `log.jsonl`, so a blocked
+instance was writing into the OWNER's book of record for its whole life — not
+one row, but every condition it ever raised. The live proof below had
+reproduced exactly that at seq 18, and it was read as evidence the lock worked.
+
+Enforced at the two seams that already existed — `DegradationLog`'s single
+private `append`, and `DiagnosisWriter.write()`, which covers boot, the minute
+timer and the quit path — so neither can be forgotten at a second call site. The
+ring and the window keep every condition: invariant §7 still owes the blocked
+instance's own user the truth. `DIAGNOSIS.md` now also names the process that
+wrote it, for the same reason its age line is first.
+
+Two things were DELETED rather than kept. The `waitingWhen` for
+`agora/home-occupied` and its tests: with a blocked instance writing nothing,
+that condition can never reach a rendered row (the owner never has it, and the
+instance that has it never writes), so it was a check that cannot fire —
+recorded as a clause note against ADR-0034 in `docs/adr/README.md`. And the
+class-level "does not latch" test: `blockedBy` closes over a boot-time
+constant, so a green test claimed a recovery the product does not offer.
+Occupancy is a boot-time decision by Architect decision, and the refusal says to
+stop the other harness and restart.
+
+*Proved live again after the second pass, same scenario:* before B, 13 log rows
+and `DIAGNOSIS.md` written by process 34216; after B refused, **zero**
+`not-started` rows, **zero** `home-occupied` rows, **zero** `hooks/*` or
+`control/*` rows from the blocked instance, and the report still headed
+`written by process 34216` — A's, never overwritten. The three rows that did
+appear while B was up are A's own budget pace and its `unbudgeted` condition.
+
 *Proved live, two harnesses on one home:* A boots on a fresh home, is granted
 consent through `ephctl` and hires Artemis; B is then started against the SAME
 home and **refuses** — `agora: another Ephesus harness is already working on this

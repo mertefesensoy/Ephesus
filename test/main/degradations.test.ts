@@ -328,3 +328,38 @@ describe('when more things are wrong than the list can hold', () => {
     expect(log.list().map((entry) => entry.cause)).toEqual(['agora/commit', 'usage/pacing'])
   })
 })
+
+describe('a harness that does not own this home appends nothing (ADR-0034)', () => {
+  it('keeps the ring and the window, and withholds only the WRITE', () => {
+    // Invariant §7 still owes THIS process's user every condition; what it does
+    // not owe is a row in a book of record belonging to another harness. Two
+    // appenders on one append-only file is how the duplicate `seq` happened.
+    const rows: DegradationRow[] = []
+    const log = new DegradationLog({
+      append: (row) => rows.push(row),
+      mayAppend: () => false
+    })
+    log.report('agora/home-occupied', 'another harness owns this home')
+    log.report('library/recall-rung', 'recall is on the grep rung')
+
+    expect(rows).toEqual([])
+    expect(log.list().map((entry) => entry.cause)).toEqual([
+      'agora/home-occupied',
+      'library/recall-rung'
+    ])
+  })
+
+  it('appends when it may, so the default is unchanged', () => {
+    const rows: DegradationRow[] = []
+    const log = new DegradationLog({ append: (row) => rows.push(row), mayAppend: () => true })
+    log.report('library/recall-rung', 'recall is on the grep rung')
+    expect(rows).toHaveLength(1)
+  })
+
+  it('appends when nothing is asked at all', () => {
+    const rows: DegradationRow[] = []
+    const log = new DegradationLog({ append: (row) => rows.push(row) })
+    log.report('library/recall-rung', 'recall is on the grep rung')
+    expect(rows).toHaveLength(1)
+  })
+})

@@ -48,6 +48,9 @@ committer — which is the failure that actually happened.
 | `docs/PROGRESS.md` · `docs/DECISIONS-LOG.md` | The record |
 | `test/main/home-lock.test.ts` | **New.** Real servers on real addresses |
 | `test/main/hooks.test.ts` · `test/main/consent-gate.test.ts` · `test/shared/diagnosis.test.ts` | The guard, the block on both paths, the verdict |
+| *Second pass (§7):* `src/main/degradations.ts` · `src/main/diagnosis.ts` | `mayAppend()` and `mayWrite()` — one seam each, so a blocked instance writes nothing into a home it does not own |
+| *Second pass:* `src/shared/diagnosis.ts` | The report names the process that wrote it; the unreachable `waitingWhen` deleted |
+| *Second pass:* `docs/adr/README.md` | A clause note against ADR-0034, which is accepted and never edited |
 
 ## 3. Implementation approach
 
@@ -155,18 +158,75 @@ company starting anyway; a silent block; a block with no log row; a refusal that
 5. `ephctl agents:list` still reaches **A**, and `control-endpoint.json` still names A's
    pid: B took neither plane.
 
-### One observation, flagged rather than fixed
+## 7. Second pass, same day — a blocked instance writes nothing
 
-**Both instances write `DIAGNOSIS.md`**, and they disagree honestly — A is a working
-company and reads `the book of record | WORKING`; B carries `agora/home-occupied` and would
-read `WAITING FOR YOU`. Whichever wrote last is what a reader sees, and the file says
-nowhere which instance produced it. The lock does not remove this, because it deliberately
-lets a blocked instance keep its window and its diagnostics — which is right for the person
-sitting at B. Whether a blocked instance should write the *shared* report of a home it does
-not own is a judgement about who that file is for, and it is the Architect's. Recorded in
-`docs/DECISIONS-LOG.md` rather than taken.
+The observation this shipped with was narrow: **both instances write `DIAGNOSIS.md`**, and
+they disagree honestly — A reads `the book of record | WORKING`, B carries
+`agora/home-occupied` and would read `WAITING FOR YOU`, and whichever wrote last is what a
+reader sees. It was recorded rather than taken, because who that file is for is a judgement.
 
-## 7. Related docs
+The Architect's answer was **a blocked instance should not write it** — and looking for the
+fix found the larger half of the same problem.
+
+### What the narrow observation was hiding
+
+`degradations.report()` appends every condition to `log.jsonl` (`index.ts`'s `append`
+closure). So a blocked instance was writing into the **owner's book of record for its whole
+life** — not one `orchestrator/not-started` row, but every degradation it ever raised. The
+live proof above had reproduced exactly that, at seq 18, and it was read as evidence the
+lock worked.
+
+The rule is the simple one: **an instance that does not own the home writes nothing into
+it.** Enforced at the two seams that already existed —
+
+- `DegradationLog`'s single private `append`, so every condition is covered rather than
+  the one that happened to be noticed;
+- `DiagnosisWriter.write()`, which covers all three call sites: boot, the minute timer, and
+  the quit path.
+
+The ring and the window keep every condition. Invariant §7 still owes the blocked
+instance's own user the truth; what it does not owe is a row in somebody else's book.
+
+`DIAGNOSIS.md` now also names the process that wrote it — the same reasoning as M8.13's age
+line, which is first in the file because a stale report read as current is a degradation
+failing as good news. A report that cannot say *who* wrote it can be misread the same way,
+and this entire rule was found by two reports disagreeing.
+
+### Two things deleted, which is the honest half
+
+**The `waitingWhen` for `agora/home-occupied`, and its two tests.** With a blocked instance
+writing nothing, that condition can never reach a rendered row — the owner never has it,
+and the instance that has it never writes. A predicate that cannot fire is the check that
+cannot fail, in the report built to refuse exactly that. Recorded as a clause note against
+ADR-0034 in `docs/adr/README.md`, since an accepted ADR is never edited.
+
+**The class-level "does not latch" test.** `index.ts` computes `occupancy` once and
+`blockedBy` closes over it, so nothing can flip it inside a process: the test was green
+against a path production cannot reach — written the same day, by me. Occupancy is a
+boot-time decision by Architect decision, and the refusal already says to stop the other
+harness and restart; a company that quietly starts itself minutes later is a surprise
+nobody asked for. A comment stands where the test was, saying why `started` is left false:
+a block is not a start, not an offer of recovery.
+
+### Proved live again, on the same scenario
+
+A fresh home, A brought up as a working company through `ephctl`, then B started against
+the same home. Before B: 13 log rows, `DIAGNOSIS.md` written by process 34216. After B
+refused:
+
+| | before the fix | after |
+|---|---|---|
+| `orchestrator/not-started` rows in the owner's log | 1 (at seq 18) | **0** |
+| `agora/home-occupied` rows in the owner's log | 1 | **0** |
+| `hooks/*` or `control/*` rows from the blocked instance | present | **0** |
+| `DIAGNOSIS.md` header | no writer named | `written by process 34216` — **A's**, never overwritten |
+
+The three rows that did appear while B was up are A's own — a `budget` pace row, its
+`budgets/state:agent.artemis` condition, and a second `budget` row. B contributed nothing
+to a home it does not own, and its own console and window still carry the refusal in
+full.
+
+## 8. Related docs
 
 - [ADR-0034 — One harness per home](../adr/ADR-0034-one-harness-per-home.md)
 - [ADR-0033 — A script may run the company](../adr/ADR-0033-a-script-may-run-the-company.md)

@@ -316,8 +316,23 @@ const degradations = new DegradationLog({
     if (agora === null) pendingDegradationRows.push(row)
     else agora.appendLog(row)
   },
+  // A harness that found the home already in use writes NOTHING into it
+  // (ADR-0034). Its ring and its window keep every condition — invariant §7
+  // still owes ITS user the truth — but the book of record belongs to whoever
+  // owns the home. Two appenders on one append-only file is how the duplicate
+  // `seq` of 2026-09-07 happened.
+  mayAppend: () => homeBelongsToUs,
   warn: (line) => console.warn(line)
 })
+
+/**
+ * False once boot finds another harness serving this home (ADR-0034).
+ *
+ * Module-scope because the degradation channel is constructed here, before
+ * `boot()` can know; it flips exactly once, at the occupancy check, and
+ * everything that writes into the home consults it.
+ */
+let homeBelongsToUs = true
 
 /** How much of the log's tail the boot replay reads back. */
 const DEGRADATION_REPLAY_LIMIT = 400
@@ -900,7 +915,16 @@ async function boot(): Promise<void> {
     addressFile: path.join(home.root, CONTROL_ADDRESS_FILE),
     endpoints: [hookEndpointFor(home.root), controlEndpointFor(home.root)]
   })
-  if (occupancy.occupied) reportDegradation(HOME_OCCUPIED, occupancy.because)
+  if (occupancy.occupied) {
+    // Set BEFORE the condition is reported, so the report that explains the
+    // refusal is itself the first thing withheld from a home we do not own.
+    homeBelongsToUs = false
+    // Conditions raised before this point (home seeding, config) were queued
+    // against an Agora that did not exist yet. They belong to this process, not
+    // to this home's book of record.
+    pendingDegradationRows.length = 0
+    reportDegradation(HOME_OCCUPIED, occupancy.because)
+  }
 
   // Bound before any agent can spawn, so no spawn ever races its own hooks.
   // A failure here is a *visible* degraded state, never a dead app: agents still
@@ -3382,6 +3406,7 @@ async function boot(): Promise<void> {
     snapshot: (): DiagnosisInput => ({
       at: Date.now(),
       home: home.root,
+      pid: process.pid,
       version: app.getVersion(),
       conditions: degradations.list().map((entry) => ({
         source: entry.source,
@@ -3401,7 +3426,8 @@ async function boot(): Promise<void> {
       armed: scheduler.armed()
     }),
     // The one channel whose contract is that reporting cannot fail.
-    onFailed: (detail) => reportDegradation('home/diagnosis', detail)
+    onFailed: (detail) => reportDegradation('home/diagnosis', detail),
+    mayWrite: () => homeBelongsToUs
   })
   // Its OWN timer, deliberately NOT the company scheduler.
   //
