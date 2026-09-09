@@ -78,6 +78,7 @@ export type ControlDeps = Pick<
   | 'profilesDeactivate'
   | 'profilesInstances'
   | 'convene'
+  | 'meetingClose'
 > & {
   /**
    * The writer itself, not a second closure over the same fields.
@@ -600,6 +601,16 @@ export async function performVerb(
       return outcome.ok
         ? ok(verb, `convened ${outcome.id} with ${attendee.join(', ')}`, outcome)
         : fail(verb, `not convened: ${outcome.reason}`, outcome)
+    }
+    case 'odeon:adjourn': {
+      // No action items from a script. Action items are the chair's reading of
+      // what the meeting decided, and a control surface that invented them
+      // would be writing the ledger's input on nobody's authority — the same
+      // line `watch:approve` refuses to cross.
+      const outcome = deps.meetingClose([])
+      return outcome.ok
+        ? ok(verb, `adjourned; minutes at ${outcome.ref}`, outcome)
+        : fail(verb, `not adjourned: ${outcome.reason}`, outcome)
     }
     case 'agents:list': {
       const cards = deps.agents.list()

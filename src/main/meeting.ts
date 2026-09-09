@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { writeFileAtomic } from './fsx'
 import {
   close as closeMeeting,
+  decline as declineMeeting,
   convene,
   interject,
   renderMinutes,
@@ -128,6 +129,57 @@ export class MeetingDriver {
     if (outcome.kind === 'accepted') this.handFloor()
     this.options.onChange?.()
     return { kind: outcome.kind }
+  }
+
+  /**
+   * The floor-holder has nothing to add (M8b.2).
+   *
+   * Contract: passes the floor on, or ADJOURNS when a full round has declined
+   * with nothing said — writing the minutes exactly as an Architect-driven
+   * close does, because a meeting that ends itself must leave the same record
+   * as one a person ended.
+   *
+   * Before this, nothing could end a meeting but a person at the ODEON tab.
+   * The 2026-09-09 run convened the one-attendee meeting `ephctl help`'s own
+   * usage line documents, and it re-handed the floor to its only speaker for
+   * the rest of the hour.
+   */
+  declineFloor(from: string): SayOutcome | { readonly kind: 'adjourned'; readonly ref: string } {
+    if (this.state === null) return { kind: 'refused', reason: 'no meeting is open' }
+    const outcome = declineMeeting(this.state, from)
+    if (outcome.kind === 'refused') return outcome
+
+    this.state = outcome.state
+    this.options.onLogEvent?.({
+      kind: 'meeting',
+      event: 'declined',
+      meetingId: this.state.id,
+      from,
+      floor: this.state.floor,
+      declinedInARow: this.state.declinedInARow
+    })
+
+    if (outcome.kind === 'passed') {
+      this.handFloor()
+      this.options.onChange?.()
+      return { kind: 'accepted' }
+    }
+
+    // `close()` refuses a state it finds already closed, and `decline` has
+    // just closed it — so the state is re-opened for exactly the length of
+    // that call. Ugly, and the alternative is worse: a second code path that
+    // writes minutes would be a second thing to keep in step with the first,
+    // and the minutes are the whole artifact this milestone exists to produce.
+    this.state = { ...this.state, status: 'open' }
+    const closed = this.close([])
+    if (!closed.ok) return { kind: 'refused', reason: closed.reason }
+    this.options.onLogEvent?.({
+      kind: 'meeting',
+      event: 'adjourned',
+      meetingId: outcome.state.id,
+      because: 'every attendee declined the floor with nothing said'
+    })
+    return { kind: 'adjourned', ref: closed.ref }
   }
 
   /** The Architect takes the floor (UC-07 step 3, SDD §5 `odeon:meetingSay`). */

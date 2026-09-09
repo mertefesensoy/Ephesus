@@ -58,6 +58,24 @@ export interface MeetingState {
   /** Replies that arrived out of turn, kept in arrival order. */
   readonly held: readonly MeetingTurn[]
   readonly status: MeetingStatus
+  /**
+   * How many attendees have declined the floor since anything was last said
+   * (M8b.2).
+   *
+   * A COUNT rather than a set of names, and that is exact rather than lazy:
+   * the floor advances on a decline, so consecutive declines are consecutive
+   * ATTENDEES by construction. Reaching `attendees.length` therefore means one
+   * full round in which nobody had anything to add — which is the only
+   * evidence a meeting has that it is over.
+   *
+   * Before this, no meeting of ANY size could end without a person clicking
+   * close. The 2026-09-09 run found it at one attendee, where `after()` wraps
+   * to the same agent and the loop is visible in the log (seq 387 → 393 → 395
+   * → 427 → 429); Artemis diagnosed it from her own transcript and declined
+   * rather than speak a third time. A two-attendee meeting had the same defect
+   * one step further away.
+   */
+  readonly declinedInARow: number
 }
 
 /**
@@ -75,7 +93,8 @@ export function convene(id: string, request: ConveneRequest, at: string): Meetin
     floor: request.attendees[0] ?? null,
     transcript: [{ from: HUMAN, text: request.agenda, at }],
     held: [],
-    status: 'open'
+    status: 'open',
+    declinedInARow: 0
   }
 }
 
@@ -108,9 +127,95 @@ export function reply(state: MeetingState, from: string, text: string, at: strin
     return { kind: 'held', state: { ...state, held: [...state.held, turn] } }
   }
 
+  // Anything SAID restarts the round. The counter measures silence since the
+  // last contribution, so a meeting where one attendee keeps talking never
+  // adjourns itself, and one where nobody does always will.
   return {
     kind: 'accepted',
-    state: drain({ ...state, transcript: [...state.transcript, turn], floor: after(state, from) })
+    state: drain({
+      ...state,
+      transcript: [...state.transcript, turn],
+      floor: after(state, from),
+      declinedInARow: 0
+    })
+  }
+}
+
+/**
+ * Contract: whether this message is the floor-holder yielding. Pure.
+ *
+ * Extracted rather than written inline at the dispatch, and a mutation run is
+ * why: the condition lived in `index.ts` AND in the scenario rig's hand-copy
+ * of it, so breaking the shipped one left every test green. Two copies of a
+ * routing rule is the same defect shape as two copies of a schema — they agree
+ * until one of them is edited, and the disagreement is invisible.
+ *
+ * The narrowness is the design. A `refuse` from anyone but the current
+ * floor-holder is NOT a declined floor: it is an ordinary refusal that belongs
+ * to the filing endpoint's aside path, and widening this would let any agent's
+ * unrelated "I cannot do that" advance a meeting it is not even in.
+ */
+export function isFloorDecline(
+  message: { readonly act: string; readonly from: string },
+  state: MeetingState | null
+): boolean {
+  return (
+    message.act === 'refuse' &&
+    state !== null &&
+    state.status === 'open' &&
+    state.floor === message.from
+  )
+}
+
+/** What became of a declined floor. */
+export type DeclineOutcome =
+  /** The floor moved on; the meeting is still open. */
+  | { readonly kind: 'passed'; readonly state: MeetingState }
+  /** A full round declined with nothing said: the meeting is over. */
+  | { readonly kind: 'adjourned'; readonly state: MeetingState }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/**
+ * Contract: the floor-holder has nothing to add. Pure.
+ *
+ * A decline writes NO transcript entry. "I have nothing further" is not a
+ * contribution to the minutes, and recording one would make a silent round
+ * read like a discussion.
+ *
+ * Only the floor-holder may decline, and a decline out of turn is refused
+ * rather than held. A held REPLY is a contribution that arrived early and is
+ * worth keeping; a held decline is worth nothing by the time it is released,
+ * because the question it answers has moved on.
+ *
+ * Adjourning is left to the caller to act on: this returns the closed state,
+ * and the driver is what writes minutes and tells the room.
+ *
+ * It takes no timestamp, unlike `reply` and `interject`. Those two record a
+ * turn and a turn needs a time; a decline records nothing, so a parameter kept
+ * only for symmetry with its neighbours would be an unused one — and an unused
+ * parameter is a thing every formatter and fixer in the toolchain feels
+ * entitled to change underneath you.
+ */
+export function decline(state: MeetingState, from: string): DeclineOutcome {
+  if (state.status === 'closed') {
+    return { kind: 'refused', reason: `meeting ${state.id} is closed` }
+  }
+  if (!state.attendees.includes(from)) {
+    return { kind: 'refused', reason: `"${from}" is not in meeting ${state.id}` }
+  }
+  if (state.floor !== from) {
+    return { kind: 'refused', reason: `"${from}" does not hold the floor in meeting ${state.id}` }
+  }
+  const declinedInARow = state.declinedInARow + 1
+  // One full round of declines with nothing said between them. `>=` rather
+  // than `===` because a meeting with no attendees would otherwise never
+  // satisfy it, and `attendees.length` is 0 there.
+  if (declinedInARow >= state.attendees.length) {
+    return { kind: 'adjourned', state: close({ ...state, declinedInARow }) }
+  }
+  return {
+    kind: 'passed',
+    state: drain({ ...state, floor: after(state, from), declinedInARow })
   }
 }
 
@@ -140,7 +245,12 @@ export function interject(
     state: drain({
       ...state,
       transcript: [...state.transcript, { from: HUMAN, text, at }],
-      floor: to ?? state.floor
+      floor: to ?? state.floor,
+      // A new question restarts the round. An attendee who had nothing to add
+      // to the last one may well have something to say about this one, and a
+      // meeting that adjourned under the Architect's own follow-up would be
+      // the rudest possible reading of the rule.
+      declinedInARow: 0
     })
   }
 }

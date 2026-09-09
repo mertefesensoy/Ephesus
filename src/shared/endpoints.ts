@@ -167,9 +167,21 @@ export const ENDPOINT_CONTRACTS: readonly EndpointContract[] = [
     // ("When you finish, say so with a reference to the result") — bounced off
     // the very endpoint that had asked.
     accepts: ['propose', 'inform', 'agree', 'refuse', 'done'],
-    // A filing and a meeting answer are acted on. "Done" and "I cannot" are
-    // asides — recorded, not run through the deck parser.
-    handles: ['propose', 'inform']
+    // A filing, a meeting answer, and a DECLINED FLOOR are acted on. "Done" is
+    // still an aside — recorded, not run through the deck parser.
+    //
+    // `refuse` moved from accepted-but-unhandled to handled in M8b.2, and the
+    // exit run is why. Artemis, the only attendee of a meeting that could not
+    // terminate, said she had nothing further with `act: "refuse"` (seq 442).
+    // It was accepted, recorded as an aside, and never reached the endpoint —
+    // so the meeting driver never learned its only speaker had yielded, and
+    // the floor came back to her a third time.
+    //
+    // A `refuse` that is NOT a declined floor must still not meet the deck
+    // parser: the dispatch answers it as the aside it is. Handling an act is
+    // not the same as filing it, and conflating the two is what made "your
+    // JSON is malformed" the reply to an agent that had claimed no JSON.
+    handles: ['propose', 'inform', 'refuse']
   },
   {
     // `Incidents.raise` sends the triage `request`; `Incidents.refuse` and
