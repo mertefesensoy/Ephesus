@@ -23,6 +23,45 @@ import { taskIdSchema } from './tasks'
 export const ODEON_SCHEMA_VERSION = 1
 
 /**
+ * Where the Agora sits under the harness home.
+ *
+ * Stated once because three archives build refs from it and every one of them
+ * was hand-written before (M8b.3).
+ */
+export const AGORA_REL = 'agora'
+
+/**
+ * Contract: a reference to an archived artifact, relative to the HARNESS HOME.
+ * Pure — no `node:path`, because this module is reachable from the renderer.
+ *
+ * ## Why the home, and not the Agora
+ *
+ * These refs go into `log.jsonl` and are read by PEOPLE. A reader has the home:
+ * it is the thing `EPH_HOME` names, the thing `ephctl` reports, the thing they
+ * `ls`. They do not necessarily know that `odeon/` sits inside `agora/`, and
+ * nothing in a row like `"briefRef": "odeon/briefs/2026-…Z.md"` says so.
+ *
+ * The 2026-09-09 exit run is the evidence. Finding 13 reported, at HIGH
+ * severity, that "the one brief in the run was archived pointing at a file that
+ * was never written" — on the strength of `ls $EPH_HOME/odeon/briefs/…` coming
+ * back empty and there being "no odeon/ directory at all". The file existed the
+ * whole time, 1,781 bytes of it, at `$EPH_HOME/agora/odeon/briefs/…`. The
+ * runner's own directory listing included `agora/`; nothing told them to look
+ * inside it.
+ *
+ * The archive was never broken. The REFERENCE could not be resolved by the
+ * person holding it, which for a field whose only job is to be resolved is the
+ * same thing.
+ *
+ * Deck refs deliberately do NOT go through here: the ledger stores a `deckRef`
+ * and reads it back, so its shape is data other code depends on rather than a
+ * pointer for a human.
+ */
+export function homeRef(...segments: readonly string[]): string {
+  return [AGORA_REL, ...segments].join('/')
+}
+
+/**
  * One archived deck, as the viewer lists them. Lives here rather than beside
  * the archive because the renderer needs the type and may not import main.
  */

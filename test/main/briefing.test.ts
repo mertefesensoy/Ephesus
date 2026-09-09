@@ -58,6 +58,8 @@ const INPUT: BriefInput = {
 }
 
 interface Rig {
+  /** The HARNESS HOME — what a reader of the book of record actually has. */
+  readonly home: string
   readonly agora: Agora
   readonly odeon: Odeon
   readonly job: BriefingJob
@@ -97,6 +99,7 @@ async function rig(over: { orchestrator?: string | null; input?: BriefInput } = 
 
   const briefsDir = path.join(agora.root, 'odeon', 'briefs')
   return {
+    home,
     agora,
     odeon,
     job,
@@ -360,5 +363,85 @@ describe('a refused narration leaves the question open (regression)', () => {
     )
     expect(corrected.ok).toBe(true)
     expect(r.briefFiles()).toHaveLength(1)
+  })
+})
+
+describe('a briefRef resolves from the home a reader has (M8b.3 — Finding 13)', () => {
+  /**
+   * The assertion the exit run needed and nobody had written.
+   *
+   * Finding 13 reported, at HIGH severity, that the run's one brief "was
+   * archived pointing at a file that was never written", on the strength of
+   * `ls $EPH_HOME/odeon/briefs/…` coming back empty. The file existed the whole
+   * time — 1,781 bytes at `$EPH_HOME/agora/odeon/briefs/…`. The archive was
+   * never broken; the REFERENCE could not be resolved by the person holding it,
+   * which for a field whose only job is to be resolved is the same thing.
+   *
+   * So this joins the ref to the home rather than to the agora root. Written
+   * against the home ON PURPOSE: a test that resolved against `agora.root`
+   * would have passed on 2026-09-09 too.
+   */
+  it('joins to the home and opens', async () => {
+    const r = await rig()
+    const facts = r.job.request() as readonly BriefFact[]
+    const outcome = r.odeon.fileBrief(
+      narration(r.job.pending() ?? '', [
+        { section: 'headline', text: 'One action waits.', refs: ['gate:g-1'] }
+      ]),
+      facts
+    )
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+
+    const resolved = path.join(r.home, ...outcome.ref.split('/'))
+    expect(fs.existsSync(resolved)).toBe(true)
+    expect(fs.readFileSync(resolved, 'utf8')).toContain('One action waits.')
+  })
+
+  it('is the same ref the log row carries, and every listed brief resolves too', async () => {
+    const r = await rig()
+    // `request()` is what ISSUES the facts and the pending brief id, so it has
+    // to run before `pending()` is read — calling it afterwards mints a second
+    // brief and the narration then cites an id the archive has already moved
+    // past, which it correctly refuses.
+    const facts = r.job.request() as readonly BriefFact[]
+    r.odeon.fileBrief(
+      narration(r.job.pending() ?? '', [
+        { section: 'headline', text: 'One action waits.', refs: ['gate:g-1'] }
+      ]),
+      facts
+    )
+
+    // The LOG row is what a runner reads — the return value is not on their
+    // screen. Asserting only the returned ref would leave the one a person
+    // actually holds unchecked.
+    const archived = r.logs.find((row) => row.kind === 'brief' && row.event === 'archived')
+    const briefRef = String(archived?.briefRef ?? '')
+    expect(briefRef).not.toBe('')
+    expect(fs.existsSync(path.join(r.home, ...briefRef.split('/')))).toBe(true)
+
+    // And the panel's own list, so the three do not drift apart.
+    for (const record of r.odeon.briefs()) {
+      expect(fs.existsSync(path.join(r.home, ...record.ref.split('/')))).toBe(true)
+    }
+  })
+
+  it('does NOT resolve from the agora root, which is what misled the runner', async () => {
+    // The negative half. Without it, a regression that dropped the `agora/`
+    // prefix would still pass every assertion above on a home whose agora root
+    // happened to be the home — and this is exactly the confusion that cost a
+    // careful runner a high-severity finding.
+    const r = await rig()
+    const facts = r.job.request() as readonly BriefFact[]
+    const outcome = r.odeon.fileBrief(
+      narration(r.job.pending() ?? '', [
+        { section: 'headline', text: 'One action waits.', refs: ['gate:g-1'] }
+      ]),
+      facts
+    )
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.ref.startsWith('agora/')).toBe(true)
+    expect(fs.existsSync(path.join(r.agora.root, ...outcome.ref.split('/')))).toBe(false)
   })
 })

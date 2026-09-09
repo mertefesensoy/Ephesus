@@ -6,6 +6,7 @@ import {
   DECK_SECTIONS,
   deckFileName,
   escapeHtml,
+  homeRef,
   parseDeckFiling,
   taskOfDeckFile,
   type BriefRecord,
@@ -518,7 +519,7 @@ export class Odeon {
     }
     writeFileAtomic(file, renderBriefMarkdown(filing.briefId, filing, facts, at.toISOString()))
 
-    const ref = path.posix.join('odeon', 'briefs', name)
+    const ref = homeRef('odeon', 'briefs', name)
     this.options.onLogEvent?.({
       kind: 'brief',
       event: 'archived',
@@ -543,7 +544,7 @@ export class Odeon {
       .filter((name) => name.endsWith('.md'))
       .sort((a, b) => b.localeCompare(a))
       .map((name) => ({
-        ref: path.posix.join('odeon', 'briefs', name),
+        ref: homeRef('odeon', 'briefs', name),
         archivedAt: name.replace(/\.md$/, ''),
         markdown: fs.readFileSync(path.join(dir, name), 'utf8')
       }))
