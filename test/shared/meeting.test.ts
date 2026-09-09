@@ -340,4 +340,17 @@ describe('which message is a declined floor (M8b.2)', () => {
     expect(isFloorDecline({ act: 'refuse', from: 'agent.a' }, null)).toBe(false)
     expect(isFloorDecline({ act: 'refuse', from: 'agent.a' }, close(open))).toBe(false)
   })
+
+  it('checks the STATUS, not only the floor a close happens to null', () => {
+    // A mutation run found this guard unkillable: `close()` sets
+    // `floor: null`, so `state.floor === message.from` is already false
+    // for every meeting `close()` produced, and the status check looked
+    // redundant. It is defence in depth against a state `close()` cannot
+    // currently build — and a guard no test can reach is the defect shape
+    // this build has paid for before, so the state is constructed by hand
+    // and the guard is pinned rather than left to look decorative.
+    const closedWithFloor = { ...open, status: 'closed' as const }
+    expect(closedWithFloor.floor).toBe('agent.a')
+    expect(isFloorDecline({ act: 'refuse', from: 'agent.a' }, closedWithFloor)).toBe(false)
+  })
 })

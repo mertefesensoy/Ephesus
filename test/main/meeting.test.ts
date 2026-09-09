@@ -350,3 +350,41 @@ describe('a meeting can end itself (M8b.2 — Finding 11)', () => {
     expect(after.length).toBe(r.sent.slice(0, before).filter((m) => m.act === 'query').length)
   })
 })
+
+describe('the floor prompt tells an agent how to leave (M8b.2, adversarial)', () => {
+  /**
+   * The mechanism is useless if nobody is told about it, and the shipped
+   * prompt used to steer agents straight past it: "If you have nothing useful
+   * to add, SAY THAT in one line rather than filling the silence." Saying it
+   * is a turn. A turn is a contribution. A contribution restarts the round —
+   * so an agent obeying the prompt keeps the meeting alive for ever.
+   *
+   * That is what happened on 2026-09-09: Artemis said she had nothing further
+   * at seq 393 and again at seq 427, and the floor came back both times. She
+   * reached `refuse` on her third attempt by reasoning about the log, not
+   * because anything told her it existed. The round rule alone would not have
+   * ended that meeting.
+   *
+   * Asserted against the SHIPPED prompt rather than a fixture, for the reason
+   * `GH_TOKEN_REFRESH_COMMAND` is one exported constant: a rule that does not
+   * match the sentence the agent was given is a rule that grants nothing.
+   */
+  const floorPrompt = fs.readFileSync(
+    path.join(BUNDLED_PROMPTS, 'odeon', 'meeting-floor.md'),
+    'utf8'
+  )
+
+  it('names the act that declines the floor', () => {
+    expect(floorPrompt).toContain('refuse')
+  })
+
+  it('does not tell an agent to SAY it has nothing to add', () => {
+    // The exact steer that produced the loop. A prompt may not both offer the
+    // decline and recommend the turn that defeats it.
+    expect(floorPrompt).not.toMatch(/say that in one line/i)
+  })
+
+  it('says what a decline does, so the agent can predict the outcome', () => {
+    expect(floorPrompt).toMatch(/adjourns/i)
+  })
+})

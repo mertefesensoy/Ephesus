@@ -164,13 +164,100 @@ indistinguishable from one a person closed, so an `adjourned` row carries
 
 ---
 
-## 6. Verification
+## 6. The adversarial pass, and the two things it found
 
-*(filled in below.)*
+### The prompt steered agents straight past the new mechanism
+
+The round rule and the routing were done, 130 tests were green, and the round's
+mutants were dying. Then: *does anything TELL an agent it can decline?*
+
+The shipped `prompts/odeon/meeting-floor.md` said:
+
+> If you have nothing useful to add, **say that in one line** rather than filling
+> the silence.
+
+Saying it is a turn. A turn is a contribution. A contribution **resets the round**.
+So an agent obeying the prompt keeps the meeting alive for ever — and that is exactly
+what happened on 2026-09-09, where Artemis said she had nothing further at seq 393
+and again at seq 427 and the floor came back both times. **The round rule alone would
+not have ended that meeting.** She reached `refuse` on her third attempt by reasoning
+about the log, not because anything told her the act existed.
+
+The prompt now names the act, says what a decline does, and says why a "nothing
+further" turn is not one. Three tests assert it against the **shipped** file rather
+than a fixture, for the reason `GH_TOKEN_REFRESH_COMMAND` is one exported constant: a
+rule that does not match the sentence the agent was given is a rule that grants
+nothing.
+
+**The honest limit.** `PromptStore` seeds a home's copy once and never re-seeds, so an
+Ephesus that has already run keeps the old wording. Unlike M8b.1 there is no
+placeholder to smuggle the fix through — this is prose. A fresh home (which is what an
+exit run uses) gets it; an existing one is covered by `odeon:adjourn`, which needs no
+prompt at all.
+
+### An unkillable mutant, and what it meant
+
+`isFloorDecline`'s `state.status === 'open'` check survived every test, because
+`close()` also sets `floor: null` — so `state.floor === message.from` is already false
+for every meeting `close()` produced. Two conditions that cannot disagree.
+
+Rather than delete a guard that reads as the intent, the state is now constructed by
+hand in a test (`{ ...open, status: 'closed' }`, floor intact) and the guard is pinned.
+A guard no test can reach is the defect shape this build has paid for before.
 
 ---
 
-## 7. Related docs
+## 7. Verification
+
+### Definition of Done
+
+```bash
+npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm run test:coverage && node scripts/check-coverage.cjs
+```
+
+### Mutation — 11 of 11 real mutants killed, control survived
+
+| Mutant | What it breaks | |
+|---|---|---|
+| N1 | a full round of declines no longer ends the meeting | killed |
+| N2 | the round needs one MORE decline than there are attendees | killed |
+| N3 | saying something no longer restarts the round | killed |
+| N4 | the Architect's follow-up no longer restarts the round | killed |
+| N5 | a decline writes a transcript entry, so silence reads as discussion | killed |
+| N6 | an attendee who does not hold the floor may decline it | killed |
+| N7 | `refuse` goes back to being an aside — the 2026-09-09 state exactly | killed |
+| N8 | a refuse from ANY attendee declines the floor, not just its holder | killed |
+| N8b | a refuse still declines the floor of a CLOSED meeting | killed *(after the pinning test; it SURVIVED before)* |
+| N9 | the adjourn verb stops declaring that it changes something | killed |
+| N10 | an adjourned meeting leaves no minutes on disk | killed |
+| **N11** | **CONTROL — changes nothing** | **SURVIVED, as it must** |
+
+### Three rounds before this one were thrown away, and why that matters
+
+This is the evidence, so the failures belong in it.
+
+1. **A round reported 11/12 with the control KILLED.** Free RAM had fallen to 0.90 GB
+   and `test/global-setup.ts`'s `requireHeadroom` refuses below 1 GB — exiting
+   non-zero *without running a single test*, which the harness scored as a kill. Every
+   verdict in that round was unearned, including the eleven that looked right.
+2. **A stopped harness left two mutants in the tree** — a flipped boolean and a
+   *deleted* line, neither findable by grepping for inserted marker text. The next
+   round ran against a broken tree, so every run was red and the control "died" again.
+3. **A restore was not byte-exact.** Python's text mode translates newlines, so
+   restoring a prettier-written LF file on Windows rewrote it as CRLF.
+
+The harness now reports INVALID rather than "killed" when the suite refuses to start,
+checks a baseline SHA per file **before and after** every mutant, and does byte-exact
+I/O. The package was committed before the final round so `git status` is a second
+check on the tree.
+
+**Every one of those was caught by the planted no-op control.** A mutation score with
+no control is a number with no condition.
+
+---
+---
+
+## 8. Related docs
 
 - [The M8 exit run](../demo/m8-onehour-aftershock.md) — Findings 11 and 12, §9, §10 clause 4.
 - [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md) — M8b.2's acceptance criteria.
