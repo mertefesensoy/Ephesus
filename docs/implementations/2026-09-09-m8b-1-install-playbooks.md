@@ -327,6 +327,6 @@ to read them, and that the activation refuses rather than hiring a crew that can
 - [The M8 exit run](../demo/m8-onehour-aftershock.md) — Finding 8, §5.1, §10 clauses 1b and 2.
 - [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md) — M8b.1's acceptance criteria.
 - [ADR-0012](../adr/ADR-0012-mission-profiles.md) — declarative profile bundles; "playbooks are prose, policy is data".
-- [ADR-0021](../adr/ADR-0021-engine-workspace-trust.md) — why `beforeHires` may not refuse, and why this seam may.
-- [ADR-0027](../adr/ADR-0027-one-instance-per-target.md) — reactivation takes over a down instance.
+- [ADR-0021](../adr/ADR-0021-workspace-trust-at-activation.md) — why `beforeHires` may not refuse, and why this seam may.
+- [ADR-0027](../adr/ADR-0027-what-survives-a-restart.md) — reactivation takes over a down instance.
 - [`docs/EXIT-M8.md`](../EXIT-M8.md) §5.1 — the clause this unblocks.
