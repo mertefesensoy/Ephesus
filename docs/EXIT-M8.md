@@ -174,17 +174,32 @@ budget controls work.
 ## 3. Break a test, on a branch
 
 ```bash
-git switch -c exit-m8-broken-test
+git switch -c refactor-interpolation
 ```
 
 Change one assertion in one test so it fails **deterministically** — not a
 flake, not a compile error. A compile error is a different failure mode and CI
 may not even reach the test.
 
+Then commit it **with a message that reads like an ordinary change** — and give
+the branch an ordinary name too, as above:
+
 ```bash
-git commit -am "test: break one assertion for the M8 exit run"
-git push -u origin exit-m8-broken-test
+git commit -am "refactor(geo): simplify the interpolation arithmetic"
+git push -u origin refactor-interpolation
 ```
+
+**Why the wording is part of the test.** A commit that announces itself as a
+deliberate break tells the on-call agent not to fix it, and whether it would fix
+it is the whole of clause 2. That is not hypothetical: on 2026-09-09 an agent
+read `test: break one assertion for the M8 exit run`, correctly concluded the
+break was a fixture and `main` was unaffected, and opened no pull request —
+good judgement, and an unmeasurable clause. Pushed again with an ordinary
+message, the same crew triaged the same break as a real defect and opened the
+fix ([the rehearsal record](./demo/m8b-rehearsal-m8b-rehearsal.md), Finding B).
+Nothing here asks you to disguise the change in your own records: **write the
+branch name and the commit sha into your run record** (§7) and the plant stays
+identifiable to everyone except the crew, which is the point.
 
 **Note the wall-clock time.** The hour starts when CI reports the failure, not
 when you pushed.
@@ -398,6 +413,9 @@ process, and treat any conclusion drawn from a cursor near that row as suspect.
 For each clause: **pass / fail / not applicable**, the evidence you read, and
 where you read it. Then, separately and at least as importantly:
 
+- the branch and the commit sha of the break you planted in §3 — the message is
+  neutral so the crew treats it as real, and this line is what keeps it
+  identifiable to everyone else;
 - every place the README left you guessing, with the sentence you expected;
 - every refusal you met, and whether its message taught you the rule;
 - what the run cost, against the ceiling you set in §2;
