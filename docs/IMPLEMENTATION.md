@@ -313,10 +313,15 @@ is current, with the corrections in M8c.6 folded in.
 
 ## M8c — Bounded, and honest about itself (≈ 1 week) — *hardening*
 
-> Also filed 2026-09-09 from the same record. **None of these blocked a clause**
-> — they made the run expensive, or made its reports untrustworthy. Two of them
-> would have made an unattended overnight run genuinely costly, which is the
-> thing M8 exists to make safe.
+> Filed 2026-09-09 from the same record. M8c.1–M8c.8 **blocked no clause** —
+> they made the run expensive, or its reports untrustworthy.
+>
+> **M8c.9 and M8c.10 were added later the same day, from the M8b rehearsal**
+> ([`docs/demo/m8b-rehearsal-m8b-rehearsal.md`](./demo/m8b-rehearsal-m8b-rehearsal.md)),
+> and they are a different kind: **each would fail a real exit run on its own.**
+> They were invisible on 2026-09-09 because the crew never got far enough to
+> meet them — M8b is what let the crew act, and acting is what found them.
+> M8c.8 is amended by the same run and is no longer a worry.
 
 **M8c.1 — A ceiling must be reachable without a mouse** *(Finding 3)*.
 `EXIT-M8.md` §2 calls setting a daily budget *"the step that is skipped and then
@@ -403,21 +408,100 @@ only the known MemPalace cause. It also removed the crew's only route around
 M8b.1. *Acceptance:* recall fails fast with a named cause, and the hang is a
 reported degradation rather than a silent stall.
 
-**M8c.8 — Decide what an engine-level permission prompt is** *(Finding 10)*. Ten
+**M8c.8 — Decide what an engine-level permission prompt is** *(Finding 10,
+**upgraded by the M8b rehearsal**)*. Ten
 times the harness recorded `gate/ungated · tool-permission · waiting · "Claude is
 waiting for your input"`. The harness is right to surface it — invariant §7
 requires it — but the run's own rules forbid answering it, and `ephctl` cannot.
 So an agent that reaches its engine's prompt is stalled for the rest of the run
 **by construction**, which undercuts the premise of an unattended hour. This is
 not an Ephesus gate: it has no `gateId` and no Architect can clear it.
+**The rehearsal settles what this costs.** With the crew finally able to act,
+it stopped here: **four of the five agents' last recorded action is a parked
+prompt** — health-watcher 19:57:55, verifier 19:53:39, artemis 19:53:26,
+ci-babysitter 19:44:37 — **twelve prompts in the hour**, against seven in forty
+minutes on 2026-09-09. The Architect saw it from outside before the log did
+(*"they opened 3 PRs then stopped"*). So the hour does not last an hour: **it
+lasts until the first agent reaches a prompt**, and every number a run reports
+is bounded by that rather than by the company's capacity. This is no longer a
+premise being undercut; it is the thing that ends the run.
+
 *Acceptance:* a decision, recorded as an ADR — either the spawn plan
 pre-authorises these, or they escalate as real gates the Architect can clear.
-The design question is the deliverable; the code follows it.
+The design question is the deliverable; the code follows it. Whichever is
+chosen, an unattended hour must be able to *end because the work ended*.
+
+**M8c.9 — A crew must be able to come back after a restart** *(M8b rehearsal,
+Finding A — **the highest-severity item in M8c**)*. After the §4 force-kill the
+instance restored correctly — plan back, trigger clock back, `seq` contiguous,
+consent not re-asked — and then **the crew could not be brought back by any
+documented surface**:
+
+```
+profile:activate  → hire "ci-babysitter" could not spawn: … asked for an isolated
+                    worktree and did not get one — worktree refused:
+                    "<home>\worktrees\agent.…-ci-babysitter" already exists
+                    — nothing was activated
+profile:deactivate → the harness failed: agents: no agent "agent.…-ci-babysitter"
+```
+
+A closed loop: **activate refuses because the worktrees exist, deactivate
+refuses because the agents do not.** The rehearsal continued only because the
+runner deleted four worktrees by hand (`git worktree remove --force`, then
+`prune`), which no README documents and which a non-author would not invent.
+
+**It contradicts the exit run**, whose §6 recorded reactivation *"took over the
+down instance rather than refusing it as a duplicate — ADR-0027's intent,
+confirmed live"*. Something differs between the two runs and the rehearsal did
+not chase it; **finding out which is the first half of this package**, because
+one of the two observations is about a path that no longer works.
+
+*Acceptance:* after a restart, `profile:activate` on a restored instance brings
+its crew back with no manual filesystem step — reusing or replacing the existing
+worktree — and a test performs a restore-then-reactivate against real
+directories rather than a stubbed worktree seam. Whatever is decided, the
+refusal an Architect meets must name the recovery.
+
+**M8c.10 — The exit script must not tell the crew the break is deliberate**
+*(M8b rehearsal, Finding B — a defect in `EXIT-M8.md`, not in the product)*.
+§3 instructs:
+
+```bash
+git commit -am "test: break one assertion for the M8 exit run"
+```
+
+The on-call agent reads that message and **correctly declines to open a fix
+PR**. Its own words, from the rehearsal's log:
+
+> …I reproduced it locally, confirmed a one-line revert turns the suite green (3
+> pass, 0 fail), and **opened no PR because the break is self-described as a
+> deliberate rehearsal fixture and main is unaffected.**
+
+That is good judgement and the wrong outcome: **clause 2 asks whether the crew
+would fix a broken build, and the script tells it not to.** The clause is
+therefore unmeasurable as written. It was invisible on 2026-09-09 because the
+crew never reached triage; the rehearsal proved it by pushing a second break
+with a neutral message (`refactor(geo): simplify the interpolation arithmetic`,
+a sign typo), which the crew triaged as a genuine defect and fixed in PR #3 —
+merged, and `main` went green.
+
+*Acceptance:* §3 tells the runner to commit the break with a message that reads
+like an ordinary change, and says why in one sentence. Cheap, and until it is
+done **no exit run can pass clause 2 honestly.**
+
+> **Observation, not a package.** Two task-opens in the rehearsal were refused
+> with `body is not valid JSON: Bad escaped character…` — the same class the exit
+> run recorded as an Observation when hermes quarantined a health-watcher
+> message. It has now cost a message on both runs, so it is a recurrence rather
+> than a one-off; the M8b.5 refusal named the envelope and the orchestrator
+> recovered. Recorded here so the third occurrence is not filed as new.
 
 **Exit:** an unattended run of `docs/EXIT-M8.md` completes inside a **stated**
-ceiling with no incident raised for a run older than the activation; and
+ceiling with no incident raised for a run older than the activation;
 `DIAGNOSIS.md` reports no area as `WORKING` on the strength of an entry row —
-verified by planting an entered-but-failing pipeline and reading the report.
+verified by planting an entered-but-failing pipeline and reading the report; a
+restarted company brings its crew back with no manual filesystem step; and the
+hour ends because the work ended rather than because an agent met a prompt.
 
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
 
