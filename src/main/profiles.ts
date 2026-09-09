@@ -677,6 +677,21 @@ export class ProfileActivations {
    *
    * Triggers first, deliberately: disarming after killing leaves a window in
    * which a trigger fires at an agent that no longer exists.
+   *
+   * **A crew that is already down is not an error** (M8c.9). A restored
+   * instance's hires are `down` by design (ADR-0027): the harness restarted,
+   * the plan came back, the processes did not. Asking `kill` for one of them by
+   * name threw `agents: no agent "…"` out of the middle of this method, which
+   * is how the M8b rehearsal met a closed loop — `profile:activate` refused
+   * because the worktrees existed, `profile:deactivate` refused because the
+   * agents did not, and the run continued only because the runner deleted four
+   * directories by hand. It also threw *after* disarming the triggers and
+   * releasing the hires, so the refusal left the instance half torn down.
+   *
+   * A `live` crew whose agent has died in the meantime is the same shape and is
+   * handled the same way: what could not be killed is reported on the row
+   * rather than thrown, because a deactivation that stops halfway is strictly
+   * worse than one that finishes and says what it found.
    */
   deactivate(instanceId: string): { readonly ok: boolean; readonly reason: string | null } {
     const instance = this.live.get(instanceId)
@@ -686,7 +701,22 @@ export class ProfileActivations {
     // first: a hire whose ladder is still armed treats the kill that is
     // deactivating it as a crash, and brings it straight back (M8.6).
     for (const agentId of instance.agentIds) this.options.onReleased?.(agentId)
-    for (const agentId of instance.agentIds) this.options.kill(agentId)
+    // Nothing to kill when the crew is already down — and asking anyway is the
+    // defect, not a harmless no-op.
+    const unkillable: string[] = []
+    if (instance.crew === 'live') {
+      for (const agentId of instance.agentIds) {
+        try {
+          this.options.kill(agentId)
+        } catch (err) {
+          // Whole, not first-line-only: a `split()[0]` here would add a branch
+          // no test could reach (`[0]` of a split is never absent), and this
+          // module already learned that a branch which exists to be uncovered
+          // is a design smell rather than a coverage problem.
+          unkillable.push(`${agentId}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    }
     this.live.delete(instanceId)
     this.persist()
     // An instance that is gone is not an instance watching nothing (M8.5). Left
@@ -698,7 +728,11 @@ export class ProfileActivations {
       event: 'deactivated',
       instanceId,
       agents: instance.agentIds,
-      disarmed: instance.armed
+      disarmed: instance.armed,
+      // What the crew was when the Architect asked, so the row distinguishes
+      // "four agents stopped" from "four agents were already down".
+      crew: instance.crew,
+      ...(unkillable.length > 0 ? { unkillable } : {})
     })
     return { ok: true, reason: null }
   }

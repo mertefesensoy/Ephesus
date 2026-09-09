@@ -31,7 +31,12 @@ test/                                                     # mirrors src/ structu
 ephesus/docs/                                             # this suite; ADRs append-only
 ```
 
-- **Branches:** `feature/<topic>`, `fix/<topic>`, agents use `agent/<name>/<topic>`.
+- **Branches:** `feature/<topic>`, `fix/<topic>`, agents use `agent/<name>/<topic>`
+  — except where `agent/<name>` already exists as a branch, which is every hire
+  the harness runs: git cannot nest a ref under an existing one
+  (`cannot lock ref 'refs/heads/agent/mason/fix': 'refs/heads/agent/mason'
+  exists`), so those use `agent/<name>-<topic>`. *(M8c.9 — the shipped incident
+  runbook asked for the impossible form and every hire had to improvise.)*
   `main` is protected: PRs only, CI green, one review (the Architect or Artemis under
   delegated authority — countersigned).
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`,

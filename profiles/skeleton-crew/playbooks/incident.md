@@ -74,8 +74,10 @@ failure on your part, it is the runbook working.
 the work, not an exception to it: an incident you triaged and fixed is worth more
 as a reviewable diff than as a proposal nobody is awake to answer. A pull request
 changes nothing on its own — it is a request, it is read before it lands, and it
-can be closed. Push to `agent/<your-name>/<topic>` and open the PR against the
-default branch.
+can be closed. You are already on your own branch, `agent/<your-name>`, so name
+the topic branch `agent/<your-name>-<topic>` — a hyphen, not a slash, because
+git cannot nest a branch under one that already exists — and open the PR against
+the default branch.
 
 These still require approval before you do them, every time:
 

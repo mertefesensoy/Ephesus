@@ -45,18 +45,32 @@ interface Rig {
   readonly script: (steps: readonly unknown[]) => void
 }
 
-async function startRig(options: { readonly isolationConfigured?: boolean } = {}): Promise<Rig> {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agent-wt-'))
-  temps.push(home)
+/** Drains the open rigs, the way a force-kill drains a harness: no unwind. */
+async function stopEverything(): Promise<void> {
+  for (const close of closers.splice(0)) await close()
+}
+
+async function startRig(
+  options: { readonly isolationConfigured?: boolean; readonly reuseHome?: string } = {}
+): Promise<Rig> {
+  // `reuseHome` is how a RESTART is expressed here (M8c.9): a second harness
+  // against the home the first one left behind, with a fresh AgentManager that
+  // knows nothing and a `worktrees/` directory that is still full.
+  const home = options.reuseHome ?? fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agent-wt-'))
+  if (options.reuseHome === undefined) temps.push(home)
   const target = path.join(home, 'target-repo')
   fs.mkdirSync(target, { recursive: true })
   const git = (args: readonly string[]): void => {
     execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd: target })
   }
-  git(['init', '-q', '-b', 'main'])
-  fs.writeFileSync(path.join(target, 'README.md'), '# target\n', 'utf8')
-  git(['add', '.'])
-  git(['commit', '-qm', 'initial'])
+  // Seeded once. A restart finds the repository the first harness left, not a
+  // fresh one — re-committing into it would throw "nothing to commit".
+  if (options.reuseHome === undefined) {
+    git(['init', '-q', '-b', 'main'])
+    fs.writeFileSync(path.join(target, 'README.md'), '# target\n', 'utf8')
+    git(['add', '.'])
+    git(['commit', '-qm', 'initial'])
+  }
 
   const prompts = new PromptStore(path.join(home, 'prompts'), path.join(REPO, 'prompts'))
   const agoraRoot = path.join(home, 'agora')
@@ -240,6 +254,56 @@ describe('a spawn that asks for isolation (UC-01 alternate 2a)', () => {
     // The branch existed already, so this one was reused rather than created.
     expect(back.worktree?.branchCreated).toBe(false)
     expect(fs.existsSync(path.join(back.cwd, 'README.md'))).toBe(true)
+  }, 30_000)
+
+  /**
+   * **M8c.9 — a crew must be able to come back after a restart.**
+   *
+   * The M8b rehearsal's Finding A, reproduced at the seam it actually breaks
+   * at. After the §4 force-kill the instance restored correctly and then the
+   * crew could not be brought back by any documented surface:
+   *
+   * ```text
+   * profile:activate  → hire "ci-babysitter" could not spawn: … asked for an
+   *                     isolated worktree and did not get one — worktree
+   *                     refused: "<home>\worktrees\agent.…" already exists
+   * profile:deactivate → the harness failed: agents: no agent "agent.…"
+   * ```
+   *
+   * The run continued only because the runner deleted four worktrees by hand.
+   * This is the real thing: a real repository, a real worktree, a real second
+   * harness against the home the first one left behind — because a stubbed
+   * worktree seam is exactly what let this reach a live run.
+   */
+  it('brings the crew back after a restart, on the branch the agent left (M8c.9)', async () => {
+    const first = await startRig()
+    const card = await first.agents.spawn(request(first, true))
+    await until(() => first.spawner.stdoutOf(AGENT).includes('RUNNING'), 'the agent to start')
+    const worktreePath = card.worktree?.path ?? ''
+    expect(worktreePath).not.toBe('')
+
+    // The agent does what its runbook tells it: cuts a branch for the fix and
+    // leaves work in progress on it. `agent/<id>/<topic>` is what
+    // ENGINEERING-STANDARDS §2 asks for and git will not create it while
+    // `agent/<id>` exists, so a hire ends up somewhere else — which is the
+    // whole of why the old namespace test could not hold.
+    execFileSync('git', ['checkout', '-q', '-b', 'fix/latitude-sign'], { cwd: worktreePath })
+    fs.writeFileSync(path.join(worktreePath, 'wip.md'), '# half a day\n', 'utf8')
+
+    // The restart. Force-killed, so nothing unwinds and no worktree is released.
+    await stopEverything()
+
+    const second = await startRig({ reuseHome: first.home })
+    const back = await second.agents.spawn(request(second, true))
+
+    expect(back.worktree?.path).toBe(worktreePath)
+    // Where it stands, not where the harness would have put it.
+    expect(back.worktree?.branch).toBe('fix/latitude-sign')
+    expect(back.worktree?.branchCreated).toBe(false)
+    // And the half-day of work is still there — the recovery never removes.
+    expect(fs.readFileSync(path.join(worktreePath, 'wip.md'), 'utf8')).toBe('# half a day\n')
+    // No manual filesystem step: nothing was deleted between the two rigs.
+    await until(() => second.spawner.stdoutOf(AGENT).includes('RUNNING'), 'the crew to come back')
   }, 30_000)
 
   it('a spawn that does NOT ask for isolation works in the target repo', async () => {
