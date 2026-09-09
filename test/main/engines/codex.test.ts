@@ -49,6 +49,7 @@ function rig(): { adapter: EngineAdapter; cfg: AgentSpawnConfig; cwd: string } {
       cwd,
       engineConfigDir: path.join(root, 'engine-config'),
       tools: NO_TOOLS,
+      playbooksDir: null,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},

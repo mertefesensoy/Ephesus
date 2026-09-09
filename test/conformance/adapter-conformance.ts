@@ -110,6 +110,7 @@ export function conformanceRig(): ConformanceRig {
       cwd,
       engineConfigDir: path.join(root, 'engine-config'),
       tools: NO_TOOLS,
+      playbooksDir: null,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: {},

@@ -77,6 +77,7 @@ import { RECALL_SCHEMA_VERSION } from '../shared/recall'
 import { ReflectionJob } from './reflection'
 import { Scheduler } from './scheduler'
 import { activationsRecord, blockedTasksFrom, restoreCompany } from './restore'
+import { installPlaybooks, playbookDegradations, playbookPath, playbooksDir } from './playbooks'
 import { JsonStateStore, type StateStore } from './state-store'
 import {
   EMPTY_TRIGGERS,
@@ -1849,6 +1850,10 @@ async function boot(): Promise<void> {
             instanceId: instance.instanceId,
             agentId: trigger.agentId,
             playbook: trigger.playbook,
+            // Resolved, not guessed. The on-call agent is told where the
+            // runbook IS; on 2026-09-09 it was told only its name and spent
+            // its turn searching a home that never held it (M8b.1).
+            playbookPath: playbookPath(home.root, instance.instanceId, trigger.playbook),
             repos: instance.plan.repos
           }))
       ),
@@ -2193,6 +2198,15 @@ async function boot(): Promise<void> {
     // SAME resolver that answers autonomy above, so the roster and the gates
     // can never disagree about which profile an agent belongs to.
     profileFor: (agentId) => activations?.profileFor(agentId) ?? null,
+    // Asked at the same moment as `toolsFor` and `autonomyFor`, and answered
+    // by the same layer: an agent's runbooks are its INSTANCE's, and the
+    // engine needs the directory in its settings or the read is blocked
+    // (M8b.1). Null for an agent on no profile — Artemis and the endpoints
+    // have no runbook and get no grant.
+    playbooksFor: (agentId) => {
+      const instanceId = activations?.instanceFor(agentId) ?? null
+      return instanceId === null ? null : playbooksDir(home.root, instanceId)
+    },
     /**
      * Asks an engine whether it is logged in (M8.4). Same discipline as the
      * version probe: a shell on Windows because engine CLIs are `.cmd` shims,
@@ -2439,6 +2453,14 @@ async function boot(): Promise<void> {
   activations = new ProfileActivations({
     store: profiles,
     globalAutonomy: () => loadGatePolicy(gatePolicyPath).policy.autonomy,
+    // The runbooks cross from the bundle into the home here (M8b.1). Wired to
+    // the same `home.root` every other harness file uses, so the directory an
+    // agent is TOLD to open is the one the harness has just written — the two
+    // could not disagree even if the home moved between boots.
+    installPlaybooks: (plan, books) => {
+      const outcome = installPlaybooks(home.root, plan.instanceId, books)
+      return outcome.ok ? { ok: true } : { ok: false, reasons: outcome.reasons }
+    },
     missingGrants: (declared) => resolveDeclaredGrants(declared).missing,
     // The checkout already knows which repository it is (M8.5, B7). Both
     // shipped bundles carry `repos: []`, so without this every activation
@@ -2558,6 +2580,9 @@ async function boot(): Promise<void> {
             triggerId,
             agentId,
             playbook,
+            // Where it actually is, so the duty message names a file rather
+            // than setting the agent a search (M8b.1).
+            playbookPath: playbookPath(home.root, instanceId, playbook),
             profile: instance?.plan.profile ?? instanceId,
             targetPath: instance?.plan.targetPath ?? ''
           },
@@ -2617,6 +2642,22 @@ async function boot(): Promise<void> {
     // console line that scrolls away (invariant §7, M8.2).
     for (const problem of replay.problems) {
       reportDegradation(problem.cause as DegradationCause, problem.detail)
+    }
+    // A restored instance's record survives in `activations.json`; the home
+    // directory its runbooks live in might not have (M8b.1, the Architect's
+    // decision of 2026-09-09). Checked HERE, after the restore has put the
+    // plans back, because until then there is nothing to compare against —
+    // and checked at all because the alternative is what the exit run
+    // measured: an instance that comes back looking healthy and whose crew
+    // discovers the wall one duty at a time, forty minutes later.
+    for (const detail of playbookDegradations(
+      home.root,
+      (activations?.instances() ?? []).map((instance) => ({
+        instanceId: instance.instanceId,
+        declared: instance.plan.playbooks
+      }))
+    )) {
+      reportDegradation('profiles/playbooks-missing', detail)
     }
   }
 

@@ -64,6 +64,7 @@ function budgeted(
     cwd,
     engineConfigDir: path.join(company.home, 'engine-config', agentId),
     tools: NO_TOOLS,
+    playbooksDir: null,
     commitIdentity: null,
     ghTokenCommand: '',
     envGrants: {},

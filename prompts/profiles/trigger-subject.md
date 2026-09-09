@@ -1,1 +1,1 @@
-Scheduled duty due: {{playbook}}
+Scheduled duty due: {{playbookName}}

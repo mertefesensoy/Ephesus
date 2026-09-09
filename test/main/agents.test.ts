@@ -120,6 +120,8 @@ interface RigOptions {
   readonly respawnBlocked?: AgentManagerOptions['respawnBlocked']
   /** The composed ceiling this spawn runs at (ADR-0012, ADR-0031). */
   readonly autonomyFor?: AgentManagerOptions['autonomyFor']
+  /** Where this agent's instance runbooks were installed (M8b.1). */
+  readonly playbooksFor?: AgentManagerOptions['playbooksFor']
 }
 
 async function rig(
@@ -164,6 +166,7 @@ async function rig(
     ...(extra.maxDailyTokens ? { maxDailyTokens: extra.maxDailyTokens } : {}),
     ...(extra.respawnBlocked ? { respawnBlocked: extra.respawnBlocked } : {}),
     ...(extra.autonomyFor ? { autonomyFor: extra.autonomyFor } : {}),
+    ...(extra.playbooksFor ? { playbooksFor: extra.playbooksFor } : {}),
     onChange: (card) => changes.push(card.lifecycle)
   })
 
@@ -185,6 +188,66 @@ async function rig(
     })
   }
 }
+
+describe('AgentManager — the runbook grant reaches the engine (M8b.1)', () => {
+  /**
+   * The JOIN, end to end: the `playbooksFor` option the profile layer answers,
+   * onto `spawnConfig`, into the adapter's settings file. Everything between
+   * is real — a real `ClaudeAdapter`, a real config directory, the settings
+   * file an actual spawn writes.
+   *
+   * It exists because a mutation run found the gap. `playbookPermissions` was
+   * tested against a config carrying the directory, and `instanceFor` was
+   * tested for answering during a spawn — and replacing this one line with
+   * `playbooksDir: null` still left every one of those tests green. Two
+   * correct halves and no test of the seam between them is the shape this
+   * build keeps rediscovering, so the assertion is made where the two meet.
+   */
+  const settingsOf = (home: string, agentId: string): { allow: string[]; dirs: string[] } => {
+    const file = path.join(
+      engineConfigDir(path.join(home, 'engines'), 'claude', agentId),
+      CLAUDE_HARNESS_SETTINGS_REL
+    )
+    const written = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      permissions?: { allow?: string[]; additionalDirectories?: string[] }
+    }
+    return {
+      allow: written.permissions?.allow ?? [],
+      dirs: written.permissions?.additionalDirectories ?? []
+    }
+  }
+
+  it('writes the directory the profile layer named into the engine settings', async () => {
+    const r = await rig(async () => '2.1.195', undefined, {
+      playbooksFor: (agentId) =>
+        agentId === 'agent.mason' ? '/home/ephrun/instances/crew@repo-app/playbooks' : null
+    })
+    await r.manager.spawn(r.request)
+
+    const { allow, dirs } = settingsOf(r.home, 'agent.mason')
+    const granted = '/home/ephrun/instances/crew@repo-app/playbooks'
+    expect(dirs).toContain(granted)
+    expect(allow).toContain(`Read(${granted}/**)`)
+    // Read-only across the whole chain, not only in the function that mints it.
+    expect(allow).not.toContain(`Edit(${granted}/**)`)
+
+    await r.manager.shutdown()
+  })
+
+  it('writes no runbook grant when the profile layer answers null', async () => {
+    const r = await rig()
+    await r.manager.spawn(r.request)
+
+    const { allow, dirs } = settingsOf(r.home, 'agent.mason')
+    // Only the mailbox. An agent on no profile gains nothing from this change,
+    // which is what keeps the default a lockdown rather than an exception.
+    expect(dirs).toHaveLength(1)
+    expect(dirs[0]).toContain('agora')
+    expect(allow.some((rule) => rule.includes('instances'))).toBe(false)
+
+    await r.manager.shutdown()
+  })
+})
 
 describe('AgentManager — an exit nobody awaits', () => {
   it('reports a failed teardown instead of killing the harness', async () => {

@@ -222,6 +222,7 @@ describe('the spawn plan carries the grants (ADR-0026)', () => {
         cwd: path.join(root, 'repo'),
         engineConfigDir: engineConfigDir(path.join(root, 'engines'), 'claude', 'agent.mason'),
         tools,
+        playbooksDir: null,
         commitIdentity: null,
         envGrants: {},
         identityPath: path.join(agora, 'identity.md'),

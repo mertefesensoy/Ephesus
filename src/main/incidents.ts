@@ -101,6 +101,8 @@ export interface IncidentBinding {
   readonly instanceId: string
   readonly agentId: string
   readonly playbook: string
+  /** Where that runbook was installed for this instance, absolute (M8b.1). */
+  readonly playbookPath: string
   /** Repositories this instance watches, so an item is routed to its owner. */
   readonly repos: readonly string[]
 }
@@ -290,7 +292,14 @@ export class IncidentEndpoint {
       url: incident.url,
       at: incident.at,
       oncall: incident.agentId,
-      playbook: incident.playbook,
+      // The PATH renders as `{{playbook}}` and the file name as
+      // `{{playbookName}}`, that way round for the reason `triggerWakeMessage`
+      // does it: `PromptStore` seeds a home's copy of a prompt once and never
+      // re-seeds it, so an Ephesus that has already run keeps its old
+      // `incident-body.md`. Carrying the fix in the VALUE of a placeholder
+      // that file already has is what makes it reach an existing install.
+      playbook: incident.playbookPath,
+      playbookName: incident.playbook,
       triageSubject: TRIAGE_SUBJECT
     }
     const message = composeMessage({

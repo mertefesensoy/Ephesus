@@ -13,7 +13,9 @@ been assigned — that is the on-call agent's call after triage, not the
 harness's.
 
 The active profile puts `{{oncall}}` on call for this repository, with the
-runbook `{{playbook}}`.
+runbook installed at `{{playbook}}` — that is the full path to it on this
+machine. Pass it on when you hand them the task, so they open it rather than
+searching for it.
 
 ## What you are being asked to do
 

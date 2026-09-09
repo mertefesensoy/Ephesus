@@ -66,6 +66,7 @@ const BINDING: IncidentBinding = {
   instanceId: 'skeleton-crew@repo:myapp',
   agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
   playbook: 'incident.md',
+  playbookPath: `/home/instances/i/playbooks/incident.md`,
   repos: ['owner/app']
 }
 
