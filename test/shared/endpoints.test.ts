@@ -212,3 +212,23 @@ describe('the two instances that were actually observed', () => {
     }
   })
 })
+
+describe('the odeon acts on a declined floor (M8b.2)', () => {
+  it('HANDLES refuse, not merely accepts it', () => {
+    // The whole of Finding 11's second half. `refuse` was accepted and
+    // unhandled, so hermes recorded it as an aside and the endpoint never saw
+    // it: Artemis said she had nothing further (seq 442), it was "accepted",
+    // and the meeting driver never learned its only speaker had yielded.
+    const odeon = ENDPOINT_CONTRACTS.find((contract) => contract.name === 'odeon')
+    expect(odeon?.accepts).toContain('refuse')
+    expect(odeon?.handles).toContain('refuse')
+  })
+
+  it('still leaves `done` an aside', () => {
+    // Handling `refuse` must not turn every terminal act into a filing. "Done"
+    // obliges nothing back and is recorded, not run through the deck parser.
+    const odeon = ENDPOINT_CONTRACTS.find((contract) => contract.name === 'odeon')
+    expect(odeon?.accepts).toContain('done')
+    expect(odeon?.handles).not.toContain('done')
+  })
+})

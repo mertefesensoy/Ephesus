@@ -138,6 +138,10 @@ describe('the verb table', () => {
     const writes = CONTROL_VERBS.filter((verb) => verb.writes).map((verb) => verb.name)
     expect(writes.sort()).toEqual([
       'consent:grant',
+      // M8b.2. `convene` shipped with no counterpart, so a CLI runner could
+      // open a meeting and had no way to end one — the same absent-and-not-
+      // refused shape as Finding 3's `budget:set`.
+      'odeon:adjourn',
       'odeon:convene',
       'profile:activate',
       'profile:deactivate'

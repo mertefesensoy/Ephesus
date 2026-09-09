@@ -262,6 +262,13 @@ export const CONTROL_VERBS: readonly ControlVerb[] = [
     usage: 'ephctl odeon:convene --attendee agent.artemis --agenda "the incident"'
   },
   {
+    name: 'odeon:adjourn',
+    summary: 'close the open meeting and archive its minutes',
+    args: noArgs,
+    writes: true,
+    usage: 'ephctl odeon:adjourn'
+  },
+  {
     name: 'agents:list',
     summary: 'the roster and each agent\u2019s lifecycle',
     args: noArgs,

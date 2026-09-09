@@ -180,3 +180,56 @@ describe('S-MEETING — minutes and action items on close', () => {
     expect(closed).toMatchObject({ unheard: 1 })
   })
 })
+
+describe('S-MEETING — a meeting ends itself when the room is out of things to say (M8b.2)', () => {
+  /**
+   * The 2026-09-09 exit run, reproduced through the real router with real
+   * spawned processes.
+   *
+   * Artemis tried twice to end the meeting she was the only attendee of. Her
+   * first attempt used `act: "request"` and bounced (seq 439–440, Finding 12).
+   * Her second used `act: "refuse"` and was ACCEPTED by the endpoint — and
+   * parsed as a filing, so the meeting driver never heard that its only
+   * speaker had yielded (seq 442). The floor came back to her a third time and
+   * the hour ended with no minutes.
+   *
+   * This asserts the whole path: a real agent, its own outbox, the real
+   * dispatch, and a file on disk at the end of it.
+   */
+  it('adjourns and archives its minutes when the only attendee declines the floor', async () => {
+    const eph = await startCompany()
+    companies.push(eph)
+    eph.hire('agent.artemis')
+    eph.hire('agent.a')
+
+    const convened = eph.meetings.convene({
+      attendees: ['agent.a'],
+      agenda: 'the CI failure incident on mertefesensoy/aftershock run 34317920145'
+    })
+    if (!convened.ok) throw new Error(convened.reason)
+
+    await answer(eph, 'agent.a', 'The crew found run 34317920145 and opened a task for it.')
+
+    // The message Artemis actually sent, in the act she actually used.
+    await eph.runTurn('agent.a', [
+      sendStep(
+        scenarioMessage({
+          from: 'agent.a',
+          to: ODEON_ENDPOINT,
+          act: 'refuse',
+          subject: 'nothing further',
+          body: 'The agenda is answered and I have nothing further.'
+        })
+      )
+    ])
+    await eph.hermes.sweep()
+
+    expect(eph.meetings.current()?.status).toBe('closed')
+    const file = path.join(eph.agora.root, 'odeon', 'minutes', `${convened.id}.md`)
+    expect(fs.existsSync(file)).toBe(true)
+    // §5.4 asks a runner to read the narration against the incident. On
+    // 2026-09-09 there was nothing to read — `meeting/said` rows carry no
+    // content, and the meeting never closed, so no minutes were ever written.
+    expect(fs.readFileSync(file, 'utf8')).toContain('run 34317920145')
+  })
+})

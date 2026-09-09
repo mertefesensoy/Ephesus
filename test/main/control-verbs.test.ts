@@ -84,6 +84,7 @@ function deps(overrides: Record<string, unknown> = {}): ControlDeps {
     profilesActivate: () => Promise.resolve({ ok: false, reasons: ['no such profile'] }),
     profilesDeactivate: () => ({ ok: true, reason: null }),
     convene: () => ({ ok: true, id: 'meeting-1' }),
+    meetingClose: () => ({ ok: true, ref: 'agora/odeon/minutes/meeting-1.md' }),
     diagnosis: { snapshot: () => SNAPSHOT },
     ...overrides
   } as unknown as ControlDeps
@@ -660,5 +661,45 @@ describe('startControlSurface', () => {
     const server = new ControlServer({ deps: deps(), onDegraded: () => undefined })
     await expect(server.stop()).resolves.toBeUndefined()
     expect(server.endpoint()).toBeNull()
+  })
+})
+
+describe('odeon:adjourn (M8b.2)', () => {
+  it('closes the open meeting and names where the minutes went', async () => {
+    const answer = await performVerb(deps(), verb('odeon:adjourn'), {})
+    expect(answer.ok).toBe(true)
+    // The runner is told WHERE, because §5.4 asks them to read it. A verb
+    // that said only 'adjourned' would leave them hunting for the file, which
+    // is the whole of Finding 13's cost.
+    expect(answer.text).toContain('agora/odeon/minutes/meeting-1.md')
+  })
+
+  it('reports a refusal as one', async () => {
+    const answer = await performVerb(
+      deps({ meetingClose: () => ({ ok: false, reason: 'no meeting is open' }) }),
+      verb('odeon:adjourn'),
+      {}
+    )
+    expect(answer.ok).toBe(false)
+    expect(answer.text).toContain('no meeting is open')
+  })
+
+  it('sends no action items — those are the chair’s reading, not a script’s', () => {
+    const seen: unknown[][] = []
+    return performVerb(
+      deps({
+        meetingClose: (actions: unknown[]) => {
+          seen.push(actions)
+          return { ok: true, ref: 'agora/odeon/minutes/m.md' }
+        }
+      }),
+      verb('odeon:adjourn'),
+      {}
+    ).then(() => {
+      // The line `watch:approve` refuses to cross: a control surface that
+      // invented action items would be writing the ledger's input on nobody's
+      // authority.
+      expect(seen).toEqual([[]])
+    })
   })
 })

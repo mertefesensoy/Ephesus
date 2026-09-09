@@ -32,6 +32,7 @@ import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { GatesRecord, OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
+import { isFloorDecline } from '../shared/meeting'
 import { Gymnasium } from './gymnasium'
 import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
@@ -2056,6 +2057,37 @@ async function boot(): Promise<void> {
           ok: outcome.kind !== 'refused',
           subject: `meeting: ${outcome.kind}`,
           body: JSON.stringify(outcome)
+        }
+      }
+      // A `refuse` FROM THE FLOOR-HOLDER is a declined floor, not a filing
+      // (M8b.2). Narrowed to exactly that case so a refusal about anything
+      // else still reaches the filing endpoint and gets the precise answer it
+      // deserves there: only while a meeting is open, and only from the agent
+      // actually holding the floor.
+      //
+      // This is the routing Artemis needed on 2026-09-09 and did not have.
+      // She sent `request` (bounced, seq 439), then `refuse` (seq 442) — which
+      // was accepted by the endpoint and parsed as a FILING, so the meeting
+      // driver never heard that its only speaker had yielded.
+      if (isFloorDecline(message, meetings?.current() ?? null)) {
+        const outcome = meetings?.declineFloor(message.from) ?? {
+          kind: 'refused' as const,
+          reason: 'no meeting is open'
+        }
+        return {
+          ok: outcome.kind !== 'refused',
+          subject: `meeting: ${outcome.kind}`,
+          body: JSON.stringify(outcome)
+        }
+      }
+      // Every other `refuse` stays an aside in everything but the routing:
+      // recorded, answered, and NEVER handed to the filing parser. "I cannot
+      // do that" is not a malformed deck.
+      if (message.act === 'refuse') {
+        return {
+          ok: true,
+          subject: 'odeon: noted',
+          body: JSON.stringify({ kind: 'noted', act: 'refuse' })
         }
       }
       // The SHIPPED dispatch, in one place, so the scenario rig exercises it

@@ -22,6 +22,7 @@ import { Gymnasium } from '../../src/main/gymnasium'
 import { Stoa } from '../../src/main/stoa'
 import { BriefingJob } from '../../src/main/briefing'
 import { MeetingDriver } from '../../src/main/meeting'
+import { isFloorDecline } from '../../src/shared/meeting'
 import { OrgLayer } from '../../src/main/org'
 import { wireOdeonEndpoint } from '../../src/main/odeon-endpoint'
 import { Hermes, type HermesFaultPoint } from '../../src/main/hermes'
@@ -471,6 +472,26 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
           ok: outcome.kind !== 'refused',
           subject: `meeting: ${outcome.kind}`,
           body: JSON.stringify(outcome)
+        }
+      }
+      // A `refuse` from the FLOOR-HOLDER is a declined floor, not a filing —
+      // exactly as `index.ts` routes it (M8b.2).
+      if (isFloorDecline(message, meetings.current())) {
+        const outcome = meetings.declineFloor(message.from)
+        return {
+          ok: outcome.kind !== 'refused',
+          subject: `meeting: ${outcome.kind}`,
+          body: JSON.stringify(outcome)
+        }
+      }
+      // Every other `refuse` stays an aside in everything but the routing:
+      // recorded, answered, and NEVER handed to the filing parser. "I cannot
+      // do that" is not a malformed deck.
+      if (message.act === 'refuse') {
+        return {
+          ok: true,
+          subject: 'odeon: noted',
+          body: JSON.stringify({ kind: 'noted', act: 'refuse' })
         }
       }
       return odeonEndpoint(message)
