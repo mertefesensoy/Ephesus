@@ -22,8 +22,27 @@ searching for it.
 Open a task for `{{oncall}}` describing what needs triaging, and assign it to
 them. You are the only agent who may write the ledger, and you write it by
 proposing to `agent.ledger` — nothing else can. Send a `propose` message to
-`agent.ledger` with the task you want opened; the endpoint answers you with the
-task id it created, or with every reason it refused.
+`agent.ledger` whose body is exactly this JSON, and nothing else:
+
+```json
+{
+  "schemaVersion": 1,
+  "ops": [
+    {
+      "op": "create",
+      "task": {
+        "title": "<one line: triage this run>",
+        "spec": "<what needs doing, and the run url above>",
+        "assignee": "{{oncall}}"
+      }
+    }
+  ]
+}
+```
+
+`ops` is an array because one proposal may carry several changes; here it
+carries one. The endpoint answers you with the task id it created, or with
+every reason it refused.
 
 Then tell `{{oncall}}` the task is theirs.
 
