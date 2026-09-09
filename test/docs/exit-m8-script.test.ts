@@ -41,7 +41,7 @@ const EXIT_M8 = path.join(__dirname, '..', '..', 'docs', 'EXIT-M8.md')
  * the state a real incident arrives in.
  */
 const ANNOUNCES =
-  /\b(break|breaks|broke|broken|breaking|deliberate|deliberately|fixture|intentional|intentionally|on purpose|do not fix|don't fix|exit run|exit-m8|m8 exit|rehearsal)\b/i
+  /\b(break|breaks|broke|broken|breaking|deliberate|deliberately|fixture|intentional|intentionally|on purpose|do ?n[o']t fix|exit run|exit-m8|m8 exit|rehearsal|plant|planted|seed|seeded|failing test|acceptance run|self-described|dummy|not a real)\b/i
 
 /** Every first capture group `pattern` finds in `text`. */
 function captures(text: string, pattern: RegExp): readonly string[] {
@@ -87,10 +87,23 @@ describe('EXIT-M8 §3 — the planted break reads like an ordinary change', () =
     expect(three).toContain('demo/m8b-rehearsal-m8b-rehearsal.md')
   })
 
-  it('CONTROL — the message the 2026-09-09 run used is rejected by this check', () => {
+  it('asks for a defect in the code under test, not only an edited assertion', () => {
+    // The crew reads the DIFF as well as the subject line, and an assertion
+    // changed to an obviously wrong expected value announces itself. The
+    // rehearsal's PR only ever came back for a one-line defect in the code.
+    expect(three).toMatch(/code under test/i)
+  })
+
+  it('CONTROL — the messages that announce a break are rejected by this check', () => {
+    // The exact string the 2026-09-09 run used, and its branch.
     expect('test: break one assertion for the M8 exit run').toMatch(ANNOUNCES)
     expect('exit-m8-broken-test'.replace(/[-_/]/g, ' ')).toMatch(ANNOUNCES)
+    // Subtler ways of saying the same thing, which a bare "break" list misses.
+    expect('chore: seed a failing test for the acceptance run').toMatch(ANNOUNCES)
+    expect('chore: plant a CI failure').toMatch(ANNOUNCES)
+    expect("test: don't fix this, it is a fixture").toMatch(ANNOUNCES)
     // …and the message the rehearsal proved works is not.
     expect('refactor(geo): simplify the interpolation arithmetic').not.toMatch(ANNOUNCES)
+    expect('fix(auth): tighten the session timeout').not.toMatch(ANNOUNCES)
   })
 })

@@ -177,9 +177,12 @@ budget controls work.
 git switch -c refactor-interpolation
 ```
 
-Change one assertion in one test so it fails **deterministically** — not a
-flake, not a compile error. A compile error is a different failure mode and CI
-may not even reach the test.
+Make one line of the code under test wrong — a flipped sign, an off-by-one, a
+swapped operand — so the suite fails **deterministically**. Not a flake, and not
+a compile error: a compile error is a different failure mode and CI may not even
+reach the test. Editing one assertion in one test also produces a deterministic
+failure and is the older form of this step, but a defect in the code is what the
+crew was observed to fix, and it is the shape a real incident has.
 
 Then commit it **with a message that reads like an ordinary change** — and give
 the branch an ordinary name too, as above:
@@ -197,9 +200,13 @@ break was a fixture and `main` was unaffected, and opened no pull request —
 good judgement, and an unmeasurable clause. Pushed again with an ordinary
 message, the same crew triaged the same break as a real defect and opened the
 fix ([the rehearsal record](./demo/m8b-rehearsal-m8b-rehearsal.md), Finding B).
-Nothing here asks you to disguise the change in your own records: **write the
-branch name and the commit sha into your run record** (§7) and the plant stays
-identifiable to everyone except the crew, which is the point.
+The **diff** is read too, not only the subject line, which is why the paragraph
+above asks for a defect rather than an edited assertion: an assertion changed to
+an obviously wrong expected value is its own announcement, and the rehearsal
+never tested one under a neutral message. Nothing here asks you to disguise the
+change in your own records: **write the branch name and the commit sha into your
+run record** (§7) and the plant stays identifiable to everyone except the crew,
+which is the point.
 
 **Note the wall-clock time.** The hour starts when CI reports the failure, not
 when you pushed.
