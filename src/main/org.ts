@@ -2,6 +2,7 @@ import { mkdirSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { writeFileAtomic } from './fsx'
 import { compileRetro, renderRetro, type OrgInput, type RetroReport } from '../shared/org'
+import { homeRef } from '../shared/odeon'
 import type { Trigger } from './scheduler'
 
 /**
@@ -86,7 +87,7 @@ export class OrgLayer {
     if (existsSync(file)) return { ok: false, reason: `a retro is already archived at ${name}` }
 
     writeFileAtomic(file, renderRetro(report, at.toISOString()))
-    const ref = path.posix.join('odeon', 'retros', name)
+    const ref = homeRef('odeon', 'retros', name)
     this.options.onLogEvent?.({
       kind: 'orchestrator',
       event: 'retro',
@@ -108,7 +109,7 @@ export class OrgLayer {
       .filter((name) => name.endsWith('.md'))
       .sort((a, b) => b.localeCompare(a))
       .map((name) => ({
-        ref: path.posix.join('odeon', 'retros', name),
+        ref: homeRef('odeon', 'retros', name),
         generatedAt: name.replace(/\.md$/, ''),
         markdown: readFileSync(path.join(dir, name), 'utf8')
       }))

@@ -33,6 +33,7 @@ import type { GatesRecord, OpenGate } from '../shared/gates'
 import { BriefingJob, STANDUP_EVERY_MS } from './briefing'
 import { MeetingDriver } from './meeting'
 import { isFloorDecline } from '../shared/meeting'
+import { AGORA_REL } from '../shared/odeon'
 import { Gymnasium } from './gymnasium'
 import { KNOWN_TARGETS_REL, KnownTargets } from './known-targets'
 import { GitHubAppIdentity, TOKEN_REFRESH_MS } from './harbor/app-auth'
@@ -1090,10 +1091,14 @@ async function boot(): Promise<void> {
   const gitRunner = new ExecGitRunner()
   const worktrees = new Worktrees({
     runner: gitRunner,
-    forbiddenRoot: path.join(home.root, 'agora')
+    forbiddenRoot: path.join(home.root, AGORA_REL)
   })
   agora = new Agora({
-    root: path.join(home.root, 'agora'),
+    // The SAME constant `homeRef` builds refs from, so the directory the
+    // Agora actually lives in and the prefix the book of record promises
+    // cannot drift apart (M8b.3). Two hand-written copies of one fact is
+    // how a `briefRef` comes to name a place that is not there.
+    root: path.join(home.root, AGORA_REL),
     prompts,
     onCommitError: (failure) =>
       reportDegradation(

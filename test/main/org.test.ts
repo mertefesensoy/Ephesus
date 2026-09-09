@@ -44,7 +44,7 @@ function rig(events: LogEntry[] = [], at = new Date('2026-08-28T10:00:00.000Z'))
     commitSoon: (subject) => commits.push(subject),
     now: () => at
   })
-  return { org, logs, commits, agoraRoot }
+  return { org, logs, commits, agoraRoot, home }
 }
 
 describe('the retro archives, and only archives', () => {
@@ -57,7 +57,12 @@ describe('the retro archives, and only archives', () => {
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
     expect(outcome.ref).toContain('odeon/retros/')
-    const md = fs.readFileSync(path.join(r.agoraRoot, outcome.ref), 'utf8')
+    // Joined to the HOME, not the agora root (M8b.3). This line used to join
+    // to `agoraRoot` and that is exactly the assumption the exit run's Finding
+    // 13 was built on: a ref whose root is stated nowhere, resolved against
+    // whichever directory the reader happens to hold. It is the home, now, and
+    // this test failing is what proved the change was load-bearing.
+    const md = fs.readFileSync(path.join(r.home, outcome.ref), 'utf8')
     expect(md).toContain('# Weekly retro')
     expect(md).toContain('agent.mason')
   })

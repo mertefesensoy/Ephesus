@@ -133,7 +133,7 @@ describe('S-MEETING — minutes and action items on close', () => {
     const closed = eph.meetings.close()
     expect(closed.ok).toBe(true)
     if (!closed.ok) return
-    const md = fs.readFileSync(path.join(eph.agora.root, closed.ref), 'utf8')
+    const md = fs.readFileSync(path.join(eph.home, closed.ref), 'utf8')
     expect(md).toContain('the CI cache is stale')
     expect(md).toContain(id)
   })
@@ -145,7 +145,7 @@ describe('S-MEETING — minutes and action items on close', () => {
 
     const closed = eph.meetings.close()
     if (!closed.ok) throw new Error(closed.reason)
-    const md = fs.readFileSync(path.join(eph.agora.root, closed.ref), 'utf8')
+    const md = fs.readFileSync(path.join(eph.home, closed.ref), 'utf8')
     expect(md).toContain('Never reached the floor')
     expect(md).toContain('never heard')
   })

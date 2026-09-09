@@ -14,6 +14,7 @@ import {
   type MeetingState
 } from '../shared/meeting'
 import { composeMessage, makeMessageId, type Message } from '../shared/message'
+import { homeRef } from '../shared/odeon'
 import { ODEON_ENDPOINT } from '../shared/reserved'
 import type { PromptStore } from './prompts'
 
@@ -235,7 +236,7 @@ export class MeetingDriver {
 
     for (const attendee of state.attendees) this.options.onAttendance?.(attendee, false)
 
-    const ref = path.posix.join('odeon', 'minutes', `${state.id}.md`)
+    const ref = homeRef('odeon', 'minutes', `${state.id}.md`)
     this.options.onLogEvent?.({
       kind: 'meeting',
       event: 'closed',

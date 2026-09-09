@@ -29,6 +29,8 @@ afterEach(() => {
 })
 
 interface Rig {
+  /** The HARNESS HOME — what a reader of the book of record actually has. */
+  readonly home: string
   readonly driver: MeetingDriver
   readonly sent: Message[]
   readonly logs: Record<string, unknown>[]
@@ -58,6 +60,7 @@ function rig(over: { orchestrator?: string | null } = {}): Rig {
   })
 
   return {
+    home,
     driver,
     sent,
     logs,
@@ -386,5 +389,61 @@ describe('the floor prompt tells an agent how to leave (M8b.2, adversarial)', ()
 
   it('says what a decline does, so the agent can predict the outcome', () => {
     expect(floorPrompt).toMatch(/adjourns/i)
+  })
+})
+
+describe('a minutesRef resolves from the home a reader has (M8b.3)', () => {
+  /**
+   * `EXIT-M8.md` §5.4 asks a runner to read the narration against the
+   * incident. After M8b.2 an adjourned meeting is where that narration lives —
+   * so the ref it hands back has to open on the first try, from the directory
+   * the runner actually has.
+   *
+   * A mutation run is why this exists: reverting `minutesRef` to its old
+   * agora-relative shape survived every other test in the package, because the
+   * only assertion on it was `toContain('odeon/minutes/')`, which is true of
+   * both shapes. A substring check is not a resolution check.
+   */
+  it('joins to the home and opens, for a close and for an adjournment', () => {
+    const closeRig = rig()
+    const opened = closeRig.driver.convene(AGENDA)
+    if (!opened.ok) throw new Error('convene failed')
+    closeRig.driver.say('agent.mason', 'The fixture is stale.')
+    const closed = closeRig.driver.close()
+    if (!closed.ok) throw new Error(closed.reason)
+
+    expect(closed.ref.startsWith('agora/')).toBe(true)
+    const resolved = path.join(closeRig.home, ...closed.ref.split('/'))
+    expect(fs.existsSync(resolved)).toBe(true)
+    expect(fs.readFileSync(resolved, 'utf8')).toContain('The fixture is stale.')
+
+    // And the path an ADJOURNMENT reports, which is the one §5.4's runner gets
+    // from `odeon:adjourn`.
+    const adjournRig = rig()
+    const second = adjournRig.driver.convene({
+      attendees: ['agent.artemis'],
+      agenda: 'the incident'
+    })
+    if (!second.ok) throw new Error(second.reason)
+    adjournRig.driver.say('agent.artemis', 'The crew opened a task for run 34317920145.')
+    const outcome = adjournRig.driver.declineFloor('agent.artemis')
+    expect(outcome.kind).toBe('adjourned')
+    if (outcome.kind !== 'adjourned') return
+    const adjourned = path.join(adjournRig.home, ...outcome.ref.split('/'))
+    expect(fs.existsSync(adjourned)).toBe(true)
+    expect(fs.readFileSync(adjourned, 'utf8')).toContain('run 34317920145')
+  })
+
+  it('is the ref the book of record carries, not only the one returned', () => {
+    const r = rig()
+    const opened = r.driver.convene(AGENDA)
+    if (!opened.ok) throw new Error('convene failed')
+    r.driver.close()
+
+    const row = r.logs.find((entry) => entry.event === 'closed')
+    const ref = String(row?.minutesRef ?? '')
+    expect(ref).not.toBe('')
+    // The log row is what a runner reads; the return value never reaches them.
+    expect(fs.existsSync(path.join(r.home, ...ref.split('/')))).toBe(true)
   })
 })

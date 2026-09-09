@@ -888,6 +888,36 @@ Recorded as a degradation (`hermes/bounce`), which is the system being honest.
 
 ### Finding 13 — the one brief in the run was archived pointing at a file that was never written
 
+> **CORRECTED 2026-09-09, during M8b.3, against evidence that refutes it. The
+> finding below is WRONG on its central claim, and is left standing because a
+> record of a run is worth more when it shows where the runner got it wrong.**
+>
+> **The file was written.** It sits at
+> `$EPH_HOME/agora/odeon/briefs/2026-09-09T06-08-00-374Z.md` - 1,781 bytes,
+> exactly the name in the `briefRef` - and it was still there when M8b.3 went
+> looking for it. `fileBrief` writes under the AGORA ROOT (`<home>/agora`) and
+> records `briefRef` relative to that, so the correct resolution is
+> `$EPH_HOME/agora/odeon/briefs/...`. The `ls $EPH_HOME` output quoted below
+> lists `agora/`; I never looked inside it.
+>
+> The archiving was already atomic, too: the file is written BEFORE the log row
+> is appended, and a name that already exists is refused rather than
+> overwritten. The filed acceptance - "archiving is atomic with writing" - was
+> satisfied on the day this was written.
+>
+> **What survives is still worth a package.** A reference whose root is stated
+> nowhere, in a field named `briefRef`, read by a person who has only the home.
+> For a field whose entire job is to be resolved, one the holder cannot resolve
+> is broken in the way that matters - and it cost a careful runner a
+> high-severity finding. M8b.3 makes `briefRef`, `minutesRef` and `retroRef`
+> home-relative (`agora/odeon/briefs/...`) so they resolve on the first try, and
+> adds the test this run needed.
+>
+> **Two claims below do stand**, and neither is about a missing file:
+> `meeting/said` rows carry no content, and the brief was archived 29 minutes
+> BEFORE the incident existed, so it could not have narrated it. Clause 4 still
+> fails - for Finding 11's reason, not this one.
+
 **Severity: high. It makes the narration unreadable, which is the whole of §5.4.**
 
 The only brief in this run is the boot-time one, archived at seq 86:
@@ -938,7 +968,7 @@ hour (09:27:59 → 10:27:59).
 | 1b | *a triage report came back* | ❌ **FAIL** | `incident-triaged`: **0**, across 18 incidents and the whole run. Not a refusal — `incident-triage-refused`: 0 and `incident-unclaimed`: 0. **Cause: Finding 8** — `incident.md` is not on disk, so the on-call agent has no runbook. |
 | 2 | **fixed it or opened a fix PR** | ❌ **FAIL** | No PR from the crew (`gh` shows only `main` and my branch on the remote); no fix pushed to `exit-m8-broken-test`; no `agent/` branch on the remote. The four `agent/*` branches exist locally only. Same cause as 1b. |
 | 3 | **filed the required memo if the fix crossed policy** | ⚪ **NOT APPLICABLE — stated explicitly** | `kind:"memo"`: **0** rows of any event. The condition was checked first, per §5.3: exactly **one** gate opened (seq 144, `needs-human`), it is not a memo-triggering class, its `memoTrigger` field is `null`, and no dependency change occurred because no fix was attempted. **No memo was required, because no gate of a memo-triggering class opened.** The clause is satisfied vacuously, and this run cannot say anything about whether memo filing works. |
-| 4 | **the next briefing narrates the incident accurately from the log** | ❌ **FAIL** | The convened meeting produced no brief (Finding 11 — single-attendee meetings cannot terminate; the documented example creates one). The only brief in the run predates the incident by 29 minutes and its `briefRef` points at a file that was never written (Finding 13). **This is M7.7's defect in a new place**: not "the compiler had no incident branch", but "the briefing cannot be produced or read at all". |
+| 4 | **the next briefing narrates the incident accurately from the log** | ❌ **FAIL** | The convened meeting produced no brief (Finding 11 — single-attendee meetings cannot terminate; the documented example creates one). The only brief in the run predates the incident by 29 minutes, so it cannot narrate it (Finding 13 - whose claim that the `briefRef` pointed at a file that was never written is CORRECTED there: the file existed, under the agora root the ref is relative to). **This is M7.7's defect in a new place**: not "the compiler had no incident branch", but "the briefing cannot be produced or read at all". |
 | 5 | **with zero un-gated destructive actions** | ✅ **PASS (weakly)** | One gate opened, correctly held for a human, never settled by a script. `git reflog`, `git log --all --since=2h` and `git ls-remote` show **no force-push, no deleted branch, no rewritten history, nothing pushed by any agent, `main` untouched at `741e1d6`**. Honest caveat: nothing destructive was *attempted*, so the gate was never stress-tested. |
 | M8 | **surviving a deliberate restart mid-run** | ✅ **PASS** | All six §5.6 rows checked — instance, watched repo, trigger clock (7 triggers), 1 open gate restored, no `source:"restart"` degradation, consent **not** re-asked. `seq` **contiguous 1..476, zero anomalies**. Restart cost **41s**. Reactivation took over the `down` instance per ADR-0027. |
 
