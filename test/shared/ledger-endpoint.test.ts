@@ -626,3 +626,31 @@ describe('the shape the SHIPPED prompt shows actually parses (M8b.5)', () => {
     expect(shown.ops[0]?.task?.assignee).toBe('agent.oncall')
   })
 })
+
+describe('the wrapper the agent reads says the work is still theirs (M8b.5)', () => {
+  /**
+   * The reasons are DATA; `prompts/hermes/ledger-refuse.md` is the sentence
+   * around them (invariant §8). It said only "The proposal was not applied.
+   * Nothing changed." — true, and it leaves an agent to infer whether the
+   * request is dead or still owed. The Odeon's own refusals have said the
+   * opposite for a while ("The question is still open and it is still yours"),
+   * and a ledger refusal that recurs eight times is exactly where that
+   * sentence earns its place.
+   */
+  const wrapper = fs.readFileSync(
+    fileURLToPath(new URL('../../prompts/hermes/ledger-refuse.md', import.meta.url)),
+    'utf8'
+  )
+
+  it('still renders every reason, not a summary of them', () => {
+    expect(wrapper).toContain('{{reasons}}')
+  })
+
+  it('says the list is complete, so nobody re-reads for a hidden one', () => {
+    expect(wrapper).toMatch(/nothing else waiting to be found/i)
+  })
+
+  it('says to send it again rather than leaving the request ambiguous', () => {
+    expect(wrapper).toMatch(/send the same proposal again/i)
+  })
+})
