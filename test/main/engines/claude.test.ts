@@ -83,6 +83,7 @@ function rig(): Rig {
       cwd,
       engineConfigDir,
       tools: NO_TOOLS,
+      playbooksDir: null,
       commitIdentity: null,
       ghTokenCommand: '',
       envGrants: { GH_TOKEN: 'granted-value' },
@@ -415,6 +416,91 @@ describe('claude adapter — settings hygiene (TEST-STRATEGY §5)', () => {
 
     expect(() => adapter.wireHooks(cfg)).toThrow(/not a JSON object, refusing to overwrite/)
     expect(fs.readFileSync(settingsPath, 'utf8')).toBe('["hooks"]')
+  })
+})
+
+describe('claude adapter — the runbook grant (M8b.1)', () => {
+  /**
+   * Found by an adversarial pass over M8b.1, not by its own tests.
+   *
+   * M8b.1 installs an instance's runbooks under `<home>/instances/…` and tells
+   * the agent to open them by absolute path. That directory is OUTSIDE the
+   * directory the agent was spawned in — precisely where `agora/agents/<id>/`
+   * sits, and the mailbox grant below exists because the engine's permission
+   * model blocks that position. Without a grant the agent either meets a
+   * permission prompt nobody may answer during an unattended hour (the exit
+   * run's Finding 10) or reports it cannot read its runbook: Finding 8 again,
+   * one step further along, with the file present this time.
+   *
+   * Twenty-seven green tests and fifteen killed mutants did not see it, which
+   * is the reason these assertions are here rather than in that package's own
+   * file.
+   */
+  it('grants READ on the instance runbooks, and nothing wider', async () => {
+    const { adapter, cfg, settingsPath } = rig()
+    const dir = '/home/ephrun/instances/skeleton-crew@repo-aftershock/playbooks'
+    const plan = adapter.wireHooks({ ...cfg, playbooksDir: dir })
+    await plan.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[]; additionalDirectories: string[] }
+    }
+    expect(written.permissions.allow).toContain(`Read(${dir}/**)`)
+    expect(written.permissions.additionalDirectories).toContain(dir)
+
+    // READ-ONLY, and this is the half that matters. `Edit` is granted on the
+    // mailbox because an agent must write its own outbox; a runbook is the
+    // standard the work is judged against, shared by several hires, and an
+    // agent that could rewrite it could quietly lower the bar it is held to.
+    expect(written.permissions.allow).not.toContain(`Edit(${dir}/**)`)
+    expect(written.permissions.allow).not.toContain(`Write(${dir}/**)`)
+
+    // Not the instance directory, not `instances/`, not the home.
+    for (const parent of [
+      '/home/ephrun/instances/skeleton-crew@repo-aftershock',
+      '/home/ephrun/instances',
+      '/home/ephrun'
+    ]) {
+      expect(written.permissions.additionalDirectories).not.toContain(parent)
+      for (const rule of written.permissions.allow) expect(rule).not.toContain(`${parent}/**`)
+    }
+
+    await plan.uninstall()
+  })
+
+  it('grants nothing for an agent on no profile', async () => {
+    // Artemis and the endpoints have no runbook. A grant minted for them would
+    // be a widened permission bought with nothing.
+    const { adapter, cfg, settingsPath } = rig()
+    const plan = adapter.wireHooks(cfg)
+    await plan.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[]; additionalDirectories: string[] }
+    }
+    const agentDir = path.dirname(cfg.identityPath).split(path.sep).join('/')
+    expect(written.permissions.additionalDirectories).toEqual([agentDir])
+
+    await plan.uninstall()
+  })
+
+  it('does not duplicate the grant when the settings are re-installed', async () => {
+    // The same accumulation bug the mailbox grant already paid for: a plain
+    // append produced the same agent's rule twice on every re-install.
+    const { adapter, cfg, settingsPath } = rig()
+    const dir = '/home/ephrun/instances/crew@repo-app/playbooks'
+    const first = adapter.wireHooks({ ...cfg, playbooksDir: dir })
+    await first.install()
+    const second = adapter.wireHooks({ ...cfg, playbooksDir: dir })
+    await second.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[]; additionalDirectories: string[] }
+    }
+    expect(written.permissions.allow.filter((r) => r === `Read(${dir}/**)`)).toHaveLength(1)
+    expect(written.permissions.additionalDirectories.filter((d) => d === dir)).toHaveLength(1)
+
+    await second.uninstall()
   })
 })
 

@@ -183,6 +183,7 @@ describe('S-PROFILE — a CI failure becomes a triage task, through Artemis', ()
       instanceId: 'skeleton-crew:repo:myapp',
       agentId: ONCALL,
       playbook: 'incident.md',
+      playbookPath: `/home/instances/i/playbooks/incident.md`,
       repos: ['owner/app']
     })
     return co
@@ -286,6 +287,7 @@ describe('S-PROFILE — the playbook path back', () => {
       instanceId: 'skeleton-crew:repo:myapp',
       agentId: ONCALL,
       playbook: 'incident.md',
+      playbookPath: `/home/instances/i/playbooks/incident.md`,
       repos: ['owner/app']
     })
     co.incidents.raise([failedRun()])
@@ -449,6 +451,7 @@ describe('S-PROFILE — an activation against a real checkout can raise an incid
       instanceId: planned.plan.instanceId,
       agentId: ONCALL,
       playbook: 'incident.md',
+      playbookPath: `/home/instances/i/playbooks/incident.md`,
       repos: [...planned.plan.repos]
     })
 
@@ -487,6 +490,7 @@ describe('S-PROFILE — an activation against a real checkout can raise an incid
       instanceId: planned.plan.instanceId,
       agentId: ONCALL,
       playbook: 'incident.md',
+      playbookPath: `/home/instances/i/playbooks/incident.md`,
       repos: [...planned.plan.repos]
     })
     for (const repo of ['me/app', 'canonical/app']) {

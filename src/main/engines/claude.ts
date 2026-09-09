@@ -462,6 +462,29 @@ function mailboxPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
 }
 
 /**
+ * Lets the agent READ the runbooks its instance was activated with, and only
+ * read them (M8b.1).
+ *
+ * The same shape of grant as the mailbox above, and it exists for the same
+ * reason: `<home>/instances/<instance>/playbooks/` is outside the directory
+ * the agent was spawned in, so without this the engine blocks the read or
+ * parks the agent at a permission prompt. The 2026-09-09 run measured what
+ * that costs — eighteen incidents, zero triaged — and would have measured it
+ * again, in a new place, had the file been installed and left unreachable.
+ *
+ * `Read` only. `CLAUDE_FILE_RULE_TOOLS` carries `Edit` because an agent must
+ * write its own outbox; a runbook is the opposite case. It is the standard the
+ * work is judged against, several hires share one copy, and an agent that
+ * could rewrite it could quietly lower the bar it is being held to — so the
+ * grant is deliberately narrower than the mailbox's, not a copy of it.
+ */
+function playbookPermissions(cfg: AgentSpawnConfig): Record<string, unknown> {
+  if (cfg.playbooksDir === null) return { allow: [], additionalDirectories: [] }
+  const dir = cfg.playbooksDir.split(path.sep).join('/')
+  return { allow: [`Read(${dir}/**)`], additionalDirectories: [dir] }
+}
+
+/**
  * The literal PROTOCOL.md tells an agent to run when its GitHub token expires.
  *
  * Kept as one exported constant because a rule that does not match the sentence
@@ -962,6 +985,7 @@ export function mergeClaudeSettings(
   // never replacing their list: this agent's mailbox, and the one command that
   // refreshes the credential the harness itself handed it.
   const grant = mailboxPermissions(cfg)
+  const runbooks = playbookPermissions(cfg)
   const tokenRules = ghTokenPermissions(cfg)
   const existingPermissions =
     typeof base['permissions'] === 'object' &&
@@ -981,6 +1005,8 @@ export function mergeClaudeSettings(
   const mine = new Set([
     ...(grant['allow'] as unknown[]),
     ...(grant['additionalDirectories'] as unknown[]),
+    ...(runbooks['allow'] as unknown[]),
+    ...(runbooks['additionalDirectories'] as unknown[]),
     ...tokenRules
   ])
   const permissions = {
@@ -988,11 +1014,13 @@ export function mergeClaudeSettings(
     allow: [
       ...priorAllow.filter((item) => !mine.has(item)),
       ...(grant['allow'] as unknown[]),
+      ...(runbooks['allow'] as unknown[]),
       ...tokenRules
     ],
     additionalDirectories: [
       ...priorDirs.filter((item) => !mine.has(item)),
-      ...(grant['additionalDirectories'] as unknown[])
+      ...(grant['additionalDirectories'] as unknown[]),
+      ...(runbooks['additionalDirectories'] as unknown[])
     ]
   }
 

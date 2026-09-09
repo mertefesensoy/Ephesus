@@ -85,6 +85,7 @@ describe('M7 evidence (committed generator)', () => {
       instanceId: 'skeleton-crew:repo:myapp',
       agentId: ONCALL,
       playbook: 'incident.md',
+      playbookPath: '/home/instances/skeleton-crew@repo-myapp/playbooks/incident.md',
       repos: ['owner/app']
     })
 

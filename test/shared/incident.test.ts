@@ -42,7 +42,8 @@ function ciRun(overrides: Partial<InboundItem> = {}): InboundItem {
 const BINDING = {
   instanceId: 'skeleton-crew:repo:myapp',
   agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
-  playbook: 'incident.md'
+  playbook: 'incident.md',
+  playbookPath: '/home/instances/skeleton-crew@repo-myapp/playbooks/incident.md'
 }
 
 describe('the escalation table is total', () => {

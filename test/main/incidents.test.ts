@@ -27,6 +27,7 @@ const BINDING: IncidentBinding = {
   instanceId: 'skeleton-crew:repo:myapp',
   agentId: 'agent.skeleton-crew-myapp-ci-babysitter',
   playbook: 'incident.md',
+  playbookPath: `/home/instances/i/playbooks/incident.md`,
   repos: ['owner/app']
 }
 
@@ -110,7 +111,12 @@ describe('a CI failure becomes mail to the orchestrator', () => {
     expect(vars.conclusion).toBe('failure')
     expect(vars.at).toBe('2026-08-31T09:00:00.000Z')
     expect(vars.oncall).toBe('agent.skeleton-crew-myapp-ci-babysitter')
-    expect(vars.playbook).toBe('incident.md')
+    // The PATH, not the name (M8b.1). The agent is being told where its
+    // runbook is; the file name survives as `playbookName` for the subject.
+    // On 2026-09-09 this port named `incident.md` and nothing else, and the
+    // on-call agent spent its turn searching a home that never held it.
+    expect(vars.playbook).toBe('/home/instances/i/playbooks/incident.md')
+    expect(vars.playbookName).toBe('incident.md')
     // No severity, no diagnosis, no summary: the harness has none of those and
     // must not supply them. This is E-BRIEF-FAITH's rule applied at the port.
     expect(Object.keys(vars)).not.toContain('severity')
@@ -197,6 +203,7 @@ describe('routing never guesses a recipient', () => {
       instanceId: 'skeleton-crew:repo:other',
       agentId: 'agent.skeleton-crew-other-ci-babysitter',
       playbook: 'incident.md',
+      playbookPath: `/home/instances/i/playbooks/incident.md`,
       repos: ['someone/else']
     }
     const { endpoint, delivered } = rig([other, BINDING])

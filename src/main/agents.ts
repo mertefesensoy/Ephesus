@@ -249,6 +249,16 @@ export interface AgentManagerOptions {
    * than an exception to it.
    */
   toolsFor?(agentId: string): ResolvedTools | null
+  /**
+   * Where this agent's instance runbooks were installed, or null (M8b.1).
+   *
+   * Injected exactly like `toolsFor` and `autonomyFor`, and asked at the same
+   * moment: the profile layer owns which instance an agent belongs to, and a
+   * spawn path that recomputed the directory from a home root and an id would
+   * be a second opinion about the same fact — the drift those two options
+   * already exist to prevent.
+   */
+  playbooksFor?(agentId: string): string | null
   readonly probe?: VersionProber
   /**
    * Runs the adapter's authentication probe (M8.4). Injected for the same
@@ -874,6 +884,7 @@ export class AgentManager {
       // expressions that agree until one of them is edited.
       engineConfigDir: this.options.engineConfigDirFor(request.engine, request.agentId),
       tools: this.options.toolsFor?.(request.agentId) ?? NO_TOOLS,
+      playbooksDir: this.options.playbooksFor?.(request.agentId) ?? null,
       commitIdentity: this.options.commitIdentity?.() ?? null,
       // `manual` when nobody has an opinion: an agent on no profile does not
       // get latitude by default (FR-11.1's conservative default).

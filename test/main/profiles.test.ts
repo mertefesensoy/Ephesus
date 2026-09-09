@@ -289,6 +289,7 @@ describe('a fired schedule trigger actually wakes its agent', () => {
     triggerId: 'health-sweep',
     agentId: 'agent.skeleton-crew-myapp-health-watcher',
     playbook: 'health-check.md',
+    playbookPath: `/home/instances/i/playbooks/health-check.md`,
     profile: 'skeleton-crew',
     targetPath: '/repos/myapp'
   }
@@ -346,6 +347,7 @@ describe('a trigger wake survives the ids production actually mints', () => {
         triggerId,
         agentId: 'agent.skeleton-crew-musahit-health-watcher',
         playbook: 'health-check.md',
+        playbookPath: `/home/instances/i/playbooks/health-check.md`,
         profile: 'skeleton-crew',
         targetPath: 'C:\\repos\\musahit'
       },
@@ -370,6 +372,7 @@ describe('a trigger wake survives the ids production actually mints', () => {
           triggerId,
           agentId: 'agent.a',
           playbook: 'x.md',
+          playbookPath: `/home/instances/i/playbooks/x.md`,
           profile: 'p',
           targetPath: '/tmp'
         },

@@ -102,6 +102,19 @@ export interface AgentSpawnConfig {
    */
   readonly tools: ResolvedTools
   /**
+   * The instance runbook directory this agent must be able to READ, or null
+   * for an agent on no profile (M8b.1).
+   *
+   * It is on the config for the reason the mailbox grant exists at all: the
+   * directory lives in the harness home, OUTSIDE the working directory the
+   * agent was spawned in, so the engine's own permission model blocks it. An
+   * agent told to follow `<home>/instances/…/incident.md` with no grant either
+   * parks at a permission prompt — which nobody may answer during an
+   * unattended hour — or reports that it cannot read its runbook. Both are the
+   * 2026-09-09 failure in a new place.
+   */
+  readonly playbooksDir: string | null
+  /**
    * Role-declared secret grants, already resolved by the broker (ADR-0010).
    * Least-privilege: only what the hire template declares reaches this map.
    */

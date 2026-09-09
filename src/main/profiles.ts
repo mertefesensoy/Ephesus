@@ -1,6 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { parseProfile, profileNameSchema, type ProfileFiles } from '../shared/profile'
+import {
+  parseProfile,
+  profileNameSchema,
+  type ProfileBundle,
+  type ProfileFiles
+} from '../shared/profile'
 import {
   activationPlan,
   instanceIdFor,
@@ -350,6 +355,25 @@ export interface ProfileActivationOptions {
    */
   beforeHires?(plan: ActivationPlan): void
   /**
+   * The plan is settled and NOTHING has been hired yet; put this instance's
+   * runbooks where its agents can read them (M8b.1).
+   *
+   * Unlike `beforeHires` it CAN refuse, and the difference is the point. A
+   * failed engine-trust write leaves a company that still works; an instance
+   * whose hires cannot open the runbook they are told to follow cannot do the
+   * one thing it was activated for, and every agent discovers that separately
+   * and expensively. Refusing here unwinds nothing, because nothing has
+   * started.
+   *
+   * Optional, like every other seam here, so the class stays testable with no
+   * filesystem — absent means nothing is installed, which is the pre-M8b.1
+   * behaviour and the reason the exit run found what it found.
+   */
+  installPlaybooks?(
+    plan: ActivationPlan,
+    playbooks: ReadonlyMap<string, string>
+  ): { readonly ok: true } | { readonly ok: false; readonly reasons: readonly string[] }
+  /**
    * One hire is up and the instance is live (M8.6). Carries the whole planned
    * hire rather than an id and a policy, so a consumer that later needs the
    * isolation row or the budget does not need a second seam — and so this one
@@ -435,13 +459,34 @@ export class ProfileActivations {
    * adds a remote to a checkout between two activations like anybody else.
    */
   async preview(request: ActivationRequest): Promise<ActivationPlanResult> {
+    const planned = await this.planWith(request)
+    return planned.ok ? { ok: true, plan: planned.plan } : { ok: false, reasons: planned.reasons }
+  }
+
+  /**
+   * `preview`, plus the bundle the plan was computed from.
+   *
+   * Private, and the reason it exists is that `activate` needs the playbook
+   * BODIES and the plan carries only their file names. Re-loading the bundle
+   * to get them would read the disk a second time, so an edit landing between
+   * the two reads would install runbooks belonging to a plan the Architect was
+   * never shown. One load answers both questions, for the same reason
+   * `grantsUnavailable` is answered by the resolver the spawn uses: the screen
+   * and the outcome must not be able to disagree.
+   */
+  private async planWith(
+    request: ActivationRequest
+  ): Promise<
+    | { readonly ok: true; readonly plan: ActivationPlan; readonly bundle: ProfileBundle }
+    | { readonly ok: false; readonly reasons: readonly string[] }
+  > {
     const loaded = this.options.store.load(request.profile)
     if (!loaded.ok) return { ok: false, reasons: loaded.reasons }
     const derived = (await this.options.resolveRepos?.(request.target)) ?? {
       ok: false as const,
       because: 'the harness did not look at the target’s remotes'
     }
-    return activationPlan(
+    const planned = activationPlan(
       loaded.bundle,
       request.target,
       this.options.globalAutonomy(),
@@ -450,6 +495,9 @@ export class ProfileActivations {
       request.repos ?? [],
       request.isolation ?? 'as-declared'
     )
+    return planned.ok
+      ? { ok: true, plan: planned.plan, bundle: loaded.bundle }
+      : { ok: false, reasons: planned.reasons }
   }
 
   /**
@@ -476,9 +524,28 @@ export class ProfileActivations {
       }
     }
 
-    const planned = await this.preview(request)
+    const planned = await this.planWith(request)
     if (!planned.ok) return { ok: false, reasons: planned.reasons }
     const { plan } = planned
+
+    // The runbooks cross from the bundle into the harness home HERE (M8b.1):
+    // after the plan is fixed, before anything is spawned. A refusal at this
+    // point costs nothing — no process exists and no token has been spent —
+    // whereas letting it through is what the 2026-09-09 exit run measured:
+    // four hires against three runbooks none of them could open, a duty
+    // re-firing every fifteen minutes, `incident-triaged: 0` across eighteen
+    // incidents, and $11.22 spent discovering the file was never written.
+    //
+    // It refuses rather than degrading, unlike `beforeHires` below. ADR-0021's
+    // trust write degrades because a company may still work without it; an
+    // instance whose hires cannot read their runbook cannot do the one thing
+    // it was activated to do, and `profile.ts` already refuses a bundle whose
+    // trigger names a playbook it does not carry. This is that same rule, one
+    // boundary further on.
+    const installed = this.options.installPlaybooks?.(plan, playbookBodies(planned.bundle, plan))
+    if (installed !== undefined && !installed.ok) {
+      return { ok: false, reasons: installed.reasons }
+    }
 
     // Before the first process, after the plan is fixed: the engine's trust
     // record has to name every directory these hires will work in, or an
@@ -687,6 +754,23 @@ export class ProfileActivations {
   }
 
   /**
+   * Contract: the INSTANCE id an agent belongs to, or null (M8b.1).
+   *
+   * The instance rather than the profile, because runbooks are installed per
+   * activation: two targets running one profile have two directories, and
+   * answering with the profile name would hand both crews the same one.
+   *
+   * Answers DURING a spawn for the same reason `profileFor` does — `planFor`
+   * searches the in-flight plans as well as the live set, and the spawn path
+   * asks before the instance is registered. An answer that only became
+   * available afterwards would be no answer at all: the settings file is
+   * written at spawn.
+   */
+  instanceFor(agentId: string): string | null {
+    return this.planFor(agentId)?.instanceId ?? null
+  }
+
+  /**
    * Contract: puts previously-live instances back, with their crews DOWN, and
    * returns one sentence per instance describing what did and did not come
    * back (M8.8). Never spawns, never kills, never arms a trigger.
@@ -761,12 +845,54 @@ export class ProfileActivations {
   }
 }
 
+/**
+ * Contract: the bodies of exactly the playbooks a plan declares, keyed by file
+ * name. Pure.
+ *
+ * Keyed off `plan.playbooks` rather than off the bundle, so the set installed
+ * is the set the Architect was shown on the activation screen and the set
+ * `activations.json` records. That equality is M8b.1's whole acceptance
+ * criterion, and deriving the installed set from a second source is how it
+ * would come apart: the exit run's home held zero of three declared runbooks
+ * and every surface still named all three.
+ *
+ * A declared name the bundle does not carry is skipped rather than defaulted
+ * to an empty file. `parseProfile` already refuses a trigger naming a playbook
+ * the bundle lacks, so this is unreachable through the normal path — and if it
+ * ever becomes reachable, an absent file that the audit then reports is a far
+ * better outcome than a zero-byte runbook an agent would dutifully follow.
+ */
+export function playbookBodies(
+  bundle: Pick<ProfileBundle, 'playbooks'>,
+  plan: Pick<ActivationPlan, 'playbooks'>
+): ReadonlyMap<string, string> {
+  const byFile = new Map(bundle.playbooks.map((book) => [book.file, book.text]))
+  const declared = new Map<string, string>()
+  for (const file of plan.playbooks) {
+    const text = byFile.get(file)
+    if (text !== undefined) declared.set(file, text)
+  }
+  return declared
+}
+
 /** What a fired schedule trigger needs to say, and to whom. */
 export interface TriggerWake {
   readonly instanceId: string
   readonly triggerId: string
   readonly agentId: string
+  /** The runbook's file name, e.g. `incident.md`. */
   readonly playbook: string
+  /**
+   * Where that runbook actually is, absolute (M8b.1).
+   *
+   * The wake used to name the file and leave the agent to find it. On the
+   * 2026-09-09 run the health watcher searched the home by name AND by
+   * content, read `activations.json`, and correctly concluded the file had
+   * never been shipped — work it should not have had to do, and could only do
+   * because it happened to be diligent. A duty message that names a path the
+   * harness has just written is not asking the agent to guess.
+   */
+  readonly playbookPath: string
   /** The profile's name, for the wake's own words. */
   readonly profile: string
   /** Where the agent works — the activation target's path. */
@@ -792,7 +918,19 @@ export function triggerWakeMessage(
   render: (kind: 'subject' | 'body', vars: Record<string, string>) => string,
   at: Date
 ): Message {
-  const vars = { profile: wake.profile, playbook: wake.playbook, target: wake.targetPath }
+  // `playbook` renders the PATH, and `playbookName` the file name. That way
+  // round on purpose: `PromptStore` seeds the home's copy of a prompt on first
+  // use and never re-seeds it, so an Ephesus that has already run once keeps
+  // its old `trigger-body.md`. Putting the fix in the value of a placeholder
+  // that file already contains is what makes it reach an existing install;
+  // introducing a new placeholder alone would have fixed only fresh homes —
+  // and a fresh home is the only kind an exit run ever uses.
+  const vars = {
+    profile: wake.profile,
+    playbook: wake.playbookPath,
+    playbookName: wake.playbook,
+    target: wake.targetPath
+  }
   return composeMessage({
     // The suffix is derived from the trigger, so a wake is traceable to the
     // binding that sent it (NFR-13) without a random component nothing can

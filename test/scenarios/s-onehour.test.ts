@@ -81,6 +81,7 @@ async function onCall(): Promise<Company> {
     instanceId: INSTANCE,
     agentId: ONCALL,
     playbook: 'incident.md',
+    playbookPath: `/home/instances/i/playbooks/incident.md`,
     repos: ['owner/app']
   })
   return eph

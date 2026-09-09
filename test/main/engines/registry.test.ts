@@ -48,6 +48,7 @@ const spawnConfig: AgentSpawnConfig = {
   cwd: '/tmp/eph/repo',
   engineConfigDir: '/tmp/eph/engine-config',
   tools: NO_TOOLS,
+  playbooksDir: null,
   commitIdentity: null,
   ghTokenCommand: '',
   envGrants: { GH_TOKEN: 'granted' },

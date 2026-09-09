@@ -154,6 +154,16 @@ export interface Incident {
   readonly agentId: string
   /** The runbook that agent should follow. A reference — never the text. */
   readonly playbook: string
+  /**
+   * Where that runbook is on this machine, absolute (M8b.1).
+   *
+   * Carried beside the name rather than instead of it: the log row records the
+   * NAME, because `playbook: "incident.md"` is what a reader of the book of
+   * record can match against a bundle, while a machine-specific path in an
+   * append-only file ages badly. The PATH is for the agent being asked to open
+   * it, and only for that.
+   */
+  readonly playbookPath: string
 }
 
 /**
@@ -166,7 +176,12 @@ export interface Incident {
  */
 export function incidentFrom(
   item: InboundItem,
-  binding: { readonly instanceId: string; readonly agentId: string; readonly playbook: string }
+  binding: {
+    readonly instanceId: string
+    readonly agentId: string
+    readonly playbook: string
+    readonly playbookPath: string
+  }
 ): Incident | null {
   if (item.kind !== 'ci-run') return null
   if (item.conclusion === null) return null
@@ -180,7 +195,8 @@ export function incidentFrom(
     at: item.at,
     instanceId: binding.instanceId,
     agentId: binding.agentId,
-    playbook: binding.playbook
+    playbook: binding.playbook,
+    playbookPath: binding.playbookPath
   }
 }
 
