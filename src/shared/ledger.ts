@@ -88,6 +88,12 @@ export const ledgerOpSchema = z.discriminatedUnion('op', [
 
 export type LedgerOp = z.infer<typeof ledgerOpSchema>
 
+/** A single backtick, so these sentences can quote code without escaping. */
+const BT = '`'
+
+/** The envelope every proposal wears, quoted back in refusals that need it. */
+const PROPOSAL_SHAPE = '{"schemaVersion":1,"ops":[ ... ]}'
+
 export const ledgerProposalSchema = z
   .object({
     schemaVersion: z.literal(LEDGER_SCHEMA_VERSION),
@@ -99,7 +105,98 @@ export type LedgerProposal = z.infer<typeof ledgerProposalSchema>
 
 export type ProposalParse =
   | { readonly ok: true; readonly proposal: LedgerProposal }
-  | { readonly ok: false; readonly reason: string }
+  /**
+   * EVERY reason, not the first (M8b.5).
+   *
+   * `applyProposal` below already collects every reason, and says why in its
+   * own contract: "these three things are wrong" beats "the first one was
+   * wrong, and the rest may or may not have happened". The PARSE half did not
+   * obey its own module's rule -- it reported `issues[0]` and stopped -- so an
+   * agent with two mistakes had to make two round trips to learn both.
+   */
+  | { readonly ok: false; readonly reasons: readonly string[] }
+
+/** How many reasons one refusal carries before it stops being readable. */
+const MAX_REASONS = 12
+
+/**
+ * Contract: a dotted path rendered the way a JSON author reads it. Pure.
+ *
+ * `ops.3.task.title` is a Zod path; `ops[3].task.title` is a place in the
+ * document the agent wrote. The index is also the closest this layer gets to
+ * naming the OFFENDING TASK, which is what M8b.5's acceptance asks for: the
+ * task has no id yet -- the ledger mints it -- so its position in the batch is
+ * the only handle both sides share.
+ */
+export function proposalPath(path: readonly PropertyKey[]): string {
+  return path.reduce<string>((acc, part) => {
+    if (typeof part === 'number') return `${acc}[${String(part)}]`
+    const name = String(part)
+    return acc === '' ? name : `${acc}.${name}`
+  }, '')
+}
+
+/**
+ * Contract: one actionable sentence per validation issue, deduplicated, in
+ * document order, capped. Pure.
+ *
+ * ## Why this exists rather than a raw validator message
+ *
+ * The 2026-09-09 exit run refused every incident's first task-open with:
+ *
+ *     ops: Invalid input: expected array, received undefined
+ *
+ * A field name and nothing else -- not what `ops` should contain, not which
+ * task, not what to send instead. The proof it did not teach is that it
+ * recurred EIGHT identical times rather than being corrected after the first.
+ * That is the failure mode the decision log already names: *a right guard with
+ * an unlearnable message bills you every time.*
+ *
+ * The guard was right. What it said was worth nothing.
+ */
+export function proposalReasons(
+  issues: readonly { readonly path: readonly PropertyKey[]; readonly message: string }[]
+): readonly string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const issue of issues) {
+    const where = proposalPath(issue.path)
+    const key = `${where}|${issue.message}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(`${where === '' ? 'proposal' : where}: ${explainIssue(where, issue.message)}`)
+    if (out.length === MAX_REASONS) {
+      out.push(
+        `and possibly more -- the first ${String(MAX_REASONS)} are listed; fix these and send again`
+      )
+      break
+    }
+  }
+  return out.length > 0 ? out : ['proposal: it does not match the ledger proposal shape']
+}
+
+/**
+ * The sentence for one issue.
+ *
+ * Only the two shapes an agent actually gets wrong carry a bespoke sentence,
+ * and both were observed: the missing envelope (`ops`) and the version literal.
+ * Everything else keeps the validator's own words, because inventing prose for
+ * an issue nobody has met is how a message becomes confidently wrong about a
+ * case it was never tested on.
+ */
+function explainIssue(where: string, message: string): string {
+  if (where === 'ops') {
+    return (
+      `the proposal needs an ${BT}ops${BT} array -- one entry per change, and at least one. ` +
+      `To open a task, send ${BT}{"op":"create","task":{"title":"...","assignee":"agent.x"}}${BT}. ` +
+      `The whole body is ${BT}{"schemaVersion":1,"ops":[ ... ]}${BT}. (${message})`
+    )
+  }
+  if (where === 'schemaVersion') {
+    return `every ledger proposal carries ${BT}"schemaVersion": 1${BT}. (${message})`
+  }
+  return message
+}
 
 /**
  * Contract: parses a proposal out of a message body, naming the reason on
@@ -113,13 +210,17 @@ export function parseProposal(body: string): ProposalParse {
   try {
     raw = JSON.parse(body)
   } catch (err) {
-    return { ok: false, reason: `body is not valid JSON: ${reason(err)}` }
+    return {
+      ok: false,
+      reasons: [
+        `body is not valid JSON: ${reason(err)}. The body is the proposal itself -- ` +
+          `${BT}${PROPOSAL_SHAPE}${BT} -- with no prose around it.`
+      ]
+    }
   }
   const parsed = ledgerProposalSchema.safeParse(raw)
   if (parsed.success) return { ok: true, proposal: parsed.data }
-  const issue = parsed.error.issues[0]
-  const where = issue && issue.path.length > 0 ? issue.path.join('.') : 'proposal'
-  return { ok: false, reason: `${where}: ${issue?.message ?? 'invalid proposal'}` }
+  return { ok: false, reasons: proposalReasons(parsed.error.issues) }
 }
 
 export interface ApplyContext {

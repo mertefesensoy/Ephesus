@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   applyProposal,
@@ -46,7 +48,7 @@ function parse(body: unknown): ReturnType<typeof parseProposal> {
 
 function apply(ledger: TaskLedger, body: unknown, ctx: Partial<ApplyContext> = {}) {
   const parsed = parse(body)
-  if (!parsed.ok) throw new Error(`proposal did not parse: ${parsed.reason}`)
+  if (!parsed.ok) throw new Error(`proposal did not parse: ${parsed.reasons.join(' · ')}`)
   return applyProposal(ledger, parsed.proposal, { ...CTX, ...ctx })
 }
 
@@ -92,7 +94,7 @@ describe('a proposal is parsed, never repaired', () => {
   it('refuses a body that is not JSON, and says so', () => {
     const parsed = parse('{ half a proposal')
     expect(parsed.ok).toBe(false)
-    expect(parsed.ok ? '' : parsed.reason).toMatch(/not valid JSON/)
+    expect(parsed.ok ? '' : parsed.reasons.join(' · ')).toMatch(/not valid JSON/)
   })
 
   it('carries a schemaVersion (invariant §9)', () => {
@@ -125,9 +127,28 @@ describe('a proposal is parsed, never repaired', () => {
     expect(parse(proposal({ op: 'update', id: 't-2026-08-27-00', patch: {} })).ok).toBe(false)
   })
 
-  it('names where a proposal went wrong', () => {
+  it('names where a proposal went wrong, the way a JSON author reads it', () => {
+    // `ops[0]`, not `ops.0` (M8b.5). The first is a place in the document the
+    // agent wrote; the second is a validator's internal path. The index is
+    // also the closest this layer gets to naming the OFFENDING TASK — the task
+    // has no id yet, because the ledger mints it, so its position in the batch
+    // is the only handle both sides share.
     const parsed = parse(proposal({ op: 'create', task: { title: 'x' } }))
-    expect(parsed.ok ? '' : parsed.reason).toMatch(/ops\.0/)
+    expect(parsed.ok ? '' : parsed.reasons.join(' · ')).toMatch(/ops\[0\]/)
+  })
+
+  it('reports EVERY reason at once, not just the first', () => {
+    // The rule `applyProposal` states in its own contract — "these three
+    // things are wrong" beats "the first one was wrong, and the rest may or
+    // may not have happened" — which the PARSE half did not obey. It returned
+    // `issues[0]` and stopped, so an agent with two mistakes paid two round
+    // trips to learn both.
+    const parsed = parse(proposal({ op: 'create', task: { title: 'x' } }))
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.reasons.length).toBeGreaterThan(1)
+    expect(parsed.reasons.join(' · ')).toContain('spec')
+    expect(parsed.reasons.join(' · ')).toContain('assignee')
   })
 })
 
@@ -475,5 +496,161 @@ describe('stallTask — ADR-0011 rung 3’s owed clause', () => {
     )
     const { ledger } = stallTask(before, 't-x', CTX.at)
     expect(ledger.tasks.map((task) => task.status)).toEqual(['stalled', 'in_progress'])
+  })
+})
+
+describe('the refusal an agent reads TEACHES the shape (M8b.5 — Finding 6)', () => {
+  /**
+   * The exit run refused every incident's first task-open with:
+   *
+   *     ops: Invalid input: expected array, received undefined
+   *
+   * A field name and nothing else — not what `ops` should contain, not which
+   * task, not what to send instead. The proof it did not teach is that it
+   * recurred EIGHT identical times rather than being corrected after the
+   * first. The guard was right; what it said was worth nothing.
+   */
+  const missingOps = () => parse({ schemaVersion: 1 })
+
+  it('says what `ops` is FOR, not merely that it is missing', () => {
+    const parsed = missingOps()
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    const said = parsed.reasons.join(' · ')
+    expect(said).toContain('ops')
+    // One entry per change, and at least one — the sentence the run needed.
+    expect(said).toMatch(/one entry per change/i)
+  })
+
+  it('shows the body an agent should send, envelope and all', () => {
+    const parsed = missingOps()
+    if (parsed.ok) return
+    const said = parsed.reasons.join(' · ')
+    // A refusal that names a field without showing the shape leaves the agent
+    // to guess the envelope a second time, which is how this cost 8 attempts.
+    expect(said).toContain('"op":"create"')
+    expect(said).toContain('"schemaVersion":1')
+  })
+
+  it('keeps the validator’s own words too, so nothing is hidden', () => {
+    // The bespoke sentence ADDS to the machine reason; it does not replace it.
+    // An agent that had learned to match on the old text is not stranded, and
+    // a reader of `log.jsonl` can still see what the schema actually said.
+    const parsed = missingOps()
+    if (parsed.ok) return
+    expect(parsed.reasons.join(' · ')).toContain('expected array')
+  })
+
+  it('teaches the version literal rather than restating the type', () => {
+    const parsed = parse({ schemaVersion: 99, ops: [{ op: 'board', body: 'x' }] })
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.reasons.join(' · ')).toContain('"schemaVersion": 1')
+  })
+
+  it('names the envelope when the body is not JSON at all', () => {
+    const parsed = parse('{ half a proposal')
+    if (parsed.ok) return
+    const said = parsed.reasons.join(' · ')
+    expect(said).toContain('not valid JSON')
+    // And what a valid one looks like — otherwise "not valid JSON" tells an
+    // agent that something is wrong and nothing about what to send.
+    expect(said).toContain('"ops"')
+  })
+
+  it('caps a wall of reasons rather than returning one per bad field', () => {
+    // A proposal with fifty broken ops must not answer with fifty lines: a
+    // refusal nobody reads to the end teaches as little as one that says
+    // nothing. It says so explicitly rather than truncating silently.
+    const many = { schemaVersion: 1, ops: Array.from({ length: 40 }, () => ({ op: 'create' })) }
+    const parsed = parse(many)
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.reasons.length).toBeLessThanOrEqual(13)
+    expect(parsed.reasons.at(-1)).toMatch(/and possibly more|fix these and send again/i)
+  })
+})
+
+describe('the shape the SHIPPED prompt shows actually parses (M8b.5)', () => {
+  /**
+   * The other half of Finding 6, and the half that stops the refusal happening
+   * at all: nothing told Artemis the proposal's shape. `PROTOCOL.md` does not
+   * carry it and `incident-body.md` said only "send a `propose` message to
+   * `agent.ledger` with the task you want opened". She guessed the envelope,
+   * guessed wrong, and the refusal was her only teacher — eight times.
+   *
+   * A prompt that shows a shape is worth nothing if the shape is wrong, and a
+   * fixture copy of it would drift from the file agents are actually given. So
+   * this reads the SHIPPED prompt, pulls its JSON block out, fills the one
+   * placeholder the harness fills, and runs the REAL parser over it.
+   */
+  const promptPath = fileURLToPath(
+    new URL('../../prompts/harbor/incident-body.md', import.meta.url)
+  )
+  const prompt = fs.readFileSync(promptPath, 'utf8')
+  const chr10 = String.fromCharCode(10)
+
+  function shownProposal(): unknown {
+    // Extracted with indexOf rather than a regex: the fence is three
+    // backticks, and a template-literal regex containing them is a fight
+    // with the parser for no benefit.
+    const fence = '```json'
+    const open = prompt.indexOf(fence)
+    expect(open, 'incident-body.md no longer shows a json block').toBeGreaterThan(-1)
+    const from = prompt.indexOf(chr10, open) + 1
+    const close = prompt.indexOf(fence.slice(0, 3), from)
+    expect(close, 'the json block in incident-body.md is not closed').toBeGreaterThan(from)
+    const filled = prompt.slice(from, close).replace(/\{\{oncall\}\}/g, 'agent.oncall')
+    return JSON.parse(filled)
+  }
+
+  it('shows a proposal the ledger accepts, first time', () => {
+    const parsed = parse(shownProposal())
+    expect(
+      parsed.ok ? [] : parsed.reasons,
+      'the shape the prompt tells an agent to send is refused by the parser'
+    ).toEqual([])
+    expect(parsed.ok).toBe(true)
+  })
+
+  it('shows the `ops` envelope, which is the field the run tripped on', () => {
+    const shown = shownProposal() as { ops?: unknown[] }
+    expect(Array.isArray(shown.ops)).toBe(true)
+    expect(shown.ops?.length).toBeGreaterThan(0)
+  })
+
+  it('assigns the task to the on-call agent the harness names', () => {
+    // A shape that parses but drops the assignee would open a task nobody
+    // owns, which is a quieter version of the same failure.
+    const shown = shownProposal() as { ops: { task?: { assignee?: string } }[] }
+    expect(shown.ops[0]?.task?.assignee).toBe('agent.oncall')
+  })
+})
+
+describe('the wrapper the agent reads says the work is still theirs (M8b.5)', () => {
+  /**
+   * The reasons are DATA; `prompts/hermes/ledger-refuse.md` is the sentence
+   * around them (invariant §8). It said only "The proposal was not applied.
+   * Nothing changed." — true, and it leaves an agent to infer whether the
+   * request is dead or still owed. The Odeon's own refusals have said the
+   * opposite for a while ("The question is still open and it is still yours"),
+   * and a ledger refusal that recurs eight times is exactly where that
+   * sentence earns its place.
+   */
+  const wrapper = fs.readFileSync(
+    fileURLToPath(new URL('../../prompts/hermes/ledger-refuse.md', import.meta.url)),
+    'utf8'
+  )
+
+  it('still renders every reason, not a summary of them', () => {
+    expect(wrapper).toContain('{{reasons}}')
+  })
+
+  it('says the list is complete, so nobody re-reads for a hidden one', () => {
+    expect(wrapper).toMatch(/nothing else waiting to be found/i)
+  })
+
+  it('says to send it again rather than leaving the request ambiguous', () => {
+    expect(wrapper).toMatch(/send the same proposal again/i)
   })
 })

@@ -118,7 +118,7 @@ export class LedgerEndpoint {
    */
   submit(message: Message): SubmitOutcome {
     const parsed = parseProposal(message.body)
-    if (!parsed.ok) return this.refuse(message, [parsed.reason])
+    if (!parsed.ok) return this.refuse(message, parsed.reasons)
 
     const at = this.now().toISOString()
     const result = applyProposal(this.tasks(), parsed.proposal, {
