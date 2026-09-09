@@ -145,7 +145,18 @@ npm run typecheck && npm run lint && node scripts/check-invariants.cjs &&
 npm run test:coverage && node scripts/check-coverage.cjs
 ```
 
-*(figures in the pull request)*
+```
+typecheck   green (node, preload, web, web-test)
+lint        All matched files use Prettier code style!
+invariants  ok — reachability 187/197 src modules reached, 10 by recorded decision, 6 type-only
+tests       Test Files 234 passed (234) · Tests 4484 passed | 8 skipped (4492)
+coverage    floors ok (17 subsystems on win32; 20 untested modules, all recorded)
+```
+
+Node v20.16.0, npm 10.8.1, win32. The suite needs ~2 GB free and
+`requireHeadroom` refuses below 1 GB; this machine was at 0.92 GB when the round
+began and the gate was run only after headroom was restored. Nothing was
+weakened to get it to run.
 
 **Mutation round, with a control** — `docs/DECISIONS-LOG.md` 2026-09-09 requires
 a proven-green baseline, a planted no-op whose survival certifies the round,
@@ -153,7 +164,27 @@ byte-exact restore checked by hash, a committed tree so `git checkout --` is the
 restore, and the test files the round ran named. Every mutant was applied to
 `docs/EXIT-M8.md`, one at a time.
 
-*(result in the pull request)*
+```
+test files this round runs: test/docs/exit-m8-script.test.ts
+baseline: GREEN
+  M1 restore the announcing commit message              KILLED
+  M2 restore the announcing branch name (switch)        KILLED
+  M3 restore the announcing branch name (push)          KILLED
+  M4 drop the citation of the run that proved it        KILLED
+  M5 drop the clause the wording protects               KILLED
+  M6 a subtler message: 'plant a deliberate CI failure' KILLED
+  M7 drop the ask for a defect in the code under test   KILLED
+  M8 a subtler message: 'seed a failing test'           KILLED
+  M9 a branch that only half announces it               KILLED
+  CONTROL a no-op reword of prose inside the same §3    SURVIVED — CERTIFIED
+
+mutants: 9 real, 1 control · killed: 9 of 9 real · ROUND OK
+```
+
+The harness refuses to start on an uncommitted tree, aborts on a red baseline,
+reports a suite that will not start as INVALID rather than as a kill (it did
+exactly that once, on an invalid `--reporter` flag), and checks every restore is
+byte-identical by SHA-256 before the next mutant.
 
 **Adversarial refutation pass.** What was tried against this package, and what it
 found:
