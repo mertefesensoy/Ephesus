@@ -214,6 +214,211 @@ built first — so the exit is performed end to end by somebody who did not writ
 the code, with nobody clicking anything. SRS §6.1 carries the matching
 amendment.
 
+**The run was performed on 2026-09-09 and the exit did NOT pass.** Record, with
+every clause's evidence and log rows:
+[`docs/demo/m8-onehour-aftershock.md`](./demo/m8-onehour-aftershock.md). It ran
+end to end against `mertefesensoy/aftershock` by a runner who did not write the
+code, driven entirely from `scripts/ephctl.cjs` with nothing clicked — so
+M8.14 did what it was built for, and §6.1(a) as amended was satisfied. Result:
+**3 clauses pass, 3 fail, 1 not applicable**. Passing are the three M8 itself
+built — detection in 9m30s of Ephesus-side time, zero un-gated destructive
+actions, and M8's own restart clause with `seq` contiguous 1..476 across a
+force-kill. Failing are triage, the fix PR, and the briefing, each for one
+concrete cause. Those causes are filed as **M8b**; the findings that made the run
+expensive or its reports untrustworthy are filed as **M8c**. The exit row in
+`docs/PROGRESS.md` is deliberately untouched — it is the Architect's to tick, on
+that record.
+
+## M8b — The crew can act, and the briefing can be read (≈ 3–5 days) — *hardening*
+
+> **Filed 2026-09-09 from the M8 exit run**, which was performed end to end
+> against `mertefesensoy/aftershock` by a runner who did not write the code and
+> clicked nothing. Full record with evidence, log rows and timings:
+> [`docs/demo/m8-onehour-aftershock.md`](./demo/m8-onehour-aftershock.md).
+> Findings are cited by number below rather than restated.
+
+The run returned **3 clauses pass, 3 fail, 1 not applicable**. The three that
+pass are the ones M8 built: detection (9m30s Ephesus-side), zero un-gated
+destructive actions, and M8's own restart clause — `seq` contiguous 1..476
+across a force-kill, consent not re-asked, the open gate restored. **M8's
+machinery works.** What failed is the layer above it: the crew had nothing to
+act *from*, and the briefing could not be produced or read.
+
+This milestone is therefore scoped to exactly the five findings on those two
+paths. **It is the whole distance between the current tree and an exit that
+passes**, and nothing else belongs in it.
+
+**M8b.1 — Install the profile bundle into the harness home** *(Finding 8 —
+the single highest-value fix in the record)*. The repository bundle carries
+`incident.md` (7,046 bytes), `dependency-update.md` and `health-check.md`;
+`$EPH_HOME/profiles/` is **empty**, and `activations.json` names all three.
+Activation resolves the bundle from the repository while agents resolve
+playbooks relative to the home, and nothing copies it across that boundary. One
+gap, and it is the cause of **both** failing action clauses: no triage
+(`incident-triaged: 0` across 18 incidents) and no fix PR. *Acceptance:* after
+activation, every playbook the instance declares is readable from the agent's
+own worktree, and a test asserts the declared set and the on-disk set are
+equal — the assertion that would have failed on this run.
+
+**M8b.2 — A meeting with one attendee must be able to end** *(Finding 11)*.
+`meeting/said` passes the floor to the next attendee, who for a single-attendee
+meeting is the same agent, so the meeting cannot advance past its only speaker.
+Artemis diagnosed the loop from the log herself (seq 387 → 393 → 395 → 427 →
+429) and declined the floor rather than spin. **The aggravating half:
+`ephctl help`'s own usage line and `EXIT-M8.md` §5.4 both tell the runner to
+convene exactly this case.** Artemis proposed the two fixes and either suffices:
+adjourn when the only attendee yields, or treat a declined floor as ending the
+round. *Acceptance:* a convened single-attendee meeting terminates and emits its
+brief; the documented example in `ephctl help` is the tested case.
+
+**M8b.3 — A brief that is archived must exist** *(Finding 13)*. The one brief in
+the run was archived with `briefRef: "odeon/briefs/2026-09-09T06-08-00-374Z.md"`,
+recording five sentences and 27 spoken seconds. **There is no `odeon/` directory
+in the home at all**, and no brief markdown anywhere in it. Compounding it,
+`meeting/said` rows carry `meetingId`, `from`, `floor` and `ts` and **no
+content** — so between an unwritten `briefRef` and contentless `said` rows, the
+narration Artemis gave at 07:05Z is unrecoverable from any artifact. §5.4 asks a
+runner to read the brief against the incident and judge accuracy; there was
+nothing to read. *Acceptance:* archiving is atomic with writing — a `briefRef`
+in the log always resolves to a file on disk, and a test asserts that for every
+archived brief.
+
+**M8b.4 — The Odeon endpoint and the orchestrator agree on their vocabulary**
+*(Finding 12)*. Artemis's adjourn request bounced: *"the odeon endpoint takes
+`propose`, `inform`, `agree`, `refuse` or `done` acts; got `request`"*. She
+recovered by re-sending as `refuse`, so this cost a round trip rather than a
+deadlock — and it is only invisible because the agent worked around it. The
+refusal itself is good (it enumerates the accepted acts) and is correctly
+recorded as `hermes/bounce`. *Acceptance:* the orchestrator's meeting-control
+messages use acts the endpoint accepts, asserted against the endpoint's own
+schema rather than against a copy of it.
+
+**M8b.5 — The ledger's first refusal must teach, or not happen** *(Finding 6, as
+corrected)*. Every incident's first task-open was refused with
+`ops: Invalid input: expected array, received undefined`, and the orchestrator
+then retried successfully — 8 refusals, 8 recoveries. **The path is lossy and
+noisy, not broken**, and the record carries the correction to an earlier
+overstatement of this. What matters is the message: a raw validator error naming
+a field and nothing else, whose failure to teach is proved by its recurring
+eight identical times instead of being corrected after the first. *Acceptance:*
+either the first attempt carries `ops` and the refusal stops occurring, or the
+refusal names the expected shape and the offending task — measured the way
+`docs/DECISIONS-LOG.md` already measures this class, by reading `reasons` in
+`log.jsonl`.
+
+**Exit:** `docs/EXIT-M8.md` re-run end to end by a runner who is not the author,
+against a real repository, with **clauses 1b, 2 and 4 passing** and the three
+that already pass still passing. The re-run needs no new script — `EXIT-M8.md`
+is current, with the corrections in M8c.6 folded in.
+
+## M8c — Bounded, and honest about itself (≈ 1 week) — *hardening*
+
+> Also filed 2026-09-09 from the same record. **None of these blocked a clause**
+> — they made the run expensive, or made its reports untrustworthy. Two of them
+> would have made an unattended overnight run genuinely costly, which is the
+> thing M8 exists to make safe.
+
+**M8c.1 — A ceiling must be reachable without a mouse** *(Finding 3)*.
+`EXIT-M8.md` §2 calls setting a daily budget *"the step that is skipped and then
+regretted"* and marks it mandatory. **There is no budget verb in the control
+surface** — not offered, and unlike `watch:approve`, `odeon:verdict`,
+`secrets:set` and `gym:set-mode`, not in the deliberately-refused list either.
+It is simply absent, and M8.14's recorded scope names it in neither column. This
+is a contradiction inside the run: ADR-0033 exists so the exit can be performed
+with no mouse, and §2 then requires a window-only action. *Acceptance:* either
+`budget:set` exists, or `ephctl help` refuses it by name with the reason — the
+standard `watch:approve` already sets.
+
+**M8c.2 — The first ingest must not replay history as news** *(Finding 5)*.
+Within two minutes of activation, before anything was broken, the Harbor pulled
+ten CI runs and the crew raised **eight incidents** for failures dated
+2026-08-23/24 — sixteen days stale and already fixed. The decisive detail is
+that the proof was **in the same payload**: the two *newest* runs in that batch
+are both `success`. Repeat ingests correctly did **not** re-raise (dedupe works);
+the defect is only the cold start. *Acceptance:* incidents are raised only for
+runs newer than the activation, or a failure superseded by a later success on
+the same branch raises none — with the ingest still reading history for context.
+
+**M8c.3 — Findings 3 and 5 compound, and that is the lesson** *(cost control)*.
+No ceiling could be set **and** the cold start replayed two weeks of history.
+Neither alone is alarming; together they turned "walk away for an hour" into
+**40,453,419 tokens ($11.22)** against the script's own guidance that *"a few
+hundred thousand tokens is generous"* — roughly one hundred times over, with the
+harness projecting 72.3% of the five-hour window consumed. The harness reported
+this accurately and continuously; it had no ceiling to enforce and no way for a
+CLI runner to give it one. *Acceptance:* a default ceiling, or a first-run
+confirmation naming projected spend before the crew is hired. This package is
+the Architect's call on policy, not a mechanical fix.
+
+**M8c.4 — `WORKING` must cite a row that proves completion** *(Finding 7)*. With
+eight ledger refusals already in the log and zero tasks succeeded,
+`DIAGNOSIS.md` reported `incidents | WORKING | profile/incident-raised at seq
+85`. The row is real and quoted honestly — but `incident-raised` proves the
+pipeline was **entered**, not that it completed. M8.13's rule promotes an area on
+"a log row that PROVES the area did its job"; an entry row was accepted as that
+proof. **This is a sharper form of the defect M8.13 was built to prevent** — not
+a vacuous pass from silence, but a false pass with eight recorded failures in
+the same file. It stayed wrong for the whole run: `incident-triaged` was 0 at the
+final check. The same reasoning weakens `the crew | WORKING | spawn at seq 40`.
+*Acceptance:* each area's `working` verdict cites a **completion** row, and a
+test plants an entered-but-failing pipeline and asserts the verdict is not
+`working`.
+
+**M8c.5 — A deduplicated condition must not lose what distinguishes its
+occurrences** *(Finding 2)*. `DIAGNOSIS.md` reported *"authority.json was missing
+and has been created (×2)"* while `log.jsonl` seq 1 recorded **`gate-policy.json`**
+for the same `home/seeded-config` cause. Two files, one cause key, one surviving
+message: the report kept the last, the book of record kept the first, and a
+reader of either learns one file and cannot tell there was another. The file the
+report drops is `gate-policy.json` — the one the README calls the company-wide
+autonomy ceiling, and the file §6.1's last clause depends on. *Acceptance:* one
+condition per file, or one message naming both.
+
+**M8c.6 — Labels and docs that are true in the reader's vocabulary** *(Findings
+4 and 1)*. `profile:activate` reports `armed dependency-sweep, health-sweep` and
+never mentions the `ci` trigger, because `armed` can only list `kind:"schedule"`
+triggers — an event trigger has no clock to arm. `EXIT-M8.md` §5.1 trains the
+runner to read a missing `ci` trigger as *"a setup defect, and the run cannot
+proceed past it"*, so **the documented reading of that output is: stop, the run
+is invalid.** It is bound; the run nearly aborted on it. Separately,
+`README.md:194` — the section `EXIT-M8.md` §1 actually sends the runner to —
+still says only *"Node 20 (`.nvmrc`)"*; the correct floor is at `README.md:46`,
+in **Quick start**, which the exit script does not name. The 2026-09-08 decision
+log records that as *"Also fixed"*; the fix reached Quick start only. This
+machine's Node 20.16.0 produced 22 `EBADENGINE` warnings and installed anyway,
+so it is a near miss rather than a break. *Acceptance:* `armed` distinguishes
+schedules from event triggers; the setup section states the Node floor; and
+`EXIT-M8.md` §5.1 no longer sends a runner to abort on a bound trigger. **Same
+class as M8c.5 and recorded twice already in the decision log: a label true in
+the producer's vocabulary and false in the reader's.**
+
+**M8c.7 — Recall must fail fast or not accept the call** *(Finding 9)*. Disclosed
+as a graceful MemPalace degradation falling back to a full-text rung; in fact,
+per the health-watcher's own report, `$EPH_RECALL` was *"unavailable, not merely
+empty. Two attempts … produced zero bytes of output and never terminated; the
+second was killed at 90s, exit 143."* A missing optional that degrades is the
+documented design; a path that accepts the call, returns nothing and never
+returns is a 90-second timeout trap, disclosed nowhere — `DIAGNOSIS.md` shows
+only the known MemPalace cause. It also removed the crew's only route around
+M8b.1. *Acceptance:* recall fails fast with a named cause, and the hang is a
+reported degradation rather than a silent stall.
+
+**M8c.8 — Decide what an engine-level permission prompt is** *(Finding 10)*. Ten
+times the harness recorded `gate/ungated · tool-permission · waiting · "Claude is
+waiting for your input"`. The harness is right to surface it — invariant §7
+requires it — but the run's own rules forbid answering it, and `ephctl` cannot.
+So an agent that reaches its engine's prompt is stalled for the rest of the run
+**by construction**, which undercuts the premise of an unattended hour. This is
+not an Ephesus gate: it has no `gateId` and no Architect can clear it.
+*Acceptance:* a decision, recorded as an ADR — either the spawn plan
+pre-authorises these, or they escalate as real gates the Architect can clear.
+The design question is the deliverable; the code follows it.
+
+**Exit:** an unattended run of `docs/EXIT-M8.md` completes inside a **stated**
+ceiling with no incident raised for a run older than the activation; and
+`DIAGNOSIS.md` reports no area as `WORKING` on the strength of an entry row —
+verified by planting an entered-but-failing pipeline and reading the report.
+
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
 
 **Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa
@@ -264,14 +469,26 @@ bridges · multi-machine crews.
 ## Dependency order (what blocks what)
 
 ```
-M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M7b
-            │          │      ▲ └► M5b ──┘         (Stoa + modes need only Gymnasium
-            │          └──────┘     └──────────────► v1; M7b's cadences and its
-            │                                        Recursive Improvement profile
-            │                                        run under M5b's modes)
+M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M8b ─► M8c ─► M7b
+            │          │      ▲ └► M5b ──┘                            ▲
+            │          └──────┘     └────────────────────────────────┘
+            │                       (Stoa + modes need only Gymnasium v1; M7b's
+            │                        cadences and its Recursive Improvement
+            │                        profile run under M5b's modes)
             └── fake-engine rig ─────────┘          (everything tests against it)
 ```
 
 The only cross-cutting asset built early and maintained forever is the fake-engine
 rig — it is the test double for every milestone and the reason the differentiators
 can be built deterministically.
+
+**The hardening chain, and why it sits where it does.** M8 was inserted before
+M7b on 2026-09-02 for a stated reason — *"M7b ships signed builds of a company
+that improves itself, and today that company cannot survive a restart"* — and the
+same reason extends to M8b and M8c. The 2026-09-09 exit run
+([record](./demo/m8-onehour-aftershock.md)) established that M8's own machinery
+holds: restart survival, a contiguous book of record, and zero un-gated
+destructive actions all passed. What it also established is that the crew cannot
+act on what it detects, and that an unattended hour has no reachable ceiling.
+Shipping signed builds of that is the same mistake M8's insertion note refuses.
+**M8b is the shorter path — it is the exact distance to an exit that passes.**
