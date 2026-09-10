@@ -482,3 +482,71 @@ describe('the installer refuses what it must not write', () => {
     expect(playbooksAgree(comparePlaybooks(['incident.md'], []))).toBe(false)
   })
 })
+/**
+ * **M8c.9 — a shipped runbook must not ask for a ref git cannot create.**
+ *
+ * `incident.md` told every hire to *"Push to `agent/<your-name>/<topic>`"*. A
+ * hire is already working on `agent/<your-name>`, and git will not nest a ref
+ * under an existing one:
+ *
+ * ```text
+ * fatal: cannot lock ref 'refs/heads/agent/mason/fix-geo':
+ *        'refs/heads/agent/mason' exists; cannot create …
+ * ```
+ *
+ * So the instruction failed for every agent that followed it, each improvised a
+ * name outside its own namespace, and `Worktrees.create` then read the
+ * improvisation as somebody else's checkout — the refusal that closed the loop
+ * after the M8b rehearsal's restart. Two halves of one defect; this is the guard
+ * on the half that lives in prose.
+ */
+describe('the branch a shipped runbook tells a hire to push (M8c.9)', () => {
+  const BUNDLES = path.join(__dirname, '..', '..', 'profiles')
+
+  /** Every shipped runbook and hire brief, as text. */
+  function shippedInstructions(): readonly {
+    readonly file: string
+    readonly body: string
+  }[] {
+    const found: { file: string; body: string }[] = []
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.md') || entry.name.endsWith('.json')) {
+          found.push({
+            file: path.relative(BUNDLES, full),
+            body: fs.readFileSync(full, 'utf8')
+          })
+        }
+      }
+    }
+    walk(BUNDLES)
+    return found
+  }
+
+  /** Whether `text` names a ref nested under an `agent/<name>` branch. */
+  function nestsUnderAnAgentBranch(text: string): boolean {
+    // `agent/*` does not match (no second segment); `agent/<name>-<topic>` does
+    // not match (a hyphen is not a separator git cares about).
+    return /agent\/[^\s`/"]+\/[^\s`/"]+/.test(text)
+  }
+
+  it('never asks for a ref nested under the branch the harness already minted', () => {
+    const offenders = shippedInstructions()
+      .filter((entry) => nestsUnderAnAgentBranch(entry.body))
+      .map((entry) => entry.file)
+
+    expect(offenders).toEqual([])
+  })
+
+  it('CONTROL — the sentence that shipped until M8c.9 is caught by this check', () => {
+    expect(nestsUnderAnAgentBranch('Push to `agent/<your-name>/<topic>` and open the PR')).toBe(
+      true
+    )
+    expect(nestsUnderAnAgentBranch('agent/mason/fix-geo')).toBe(true)
+    // …and the two forms that are legal are not.
+    expect(nestsUnderAnAgentBranch('name the topic branch `agent/<your-name>-<topic>`')).toBe(false)
+    expect(nestsUnderAnAgentBranch('Push your own `agent/*` branch and open it.')).toBe(false)
+  })
+})

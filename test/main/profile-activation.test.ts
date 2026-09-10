@@ -130,6 +130,15 @@ interface RigOptions {
   /** What the TARGET checkout's own git remotes say it is (M8.5). */
   readonly resolveRepos?: (target: { path: string }) => Promise<RepoDerivation>
   readonly onWatching?: (instanceId: string, because: string | null) => void
+  /**
+   * Agent ids whose kill THROWS, the way `AgentManager.kill` throws for an
+   * agent that is not live: `agents: no agent "…"`. The default stub records
+   * every kill and never throws, which is why a deactivation that could not
+   * survive one went to a live run undetected (M8c.9).
+   */
+  readonly killThrowsFor?: (agentId: string) => boolean
+  /** Every kill throws a bare string — JavaScript permits it, so the row must cope. */
+  readonly killThrowsNonError?: boolean
 }
 
 function rig(options: RigOptions = {}) {
@@ -191,6 +200,10 @@ function rig(options: RigOptions = {}) {
       order.push('beforeHires')
     },
     kill: (agentId) => {
+      if (options.killThrowsNonError === true) throw 'the pty is gone'
+      if (options.killThrowsFor?.(agentId) === true) {
+        throw new Error(`agents: no agent "${agentId}"`)
+      }
       killed.push(agentId)
       order.push(`kill:${agentId}`)
     },
@@ -502,6 +515,74 @@ describe('triggers', () => {
       ok: false,
       reason: 'no active profile "nobody@repo:x"'
     })
+  })
+
+  /**
+   * **M8c.9 — the other half of the closed loop.**
+   *
+   * The M8b rehearsal could not activate (the worktrees existed) and could not
+   * deactivate either: `the harness failed: agents: no agent
+   * "agent.skeleton-crew-rehearsal-ci-babysitter"`. A restored instance's crew
+   * is `down` by design (ADR-0027) — there are no processes — and asking for
+   * one by name threw out of the middle of `deactivate`, AFTER the triggers
+   * were disarmed and the hires released.
+   */
+  it('deactivates a RESTORED instance whose crew is down (M8c.9)', () => {
+    const r = rig({ killThrowsFor: () => true })
+    r.activations.restore([restorable(r.targetDir)])
+    expect(r.activations.instances()).toHaveLength(1)
+
+    const out = r.activations.deactivate('crew@repo:myapp')
+
+    expect(out).toEqual({ ok: true, reason: null })
+    // Nothing was asked for by name: the harness already knows they are gone.
+    expect(r.killed).toEqual([])
+    expect(r.activations.instances()).toEqual([])
+    const row = r.logs.find((entry) => entry['event'] === 'deactivated')
+    expect(row?.['crew']).toBe('down')
+    expect(row?.['unkillable']).toBeUndefined()
+  })
+
+  it('finishes deactivating a LIVE instance when one agent has already died', async () => {
+    // Same shape one layer along: the crew is live, one process is not. A
+    // deactivation that stops halfway is worse than one that finishes and says
+    // what it found.
+    const r = rig({ killThrowsFor: (agentId) => agentId.endsWith('-oncall') })
+    writeBundle(r.profiles, 'skeleton-crew', {
+      hires: ['deps', 'oncall'],
+      triggers: [
+        { id: 'sweep', kind: 'schedule', everyMs: 600_000, hire: 'oncall', playbook: 'incident.md' }
+      ]
+    })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    const out = r.activations.deactivate('skeleton-crew@repo:myapp')
+
+    expect(out).toEqual({ ok: true, reason: null })
+    expect(r.killed).toEqual(['agent.skeleton-crew-myapp-deps'])
+    expect(r.triggers.size).toBe(0)
+    expect(r.activations.instances()).toEqual([])
+    const row = r.logs.find((entry) => entry['event'] === 'deactivated')
+    expect(row?.['crew']).toBe('live')
+    // Reported, not swallowed (invariant §7).
+    expect(String(row?.['unkillable'])).toContain('agent.skeleton-crew-myapp-oncall')
+    expect(String(row?.['unkillable'])).toContain('no agent')
+  })
+
+  it('reports a kill that threw something that is not an Error', async () => {
+    // JavaScript lets anything be thrown, and the row must still name the agent
+    // rather than rendering `[object Object]` over the whole entry.
+    const r = rig({ killThrowsNonError: true })
+    writeBundle(r.profiles, 'skeleton-crew', { hires: ['oncall'] })
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    expect(r.activations.deactivate('skeleton-crew@repo:myapp')).toEqual({
+      ok: true,
+      reason: null
+    })
+    const row = r.logs.find((entry) => entry['event'] === 'deactivated')
+    expect(String(row?.['unkillable'])).toContain('agent.skeleton-crew-myapp-oncall')
+    expect(String(row?.['unkillable'])).toContain('the pty is gone')
   })
 })
 

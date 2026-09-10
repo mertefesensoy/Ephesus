@@ -154,31 +154,6 @@ export interface WorktreesOptions {
   readonly forbiddenRoot: string
 }
 
-/**
- * Contract: pure. Whether `branch` belongs to the agent whose own branch is
- * `own` — either it IS that branch, or it is a topic branch beneath it.
- *
- * The agent's branch is a NAMESPACE, not a single name. `agent/<id>` is where a
- * respawn lands by default, but the runbook tells a hire to "push your own
- * `agent/*` branch and open a pull request", and a hire doing exactly that ends
- * up on `agent/<id>-<topic>`. Requiring the exact name read that as somebody
- * else's checkout and refused the respawn — so an agent was punished for having
- * done its job, and because activation is all-or-nothing it took the whole
- * company down with it.
- *
- * Observed live on 2026-09-06: the dependency-updater opened three security
- * pull requests, was left on `agent/…-dependency-updater-pytest-asyncio-14-compat`,
- * and the next activation failed with "worktree refused: … already exists" on a
- * clean checkout of the right repository.
- *
- * The separator is required, so `agent/mason-2` is Mason's and `agent/masonry`
- * is not. Without it the namespace would leak into every id that merely starts
- * with another's, which is exactly the confusion the prefix is meant to avoid.
- */
-export function isAgentsOwnBranch(branch: string, own: string): boolean {
-  return branch === own || branch.startsWith(`${own}-`)
-}
-
 /** Whether a path may host a worktree, or the clause explaining why not. */
 export type VacancyVerdict =
   { readonly vacant: true } | { readonly vacant: false; readonly because: string }
@@ -263,24 +238,51 @@ export class Worktrees {
       // A worktree that survived a dirty unwind is the agent's kept work
       // (UC-01 2a): respawning onto it is reuse, not failure — refusing here
       // contradicted the card that still names it (M4 close-out audit).
+      //
+      // **Ownership is the REPOSITORY LINK, not the branch name** (M8c.9). This
+      // used to require the checkout to be sitting on `agent/<id>` or a
+      // `agent/<id>-<topic>` beneath it, and that reads a branch name as proof
+      // of who owns a directory. It is not proof, in either direction: another
+      // repository can have a branch called anything (which is why the
+      // git-common-dir test below has always been the real check), and an agent
+      // doing exactly what its runbook tells it — reproducing a failure at a
+      // commit, cutting a topic branch, opening a pull request — ends the hour
+      // on a branch outside that namespace through no fault of its own.
+      //
+      // The M8b rehearsal is what this costs. After the restart, reactivation
+      // was refused for every hire — `worktree refused: "…-ci-babysitter"
+      // already exists` — while `profile:deactivate` refused in the opposite
+      // direction because the agents were down. A closed loop, escaped only by
+      // deleting four worktrees by hand, which no README documents. The exit
+      // run never met it because its crew had no runbook and so never left the
+      // branch the harness minted.
+      //
+      // What is given up: nothing the refusal was protecting. It never
+      // destroyed anything — `--force` appears nowhere in this module — so the
+      // work in a directory is safe either way, and a checkout belonging to a
+      // DIFFERENT repository is still refused, by the test that was always
+      // doing that job.
       const head = await this.options.runner.run(target, ['rev-parse', '--abbrev-ref', 'HEAD'])
       const common = await this.options.runner.run(target, ['rev-parse', '--git-common-dir'])
-      const branch = head.ok ? head.stdout.trim() : ''
-      const owned =
-        head.ok &&
-        isAgentsOwnBranch(branch, plan.branch) &&
-        common.ok &&
-        path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
-      // Reuse it WHERE IT STANDS: the branch it is on is where its work is, and
-      // moving it back would strand the commits the agent is about to push.
-      if (owned) return { ok: true, path: target, branch, created: false }
-      // Not the agent's checkout. Before refusing it forever, ask the only
-      // question the refusal is actually protecting: is there anything in
+      const linked =
+        common.ok && path.resolve(target, common.stdout.trim()).startsWith(repo + path.sep)
+      const owned = head.ok && linked
+      // Reuse it WHERE IT STANDS, on whatever branch it is on: that branch is
+      // where its work is, and moving it back would strand the commits the
+      // agent is about to push.
+      if (owned) {
+        return { ok: true, path: target, branch: await this.headOf(target, head), created: false }
+      }
+      // Not a checkout of this repository. Before refusing it forever, ask the
+      // only question the refusal is actually protecting: is there anything in
       // there? An empty directory holds no work, and `worktree add` will use
       // it as it stands.
       const vacancy = worktreePathIsVacant(target)
       if (!vacancy.vacant) {
-        return { ok: false, reason: `worktree refused: "${plan.path}" ${vacancy.because}` }
+        return {
+          ok: false,
+          reason: `worktree refused: "${plan.path}" ${vacancy.because}${recoveryFor(common.ok, repo, plan.path)}`
+        }
       }
       // git may still hold an administrative entry pointing at the path whose
       // files are gone; without this, `worktree add` refuses it as registered.
@@ -303,6 +305,24 @@ export class Worktrees {
       return { ok: false, reason: `worktree add failed: ${added.stderr.trim() || 'unknown error'}` }
     }
     return { ok: true, path: target, branch: plan.branch, created }
+  }
+
+  /**
+   * Contract: what `worktreePath`'s HEAD actually is, as a sentence for a
+   * reader. Never throws.
+   *
+   * `rev-parse --abbrev-ref HEAD` answers the literal string `HEAD` when the
+   * checkout is detached, and reporting that as the branch would put the word
+   * "HEAD" on the agent's card as if it were a branch name. An agent that
+   * reproduced a failure at a commit — which the incident runbook asks it to do
+   * — is detached exactly then, so this is the ordinary case rather than the
+   * exotic one.
+   */
+  private async headOf(worktreePath: string, head: GitResult): Promise<string> {
+    const branch = head.ok ? head.stdout.trim() : ''
+    if (branch !== 'HEAD') return branch
+    const at = await this.options.runner.run(worktreePath, ['rev-parse', '--short', 'HEAD'])
+    return at.ok ? `detached at ${at.stdout.trim()}` : 'detached'
   }
 
   /** Contract: whether this worktree has uncommitted work. Never throws. */
@@ -350,6 +370,40 @@ export class Worktrees {
     await this.options.runner.run(repo, ['worktree', 'prune'])
     return { removed: true, residue: sweepEmptyResidue(worktreePath) }
   }
+}
+
+/**
+ * Contract: pure. The sentence that follows a refusal, naming the way out.
+ *
+ * M8c.9's acceptance: *"the refusal an Architect meets must name the
+ * recovery."* The M8b rehearsal's runner escaped the closed loop by inventing
+ * `git worktree remove --force` and `git worktree prune`, which no document
+ * mentions — a non-author would not have invented it, and the run would have
+ * ended at the restart.
+ *
+ * The two cases need different sentences, because the wrong one is worse than
+ * none. A path git knows as a worktree of ANOTHER repository is git's to
+ * unregister; a directory git knows nothing about is a directory, and telling
+ * somebody to run `git worktree remove` on it produces a refusal that teaches
+ * them nothing about the actual obstacle.
+ */
+function recoveryFor(isCheckout: boolean, repo: string, worktreePath: string): string {
+  if (isCheckout) {
+    // A checkout of SOME repository, and not this one — so the repository that
+    // owns it is the one that can unregister it, and this does not claim to
+    // know which that is.
+    return (
+      ` — it is a git checkout of a different repository. Unregister it from the` +
+      ` repository that owns it (\`git worktree remove --force "${worktreePath}"\`` +
+      ` then \`git worktree prune\`, run inside that repository), or move the` +
+      ` directory aside, and activate again.`
+    )
+  }
+  return (
+    ` — nothing here is a checkout of "${repo}". Move that directory aside (or` +
+    ` delete it if you know what is in it) and activate again; the harness never` +
+    ` removes it for you, because it cannot tell your work from residue.`
+  )
 }
 
 /**
