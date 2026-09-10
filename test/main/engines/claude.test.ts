@@ -83,6 +83,7 @@ function rig(): Rig {
       cwd,
       engineConfigDir,
       tools: NO_TOOLS,
+      unattended: [],
       playbooksDir: null,
       commitIdentity: null,
       ghTokenCommand: '',
@@ -94,6 +95,14 @@ function rig(): Rig {
       autonomy: 'manual'
     }
   }
+}
+
+/** The `permissions.allow` list the adapter wrote, in order. */
+function readAllow(settingsPath: string): readonly string[] {
+  const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+    permissions?: { allow?: string[] }
+  }
+  return written.permissions?.allow ?? []
 }
 
 describe('claude adapter — declared surface (ADR-0009)', () => {
@@ -436,6 +445,79 @@ describe('claude adapter — the runbook grant (M8b.1)', () => {
    * is the reason these assertions are here rather than in that package's own
    * file.
    */
+  /**
+   * **M8c.8 / ADR-0035 — the seam that ends the unattended hour.**
+   *
+   * A declaration in a bundle is worth nothing until it reaches the file the
+   * engine actually reads. The M8b rehearsal's crew opened three pull requests
+   * and then stopped at a prompt; this is the assertion that the grant which
+   * would have carried it further is really installed, in the engine's own
+   * syntax, with the exact/prefix distinction intact.
+   */
+  it('installs a declared command as an engine permission rule (ADR-0035)', async () => {
+    const { adapter, cfg, settingsPath } = rig()
+    const plan = adapter.wireHooks({
+      ...cfg,
+      unattended: [{ run: 'npm test' }, { run: 'git push -u origin agent/', prefix: true }]
+    })
+    await plan.install()
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8')) as {
+      permissions: { allow: string[] }
+    }
+    // Exact, and prefixed — the two forms mean different things and the
+    // difference is the whole of least privilege here.
+    expect(written.permissions.allow).toContain('Bash(npm test)')
+    expect(written.permissions.allow).toContain('Bash(git push -u origin agent/:*)')
+    expect(written.permissions.allow).not.toContain('Bash(npm test:*)')
+  })
+
+  it('declares nothing when the hire declared nothing', async () => {
+    const withNone = rig()
+    await withNone.adapter.wireHooks({ ...withNone.cfg, unattended: [] }).install()
+    const none = readAllow(withNone.settingsPath)
+
+    const withOne = rig()
+    await withOne.adapter.wireHooks({ ...withOne.cfg, unattended: [{ run: 'npm test' }] }).install()
+    const one = readAllow(withOne.settingsPath)
+
+    // A default set here would be a permission nobody declared, so the ONLY
+    // difference between the two files is the rule the bundle asked for. The
+    // two rigs have different temp homes, so the mailbox rules differ by path
+    // and it is the SHAPE of the difference that is asserted: one more rule,
+    // and it is the declared one.
+    expect(none.some((rule) => rule.startsWith('Bash('))).toBe(false)
+    expect(one).toHaveLength(none.length + 1)
+    expect(one.at(-1)).toBe('Bash(npm test)')
+  })
+
+  it('does not accumulate its grants across a respawn', async () => {
+    // The defect a plain append produced for every other harness-owned rule.
+    // It matters here because the settings file survives in a reused worktree
+    // (M8c.9), so a second install reads its own previous output as `base`.
+    const { adapter, cfg, settingsPath } = rig()
+    const unattended = [{ run: 'npm test' }]
+    await adapter.wireHooks({ ...cfg, unattended }).install()
+    const first = readAllow(settingsPath)
+    await adapter.wireHooks({ ...cfg, unattended }).install()
+
+    expect(readAllow(settingsPath)).toEqual(first)
+  })
+
+  it('CANNOT retract a grant the bundle has since removed — the recorded residual', async () => {
+    // Pinned rather than hidden (ADR-0035 §Consequences). Nothing distinguishes
+    // a rule this harness wrote from one the Architect wrote, so a narrowed
+    // declaration leaves the wider rule in the agent's own settings until that
+    // file is replaced from the backup this injection takes. A permission that
+    // outlives its declaration is the wrong direction to be wrong in, and a
+    // test that says so is how the next reader learns it is known.
+    const { adapter, cfg, settingsPath } = rig()
+    await adapter.wireHooks({ ...cfg, unattended: [{ run: 'npm test' }] }).install()
+    await adapter.wireHooks({ ...cfg, unattended: [] }).install()
+
+    expect(readAllow(settingsPath)).toContain('Bash(npm test)')
+  })
+
   it('grants READ on the instance runbooks, and nothing wider', async () => {
     const { adapter, cfg, settingsPath } = rig()
     const dir = '/home/ephrun/instances/skeleton-crew@repo-aftershock/playbooks'

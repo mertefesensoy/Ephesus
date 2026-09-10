@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { unattendedGrantsSchema } from './engine-permissions'
 import { engineIdSchema, type EngineId, type HookSupport } from './engines'
 import { isReservedAgentId } from './reserved'
 
@@ -95,7 +96,24 @@ export const spawnRequestSchema = z
      * copy. Optional and false by default — isolation is a choice the Architect
      * makes per hire, not a default that would surprise them with a branch.
      */
-    worktree: z.boolean().optional()
+    worktree: z.boolean().optional(),
+    /**
+     * Commands this hire may run without meeting its engine's own permission
+     * prompt (M8c.8, ADR-0035).
+     *
+     * It rides HERE, beside `envGrants`, because it is the same kind of thing:
+     * something a hire template declared, needing no resolution, travelling to
+     * the spawn path with the rest of the declaration. `tools` is the
+     * deliberate contrast — those are directories that must be resolved
+     * against a target and checked for containment, so they reach the spawn
+     * through a seam that can refuse them.
+     *
+     * Optional rather than defaulted, like `budget` and `worktree` beside it:
+     * absent means nothing is pre-authorised and every prompt still parks,
+     * which is what every spawn did before M8c.8 and what a spawn nobody
+     * declared anything for must keep doing.
+     */
+    unattended: unattendedGrantsSchema.optional()
   })
   .strict()
 

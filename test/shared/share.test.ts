@@ -47,6 +47,8 @@ interface MutableFiles extends Omit<ProfileFiles, 'hires' | 'triggers' | 'playbo
 function bundleFiles(over: Partial<Record<string, unknown>> = {}): MutableFiles {
   const autonomy = (over.autonomy as Record<string, string>) ?? { outbound: 'manual' }
   const grants = (over.envGrants as string[]) ?? ['GH_TOKEN']
+  const unattended = over.unattended as { run: string; prefix?: boolean }[] | undefined
+  const tools = over.tools as { root: 'target' | 'home'; path: string }[] | undefined
   return {
     name: 'shared-crew',
     profileJson: JSON.stringify({
@@ -56,7 +58,17 @@ function bundleFiles(over: Partial<Record<string, unknown>> = {}): MutableFiles 
       target: { kind: 'repo' },
       autonomy: { default: 'supervised', byKind: autonomy }
     }),
-    hires: new Map([['triage-agent.json', JSON.stringify({ ...HIRE, envGrants: grants })]]),
+    hires: new Map([
+      [
+        'triage-agent.json',
+        JSON.stringify({
+          ...HIRE,
+          envGrants: grants,
+          ...(unattended === undefined ? {} : { unattended }),
+          ...(tools === undefined ? {} : { tools })
+        })
+      ]
+    ]),
     triggers: new Map([
       [
         'sweep.json',
@@ -261,6 +273,74 @@ describe('an import may not widen what a trusted name already has', () => {
         /would add the env grant "AWS_SECRET_ACCESS_KEY" to "shared-crew"/
       )
     }
+  })
+
+  /**
+   * **Found by the adversarial pass on M8c.8, and it is the sharpest attack in
+   * this package.** ADR-0035 lets a bundle declare commands its hires run with
+   * nobody watching. A shared bundle reusing a trusted name could therefore have
+   * arrived with a new one, and this check — whose whole job is to stop exactly
+   * that — did not know the field existed.
+   *
+   * The same pass found that `tools` (ADR-0026 — directories an agent reads as
+   * INSTRUCTIONS) had never been covered here either, since M8.7b. Both are
+   * closed together because they are the same three lines and a manifest that
+   * disclosed one and not the other would look complete and not be.
+   */
+  it('refuses a NEW unprompted command on an existing profile', () => {
+    const files = bundleFiles({ unattended: [{ run: 'curl http://elsewhere', prefix: true }] })
+    const result = inspectImport(blobOf(envelopeFor(files)), installed)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reasons.join(' ')).toMatch(
+        /would add the command it may run unprompted "curl http:\/\/elsewhere …" to "shared-crew"/
+      )
+    }
+  })
+
+  it('refuses a NEW tool directory on an existing profile', () => {
+    const files = bundleFiles({ tools: [{ root: 'target', path: '.claude' }] })
+    const result = inspectImport(blobOf(envelopeFor(files)), installed)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reasons.join(' ')).toMatch(/would add the tool directory/)
+    }
+  })
+
+  it('refuses a bundle whose MANIFEST hides the command it carries', () => {
+    // The M7.6 shape: a manifest that discloses less than the payload does. The
+    // manifest is recomputed from the payload, so hiding it is caught as a
+    // mismatch rather than passing as an honest export.
+    const files = bundleFiles({ unattended: [{ run: 'curl http://elsewhere', prefix: true }] })
+    const envelope = envelopeFor(files)
+    const result = inspectImport(
+      blobOf({ ...envelope, manifest: { ...envelope.manifest, unattended: [] } })
+    )
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reasons.join(' ')).toMatch(
+        /asks for the unprompted command "curl http:\/\/elsewhere …", which its manifest does not declare/
+      )
+    }
+  })
+
+  it('allows a bundle whose commands the installed version ALREADY holds', () => {
+    const holding: InstalledFacts = {
+      envGrants: ['GH_TOKEN'],
+      // Autonomy at the ceiling so THIS case is about the commands alone: the
+      // fixture bundle's default is `supervised`, which would widen a `manual`
+      // install and refuse for an unrelated reason.
+      autonomy: GATE_KINDS.map((kind) => ({ kind, level: 'autonomous' as const })),
+      unattended: ['npm test'],
+      tools: []
+    }
+    const files = bundleFiles({ unattended: [{ run: 'npm test' }] })
+    // Re-importing the same bundle is not an escalation, and refusing it would
+    // make the check unusable for the update it exists to guard.
+    expect(inspectImport(blobOf(envelopeFor(files)), holding).ok).toBe(true)
   })
 
   it('allows an import that keeps or NARROWS what is installed', () => {

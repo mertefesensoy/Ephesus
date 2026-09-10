@@ -597,6 +597,13 @@ export function activationPlan(
         // else; the screen reads `isolation.because` and nothing else; both
         // come from the object above.
         worktree: isolation.effective === 'worktree',
+        // ADR-0035. Declared, never defaulted to something: a hire that names
+        // nothing pre-authorises nothing and parks at every prompt, which is
+        // what every bundle written before M8c.8 already did. It rides on the
+        // spawn beside `envGrants` because it is the same kind of thing — a
+        // declaration that needs no resolution — and because a second copy on
+        // the plan would be two fields that cannot disagree.
+        unattended: [...(hire.unattended ?? [])],
         ...(hire.budget === undefined ? {} : { budget: hire.budget })
       }
     })

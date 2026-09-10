@@ -1,5 +1,6 @@
 import type { CapacityLimit } from '../../shared/capacity'
 import type { ResolvedTools } from '../../shared/engine-tools'
+import type { UnattendedGrant } from '../../shared/engine-permissions'
 import type { AutonomySupport, EngineId, HookSupport } from '../../shared/engines'
 
 /**
@@ -101,6 +102,21 @@ export interface AgentSpawnConfig {
    * always wins in the end.
    */
   readonly tools: ResolvedTools
+  /**
+   * Commands this agent may run without meeting its engine's own permission
+   * prompt (M8c.8, ADR-0035).
+   *
+   * Carried as DECLARED rather than as engine syntax, for the reason `tools`
+   * gives one field above: the adapter's job is to turn a decision into the
+   * shape its engine reads, and a grant that arrived here already spelled as
+   * `Bash(...)` would have made this an engine-specific field on an
+   * engine-agnostic config (NFR-12).
+   *
+   * Empty means every prompt still parks, which is exactly what happened for
+   * the whole life of the project and what the M8b rehearsal measured: twelve
+   * prompts in an hour, four of five agents ending on one.
+   */
+  readonly unattended: readonly UnattendedGrant[]
   /**
    * The instance runbook directory this agent must be able to READ, or null
    * for an agent on no profile (M8b.1).
