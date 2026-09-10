@@ -19,6 +19,7 @@ import { knownTargetsFor, type KnownTarget } from '../shared/known-targets'
 import type { ProfileLoad, ProfileSummary } from '../shared/profile-view'
 import type { AutonomyLevel, GateKind } from '../shared/gates'
 import { describeToolGrants, type ToolGrant } from '../shared/engine-tools'
+import { describeUnattendedGrants } from '../shared/engine-permissions'
 import type { SpawnRequest } from '../shared/agents'
 import type { RepoDerivation } from '../shared/repo-remote'
 import type { Trigger } from './scheduler'
@@ -659,6 +660,15 @@ export class ProfileActivations {
         plan.hires
           .filter((hire) => hire.tools.length > 0)
           .map((hire) => [hire.agentId, describeToolGrants(hire.tools)])
+      ),
+      // What each hire may do without stopping to ask its engine (M8c.8,
+      // ADR-0035). On the row for the same reason `toolGrants` is: these are
+      // acts that will happen with nobody watching, so a forensic reader asking
+      // "who authorised that command" answers it from `log.jsonl` alone.
+      unattended: Object.fromEntries(
+        plan.hires
+          .map((hire) => [hire.agentId, describeUnattendedGrants(hire.spawn.unattended)] as const)
+          .filter(([, lines]) => lines.length > 0)
       )
     })
     // An instance watching nothing is a mission that cannot work, and until

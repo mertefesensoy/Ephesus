@@ -51,6 +51,8 @@ interface BundleOptions {
   readonly isolation?: 'worktree' | 'target'
   /** Tool directories every hire in this bundle declares (M8.7b). */
   readonly tools?: readonly { root: 'target' | 'home'; path: string }[]
+  /** Commands every hire in this bundle may run unprompted (M8c.8). */
+  readonly unattended?: readonly { run: string; prefix?: boolean }[]
   /** Per-hire isolation, by hire name (M8.6). */
   readonly hireIsolation?: Readonly<Record<string, 'worktree' | 'target'>>
   readonly onExit?: 'offer' | 'respawn'
@@ -108,7 +110,8 @@ function writeBundle(root: string, name: string, options: BundleOptions = {}): v
           ? {}
           : { isolation: options.hireIsolation[hire] }),
         ...(options.hireOnExit?.[hire] === undefined ? {} : { onExit: options.hireOnExit[hire] }),
-        ...(options.tools === undefined ? {} : { tools: [...options.tools] })
+        ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
+        ...(options.unattended === undefined ? {} : { unattended: [...options.unattended] })
       })
     )
   }
@@ -465,6 +468,45 @@ describe('triggers', () => {
 
     r.activations.deactivate('skeleton-crew@repo:myapp')
     expect([...r.triggers.keys()]).toEqual(['skeleton-crew@repo:other/sweep'])
+  })
+
+  /**
+   * **M8c.8 / ADR-0035 — the declaration reaches the spawn, and the record.**
+   *
+   * The M8b rehearsal's hour ended at a permission prompt rather than at the
+   * end of the work. What a bundle declares is worth nothing until it reaches
+   * the spawn path, so this is the join: a hire template says it, the plan puts
+   * it on the spawn request, and the activation row says what was decided.
+   */
+  it('carries a declared unattended command onto the spawn, and logs it', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', {
+      unattended: [{ run: 'npm test' }, { run: 'git push -u origin agent/', prefix: true }]
+    })
+
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    expect(r.spawned[0]?.unattended).toEqual([
+      { run: 'npm test' },
+      { run: 'git push -u origin agent/', prefix: true }
+    ])
+    const activated = r.logs.find((entry) => entry['event'] === 'activated')
+    expect(activated?.['unattended']).toEqual({
+      'agent.skeleton-crew-myapp-oncall': ['npm test', 'git push -u origin agent/ …']
+    })
+  })
+
+  it('declares nothing for a hire that said nothing, and logs no row for it', async () => {
+    const r = rig()
+    writeBundle(r.profiles, 'skeleton-crew', {})
+
+    await r.activations.activate({ profile: 'skeleton-crew', target: target(r.targetDir) })
+
+    // Absent, not empty-but-present: a spawn nobody declared anything for is
+    // exactly the spawn every bundle produced before ADR-0035.
+    expect(r.spawned[0]?.unattended).toEqual([])
+    const activated = r.logs.find((entry) => entry['event'] === 'activated')
+    expect(activated?.['unattended']).toEqual({})
   })
 
   it('refuses to deactivate something that is not active, rather than reporting success', async () => {

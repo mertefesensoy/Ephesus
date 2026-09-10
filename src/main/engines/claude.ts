@@ -526,6 +526,27 @@ function ghTokenPermissions(cfg: AgentSpawnConfig): readonly string[] {
 }
 
 /**
+ * Renders a hire's declared unattended commands as Claude permission rules
+ * (M8c.8, ADR-0035).
+ *
+ * `Bash(<cmd>)` matches that command and nothing else — the exact form
+ * `ghTokenPermissions` above has always used for the one call it grants.
+ * `Bash(<cmd>:*)` matches anything starting with it, which is what makes
+ * `git push origin HEAD` usable while `git push --force` still stops at the
+ * prompt. The schema refuses a single-word prefix grant for exactly that
+ * reason, so the difference between the two forms cannot be lost by accident.
+ *
+ * Nothing is rewritten or escaped here. The declaration was validated where it
+ * was read (`engine-permissions.ts`) and a second, looser opinion in the
+ * renderer is how the more permissive of two checks wins.
+ */
+function unattendedPermissions(cfg: AgentSpawnConfig): readonly string[] {
+  return cfg.unattended.map((grant) =>
+    grant.prefix === true ? `Bash(${grant.run}:*)` : `Bash(${grant.run})`
+  )
+}
+
+/**
  * Claude Code's own record of which working directories a human has approved:
  * `~/.claude.json` → `projects[<cwd>].hasTrustDialogAccepted`.
  *
@@ -987,6 +1008,7 @@ export function mergeClaudeSettings(
   const grant = mailboxPermissions(cfg)
   const runbooks = playbookPermissions(cfg)
   const tokenRules = ghTokenPermissions(cfg)
+  const unattended = unattendedPermissions(cfg)
   const existingPermissions =
     typeof base['permissions'] === 'object' &&
     base['permissions'] !== null &&
@@ -1007,7 +1029,18 @@ export function mergeClaudeSettings(
     ...(grant['additionalDirectories'] as unknown[]),
     ...(runbooks['allow'] as unknown[]),
     ...(runbooks['additionalDirectories'] as unknown[]),
-    ...tokenRules
+    ...tokenRules,
+    // ADR-0035's grants belong in this set for the same reason every other
+    // harness-owned rule does: without it a respawn leaves the previous
+    // install's copy in `priorAllow` and appends a second.
+    //
+    // What this CANNOT do is retract a grant the bundle has since removed —
+    // that rule sits in the prior file and in neither set, so it survives
+    // until the settings file is replaced from the backup this injection
+    // takes. Stated in ADR-0035 rather than papered over, because a
+    // permission that outlives its declaration is the wrong direction to be
+    // wrong in.
+    ...unattended
   ])
   const permissions = {
     ...existingPermissions,
@@ -1015,7 +1048,10 @@ export function mergeClaudeSettings(
       ...priorAllow.filter((item) => !mine.has(item)),
       ...(grant['allow'] as unknown[]),
       ...(runbooks['allow'] as unknown[]),
-      ...tokenRules
+      ...tokenRules,
+      // ADR-0035, LAST so a reader of the file sees the harness's own three
+      // grants first and the bundle's declaration after them.
+      ...unattended
     ],
     additionalDirectories: [
       ...priorDirs.filter((item) => !mine.has(item)),

@@ -55,6 +55,7 @@ function rig(agentId = 'agent.mason'): {
       cwd,
       engineConfigDir: engineConfigDir(path.join(root, ENGINES_DIR), 'claude', agentId),
       tools: NO_TOOLS,
+      unattended: [],
       playbooksDir: null,
       commitIdentity: null,
       envGrants: {},

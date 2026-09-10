@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { describeUnattendedGrants } from './engine-permissions'
+import { describeToolGrants } from './engine-tools'
 import { AUTONOMY_RANK, GATE_KINDS, type AutonomyLevel, type GateKind } from './gates'
 import { hireTemplateSchema, type HireTemplate } from './org'
 import { parseProfile, profileNameSchema, requestedAutonomy, type ProfileFiles } from './profile'
@@ -67,6 +69,18 @@ export const shareManifestSchema = z
     playbooks: z.array(z.string().min(1).max(120)).max(64),
     /** Repositories the instance would reach through the Harbor (FR-10.1). */
     repos: z.array(z.string().min(1).max(200)).max(64),
+    /**
+     * What every hire may do with NOBODY WATCHING — the commands ADR-0035 lets
+     * a bundle pre-authorise, and the tool directories ADR-0026 lets it load.
+     *
+     * Both default to empty so a bundle exported before they existed still
+     * parses. That is not a hole: `manifestMismatches` recomputes both from the
+     * payload, so a bundle carrying grants its manifest omits is refused for the
+     * omission — which is the M7.6 lesson, where a manifest disclosed names and
+     * never prose.
+     */
+    unattended: z.array(z.string().min(1).max(240)).max(128).default([]),
+    tools: z.array(z.string().min(1).max(240)).max(128).default([]),
     /**
      * A digest over the PROSE the bundle carries — every hire's brief and every
      * playbook's text.
@@ -188,6 +202,8 @@ export function manifestOfHire(template: HireTemplate): ShareManifest {
     triggers: [],
     playbooks: [],
     repos: [],
+    unattended: [...describeUnattendedGrants(template.unattended)].sort(),
+    tools: [...describeToolGrants(template.tools ?? [])].sort(),
     proseDigest: digestOf([template.brief])
   }
 }
@@ -235,6 +251,15 @@ export function manifestOfProfile(files: ProfileFiles): ShareManifest | null {
     triggers: bundle.triggers.map((trigger) => trigger.id).sort(),
     playbooks: bundle.playbooks.map((playbook) => playbook.file).sort(),
     repos: bundle.harbor.repos.map((repo) => repo.remote).sort(),
+    // Across every hire, deduplicated: the question the Architect is answering
+    // is "what will run here without me", and that is a property of the bundle
+    // rather than of any one role in it.
+    unattended: [
+      ...new Set(bundle.hires.flatMap((hire) => describeUnattendedGrants(hire.unattended)))
+    ].sort(),
+    tools: [
+      ...new Set(bundle.hires.flatMap((hire) => describeToolGrants(hire.tools ?? [])))
+    ].sort(),
     // Briefs AND playbooks: both are prose an agent reads as instructions.
     proseDigest: digestOf([
       ...bundle.hires.map((hire) => hire.brief),
@@ -254,6 +279,17 @@ export function manifestOfProfile(files: ProfileFiles): ShareManifest | null {
 export interface InstalledFacts {
   readonly envGrants: readonly string[]
   readonly autonomy: readonly { readonly kind: GateKind; readonly level: AutonomyLevel }[]
+  /**
+   * What the INSTALLED version may already do unprompted, and which tool
+   * directories it already loads — rendered exactly as the manifest renders
+   * them, so the two are comparable.
+   *
+   * Optional so a caller written before ADR-0035 still compiles; absent reads as
+   * "it holds none", which makes any grant in the arriving bundle a widening and
+   * refuses it. The safe direction for an unknown.
+   */
+  readonly unattended?: readonly string[]
+  readonly tools?: readonly string[]
 }
 
 export type ImportResult =
@@ -455,6 +491,8 @@ function manifestMismatches(declared: ShareManifest, derived: ShareManifest): re
     )
   }
   compare('the env grant', declared.envGrants, derived.envGrants)
+  compare('the unprompted command', declared.unattended, derived.unattended)
+  compare('the tool directory', declared.tools, derived.tools)
   compare('the hire', declared.hires, derived.hires)
   compare('the trigger', declared.triggers, derived.triggers)
   compare('the playbook', declared.playbooks, derived.playbooks)
@@ -494,6 +532,23 @@ function wideningsAgainstInstalled(
     if (!installed.envGrants.includes(grant)) {
       out.push(
         `import: this would add the env grant "${grant}" to "${derived.name}", which does not hold it — export it under a new name if that is intended`
+      )
+    }
+  }
+
+  // ADR-0035 and ADR-0026. Both are things that happen with nobody watching — a
+  // command that runs unprompted, and a directory read as instructions — and an
+  // import reusing a trusted name may not arrive with more of either than the
+  // version it replaces. Found by the adversarial pass on M8c.8, which also
+  // found that `tools` had never been covered here at all.
+  for (const [field, arriving, held] of [
+    ['command it may run unprompted', derived.unattended, installed.unattended ?? []],
+    ['tool directory', derived.tools, installed.tools ?? []]
+  ] as const) {
+    for (const entry of arriving) {
+      if (held.includes(entry)) continue
+      out.push(
+        `import: this would add the ${field} "${entry}" to "${derived.name}", which does not hold it — export it under a new name if that is intended`
       )
     }
   }
