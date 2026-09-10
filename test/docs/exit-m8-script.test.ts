@@ -144,3 +144,70 @@ describe('EXIT-M8 §2 — a ceiling the runner can actually set', () => {
     expect(before).not.toMatch(/ephctl(\.cjs)? budget:set/)
   })
 })
+
+/**
+ * **M8c.6 — the two documentation halves, guarded.**
+ *
+ * Finding 4: §5.1 trains the runner to abort on a missing `ci` trigger, and the
+ * activation output could not show one. Finding 1: the Node floor is in *Quick
+ * start*, and §1 sends the runner to *Setting it up*, which said only
+ * `Node 20 (.nvmrc)` — **the 2026-09-08 decision log records that as "Also
+ * fixed", and the fix reached Quick start only.** A documentation fix that
+ * misses the section a reader is actually sent to is the same defect twice, so
+ * both are pinned here rather than trusted.
+ */
+describe('EXIT-M8 §5.1 does not send a runner to abort on a bound trigger (M8c.6)', () => {
+  const five = fs.readFileSync(EXIT_M8, 'utf8')
+
+  it('says the activation prints event triggers separately', () => {
+    expect(five).toContain('event triggers')
+    expect(five).toContain('armed (schedules)')
+  })
+
+  it('names which line is the setup defect, so the reading is unambiguous', () => {
+    expect(five).toMatch(/empty `event triggers` line is the setup defect/i)
+  })
+
+  it('records that the trigger was bound both times a runner nearly aborted', () => {
+    expect(five).toMatch(/bound both times|it was bound/i)
+  })
+})
+
+describe('the README states the Node floor where the exit script sends you (M8c.6)', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '..', '..', 'README.md'), 'utf8')
+
+  /** The body of a `## ` section, up to the next one. */
+  function named(heading: string): string {
+    const lines = readme.split('\n')
+    const start = lines.findIndex((line) => line.trim() === heading)
+    expect(start, `README has no "${heading}" heading`).toBeGreaterThanOrEqual(0)
+    const rest = lines.slice(start + 1)
+    const end = rest.findIndex((line) => line.startsWith('## '))
+    return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+  }
+
+  it('states 20.19+/22.12+ in Setting it up — the section EXIT-M8 §1 names', () => {
+    const setup = named('## Setting it up')
+
+    // The FLOOR, in the toolchain step itself — not merely the digits somewhere
+    // in the section. The first version of this test asserted `'20.19'` and
+    // passed on a paragraph that happened to quote the lockfile's range while
+    // the toolchain line had reverted to "Node 20 (`.nvmrc`)". Found by a
+    // mutation planted to do exactly that.
+    expect(setup).toMatch(/\*\*1\. The toolchain\.\*\* \*\*Node 20\.19\+ or 22\.12\+\*\*/)
+  })
+
+  it('still states it in Quick start, where it was already correct', () => {
+    const quick = named('## Quick start')
+
+    expect(quick).toContain('20.19')
+    expect(quick).toContain('22.12')
+  })
+
+  it('CONTROL — the sentence that shipped until M8c.6 states neither', () => {
+    // The predicate is only worth anything if the old text fails it.
+    const before = '**1. The toolchain.** Node 20 (`.nvmrc`), then:'
+    expect(before).not.toContain('20.19')
+    expect(before).not.toContain('22.12')
+  })
+})
