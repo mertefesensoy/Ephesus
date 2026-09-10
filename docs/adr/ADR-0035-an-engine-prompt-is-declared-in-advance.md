@@ -90,7 +90,7 @@ able to end because the work ended."*
 ```json
 "unattended": [
   { "run": "git status", "prefix": true },
-  { "run": "git push -u origin agent/", "prefix": true },
+  { "run": "git push -u origin HEAD" },
   { "run": "npm test" }
 ]
 ```
@@ -98,8 +98,12 @@ able to end because the work ended."*
 `prefix` is the whole safety story. Without it the grant matches that command
 and nothing else — the form `ghTokenPermissions` has always used for the one
 call it grants. With it the grant matches anything **starting** with the
-declared text, which is what makes `git push -u origin agent/mason-fix` usable
-while `git push origin main` and `git push --force` still stop at the prompt.
+declared text, which is what makes `git status --short` usable off one
+declaration while `git push --force` still stops at the prompt.
+
+**Use the exact form wherever an argument could change *where* the command acts
+rather than *how*.** The push grant above is exact for that reason, and §5 says
+what it cost to learn.
 
 **Optional, and omitting it grants nothing.** Every bundle written before this
 ADR keeps the behaviour it had, which is the direction an unknown must fail in.
@@ -124,7 +128,25 @@ shell. A second vocabulary — web domains, file roots — is a schema change wi
 its own ADR, not a field somebody slips in. Same argument `engine-tools.ts`
 makes for granting directories rather than inline definitions.
 
-### 4. The shipped bundles declare what their runbooks already say in prose
+### 4. A shared bundle may not arrive holding more of this than the one it replaces
+
+`inspectImport` refuses a bundle that reuses a trusted name and arrives with more
+authority — that is the sharpest attack FR-10.4 has to answer, and M7.6 built the
+check for it. It covered env grants and autonomy. **It did not know about
+`unattended`**, which this ADR creates, so a shared bundle could have arrived
+carrying `curl … | sh` as an unprompted command and nothing would have said so.
+The manifest now carries every hire's grants, the widening check refuses any that
+the installed version does not already hold, and — because the manifest is
+recomputed from the payload — a bundle whose manifest *hides* a grant it carries
+is refused for the omission rather than passing as an honest export.
+
+**The same pass found that `tools` had never been covered there either**, since
+M8.7b: a shared bundle could add a directory an agent reads as instructions
+(ADR-0026's whole subject) with no widening refusal. Closed in the same three
+lines, because a manifest that disclosed one and not the other would look
+complete and not be.
+
+### 5. The shipped bundles declare what their runbooks already say in prose
 
 The Skeleton Crew's `ci-babysitter` brief already states that pushing its own
 branch and opening a pull request *"without asking"* is the work rather than an
@@ -134,13 +156,18 @@ part worth reading — **declared more narrowly than the prose**:
 
 | Hire | May run unprompted |
 |---|---|
-| `ci-babysitter`, `dependency-updater` | inspection (`git status/diff/log/show`, `git fetch origin`, `gh run view`) + **its own branch only** (`git switch -c agent/…`, `git add`, `git commit`, `git push -u origin agent/…`, `git push origin agent/…`, `gh pr create`) |
+| `ci-babysitter`, `dependency-updater` | inspection (`git status/diff/log/show`, `git fetch origin`, `gh run view`) + **its own work only** (`git switch -c agent/…`, `git add`, `git commit`, `gh pr create`, and the two push forms **exactly**: `git push -u origin HEAD`, `git push origin HEAD`) |
 | `verifier`, `health-watcher` | inspection only |
 | every Front Office hire | inspection only — **no push, no pull request** |
 
-`git push origin main` starts with none of those prefixes, so the runbook's
-*"pushing to a branch someone else builds on … propose it and wait"* is now
-mechanical rather than advisory. The Front Office is draft-only by design
+The two push grants are **exact, not prefixed, and the adversarial pass is why.**
+The first version of this ADR granted `git push -u origin agent/` as a prefix, on
+the reasoning that the agent's own branch namespace bounded it. It does not:
+git's refspec is `<src>:<dst>`, so `git push -u origin agent/x:main` starts with
+that prefix and pushes to `main`. An exact grant of the `HEAD` form cannot name a
+destination at all, and it is the command the runbook's own flow uses. So the
+runbook's *"pushing to a branch someone else builds on … propose it and wait"* is
+now mechanical rather than advisory. The Front Office is draft-only by design
 (M7.5/M7.6: *"a draft-only profile has no code path that posts"*), so no hire of
 it is pre-authorised to push or open a pull request at all.
 
@@ -158,10 +185,13 @@ M8.6), so the blast radius of a shell command is that checkout.
 
 **What is NOT bounded, stated plainly.** A `prefix` grant permits whatever
 follows the declared text, so `{"run": "git commit", "prefix": true}` permits
-`git commit --no-verify`. The schema refuses declarations that could chain a
-second command, and the two-word rule stops the widest grants, but a prefix is a
-prefix. Read a bundle's `unattended` list as *"these commands, and any flags a
-reasonable person could add to them"*.
+`git commit --no-verify`, and `{"run": "gh pr create", "prefix": true}` permits
+`gh pr create --repo somewhere/else`. The schema refuses declarations that could
+chain a second command, and the two-word rule stops the widest grants, but a
+prefix is a prefix. **Read a bundle's `unattended` list as "these commands, and
+any argument a reasonable person could add to them"** — and where an argument
+would change WHERE the command acts rather than how, use the exact form, as the
+two push grants do.
 
 **A grant the harness installs cannot be retracted from a settings file it did
 not replace.** Nothing distinguishes a `Bash(...)` rule this harness wrote from

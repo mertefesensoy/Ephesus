@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import { describeUnattendedGrants } from '../../shared/engine-permissions'
+import { describeToolGrants } from '../../shared/engine-tools'
 import path from 'node:path'
 import { writeFileAtomic } from '../fsx'
 import { hireRef, type HireTemplate } from '../../shared/org'
@@ -248,7 +250,18 @@ export function factsOf(bundle: ProfileBundle): InstalledFacts {
     autonomy: GATE_KINDS.map((kind: GateKind) => ({
       kind,
       level: requestedAutonomy(bundle.document.autonomy, kind) as AutonomyLevel
-    }))
+    })),
+    // Rendered exactly as `manifestOfProfile` renders them, because the
+    // comparison is string equality and two renderings that drift would make
+    // every arriving grant look new. One vocabulary, two readers.
+    unattended: [
+      ...new Set(
+        bundle.hires.flatMap((hire: HireTemplate) => describeUnattendedGrants(hire.unattended))
+      )
+    ].sort(),
+    tools: [
+      ...new Set(bundle.hires.flatMap((hire: HireTemplate) => describeToolGrants(hire.tools ?? [])))
+    ].sort()
   }
 }
 

@@ -133,14 +133,26 @@ describe('what the shipped bundles pre-authorise', () => {
     return parsed.success ? (parsed.data.unattended ?? []) : []
   }
 
-  it('lets the on-call hire push its own branch, and no other', () => {
-    const runs = grantsOf('skeleton-crew', 'ci-babysitter').map((grant) => grant.run)
+  /**
+   * **Tightened by the adversarial pass.** The first version granted
+   * `{"run": "git push -u origin agent/", "prefix": true}`, on the reasoning
+   * that the agent's own branch namespace bounded it. It does not: git's
+   * refspec is `<src>:<dst>`, so `git push -u origin agent/x:main` starts with
+   * that prefix and pushes to `main`. An EXACT grant of the `HEAD` form cannot
+   * name a destination at all, and it is the command the runbook's own flow
+   * uses.
+   */
+  it('lets the on-call hire push only the exact HEAD form — no refspec', () => {
+    const pushes = grantsOf('skeleton-crew', 'ci-babysitter').filter((grant) =>
+      grant.run.startsWith('git push')
+    )
 
-    expect(runs).toContain('git push -u origin agent/')
-    // `git push origin main` starts with none of these, so it still prompts.
-    for (const run of runs.filter((value) => value.startsWith('git push'))) {
-      expect(run, run).toMatch(/ agent\/$/)
-    }
+    expect(pushes.map((grant) => grant.run).sort()).toEqual([
+      'git push -u origin HEAD',
+      'git push origin HEAD'
+    ])
+    // Exact, every one: a prefix here would re-open the refspec above.
+    for (const grant of pushes) expect(grant.prefix, grant.run).toBeUndefined()
   })
 
   it('never pre-authorises a force-push or a branch deletion, anywhere', () => {
@@ -167,7 +179,6 @@ describe('what the shipped bundles pre-authorise', () => {
     // A predicate that stopped matching would make all three cases pass on any
     // bundle at all, which is the shape a doc-shaped guard rots into.
     expect('git push --force origin agent/x').toMatch(/--force|-f\b|--delete|push -d/)
-    expect('git push origin main').not.toMatch(/ agent\/$/)
     expect('gh pr create').toMatch(/^git push|^gh pr create/)
     expect('gh run view').not.toMatch(/^git push|^gh pr create/)
   })

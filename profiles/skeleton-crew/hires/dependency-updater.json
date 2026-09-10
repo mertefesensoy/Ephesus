@@ -46,16 +46,14 @@
       "prefix": true
     },
     {
-      "run": "git push -u origin agent/",
-      "prefix": true
-    },
-    {
-      "run": "git push origin agent/",
-      "prefix": true
-    },
-    {
       "run": "gh pr create",
       "prefix": true
+    },
+    {
+      "run": "git push -u origin HEAD"
+    },
+    {
+      "run": "git push origin HEAD"
     }
   ]
 }
