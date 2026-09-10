@@ -1,6 +1,7 @@
 # GYM-008 — A mutation round is a tool, not a scratch script
 
-**Status:** proposed · **Raised:** 2026-09-10 · **Gate:** Architect approval
+**Status:** **approved** 2026-09-10 (Architect) · **Raised:** 2026-09-10 ·
+**Gate:** Architect approval
 (tooling + a Definition-of-Done clause; no invariant, ADR, gate policy, secret or
 dependency is touched)
 
