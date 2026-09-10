@@ -190,6 +190,6 @@ no longer stops at a prompt for any step the runbook itself instructs.
 - [`docs/adr/ADR-0035-…md`](../adr/ADR-0035-an-engine-prompt-is-declared-in-advance.md) — the decision
 - [`docs/adr/ADR-0031-…md`](../adr/ADR-0031-an-engine-declares-whether-it-can-enforce-autonomy.md) — why `autonomous` is `auto` and not `bypassPermissions`
 - [`docs/adr/ADR-0033-…md`](../adr/ADR-0033-a-script-may-run-the-company.md) — the authority a script is refused, and why option 2 shares it
-- [`docs/adr/ADR-0026-…md`](../adr/ADR-0026-a-hire-runs-its-own-engine-install.md) — the "by name" precedent, and the `tools` hole this pass closed
+- [`docs/adr/ADR-0026-…md`](../adr/ADR-0026-engine-isolation-and-the-harness-as-sole-hook-author.md) — the "by name" precedent, and the `tools` hole this pass closed
 - [`docs/demo/m8b-rehearsal-m8b-rehearsal.md`](../demo/m8b-rehearsal-m8b-rehearsal.md) — Finding D, the measurement
 - [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md) — M8c.8 and its acceptance
