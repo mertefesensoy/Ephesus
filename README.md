@@ -353,9 +353,14 @@ node scripts/ephctl.cjs help
 ```
 
 `consent:status` prints what starting the company would do; `consent:grant` says
-go; `profile:activate --profile skeleton-crew --target repo:myapp --path
-/path/to/checkout` hires the crew and tells you which repositories it will
-watch; `profile:instances`, `agents:list`, `status` and `log:tail` read.
+go; `budget:set --daily 300000` bounds what it may spend; `profile:activate
+--profile skeleton-crew --target repo:myapp --path /path/to/checkout` hires the
+crew and tells you which repositories it will watch; `profile:instances`,
+`agents:list`, `status` and `log:tail` read.
+
+`budget:set` may only ever **lower** the ceiling. Raising one is refused by
+name, with the reason — a ceiling caps what the company may spend, so tightening
+it is something a script may do and loosening it is not.
 
 **Four things it will not do**, and it says so by name rather than pretending
 they do not exist: approve a gate, decide a memo, set a secret, or change the

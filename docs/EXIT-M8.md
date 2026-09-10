@@ -156,15 +156,28 @@ and is not a pass.
 
 ## 2. Set a ceiling before you walk away
 
-This is the step that is skipped and then regretted. **WATCH → settings**:
+This is the step that is skipped and then regretted, and until M8c.1 there was
+no way for a runner without a mouse to perform it at all — which is why both
+runs so far went out unbudgeted, and why the first spent **40.45M tokens
+($11.22)** against the figure below.
+
+```bash
+node scripts/ephctl.cjs budget:set --daily 300000
+```
 
 - **Daily budget** → set a ceiling. `unbudgeted` is the shipped default
   ([ADR-0029](./adr/ADR-0029-unbudgeted-is-the-default.md)) and it means exactly
   what it says. For one run of this test, a few hundred thousand tokens is
-  generous.
+  generous. From the window it is **WATCH → settings → Daily budget**; the two
+  write the same file.
+- The verb may only ever **lower** the ceiling. Raising one is refused by name,
+  with the reason and where to do it instead — a ceiling caps what the company
+  may spend, so tightening it is a script's to do and loosening it is a
+  person's ([ADR-0033](./adr/ADR-0033-a-script-may-run-the-company.md)).
 - **Autonomy** → leave the ceiling where it ships. Do not raise it; §6.1's last
   clause is about what the company does *without* asking, and loosening the
-  policy first would remove the thing being measured.
+  policy first would remove the thing being measured. There is deliberately no
+  verb for it.
 
 Record what you set. A run whose spend nobody bounded cannot say whether the
 budget controls work.
