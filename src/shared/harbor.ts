@@ -201,6 +201,58 @@ export function parseRuns(repo: string, body: string): InboundParse {
   }))
 }
 
+/**
+ * Contract: pure. The head branch of a CI run, or null.
+ *
+ * It lives in `labels` because `parseRuns` puts it there, and that is worth a
+ * function rather than an index: a reader looking for the branch would search
+ * for `branch` and find nothing, which is the "absence in one vocabulary is not
+ * absence" mistake this repository has made three times in a day. Named here,
+ * once, so the consumer has something to call it.
+ *
+ * Null for a run `gh` returned without `headBranch`, and for everything that is
+ * not a CI run at all — an issue's labels are labels.
+ */
+export function branchOf(item: InboundItem): string | null {
+  if (item.kind !== 'ci-run') return null
+  return item.labels[0] ?? null
+}
+
+/**
+ * Contract: pure. Whether this CI failure is still the newest run on its branch
+ * within `batch` — i.e. whether it still stands, or something has overtaken it.
+ *
+ * **The cold-start rule (M8c.2).** On 2026-09-09 an activation pulled ten runs
+ * and raised eight incidents for failures sixteen days old and already fixed,
+ * and the proof was in the same payload: the two NEWEST runs in that batch were
+ * both `success`. A backlog replay is not detection; it is a cold start
+ * mistaking history for news, and it cost $11.22 on work finished on 2026-08-24.
+ *
+ * "Overtaken" is deliberately any later run, not only a later SUCCESS. A newer
+ * run on the same branch means somebody pushed again, so this failure is about
+ * a tree that no longer exists — and if the newer run failed too, IT is the one
+ * that still stands and raises. Exactly one incident per branch that is red,
+ * and none for a branch that has moved on. Nothing is lost by suppressing an
+ * in-flight successor either: if it fails, the next ingest sees a failure newer
+ * than the activation and raises it then.
+ *
+ * Ordering is by `at` with `ref` as the tiebreak. `at` is GitHub's `createdAt`,
+ * carried verbatim, and `ref` is the run's database id, which increases — so
+ * two runs created in the same second still order.
+ */
+export function ciRunStillStands(item: InboundItem, batch: readonly InboundItem[]): boolean {
+  const branch = branchOf(item)
+  if (branch === null) return true
+  return !batch.some(
+    (other) =>
+      other !== item &&
+      other.kind === 'ci-run' &&
+      other.repo === item.repo &&
+      branchOf(other) === branch &&
+      (other.at > item.at || (other.at === item.at && other.ref > item.ref))
+  )
+}
+
 function parseRows<T>(
   repo: string,
   body: string,
