@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { activationRequestSchema, instanceIdSchema } from './profile-activation'
-import { maxDailyTokensSchema } from './gates'
+import { maxDailyTokensSchema, SUGGESTED_DAILY_TOKENS } from './gates'
 
 /**
  * The control surface's contract (M8.14) — the one place that says what a
@@ -366,7 +366,7 @@ export const CONTROL_VERBS: readonly ControlVerb[] = [
     summary: 'lower the company-wide daily token ceiling (a script may tighten, never raise)',
     args: budgetArgs,
     writes: true,
-    usage: 'ephctl budget:set --daily 300000'
+    usage: `ephctl budget:set --daily ${SUGGESTED_DAILY_TOKENS}`
   },
   {
     name: 'profile:list',

@@ -196,7 +196,10 @@ export class CompanyStart {
     // not answered must meet the same question the first one did.
     const missing = budgetAnswerMissing(this.options.disclose(), acceptUnbudgeted)
     if (missing !== null && !this.verdict().mayStartWork) {
-      return { ok: false, reason: `consent was NOT granted: ${missing}`, view: this.view() }
+      // No prefix: `ControlServer` and the banner each add their own, and the
+      // rehearsal printed "consent was NOT granted: consent was NOT granted: …".
+      // A refusal that stutters is a refusal a reader stops reading.
+      return { ok: false, reason: missing, view: this.view() }
     }
     if (this.verdict().mayStartWork) {
       // Idempotent: a second click, a second window, or a grant racing boot.
