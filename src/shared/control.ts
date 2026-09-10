@@ -97,6 +97,25 @@ const deactivateArgs = z.object({ instance: instanceIdSchema }).strict()
 const budgetArgs = z.object({ daily: z.coerce.number().pipe(maxDailyTokensSchema) }).strict()
 
 /**
+ * `consent:grant`'s one optional flag (M8c.3).
+ *
+ * It takes a VALUE — `--unbudgeted true` — rather than being a bare flag,
+ * because `ephctl` refuses a flag with no value and that refusal is worth more
+ * than the keystroke: `--profile --target repo:x` is a missing value, not two
+ * bare flags, and a client that guessed would answer it with a puzzle. Typing
+ * `true` is also an affirmative act, which is the whole point of this one.
+ *
+ * `"true"` from a command line and a real boolean from a caller that already
+ * has one are both accepted, and nothing else is — a typo that read as truthy
+ * would be a permission granted by accident. Absent is `false`: the answer must
+ * be given, never assumed.
+ */
+const consentGrantArgs = z
+  .object({ unbudgeted: z.union([z.boolean(), z.enum(['true', 'false'])]).optional() })
+  .strict()
+  .transform((args) => ({ unbudgeted: args.unbudgeted === true || args.unbudgeted === 'true' }))
+
+/**
  * Contract: pure. Whether a script may move the company's daily ceiling from
  * `current` to `requested`, and why not when it may not.
  *
@@ -279,9 +298,9 @@ export const CONTROL_VERBS: readonly ControlVerb[] = [
   {
     name: 'consent:grant',
     summary: 'grant consent and start the company (idempotent)',
-    args: noArgs,
+    args: consentGrantArgs,
     writes: true,
-    usage: 'ephctl consent:grant'
+    usage: 'ephctl consent:grant [--unbudgeted true]'
   },
   {
     name: 'budget:set',

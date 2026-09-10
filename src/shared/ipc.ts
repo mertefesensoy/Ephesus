@@ -351,7 +351,12 @@ export interface EphApi {
   consent: {
     get: () => Promise<ConsentView>
     /** Records the grant and starts the company in THIS process. */
-    grant: () => Promise<ConsentGrantOutcome>
+    /**
+     * @param unbudgeted the Architect's explicit answer that this company may
+     *   run with no daily ceiling (M8c.3). Required, not optional: an
+     *   unanswered question must not read as a permission.
+     */
+    grant: (unbudgeted: boolean) => Promise<ConsentGrantOutcome>
   }
   agents: {
     list: () => Promise<readonly AgentCard[]>
