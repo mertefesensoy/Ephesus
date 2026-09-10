@@ -198,7 +198,13 @@ describe('empty and full, for every list', () => {
               targetRef: 'repo:myapp',
               targetPath: 'C:\\src\\myapp',
               repos: ['me/myapp'],
-              reposBecause: 'read off the checkout'
+              reposBecause: 'read off the checkout',
+              // A real Skeleton Crew plan carries both kinds, and the event one
+              // is what a runner could not see before M8c.6.
+              triggers: [
+                { id: 'sweep', everyMs: 900_000, event: null, agentId: 'agent.mason@myapp' },
+                { id: 'ci-failure', everyMs: null, event: 'ci', agentId: 'agent.mason@myapp' }
+              ]
             }
           }
         ]
@@ -209,7 +215,9 @@ describe('empty and full, for every list', () => {
     expect(full.text).toContain('repo:myapp at C:\\src\\myapp')
     expect(full.text).toContain('repos me/myapp')
     expect(full.text).toContain('agents agent.mason@myapp')
-    expect(full.text).toContain('armed sweep')
+    expect(full.text).toContain('armed (schedules)  sweep')
+    // M8c.6: the line whose absence a runner read as a missing trigger.
+    expect(full.text).toContain('event triggers     ci → agent.mason@myapp (ci-failure)')
   })
 
   it('says an instance watching nothing watches (none), rather than printing a blank', async () => {
@@ -228,7 +236,8 @@ describe('empty and full, for every list', () => {
               targetRef: 'repo:myapp',
               targetPath: 'C:\\src\\myapp',
               repos: [],
-              reposBecause: 'the bundle declares none'
+              reposBecause: 'the bundle declares none',
+              triggers: []
             }
           }
         ]
@@ -238,7 +247,10 @@ describe('empty and full, for every list', () => {
     )
     expect(answer.text).toContain('repos (none)')
     expect(answer.text).toContain('agents (none)')
-    expect(answer.text).toContain('armed (none)')
+    expect(answer.text).toContain('armed (schedules)  (none)')
+    // Printed even when empty (M8c.6): the ABSENCE of this line is what a
+    // runner took for the absence of the trigger.
+    expect(answer.text).toContain('event triggers     (none)')
   })
 
   it('says the book of record is empty, and then prints rows with and without an event', async () => {
@@ -420,7 +432,8 @@ describe('activation and deactivation', () => {
                 targetRef: 'repo:myapp',
                 targetPath: 'C:\\src\\myapp',
                 repos: ['me/myapp'],
-                reposBecause: 'read off the checkout'
+                reposBecause: 'read off the checkout',
+                triggers: []
               }
             }
           })

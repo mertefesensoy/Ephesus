@@ -319,6 +319,23 @@ first repository this was ever pointed at, and nothing said so.
 has no `ci` trigger bound, or the repository does not match. That is a setup
 defect, and the run cannot proceed past it.
 
+> **Read that row, not the activation output.** Until M8c.6, `profile:activate`
+> printed one `armed` line that could only ever list SCHEDULES — an event trigger
+> has no clock to arm — so the `ci` trigger was structurally invisible however
+> correctly it was bound, and the paragraph above trained two runners to read
+> that absence as fatal. The 2026-09-09 run nearly aborted on it and the M8b
+> rehearsal met it again; the trigger was bound both times, and proved bound
+> minutes later when the ingest raised incidents through it. The activation now
+> prints both kinds:
+>
+> ```text
+> armed (schedules)  dependency-sweep, health-sweep
+> event triggers     ci → agent.…-ci-babysitter (ci-failure)
+> ```
+>
+> **An empty `event triggers` line is the setup defect.** An
+> `incident-unclaimed` row is the other way to find out, after the fact.
+
 ### 5.2 "fixed it or opened a fix PR"
 
 | Evidence | Where |

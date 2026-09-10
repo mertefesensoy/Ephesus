@@ -13,6 +13,7 @@ import {
   renderRefusal,
   renderUnknownVerb,
   resolveControlVerb,
+  triggerLines,
   type ControlAnswer,
   type ControlVerb
 } from '../shared/control'
@@ -580,7 +581,12 @@ export async function performVerb(
                   `  ${i.instanceId}\n      target ${i.plan.targetRef} at ${i.plan.targetPath}` +
                   `\n      repos ${i.plan.repos.join(', ') || '(none)'}` +
                   `\n      agents ${i.agentIds.join(', ') || '(none)'}` +
-                  `\n      armed ${i.armed.join(', ') || '(none)'}`
+                  triggerLines(i.plan.triggers, i.armed)
+                    .map(
+                      (row) => `
+      ${row}`
+                    )
+                    .join('')
               )
               .join('\n'),
         live
@@ -606,7 +612,7 @@ export async function performVerb(
           `  target      ${plan.targetRef} at ${plan.targetPath}`,
           `  repositories ${plan.repos.join(', ') || '(none)'} — ${plan.reposBecause}`,
           `  agents      ${result.instance.agentIds.join(', ') || '(none)'}`,
-          `  armed       ${result.instance.armed.join(', ') || '(none)'}`
+          ...triggerLines(plan.triggers, result.instance.armed).map((row) => `  ${row}`)
         ].join('\n'),
         result.instance
       )

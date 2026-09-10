@@ -14,6 +14,7 @@ import {
   renderRefusal,
   renderUnknownVerb,
   resolveControlVerb,
+  triggerLines,
   resolveVerbIn
 } from '../../src/shared/control'
 import { activationIsolationSchema } from '../../src/shared/isolation'
@@ -506,5 +507,83 @@ describe('budget:set may tighten and never raise (M8c.1)', () => {
     }
     // Strict: a typo'd flag is refused rather than silently ignored.
     expect(entry.args.safeParse({ daily: '300000', dally: '1' }).success).toBe(false)
+  })
+})
+
+/**
+ * **M8c.6 — a label true in the producer's vocabulary and false in the
+ * reader's.**
+ *
+ * Finding 4 of the M8 exit run, met AGAIN by the M8b rehearsal. `armed` means
+ * "has a clock running", so it can only ever list `kind: "schedule"` triggers —
+ * an event trigger has no clock to arm and was structurally invisible on that
+ * line however correctly it was bound. `EXIT-M8.md` §5.1 tells the runner that a
+ * missing `ci` trigger *"is a setup defect, and the run cannot proceed past
+ * it"*, so **the documented reading of that output was: stop, the run is
+ * invalid.** It was bound the whole time, and proved bound minutes later when
+ * the ingest raised eight incidents through it.
+ */
+describe('an activation names both kinds of trigger (M8c.6)', () => {
+  const sweep = {
+    id: 'dependency-sweep',
+    everyMs: 900_000,
+    event: null,
+    agentId: 'agent.deps'
+  }
+  const ci = { id: 'ci-failure', everyMs: null, event: 'ci', agentId: 'agent.oncall' }
+
+  it('lists an event trigger that no clock could ever arm', () => {
+    // The 2026-09-09 output was `armed dependency-sweep, health-sweep` and
+    // nothing else. This is the line whose absence a runner read as fatal.
+    const lines = triggerLines([sweep, ci], ['crew@repo:app/dependency-sweep'])
+
+    expect(lines[0]).toContain('armed (schedules)')
+    expect(lines[0]).toContain('dependency-sweep')
+    expect(lines[1]).toContain('event triggers')
+    expect(lines[1]).toContain('ci → agent.oncall (ci-failure)')
+  })
+
+  it('prints the event line even when there is NONE, so absence is visible', () => {
+    // The whole defect is that a missing line read as a missing trigger. An
+    // empty list must say so out loud, because that IS the setup defect §5.1
+    // is about.
+    const lines = triggerLines([sweep], ['crew@repo:app/dependency-sweep'])
+
+    expect(lines[1]).toBe('event triggers     (none)')
+  })
+
+  it('prints the schedule line even when there is none', () => {
+    expect(triggerLines([ci], [])[0]).toBe('armed (schedules)  (none)')
+  })
+
+  it('says when a declared schedule is NOT actually armed', () => {
+    // `armed` is the scheduler's own list. A schedule the plan declares and the
+    // clock does not hold is the real version of the thing §5.1 worries about,
+    // and it was previously indistinguishable from one that simply was not
+    // declared.
+    const lines = triggerLines([sweep], [])
+
+    expect(lines[0]).toContain('dependency-sweep — NOT ARMED')
+  })
+
+  it('matches the scheduler’s instance-qualified ids against the plan’s bare ones', () => {
+    // Two vocabularies for one id: the scheduler holds
+    // `<instance>/<trigger>` and the plan holds `<trigger>`. They meet here
+    // rather than in a caller that would have to know both — which is exactly
+    // the shape of the `when === "ci"` defect that cost the incident path its
+    // whole production life.
+    expect(triggerLines([sweep], ['dependency-sweep'])[0]).not.toContain('NOT ARMED')
+    expect(triggerLines([sweep], ['crew@repo:app/dependency-sweep'])[0]).not.toContain('NOT ARMED')
+    expect(triggerLines([sweep], ['other@repo:x/dependency-sweep'])[0]).not.toContain('NOT ARMED')
+  })
+
+  it('CONTROL — a plan with only an event trigger produced an EMPTY armed list', () => {
+    // The old rendering, reproduced: `armed` alone, over a plan whose only
+    // trigger is the `ci` one. This is what a runner was shown, and what §5.1
+    // told them to abort on.
+    const armedOnly = [ci].filter((trigger) => trigger.everyMs !== null).map((t) => t.id)
+    expect(armedOnly).toEqual([])
+    // …and the new rendering says the trigger is there.
+    expect(triggerLines([ci], [])[1]).toContain('ci → agent.oncall')
   })
 })

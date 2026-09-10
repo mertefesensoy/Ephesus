@@ -191,7 +191,11 @@ What makes it different from its inspiration:
 Ephesus runs a company of real terminal-agent CLIs on your machine. It needs
 three things from you and creates the rest itself.
 
-**1. The toolchain.** Node 20 (`.nvmrc`), then:
+**1. The toolchain.** **Node 20.19+ or 22.12+** — the major line alone is not
+enough, and nothing refuses the install, so check `node -v` yourself. `.nvmrc`
+says `20`, but fifteen packages in the lockfile (`@electron/rebuild` among them)
+require `^20.19.0 || >=22.12.0`; see [Quick start](#quick-start) for what an
+older 20.x actually does. Then:
 
 ```bash
 npm install        # postinstall patches node-pty and rebuilds native modules
