@@ -1242,7 +1242,26 @@ export class ClaudeAdapter implements EngineAdapter {
         // The Library's agent-facing surface (ADR-0006 layer 2). Harness-owned
         // and identical for every engine, so the adapter only forwards it.
         ...(cfg.recallCommand.length === 0 ? {} : { EPH_RECALL: cfg.recallCommand }),
-        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand })
+        ...(cfg.ghTokenCommand.length === 0 ? {} : { EPH_GH_TOKEN: cfg.ghTokenCommand }),
+        // **Both of those commands begin with Electron's own binary** —
+        // `index.ts` builds them from `process.execPath`, and in this app that
+        // is `electron`, not `node`. Handed a `.mjs` path, Electron treats it as
+        // an APP to load rather than a script to run: it starts, finds no
+        // entry point, and sits there. No stdout, no stderr, no exit.
+        //
+        // That is exactly what the M8 exit run's Finding 9 recorded — the
+        // health-watcher's own words: *"`$EPH_RECALL` is unavailable, not
+        // merely empty. Two attempts … produced zero bytes of output and never
+        // terminated; the second was killed at 90s, exit 143."* Exit 143 is
+        // SIGTERM: the agent gave up on it. The shim has had a 10-second
+        // timeout since it was written, and it never ran.
+        //
+        // `ELECTRON_RUN_AS_NODE` is Electron's documented answer: the binary
+        // behaves as plain Node. It is set on the agent's environment because
+        // these two are command STRINGS an agent runs in its own shell, so the
+        // variable has to be inherited rather than prefixed — and its only
+        // effect is on an Electron binary, which nothing else the agent runs is.
+        ELECTRON_RUN_AS_NODE: '1'
       },
       settings: this.settingsInjections(cfg)
     }

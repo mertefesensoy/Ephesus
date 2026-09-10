@@ -118,7 +118,8 @@
         "src/main/reflection.ts",
         "src/shared/memory.ts",
         "src/shared/recall.ts",
-        "src/shared/reflection.ts"
+        "src/shared/reflection.ts",
+        "src/main/recall-probe.ts"
       ]
     },
     "odeon": {
