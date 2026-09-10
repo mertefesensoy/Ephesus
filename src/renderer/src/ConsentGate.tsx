@@ -96,12 +96,12 @@ export function ConsentGate(): ReactElement | null {
     }
   }, [])
 
-  const grant = useCallback(() => {
+  const grant = useCallback((unbudgeted: boolean) => {
     const eph = window.eph
     if (!eph?.consent) return
     setBusy(true)
     setProblem(null)
-    void eph.consent.grant().then(
+    void eph.consent.grant(unbudgeted).then(
       (outcome) => {
         setBusy(false)
         // Adopt what main reports, refusal included: after a grant that could
@@ -131,9 +131,25 @@ export function ConsentGate(): ReactElement | null {
           </li>
         ))}
       </ul>
+      {/*
+        M8c.3. With no ceiling set, starting is REFUSED until the Architect
+        answers the question rather than skipping it — so the banner offers the
+        answer instead of a button that fails. `unbudgeted` stays the shipped
+        default (ADR-0029); what it stops being is something a company can start
+        on by omission.
+      */}
       <p style={{ margin: '8px 0 0' }}>
-        <button type="button" style={control} disabled={busy} onClick={grant}>
-          {busy ? 'STARTING…' : 'START THE COMPANY'}
+        <button
+          type="button"
+          style={control}
+          disabled={busy}
+          onClick={() => grant(view.disclosure.dailyCeiling === null)}
+        >
+          {busy
+            ? 'STARTING…'
+            : view.disclosure.dailyCeiling === null
+              ? 'START UNBUDGETED'
+              : 'START THE COMPANY'}
         </button>
         <span style={note}>
           Or leave it closed — everything else in the app stays readable, and nothing runs.

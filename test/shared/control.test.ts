@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 import {
   CONTROL_ADDRESS_FILE,
@@ -412,6 +413,44 @@ describe('the address file', () => {
  * company is not otherwise allowed to do; a ceiling authorises nothing, it caps.
  * Lowering one is therefore a script's to make, and raising one is not.
  */
+describe('consent:grant --unbudgeted is an answer, not a presence (M8c.3)', () => {
+  const args = (): z.ZodType => {
+    const entry = CONTROL_VERBS.find((candidate) => candidate.name === 'consent:grant')
+    if (!entry) throw new Error('consent:grant is not in the table')
+    return entry.args
+  }
+
+  it('reads the two spellings a caller can actually produce', () => {
+    // A command line gives strings; a programmatic caller gives a boolean.
+    expect(args().safeParse({ unbudgeted: 'true' })).toMatchObject({
+      success: true,
+      data: { unbudgeted: true }
+    })
+    expect(args().safeParse({ unbudgeted: true })).toMatchObject({
+      success: true,
+      data: { unbudgeted: true }
+    })
+  })
+
+  it('reads an explicit NO, and an absent flag, as no answer', () => {
+    expect(args().safeParse({ unbudgeted: 'false' })).toMatchObject({
+      success: true,
+      data: { unbudgeted: false }
+    })
+    expect(args().safeParse({})).toMatchObject({ success: true, data: { unbudgeted: false } })
+  })
+
+  it('REFUSES anything else rather than reading it as truthy', () => {
+    // The mutation this exists to kill: `unbudgeted !== undefined`, which turns
+    // `--unbudgeted no` into a permission to spend without a ceiling.
+    for (const bad of ['no', 'yes', '1', '0', 'TRUE', '']) {
+      expect(args().safeParse({ unbudgeted: bad }).success, bad).toBe(false)
+    }
+    // Strict: a typo'd flag is refused rather than silently ignored.
+    expect(args().safeParse({ unbudgetted: 'true' }).success).toBe(false)
+  })
+})
+
 describe('budget:set may tighten and never raise (M8c.1)', () => {
   it('accepts any ceiling when the company is unbudgeted', () => {
     // ADR-0029 ships `unbudgeted`, so the FIRST ceiling is always a tightening

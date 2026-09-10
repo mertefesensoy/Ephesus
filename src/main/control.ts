@@ -521,7 +521,8 @@ export async function performVerb(
       )
     }
     case 'consent:grant': {
-      const outcome = deps.consent.grant()
+      const { unbudgeted } = args as { unbudgeted: boolean }
+      const outcome = deps.consent.grant(unbudgeted)
       return outcome.ok
         ? ok(
             verb,

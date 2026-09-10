@@ -4,7 +4,11 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CompanyStart, CONSENT_UNWRITABLE, CONSENT_WITHHELD } from '../../src/main/consent'
 import { ensureHarnessHome } from '../../src/main/home'
-import { CONSENT_TERMS_VERSION, type ConsentDisclosure } from '../../src/shared/consent'
+import {
+  CONSENT_TERMS_VERSION,
+  consentSentences,
+  type ConsentDisclosure
+} from '../../src/shared/consent'
 import type { ConsentRecord } from '../../src/shared/consent'
 import type { DegradationCause } from '../../src/shared/degradation'
 import { removeTempDir } from '../tmpdir'
@@ -33,7 +37,10 @@ afterEach(() => {
 const DISCLOSURE: ConsentDisclosure = {
   hire: { agentId: 'artemis', engine: 'claude' },
   triggers: [{ id: 'standup', everyMs: 1_800_000 }],
-  dailyCeiling: null
+  // M8c.3: a company WITH a ceiling, so every case below that is not about the
+  // ceiling reads exactly as it did before. The unbudgeted cases set it to null
+  // themselves, which is the state the whole package is about.
+  dailyCeiling: 300_000
 }
 
 interface Rig {
@@ -52,6 +59,8 @@ function rig(
     saveThrows?: Error
     termsVersion?: number
     blockedBy?: () => string | null
+    /** M8c.3: a company nobody has set a ceiling for. */
+    unbudgeted?: boolean
   } = {}
 ): Rig {
   const hires: number[] = []
@@ -68,7 +77,8 @@ function rig(
       saved.push(next)
       held = next
     },
-    disclose: () => DISCLOSURE,
+    disclose: () =>
+      options.unbudgeted === true ? { ...DISCLOSURE, dailyCeiling: null } : DISCLOSURE,
     hire: () => hires.push(hires.length + 1),
     startSchedule: () => schedules.push(schedules.length + 1),
     report: (cause, detail) => reported.push({ cause, detail }),
@@ -422,5 +432,100 @@ describe('another harness is working on this home (ADR-0034)', () => {
     r.gate.boot()
     expect(r.hires).toHaveLength(1)
     expect(r.reported).toEqual([])
+  })
+})
+
+/**
+ * **M8c.3 — silence is not an answer about spend.**
+ *
+ * `unbudgeted` stays the shipped default (ADR-0029). What changes is that a
+ * company may not START on it by omission. `EXIT-M8.md` §2 calls setting a
+ * ceiling *"the step that is skipped and then regretted"*, and it was skipped on
+ * both real runs precisely because it was optional — 2026-09-09 spent $11.22 and
+ * the M8b rehearsal $17.77, neither bounded by anything.
+ *
+ * The Architect may still run unbudgeted, and often should. It just has to be an
+ * ANSWER.
+ */
+describe('the ceiling is a question the grant must answer (M8c.3)', () => {
+  it('REFUSES to start a company nobody has bounded, and names both ways out', () => {
+    const r = rig({ unbudgeted: true })
+
+    const outcome = r.gate.grant()
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.reason).toContain('no daily token ceiling')
+    // Both answers, by name — the refusal teaches the rule, to `watch:approve`'s
+    // standard, rather than saying no and stopping.
+    expect(outcome.reason).toContain('budget:set --daily')
+    expect(outcome.reason).toContain('--unbudgeted true')
+    // Nothing happened: not hired, not scheduled, and NOT written down. A
+    // consent recorded for a start that was refused would come back next boot
+    // as an answer nobody gave.
+    expect(r.hires).toEqual([])
+    expect(r.schedules).toEqual([])
+    expect(r.saved).toEqual([])
+  })
+
+  it('starts unbudgeted when the Architect says so explicitly', () => {
+    const r = rig({ unbudgeted: true })
+
+    const outcome = r.gate.grant(true)
+
+    expect(outcome.ok).toBe(true)
+    expect(r.hires).toEqual([1])
+    expect(r.schedules).toEqual([1])
+    expect(r.saved).toHaveLength(1)
+  })
+
+  it('needs no answer when a ceiling is already set', () => {
+    // The ordinary path: a company with a ceiling is not interrogated about one.
+    const outcome = rig().gate.grant()
+
+    expect(outcome.ok).toBe(true)
+  })
+
+  it('does not re-interrogate a company that already consented', () => {
+    // The idempotent path. A grant on file is an answer already given, and a
+    // second click on a running company must not refuse it — which would make
+    // `grant()` stop being idempotent exactly when a second window opens.
+    const r = rig({
+      unbudgeted: true,
+      record: { grantedAt: '2026-09-06T12:00:00.000Z', terms: CONSENT_TERMS_VERSION }
+    })
+
+    expect(r.gate.grant().ok).toBe(true)
+  })
+
+  it('re-asks a company that consented before the ceiling was a question', () => {
+    // The terms version is exactly the mechanism for this: v1's disclosure said
+    // "spending is unbudgeted until you set one in WATCH → settings" and asked
+    // nothing. A grant made against that is not an answer to the question v2
+    // asks, so it must not carry over — otherwise the one machine that has
+    // already consented is the one machine this package does not reach.
+    const stale = rig({
+      unbudgeted: true,
+      record: { grantedAt: '2026-09-06T12:00:00.000Z', terms: 1 }
+    })
+
+    expect(stale.gate.view().state).toBe('stale-terms')
+    expect(stale.gate.view().mayStartWork).toBe(false)
+    // And it meets the ceiling question, rather than being waved through.
+    expect(stale.gate.grant().ok).toBe(false)
+    expect(stale.gate.grant(true).ok).toBe(true)
+  })
+
+  it('says so on the consent screen, in the words the disclosure builds', () => {
+    const sentences = consentSentences({ ...DISCLOSURE, dailyCeiling: null })
+
+    expect(sentences.join(' ')).toContain('There is NO daily token ceiling')
+    expect(sentences.join(' ')).toContain('Starting is refused until you answer')
+  })
+
+  it('CONTROL — the same sentences on a bounded company say the figure instead', () => {
+    const sentences = consentSentences({ ...DISCLOSURE, dailyCeiling: 300_000 })
+
+    expect(sentences.join(' ')).toContain('300,000 tokens a day')
+    expect(sentences.join(' ')).not.toContain('Starting is refused')
   })
 })

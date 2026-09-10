@@ -717,6 +717,54 @@ describe('odeon:adjourn (M8b.2)', () => {
  * touch the autonomy ceiling, write into the deny-all fallback, or report a
  * save that did not happen.
  */
+describe('consent:grant carries the ceiling answer (M8c.3)', () => {
+  const withGrantSpy = (): { readonly answers: boolean[]; readonly deps: ControlDeps } => {
+    const answers: boolean[] = []
+    return {
+      answers,
+      deps: deps({
+        consent: {
+          view: () => ({
+            state: 'never-asked',
+            mayStartWork: false,
+            because: 'nobody has said go',
+            terms: 2,
+            grantedAt: null,
+            disclosure: { hire: null, triggers: [], dailyCeiling: null }
+          }),
+          grant: (unbudgeted: boolean) => {
+            answers.push(unbudgeted)
+            return {
+              ok: true,
+              reason: null,
+              view: {
+                state: 'granted',
+                mayStartWork: true,
+                because: 'granted',
+                terms: 2,
+                grantedAt: null,
+                disclosure: { hire: null, triggers: [], dailyCeiling: null }
+              }
+            }
+          }
+        }
+      })
+    }
+  }
+
+  it('passes --unbudgeted through, rather than deciding for the Architect', async () => {
+    const spy = withGrantSpy()
+    await performVerb(spy.deps, verb('consent:grant'), { unbudgeted: true })
+    expect(spy.answers).toEqual([true])
+  })
+
+  it('passes NO answer when the flag is absent', async () => {
+    const spy = withGrantSpy()
+    await performVerb(spy.deps, verb('consent:grant'), { unbudgeted: false })
+    expect(spy.answers).toEqual([false])
+  })
+})
+
 describe('budget:set', () => {
   const view = (over: Record<string, unknown> = {}) => ({
     autonomy: 'autonomous',

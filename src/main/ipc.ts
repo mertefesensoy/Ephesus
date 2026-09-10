@@ -1,4 +1,5 @@
 import type { UsageSnapshot } from '../shared/ipc'
+import { consentGrantPayloadSchema } from '../shared/consent'
 import { ipcMain } from 'electron'
 import { z } from 'zod'
 import { agentIdPayloadSchema, agentIdSchema, spawnRequestSchema } from '../shared/agents'
@@ -618,7 +619,11 @@ export function registerIpc(deps: IpcDeps): IpcDeps {
   // consent COVERS is main's to state and the renderer's to display, so there
   // is nothing here for a compromised window to widen.
   ipcMain.handle(IpcChannels.consentGet, (): ConsentView => deps.consent.view())
-  ipcMain.handle(IpcChannels.consentGrant, (): ConsentGrantOutcome => deps.consent.grant())
+  // M8c.3: the window says whether the Architect chose to run unbudgeted. A
+  // renderer payload, so it is validated here like every other one.
+  ipcMain.handle(IpcChannels.consentGrant, (_ev, raw: unknown): ConsentGrantOutcome =>
+    deps.consent.grant(consentGrantPayloadSchema.parse(raw).unbudgeted)
+  )
 
   ipcMain.handle(IpcChannels.agentsList, () => agents.list())
 

@@ -52,22 +52,26 @@ const GRANTED: ConsentView = {
 
 interface Rig {
   readonly grants: number[]
+  /** M8c.3: what the banner ANSWERED about the ceiling, per grant. */
+  readonly unbudgeted: boolean[]
 }
 
 function bridge(view: ConsentView, answer?: () => ConsentGrantOutcome): Rig {
   const grants: number[] = []
+  const unbudgeted: boolean[] = []
   Object.assign(window, {
     eph: {
       consent: {
         get: async () => view,
-        grant: async () => {
+        grant: async (accept: boolean) => {
           grants.push(grants.length + 1)
+          unbudgeted.push(accept)
           return answer?.() ?? { ok: true, reason: null, view: GRANTED }
         }
       }
     }
   })
-  return { grants }
+  return { grants, unbudgeted }
 }
 
 async function render(): Promise<void> {
@@ -104,7 +108,32 @@ describe('while consent is withheld', () => {
     bridge(WITHHELD)
     await render()
     expect(host.querySelectorAll('button')).toHaveLength(1)
+    // M8c.3. With no ceiling set, starting IS the unbudgeted answer, and the
+    // button says which answer it is giving rather than hiding it behind a
+    // neutral verb. A company with a ceiling reads 'START THE COMPANY'.
+    expect(button()?.textContent).toBe('START UNBUDGETED')
+  })
+
+  it('says START THE COMPANY once a ceiling is set', async () => {
+    bridge({ ...WITHHELD, disclosure: { ...WITHHELD.disclosure, dailyCeiling: 300_000 } })
+    await render()
     expect(button()?.textContent).toBe('START THE COMPANY')
+  })
+
+  it('answers the ceiling question, and answers it HONESTLY', async () => {
+    // The banner must not send `unbudgeted: true` for a company that has a
+    // ceiling — that would be an answer to a question nobody asked, and it
+    // would pass the gate for the wrong reason on the day the ceiling is
+    // dropped.
+    const bounded = bridge({
+      ...WITHHELD,
+      disclosure: { ...WITHHELD.disclosure, dailyCeiling: 300_000 }
+    })
+    await render()
+    await act(async () => {
+      button()?.click()
+    })
+    expect(bounded.unbudgeted).toEqual([false])
   })
 })
 
@@ -116,6 +145,8 @@ describe('the grant', () => {
       button()?.click()
     })
     expect(rig.grants).toEqual([1])
+    // No ceiling on this fixture, so the banner's answer is the explicit one.
+    expect(rig.unbudgeted).toEqual([true])
     expect(host.textContent).toBe('')
   })
 
