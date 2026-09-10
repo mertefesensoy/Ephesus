@@ -145,7 +145,8 @@ function stubDeps(
             targetRef: 'repo:myapp',
             targetPath: 'C:\\src\\myapp',
             repos: ['me/myapp'],
-            reposBecause: 'read off the checkout’s origin remote'
+            reposBecause: 'read off the checkout’s origin remote',
+            triggers: []
           }
         }
       })

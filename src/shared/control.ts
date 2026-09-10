@@ -240,6 +240,65 @@ export function activationRequestFromArgs(
 }
 
 /**
+ * Contract: pure. The two trigger lines an activation prints, in the reader's
+ * vocabulary rather than the scheduler's (M8c.6).
+ *
+ * **`armed` means "has a clock running".** It is accurate to the
+ * implementation, and it is a lie to a stranger: an event trigger has no clock
+ * to arm, so it is *structurally invisible* on that line however correctly it is
+ * bound. On 2026-09-09 `profile:activate` reported
+ * `armed dependency-sweep, health-sweep` with no `ci` trigger — and
+ * `EXIT-M8.md` §5.1 tells the runner, unambiguously, that a missing `ci`
+ * trigger *"is a setup defect, and the run cannot proceed past it."*
+ *
+ * **The documented reading of that output is therefore: stop, the run is
+ * invalid.** It was bound the whole time; it was proved bound minutes later
+ * when the ingest raised eight incidents through it. The runner nearly aborted a
+ * valid run on it, and the M8b rehearsal met the same trap again.
+ *
+ * So the two kinds are printed separately and both are named. This is the same
+ * class as M8c.5 and the one the decisions log already records twice: **a
+ * consumer-facing label that is true in the producer's vocabulary and false in
+ * the reader's.**
+ *
+ * @param armed the scheduler's own list — clocks that are actually running.
+ */
+export function triggerLines(
+  triggers: readonly {
+    readonly id: string
+    readonly everyMs: number | null
+    readonly event: string | null
+    readonly agentId: string
+  }[],
+  armed: readonly string[]
+): readonly string[] {
+  // The scheduler's ids are instance-qualified (`<instance>/<trigger>`); the
+  // plan's are bare. Matched on the suffix so the two vocabularies meet here
+  // rather than in a caller that would have to know both.
+  const isArmed = (id: string): boolean => armed.some((row) => row === id || row.endsWith(`/${id}`))
+  const schedules = triggers.filter((trigger) => trigger.everyMs !== null)
+  const events = triggers.filter((trigger) => trigger.everyMs === null && trigger.event !== null)
+  return [
+    `armed (schedules)  ${
+      schedules.length === 0
+        ? '(none)'
+        : schedules
+            .map((trigger) => `${trigger.id}${isArmed(trigger.id) ? '' : ' — NOT ARMED'}`)
+            .join(', ')
+    }`,
+    // Always printed, even when empty: the absence of this line is what a
+    // reader took for the absence of the trigger.
+    `event triggers     ${
+      events.length === 0
+        ? '(none)'
+        : events
+            .map((trigger) => `${String(trigger.event)} → ${trigger.agentId} (${trigger.id})`)
+            .join(', ')
+    }`
+  ]
+}
+
+/**
  * One verb a script may invoke.
  *
  * `writes` is not decoration and not an optimisation: it decides whether the
