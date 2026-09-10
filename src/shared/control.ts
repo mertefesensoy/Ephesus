@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { activationRequestSchema, instanceIdSchema } from './profile-activation'
+import { maxDailyTokensSchema } from './gates'
 
 /**
  * The control surface's contract (M8.14) — the one place that says what a
@@ -84,6 +85,64 @@ const noArgs = z.object({}).strict()
 const tailArgs = z.object({ limit: z.coerce.number().int().min(1).max(2000).default(40) }).strict()
 
 const deactivateArgs = z.object({ instance: instanceIdSchema }).strict()
+
+/**
+ * `budget:set`'s one argument, coerced from the string a command line gives.
+ *
+ * Bounded by `maxDailyTokensSchema`, which is the SAME schema the policy file
+ * and the settings surface use. A second set of bounds here would agree by
+ * coincidence and drift by edit, which is the defect that schema's own comment
+ * records.
+ */
+const budgetArgs = z.object({ daily: z.coerce.number().pipe(maxDailyTokensSchema) }).strict()
+
+/**
+ * Contract: pure. Whether a script may move the company's daily ceiling from
+ * `current` to `requested`, and why not when it may not.
+ *
+ * **A script may make the company safer and never more permissive** — ADR-0033's
+ * rule, applied to the one control it now offers. From `unbudgeted` (`null`)
+ * any figure is a tightening, because ADR-0029's shipped default is no ceiling
+ * at all. From a ceiling somebody set, a HIGHER figure is a raise: the same
+ * decision as widening the autonomy ceiling, and one the WATCH tab exists for.
+ *
+ * Equal is allowed and says so. A run that re-asserts the ceiling it already
+ * has has authorised nothing, and refusing it would make the verb unusable
+ * from a script that cannot read the current value first.
+ */
+export function budgetSetVerdict(
+  current: number | null,
+  requested: number
+):
+  | { readonly ok: true; readonly because: string }
+  | { readonly ok: false; readonly because: string } {
+  if (current === null) {
+    return {
+      ok: true,
+      because: `the company was unbudgeted (ADR-0029's shipped default); it now stops at ${requested.toLocaleString('en-US')} tokens a day`
+    }
+  }
+  if (requested > current) {
+    return {
+      ok: false,
+      because:
+        `raising a ceiling is not something a script may do. ` +
+        `The company stops at ${current.toLocaleString('en-US')} tokens a day and you asked for ` +
+        `${requested.toLocaleString('en-US')} — a ceiling only ever caps what the company may spend, so ` +
+        `lowering it is a tightening any script may make and raising it is a decision only a person may. ` +
+        `Do it instead: open the WATCH tab, set the Daily budget there. ` +
+        `The rule this surface keeps: a script may run the company; only a human may authorise ` +
+        `what the company is not otherwise allowed to do.`
+    }
+  }
+  return {
+    ok: true,
+    because:
+      requested === current
+        ? `unchanged: the company already stops at ${current.toLocaleString('en-US')} tokens a day`
+        : `tightened from ${current.toLocaleString('en-US')} to ${requested.toLocaleString('en-US')} tokens a day`
+  }
+}
 
 const conveneArgs = z
   .object({
@@ -223,6 +282,13 @@ export const CONTROL_VERBS: readonly ControlVerb[] = [
     args: noArgs,
     writes: true,
     usage: 'ephctl consent:grant'
+  },
+  {
+    name: 'budget:set',
+    summary: 'lower the company-wide daily token ceiling (a script may tighten, never raise)',
+    args: budgetArgs,
+    writes: true,
+    usage: 'ephctl budget:set --daily 300000'
   },
   {
     name: 'profile:list',

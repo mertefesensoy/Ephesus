@@ -107,3 +107,40 @@ describe('EXIT-M8 §3 — the planted break reads like an ordinary change', () =
     expect('fix(auth): tighten the session timeout').not.toMatch(ANNOUNCES)
   })
 })
+
+/**
+ * **M8c.1 — §2 must be performable by the runner the script is written for.**
+ *
+ * §2 marks setting a daily ceiling mandatory, and until M8c.1 it named only
+ * **WATCH → settings** — a window-only act, in a script whose whole premise
+ * (ADR-0033, and the 2026-09-08 decision) is that the run needs no mouse. Both
+ * runs so far went out `unbudgeted` because of it.
+ *
+ * This is here because the mutation round found nothing guarding it: the CLI
+ * line could be dropped from §2 and every test stayed green. That is the exact
+ * shape of M8c.10's own defect — a sentence nobody re-reads deciding the
+ * outcome of an hour — one section along.
+ */
+describe('EXIT-M8 §2 — a ceiling the runner can actually set', () => {
+  const two = section(fs.readFileSync(EXIT_M8, 'utf8'), 2)
+
+  it('names a control-surface verb, not only the window', () => {
+    expect(two).toMatch(/ephctl(\.cjs)? budget:set/)
+    expect(two).toMatch(/--daily \d/)
+  })
+
+  it('still says where to do it from the window, for a runner who has one', () => {
+    expect(two).toMatch(/WATCH/)
+  })
+
+  it('says the verb may only lower the ceiling', () => {
+    // The property that makes it safe for a script to hold at all: a ceiling
+    // caps, so tightening is a script's to do and loosening is a person's.
+    expect(two).toMatch(/lower|tighten/i)
+  })
+
+  it('CONTROL — the check fails on the section as it stood before M8c.1', () => {
+    const before = 'This is the step that is skipped and then regretted. **WATCH → settings**:'
+    expect(before).not.toMatch(/ephctl(\.cjs)? budget:set/)
+  })
+})
