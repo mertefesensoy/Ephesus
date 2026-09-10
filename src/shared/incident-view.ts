@@ -269,6 +269,14 @@ export function foldIncidents(entries: readonly LogEntry[]): IncidentBoard {
       continue
     }
     if (event === 'incident-raised') continue
+    // M8c.2. A CORRECT non-raise, not a defect and not an incident: the run
+    // predates the activation and a later run on its branch has overtaken it.
+    // It belongs in the book of record, where a reader asking "why did nothing
+    // raise" finds it beside `incident-unclaimed` — and deliberately not on
+    // this board, which is a list of incidents the company HAS. Folding it in
+    // would put eight rows on the panel at every cold start for eight things
+    // that correctly did not happen.
+    if (event === 'incident-superseded') continue
 
     const of = event === 'incident-verdict-refused' ? 'verdict' : 'triage'
     if (event === 'incident-triage-refused' || event === 'incident-verdict-refused') {

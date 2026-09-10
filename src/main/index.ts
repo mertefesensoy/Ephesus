@@ -1860,7 +1860,11 @@ async function boot(): Promise<void> {
             // runbook IS; on 2026-09-09 it was told only its name and spent
             // its turn searching a home that never held it (M8b.1).
             playbookPath: playbookPath(home.root, instance.instanceId, trigger.playbook),
-            repos: instance.plan.repos
+            repos: instance.plan.repos,
+            // M8c.2. The instance's own activation time, not a clock read now:
+            // a restart keeps `activatedAt`, so a week of real failures during
+            // a downtime is still news rather than history.
+            watchingSince: instance.activatedAt
           }))
       ),
     orchestratorId: () => agora?.registry().orchestratorId ?? ARTEMIS_AGENT_ID,

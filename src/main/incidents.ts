@@ -18,7 +18,7 @@ import {
   type RootCauseVerdict
 } from '../shared/root-cause'
 import type { InboundItem } from '../shared/harbor'
-import { isCiFailure } from '../shared/harbor'
+import { branchOf, ciRunStillStands, isCiFailure } from '../shared/harbor'
 
 /**
  * The incident endpoint (FR-9.2, UC-09, SDD §7.5 — the Skeleton Crew's spine).
@@ -105,6 +105,19 @@ export interface IncidentBinding {
   readonly playbookPath: string
   /** Repositories this instance watches, so an item is routed to its owner. */
   readonly repos: readonly string[]
+  /**
+   * When this instance began watching — its `activatedAt` (M8c.2).
+   *
+   * A run that predates it is HISTORY, and history is context rather than news.
+   * Carried on the binding rather than read from a clock, because after a
+   * restart the instance has been watching since its original activation and a
+   * fresh `Date.now()` would make a week of real failures look historical.
+   *
+   * Optional so a caller written before M8c.2 still compiles; absent means
+   * every run counts as new, which is exactly the behaviour that raised eight
+   * stale incidents on 2026-09-09 — so the shipped wiring always supplies it.
+   */
+  readonly watchingSince?: string
 }
 
 /**
@@ -263,6 +276,24 @@ export class IncidentEndpoint {
           repo: item.repo,
           ref: item.ref,
           because: 'no live profile instance watches this repository'
+        })
+        continue
+      }
+
+      // M8c.2's cold-start rule, in two halves. A run from before this instance
+      // started watching is history; it raises only if it is still the newest
+      // run on its branch, so a repository that is red RIGHT NOW is noticed
+      // once and a repository whose red patch has been overtaken is not
+      // replayed. A run from after the activation raises on its own merits.
+      const since = binding.watchingSince
+      if (since !== undefined && item.at <= since && !ciRunStillStands(item, items)) {
+        this.options.onLogEvent({
+          kind: 'profile',
+          event: 'incident-superseded',
+          repo: item.repo,
+          ref: item.ref,
+          branch: branchOf(item) ?? 'unknown',
+          because: 'the run predates this activation and a later run on its branch has overtaken it'
         })
         continue
       }

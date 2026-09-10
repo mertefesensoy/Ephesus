@@ -180,6 +180,122 @@ describe('what is not an incident raises nothing', () => {
   })
 })
 
+/**
+ * **M8c.2 — the first ingest must not replay history as news.**
+ *
+ * Finding 5 of the M8 exit run, and the batch below is that run's own. Within
+ * two minutes of activation, before anything was broken, the Harbor pulled ten
+ * CI runs and the crew raised EIGHT incidents for failures dated 2026-08-23/24
+ * — sixteen days stale and already fixed. **The proof was in the same
+ * payload:** the two newest runs in that batch are both `success`. It cost
+ * $11.22 on work finished on 2026-08-24, on a company with no reachable
+ * ceiling.
+ *
+ * The rule: a run from before the activation raises only if it is still the
+ * newest run on its branch. A repository that is red RIGHT NOW is therefore
+ * noticed exactly once, and a repository whose red patch has been overtaken is
+ * not replayed at all.
+ */
+describe('the cold start reads history as history (M8c.2)', () => {
+  const WATCHING_SINCE = '2026-09-09T06:06:36.000Z'
+  const WATCHED: IncidentBinding = { ...BINDING, watchingSince: WATCHING_SINCE }
+
+  /** The 2026-09-09 batch: two green heads over eight older reds, one branch. */
+  const aftershockBatch = (): readonly InboundItem[] => [
+    ciRun({ ref: 61, at: '2026-08-24T03:25:55.000Z', conclusion: 'success', labels: ['main'] }),
+    ciRun({ ref: 60, at: '2026-08-24T03:45:38.000Z', conclusion: 'success', labels: ['main'] }),
+    ...[69, 68, 67, 66, 65, 64, 63, 62].map((ref, i) =>
+      ciRun({
+        ref,
+        at: `2026-08-23T23:${String(50 - i * 2).padStart(2, '0')}:00.000Z`,
+        conclusion: 'failure',
+        labels: ['main']
+      })
+    )
+  ]
+
+  it('raises NOTHING for a backlog the same payload proves was superseded', () => {
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise(aftershockBatch())
+
+    // Eight on 2026-09-09. Zero is the whole package.
+    expect(raised).toEqual([])
+    expect(r.delivered).toEqual([])
+    const superseded = r.logged.filter((row) => row['event'] === 'incident-superseded')
+    expect(superseded).toHaveLength(8)
+    // Visible, never silent (invariant §7): the row names the run and why.
+    expect(superseded[0]?.['branch']).toBe('main')
+    expect(String(superseded[0]?.['because'])).toContain('overtaken')
+  })
+
+  it('raises exactly ONE for a repository that is red right now', () => {
+    // The case "newer than the activation" alone gets wrong: activate against a
+    // repository whose head is already failing and nothing would raise until
+    // somebody pushed again, which reads as a healthy company watching a broken
+    // repo.
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise([
+      ciRun({ ref: 30, at: '2026-08-20T10:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 31, at: '2026-08-21T10:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 32, at: '2026-08-22T10:00:00.000Z', conclusion: 'failure', labels: ['main'] })
+    ])
+
+    expect(raised).toHaveLength(1)
+    // The newest one, which is the one that still stands.
+    expect(raised[0]?.incident.ref).toBe(32)
+  })
+
+  it('raises one per branch that is red, not one per run', () => {
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise([
+      ciRun({ ref: 40, at: '2026-08-20T10:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 41, at: '2026-08-21T10:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 50, at: '2026-08-20T11:00:00.000Z', conclusion: 'failure', labels: ['topic'] })
+    ])
+
+    expect(raised.map((one) => one.incident.ref).sort((a, b) => a - b)).toEqual([41, 50])
+  })
+
+  it('raises a run NEWER than the activation even when a later green follows it', () => {
+    // On our watch, so the crew is told. A failure and its fix inside one poll
+    // window is a real event the company saw; suppressing it would make the
+    // rule about spend rather than about history.
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise([
+      ciRun({ ref: 70, at: '2026-09-09T07:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 71, at: '2026-09-09T07:05:00.000Z', conclusion: 'success', labels: ['main'] })
+    ])
+
+    expect(raised.map((one) => one.incident.ref)).toEqual([70])
+  })
+
+  it('treats a run with no branch as still standing rather than guessing', () => {
+    // `gh` can return a run without `headBranch`. Suppressing on a branch we
+    // could not read would be a silent non-raise on an unknown, which is the
+    // wrong direction for the one clause §6.1 measures first.
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise([
+      ciRun({ ref: 80, at: '2026-08-20T10:00:00.000Z', conclusion: 'failure', labels: [] }),
+      ciRun({ ref: 81, at: '2026-08-21T10:00:00.000Z', conclusion: 'failure', labels: [] })
+    ])
+
+    expect(raised.map((one) => one.incident.ref).sort((a, b) => a - b)).toEqual([80, 81])
+  })
+
+  it('a binding with no watchingSince keeps the old behaviour exactly', () => {
+    // Additive: a caller written before M8c.2 raises what it always raised,
+    // rather than silently gaining a filter nobody asked it for.
+    const r = rig([BINDING])
+
+    expect(r.endpoint.raise(aftershockBatch())).toHaveLength(8)
+  })
+})
+
 describe('routing never guesses a recipient', () => {
   it('drops an item no live binding watches, and says so', () => {
     const { endpoint, delivered, logged } = rig()
