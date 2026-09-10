@@ -47,7 +47,7 @@ import type { LogEntry } from './log'
  */
 
 /** How a subsystem is doing, in the only three answers that are honest. */
-export type Verdict = 'working' | 'broken' | 'waiting' | 'not-exercised'
+export type Verdict = 'working' | 'broken' | 'waiting' | 'entered' | 'not-exercised'
 
 /**
  * One subsystem's row.
@@ -99,8 +99,42 @@ interface Probe {
    * it declarative and in the table is the smallest honest thing.
    */
   waitingWhen?(condition: Condition): boolean
-  /** `kind:event` pairs, or a bare `kind`, that prove it did its job. */
+  /**
+   * `kind:event` pairs, or a bare `kind`, that prove it did its job — and
+   * **completion is the bar, not entry** (M8c.4).
+   *
+   * On 2026-09-09 `incidents` listed `profile:incident-raised` here, and the
+   * report read `incidents | WORKING | profile/incident-raised at seq 85` while
+   * eight task-opens had been refused in the same file and `incident-triaged`
+   * was zero. The row was real and quoted honestly; it proved the pipeline had
+   * been ENTERED. M8.13's rule says a row that PROVES the area did its job, and
+   * an entry row is not one — *"the verdict cannot distinguish 'raised and
+   * working' from 'raised and failing'."* That is a sharper form of the defect
+   * M8.13 exists to prevent: not a vacuous pass from silence, but a false pass
+   * with eight recorded failures beside it.
+   */
   readonly proves: readonly string[]
+  /**
+   * Rows that show the area was entered and prove nothing about the outcome.
+   *
+   * Without this, an entered-but-failing pipeline falls through to
+   * `not-exercised`, whose sentence — *"nothing has happened either way"* — is
+   * a smaller lie in the same direction. With it the row reads `entered` and
+   * says which seq it started at, which is the true answer and the actionable
+   * one.
+   */
+  readonly entered?: readonly string[]
+  /**
+   * A further test on the matched row, when the kind alone is ambiguous.
+   *
+   * `kind: "remote"` carries two different things — the Harbor's ingest and,
+   * since M8.14, one row per act performed through `ephctl`. The exit run's own
+   * runner walked into it: grepping `"kind":"remote"` matched their own
+   * `consent:grant`, and *"the correct probe is `"inbound":"ci-run"`"*. Without
+   * this, the *watching a repository* row read `working` because a script had
+   * run, which is a fact about the control surface and nothing about the Harbor.
+   */
+  provenWhere?(row: LogEntry): boolean
   /**
    * A fact that settles the area without consulting the log at all.
    *
@@ -137,25 +171,42 @@ const PROBES: readonly Probe[] = [
   {
     area: 'orchestrator',
     sources: ['artemis'],
-    proves: ['orchestrator:spawned', 'spawn'],
+    // A `task` row is the orchestrator DOING her job: FR-5.2 gives the ledger
+    // one scribe, and the harness never writes `tasks.json` itself — it mails
+    // her and she proposes. A spawn is her being hired, which is entry.
+    proves: ['task', 'orchestrator:retro'],
+    entered: ['orchestrator:spawned', 'spawn'],
     wouldExercise: 'granting consent, which hires her'
   },
   {
     area: 'the crew',
     sources: ['agents', 'respawn', 'commands'],
-    proves: ['spawn', 'exit'],
+    // A `hook` row is an engine event a live agent actually emitted — proof it
+    // ran and reported. The exit run's `the crew | WORKING | spawn at seq 40`
+    // is the row this replaces: *"a spawn proves a process started, not that
+    // any agent did work."* An `exit` is the same shape at the other end.
+    proves: ['hook'],
+    entered: ['spawn', 'exit'],
     wouldExercise: 'activating a mission profile against a repository from the PROFILES tab'
   },
   {
     area: 'watching a repository',
     sources: ['harbor'],
+    // `kind: "remote"` carries the Harbor's ingest AND every `ephctl` act
+    // (M8.14), so the bare kind would read `working` because a script ran a
+    // command. `inbound` is the field only an ingest carries — the exit run's
+    // own runner made this mistake and wrote down the correct probe.
     proves: ['remote'],
+    provenWhere: (row) => row['inbound'] !== undefined,
     wouldExercise: 'activating a profile against a checkout whose GitHub remote `gh` can read'
   },
   {
     area: 'incidents',
     sources: ['incident'],
-    proves: ['profile:incident-raised', 'profile:incident-triaged'],
+    // The row the M8 exit run's Finding 7 is about. `incident-raised` proves
+    // the pipeline was entered; `incident-triaged` proves it came back.
+    proves: ['profile:incident-triaged'],
+    entered: ['profile:incident-raised'],
     wouldExercise: 'a CI failure on a watched repository'
   },
   {
@@ -176,7 +227,12 @@ const PROBES: readonly Probe[] = [
     // `unbudgeted` is the shipped default (ADR-0029) and is not a fault; a
     // breach comes through the same cause and is.
     waitingWhen: (c) => c.cause.startsWith('budgets/state:') && c.detail.includes('unbudgeted'),
-    proves: ['cost'],
+    // `budget`, not `cost`: there is no `cost` kind in `LOG_KINDS` and never
+    // has been, so this probe could not match anything ever written. A row that
+    // can only read `not-exercised` is a check that cannot fail, in its passive
+    // form — found by reading the table against the log's own vocabulary
+    // during M8c.4.
+    proves: ['budget'],
     wouldExercise: 'an agent taking a turn'
   },
   {
@@ -269,7 +325,17 @@ export interface Diagnosis {
 }
 
 /** Contract: pure. Does a row in the log prove this probe's subsystem worked? */
-function provenBy(events: readonly LogEntry[], proves: readonly string[]): LogEntry | null {
+/** `kind` or `kind/event`, the way a reader greps for it. */
+function rowName(row: LogEntry): string {
+  const event = row['event'] === undefined ? '' : `/${String(row['event'])}`
+  return `${String(row.kind)}${event}`
+}
+
+function provenBy(
+  events: readonly LogEntry[],
+  proves: readonly string[],
+  where?: (row: LogEntry) => boolean
+): LogEntry | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const entry = events[i]
     if (!entry) continue
@@ -278,8 +344,9 @@ function provenBy(events: readonly LogEntry[], proves: readonly string[]): LogEn
     for (const want of proves) {
       const [wantKind, wantEvent] = want.split(':')
       if (kind !== wantKind) continue
-      if (wantEvent === undefined) return entry
-      if (event === wantEvent) return entry
+      if (wantEvent !== undefined && event !== wantEvent) continue
+      if (where !== undefined && !where(entry)) continue
+      return entry
     }
   }
   return null
@@ -324,13 +391,26 @@ export function diagnose(input: DiagnosisInput): Diagnosis {
     if (direct !== null) {
       return { area: probe.area, verdict: 'working', because: direct }
     }
-    const proof = provenBy(input.events, probe.proves)
+    const proof = provenBy(input.events, probe.proves, probe.provenWhere)
     if (proof) {
-      const event = proof['event'] === undefined ? '' : `/${String(proof['event'])}`
       return {
         area: probe.area,
         verdict: 'working',
-        because: `${String(proof.kind)}${event} at seq ${String(proof.seq)}`
+        because: `${rowName(proof)} at seq ${String(proof.seq)}`
+      }
+    }
+    // Entered but not finished (M8c.4). Reporting this as `not-exercised` would
+    // say "nothing has happened either way" about an area that has visibly
+    // started, and reporting it as `working` is the defect this whole row is
+    // here to stop.
+    const started = provenBy(input.events, probe.entered ?? [])
+    if (started) {
+      return {
+        area: probe.area,
+        verdict: 'entered',
+        because:
+          `started at seq ${String(started.seq)} (${rowName(started)}) and nothing since ` +
+          `proves it finished — ${probe.proves.join(' or ')} is what would`
       }
     }
     return {
@@ -360,6 +440,7 @@ const MARK: Record<Verdict, string> = {
   working: 'WORKING',
   broken: 'BROKEN',
   waiting: 'WAITING FOR YOU',
+  entered: 'STARTED, UNFINISHED',
   'not-exercised': 'NOT EXERCISED'
 }
 
@@ -379,6 +460,7 @@ export function renderDiagnosis(d: Diagnosis, readAt: number): string {
   const broken = d.rows.filter((r) => r.verdict === 'broken')
   const waiting = d.rows.filter((r) => r.verdict === 'waiting')
   const unexercised = d.rows.filter((r) => r.verdict === 'not-exercised')
+  const entered = d.rows.filter((r) => r.verdict === 'entered')
 
   out.push('# Ephesus — what is working, what is not, and why')
   out.push('')
@@ -420,6 +502,16 @@ export function renderDiagnosis(d: Diagnosis, readAt: number): string {
     out.push(`**${String(waiting.length)} thing(s) are waiting on YOU:**`)
     out.push('')
     for (const row of waiting) out.push(`- **${row.area}** — ${row.because}`)
+    out.push('')
+  }
+  // Before the unexercised count, because an area that STARTED and did not
+  // finish is the sharper news: it is a thing in flight or a thing stuck, and
+  // on 2026-09-09 one of these read `WORKING` while eight failures sat in the
+  // same file (M8c.4).
+  if (entered.length > 0) {
+    out.push(`**${String(entered.length)} thing(s) STARTED and have not finished:**`)
+    out.push('')
+    for (const row of entered) out.push(`- **${row.area}** — ${row.because}`)
     out.push('')
   }
   if (unexercised.length > 0) {
@@ -505,6 +597,11 @@ export function renderDiagnosis(d: Diagnosis, readAt: number): string {
       'never started, this file is from whenever it last did — check the date above.'
   )
   out.push(
+    '- `STARTED, UNFINISHED` is not a pass either, and it is the one to read ' +
+      'twice: the area was entered and nothing since proves it came back. On ' +
+      '2026-09-09 this exact state was reported as `WORKING`, citing a real row ' +
+      'that proved only that the pipeline had been entered, while eight failures ' +
+      'sat in the same file.',
     '- `NOT EXERCISED` is not a pass. It means no evidence exists either way, and ' +
       'the "why" column says what would produce some.'
   )
