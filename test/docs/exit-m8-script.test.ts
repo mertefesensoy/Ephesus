@@ -133,6 +133,18 @@ describe('EXIT-M8 §2 — a ceiling the runner can actually set', () => {
     expect(two).toMatch(/WATCH/)
   })
 
+  it('states the figure PER HIRE, and does not call a few hundred thousand generous', () => {
+    // Both measured runs contradict that phrase by a factor of twenty: no
+    // shipped hire declares a budget, so this ceiling becomes each one's, and
+    // the 2026-09-09 agents spent 4.9M, 9.4M, 10.2M and 16.0M tokens. A 300,000
+    // ceiling stops all of them within minutes, and clauses 1b and 2 then fail
+    // for a reason that has nothing to do with the company.
+    expect(two).toMatch(/PER HIRE|per hire/)
+    expect(two).not.toMatch(/a few hundred thousand tokens is generous/)
+    // And the number it does name is one the measurements support.
+    expect(two).toMatch(/--daily 5000000/)
+  })
+
   it('says the verb may only lower the ceiling', () => {
     // The property that makes it safe for a script to hold at all: a ceiling
     // caps, so tightening is a script's to do and loosening is a person's.
