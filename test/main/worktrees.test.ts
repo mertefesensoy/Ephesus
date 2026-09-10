@@ -3,12 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  ExecGitRunner,
-  isAgentsOwnBranch,
-  Worktrees,
-  worktreePathIsVacant
-} from '../../src/main/git'
+import { ExecGitRunner, Worktrees, worktreePathIsVacant } from '../../src/main/git'
 import { removeTempDir } from '../tmpdir'
 
 /**
@@ -355,15 +350,22 @@ describe('respawning onto a surviving worktree (M4 close-out audit)', () => {
     expect(fs.existsSync(path.join(target.path, 'not-ours.txt'))).toBe(true)
   })
 
-  it('refuses a checkout of the right shape sitting on the WRONG branch', async () => {
+  it('reuses a checkout of THIS repository whatever branch it sits on (M8c.9)', async () => {
     const r = rig()
     const target = plan(r)
     await r.worktrees.create({ ...target, branch: 'agent/someone-else' })
 
     const outcome = await r.worktrees.create(target)
 
-    expect(outcome.ok).toBe(false)
-    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    // Until M8c.9 this was refused, on the reasoning that a branch name proves
+    // who owns a directory. It does not, and the refusal is what closed the
+    // loop after a restart: activate refused because the worktrees existed,
+    // deactivate refused because the agents did not.
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) {
+      expect(outcome.branch).toBe('agent/someone-else')
+      expect(outcome.created).toBe(false)
+    }
     // Still a checkout, still git's — clearing it would have destroyed it.
     expect(fs.existsSync(path.join(target.path, 'README.md'))).toBe(true)
   })
@@ -554,7 +556,46 @@ describe('an agent respawning onto its own topic branch', () => {
     ).toBe(`${target.branch}-sec-fix`)
   })
 
-  it('still refuses a checkout on ANOTHER agent’s branch', async () => {
+  it('reuses a checkout the agent left OUTSIDE its own namespace (M8c.9)', async () => {
+    // The shape the M8b rehearsal met. `incident.md` tells a hire to cut a
+    // branch and open a pull request; whatever it names that branch, the
+    // directory is still its own checkout of this repository.
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create(target)
+    execFileSync('git', ['checkout', '-q', '-b', 'fix/geo-latitude-sign'], { cwd: target.path })
+
+    const again = await r.worktrees.create(target)
+
+    expect(again.ok).toBe(true)
+    if (again.ok) {
+      expect(again.branch).toBe('fix/geo-latitude-sign')
+      expect(again.created).toBe(false)
+    }
+  })
+
+  it('reuses a DETACHED checkout and says so rather than calling it a branch', async () => {
+    // An agent asked to reproduce a failure at a commit is detached exactly
+    // then, and `rev-parse --abbrev-ref HEAD` answers the literal "HEAD".
+    const r = rig()
+    const target = plan(r)
+    await r.worktrees.create(target)
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: target.path,
+      encoding: 'utf8'
+    }).trim()
+    execFileSync('git', ['checkout', '-q', '--detach', 'HEAD'], { cwd: target.path })
+
+    const again = await r.worktrees.create(target)
+
+    expect(again.ok).toBe(true)
+    if (again.ok) {
+      expect(again.branch).toBe(`detached at ${sha}`)
+      expect(again.branch).not.toBe('HEAD')
+    }
+  })
+
+  it("reuses a checkout that another agent's branch was left checked out in", async () => {
     const r = rig()
     const target = plan(r)
     await r.worktrees.create(target)
@@ -562,31 +603,10 @@ describe('an agent respawning onto its own topic branch', () => {
 
     const outcome = await r.worktrees.create(target)
 
-    expect(outcome.ok).toBe(false)
-    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
-  })
-})
-
-describe('isAgentsOwnBranch — the namespace, and its edge', () => {
-  const own = 'agent/mason'
-
-  it('accepts the branch itself and topic branches beneath it', () => {
-    expect(isAgentsOwnBranch(own, own)).toBe(true)
-    expect(isAgentsOwnBranch(`${own}-arc-clock`, own)).toBe(true)
-    expect(isAgentsOwnBranch(`${own}-2`, own)).toBe(true)
-  })
-
-  it('REQUIRES the separator, so a longer id is not swallowed', () => {
-    // Without it `agent/mason` would own `agent/masonry`, which is the exact
-    // confusion a namespace prefix exists to prevent.
-    expect(isAgentsOwnBranch('agent/masonry', own)).toBe(false)
-    expect(isAgentsOwnBranch('agent/masonry-topic', own)).toBe(false)
-  })
-
-  it('refuses another agent’s branch and the base branches', () => {
-    expect(isAgentsOwnBranch('agent/thalia', own)).toBe(false)
-    expect(isAgentsOwnBranch('main', own)).toBe(false)
-    expect(isAgentsOwnBranch('', own)).toBe(false)
+    // Nobody else can be working here: the path is this agent's own, derived
+    // from its id. A branch left checked out in it is where its work is.
+    expect(outcome.ok).toBe(true)
+    if (outcome.ok) expect(outcome.branch).toBe('agent/somebody-else')
   })
 })
 
@@ -615,8 +635,37 @@ describe('a worktree of somebody else’s repository', () => {
     const outcome = await r.worktrees.create(target)
 
     expect(outcome.ok).toBe(false)
-    if (!outcome.ok) expect(outcome.reason).toContain('already exists')
+    if (!outcome.ok) {
+      expect(outcome.reason).toContain('already exists')
+      // M8c.9: the refusal an Architect meets names the way out. The rehearsal's
+      // runner had to invent this command; a non-author would not have.
+      expect(outcome.reason).toContain('a git checkout of a different repository')
+      expect(outcome.reason).toContain('worktree remove --force')
+      expect(outcome.reason).toContain('worktree prune')
+      // It does NOT claim the target repo can unregister a worktree it does not
+      // own — a command that fails teaches nothing.
+      expect(outcome.reason).toContain('run inside that repository')
+    }
     // The stranger's checkout is untouched.
     expect(fs.existsSync(path.join(target.path, 'SECRETS.md'))).toBe(true)
+  })
+
+  it('names a DIFFERENT recovery when the path is not a checkout at all', async () => {
+    // Telling somebody to run `git worktree remove` on an ordinary directory
+    // produces a refusal that teaches them nothing about the real obstacle.
+    const r = rig()
+    const target = plan(r)
+    fs.mkdirSync(target.path, { recursive: true })
+    fs.writeFileSync(path.join(target.path, 'notes.txt'), 'mine\n', 'utf8')
+
+    const outcome = await r.worktrees.create(target)
+
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) {
+      expect(outcome.reason).toContain('Move that directory aside')
+      expect(outcome.reason).not.toContain('worktree remove')
+      expect(outcome.reason).toContain(r.repo)
+    }
+    expect(fs.existsSync(path.join(target.path, 'notes.txt'))).toBe(true)
   })
 })
