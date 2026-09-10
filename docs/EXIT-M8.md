@@ -162,14 +162,26 @@ runs so far went out unbudgeted, and why the first spent **40.45M tokens
 ($11.22)** against the figure below.
 
 ```bash
-node scripts/ephctl.cjs budget:set --daily 300000
+node scripts/ephctl.cjs budget:set --daily 5000000
 ```
 
 - **Daily budget** → set a ceiling. `unbudgeted` is the shipped default
   ([ADR-0029](./adr/ADR-0029-unbudgeted-is-the-default.md)) and it means exactly
-  what it says. For one run of this test, a few hundred thousand tokens is
-  generous. From the window it is **WATCH → settings → Daily budget**; the two
-  write the same file.
+  what it says. From the window it is **WATCH → settings → Daily budget**; the
+  two write the same file.
+- **The figure is PER HIRE, not a company total**, and this line used to say *"a
+  few hundred thousand tokens is generous"* — which two measured runs contradict
+  by a factor of twenty. No shipped hire declares a budget of its own, so this
+  ceiling becomes each one's, and on 2026-09-09 the five agents spent
+  **4.9M, 9.4M, 10.2M, 16.0M and 0 tokens**. A ceiling of 300,000 stops every
+  one of them within minutes, and clauses 1b and 2 then fail for a reason that
+  has nothing to do with the company. **5,000,000 per hire** is the figure to
+  use: it bounds the 16M outlier that run actually produced, and leaves room for
+  the work the clauses are asking about. Five hires at that ceiling cap the hour
+  at 25M against the 40.45M it cost unbounded.
+- **A ceiling that stops the crew is not a failed run** — it is the budget
+  control working, and §5 has a place for it. What it must not do is stop them
+  before they have done anything, which is what the old figure would have done.
 - The verb may only ever **lower** the ceiling. Raising one is refused by name,
   with the reason and where to do it instead — a ceiling caps what the company
   may spend, so tightening it is a script's to do and loosening it is a
