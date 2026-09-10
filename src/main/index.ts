@@ -103,6 +103,7 @@ import { ControlServer, controlEndpointFor, startControlSurface } from './contro
 import { CONTROL_ADDRESS_FILE } from '../shared/control'
 import { HOME_OCCUPIED, occupiedBy } from './home-lock'
 import { seededConfigConditions } from './home'
+import { reportRecallProbe, shellCommand } from './recall-probe'
 import { DiagnosisWriter } from './diagnosis'
 import type { DiagnosisInput } from '../shared/diagnosis'
 import type { ConsentDisclosure } from '../shared/consent'
@@ -1507,6 +1508,19 @@ async function boot(): Promise<void> {
   const indexRoot = path.join(home.root, 'index')
   const fts = openFtsStore(indexRoot)
   if (fts.store === null) reportDegradation('library/fts', fts.because)
+
+  // M8c.7. The command an agent is handed is composed here and run only by
+  // agents, so nothing checked it until a health-watcher spent 90 seconds
+  // finding out. Probed once, in the background: a boot that waited on it would
+  // make this fix one of the things it exists to prevent.
+  void reportRecallProbe(
+    {
+      command: shellCommand(process.execPath, path.join(appRoot, 'shims', 'eph-recall.mjs')),
+      // The variable that decides whether it runs at all (M8c.7).
+      env: { ELECTRON_RUN_AS_NODE: '1' }
+    },
+    reportDegradation
+  )
   // ADR-0016: MemPalace is an OPTIONAL external. It is probed, never installed
   // from here — a missing one degrades the ladder visibly and offers its
   // install command, exactly as a missing engine binary does (FR-1.6).
@@ -2361,8 +2375,13 @@ async function boot(): Promise<void> {
     },
     // ADR-0006 layer 2: how an agent asks what the company knows. Harness-owned
     // and engine-independent, so every adapter merely forwards it.
-    recallCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-recall.mjs')}`,
-    ghTokenCommand: `${process.execPath} ${path.join(appRoot, 'shims', 'eph-gh-token.mjs')}`,
+    // QUOTED, both halves. These are command STRINGS an agent pastes into its
+    // own shell, and an unquoted path splits at the first space — which every
+    // Windows install under `C:\Program Files\…` has. Found by writing the
+    // M8c.7 probe: the first real spawn of this command failed instantly for
+    // exactly that reason, on a machine whose node lives there.
+    recallCommand: shellCommand(process.execPath, path.join(appRoot, 'shims', 'eph-recall.mjs')),
+    ghTokenCommand: shellCommand(process.execPath, path.join(appRoot, 'shims', 'eph-gh-token.mjs')),
     // ADR-0006 layer 1: what an agent remembers reaches its next spawn through
     // the Library, budgeted there rather than by whichever adapter runs it.
     memory: {

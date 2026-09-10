@@ -194,10 +194,27 @@ describe('claude adapter — spawn plan (SDD §3)', () => {
           'GH_TOKEN',
           'CLAUDE_CONFIG_DIR',
           'CLAUDE_SECURESTORAGE_CONFIG_DIR',
-          'DISABLE_AUTOUPDATER'
+          'DISABLE_AUTOUPDATER',
+          // M8c.7. `EPH_RECALL` and `EPH_GH_TOKEN` are command strings that
+          // begin with Electron's own binary, and Electron handed a `.mjs`
+          // treats it as an app to load rather than a script to run. Without
+          // this the shim never runs at all — which is exactly what the exit
+          // run's Finding 9 measured: zero bytes, no exit, killed at 90s.
+          'ELECTRON_RUN_AS_NODE'
         ].includes(key) && !AGENT_BASE_ENV_KEYS.includes(key.toUpperCase())
     )
     expect(harnessOnly).toEqual([])
+  })
+
+  it('runs its own shims as node, not as an app Electron tries to open (M8c.7)', () => {
+    // Finding 9's root cause, and it was never in the shim. `eph-recall.mjs`
+    // has had a ten-second timeout and named refusals since it was written; it
+    // never ran. `EPH_RECALL` starts with `process.execPath`, which in this app
+    // is Electron — handed a `.mjs` path, Electron looks for an app there,
+    // finds none, and sits. Exit 143 is SIGTERM: the agent gave up on it.
+    const { adapter, cfg } = rig()
+
+    expect(adapter.spawnArgs(cfg).env['ELECTRON_RUN_AS_NODE']).toBe('1')
   })
 
   it('never lets an agent upgrade the engine the whole company is running', () => {

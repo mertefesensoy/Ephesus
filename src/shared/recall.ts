@@ -287,3 +287,75 @@ export function inScope(doc: RecallDoc, scope: string | null): boolean {
   if (scope === null) return true
   return doc.scope === scope || doc.source === scope
 }
+
+/**
+ * What a probe of the agent-facing recall COMMAND found (M8c.7).
+ *
+ * Not of the endpoint — of the command string `EPH_RECALL` hands an agent. The
+ * two are different things and only one of them was ever broken.
+ */
+export interface RecallProbe {
+  /** The command as the agent would run it, for the message. */
+  readonly command: string
+  /** Exit code, or null when it never exited. */
+  readonly code: number | null
+  /** True when the probe hit its own deadline rather than the process ending. */
+  readonly timedOut: boolean
+  /** Everything the process wrote, both streams, trimmed. */
+  readonly output: string
+}
+
+/**
+ * Contract: pure. The condition a recall probe raises, or null when the command
+ * answered at all.
+ *
+ * **Why the probe exists.** Finding 9 of the M8 exit run, in the health
+ * watcher's own words: *"`$EPH_RECALL` is unavailable, not merely empty. Two
+ * attempts (unscoped, and `--scope knowledge`) produced zero bytes of output and
+ * never terminated; the second was killed at 90s, exit 143. So I could not fall
+ * back on a colleague's transcription of the runbook either, and no agent can
+ * currently look anything up."*
+ *
+ * `DIAGNOSIS.md` disclosed the MemPalace degradation and nothing else, so a
+ * reader believed recall had gracefully degraded to a lesser rung. **A missing
+ * optional that degrades is the documented design; a path that accepts the call,
+ * returns nothing and never returns is a ninety-second timeout trap disclosed
+ * nowhere.** Invariant §7 is about exactly this distinction.
+ *
+ * An ANSWER is enough — including a refusal. `eph-recall` exits 1 with a named
+ * cause when the harness is down, and that is the shim working: the agent learns
+ * something. What this catches is the case where nothing comes back at all.
+ */
+export function recallProbeCondition(
+  probe: RecallProbe
+): { readonly cause: string; readonly detail: string } | null {
+  // Three ways to be unreachable, and they are different sentences because a
+  // reader acts differently on each. A command that ANSWERED — including one
+  // that refused with a named cause — is not any of them.
+  if (probe.timedOut) {
+    return unreachable(probe, 'never answered')
+  }
+  if (probe.code === null) {
+    // Spawn failed: the shell could not start it at all. `output` carries the
+    // system's own message, which is the actionable part.
+    return unreachable(probe, `could not be run — ${probe.output || 'no reason given'}`)
+  }
+  if (probe.output.length === 0) {
+    return unreachable(probe, `answered nothing (exit ${String(probe.code)})`)
+  }
+  return null
+}
+
+function unreachable(
+  probe: RecallProbe,
+  what: string
+): { readonly cause: string; readonly detail: string } {
+  return {
+    cause: 'library/recall-command',
+    detail:
+      `recall is unreachable, not merely empty: \`${probe.command}\` ${what}. ` +
+      'Every agent that tries to look something up will stall on it and then give ' +
+      'up, and none of them can tell you why. This is NOT the documented MemPalace ' +
+      'degradation — that one answers, on a lesser rung.'
+  }
+}
