@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { SUGGESTED_DAILY_TOKENS } from '../../src/shared/gates'
 
 /**
  * **M8c.10 — the exit script must not tell the crew the break is deliberate.**
@@ -221,5 +222,34 @@ describe('the README states the Node floor where the exit script sends you (M8c.
     const before = '**1. The toolchain.** Node 20 (`.nvmrc`), then:'
     expect(before).not.toContain('20.19')
     expect(before).not.toContain('22.12')
+  })
+})
+
+/**
+ * **M8c.3b — the README is a fifth surface, and it had the old figure.**
+ *
+ * The rehearsal caught the consent refusal naming 300,000 minutes after §2 was
+ * corrected to 5,000,000. Three code surfaces were rewired to one constant; the
+ * ADVERSARIAL pass then found this one, which no unit test can see because it is
+ * prose. That is the whole argument for the third verification step — the
+ * mutation round scored 7 of 7 and was blind to it.
+ */
+describe('the README suggests the same ceiling as the product (M8c.3b)', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '..', '..', 'README.md'), 'utf8')
+
+  it('names the figure the code names, and says whose it is', () => {
+    const suggested = [...readme.matchAll(/budget:set --daily (\d+)/g)].map((m) => m[1])
+
+    expect(suggested.length, 'the README no longer shows budget:set').toBeGreaterThan(0)
+    for (const figure of suggested) expect(figure).toBe(String(SUGGESTED_DAILY_TOKENS))
+    expect(readme).toMatch(/budget:set --daily \d+` bounds what it may spend — \*\*per hire\*\*/)
+  })
+
+  it('CONTROL — the line that shipped until M8c.3b fails this', () => {
+    const before = 'go; `budget:set --daily 300000` bounds what it may spend; `profile:activate'
+    const figures = [...before.matchAll(/budget:set --daily (\d+)/g)].map((m) => m[1])
+
+    expect(figures).toEqual(['300000'])
+    expect(figures[0]).not.toBe(String(SUGGESTED_DAILY_TOKENS))
   })
 })

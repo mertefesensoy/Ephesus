@@ -141,6 +141,23 @@ export type GateRule = z.infer<typeof gateRuleSchema>
  */
 export const maxDailyTokensSchema = z.number().int().positive().max(1_000_000_000)
 
+/**
+ * The ceiling every surface SUGGESTS when there is none — the consent screen,
+ * the refusal that stops an unanswered start, and `budget:set`'s own usage
+ * line. Defined here for the reason the bound above it is: written three times
+ * they agreed by coincidence, and on 2026-09-10 they stopped agreeing. `EXIT-M8`
+ * §2 was corrected to 5,000,000 and the three strings a reader actually meets
+ * still said 300,000 — so the script and the product disagreed about the one
+ * number the run turns on.
+ *
+ * The figure is **per hire**, not a company total: no shipped hire declares a
+ * budget of its own, so this becomes each one's. It is measured, not chosen —
+ * the five agents of the 2026-09-09 run spent 4.9M, 9.4M, 10.2M, 16.0M and 0
+ * tokens, so 5,000,000 bounds the outlier that run produced while leaving room
+ * for the work. 300,000 stops every one of them within minutes.
+ */
+export const SUGGESTED_DAILY_TOKENS = 5_000_000
+
 export const gatePolicySchema = z
   .object({
     schemaVersion: z.literal(GATE_SCHEMA_VERSION),

@@ -357,7 +357,8 @@ node scripts/ephctl.cjs help
 ```
 
 `consent:status` prints what starting the company would do; `consent:grant` says
-go; `budget:set --daily 300000` bounds what it may spend; `profile:activate
+go; `budget:set --daily 5000000` bounds what it may spend — **per hire**, which
+is the figure the consent screen and the run script both name; `profile:activate
 --profile skeleton-crew --target repo:myapp --path /path/to/checkout` hires the
 crew and tells you which repositories it will watch; `profile:instances`,
 `agents:list`, `status` and `log:tail` read.
