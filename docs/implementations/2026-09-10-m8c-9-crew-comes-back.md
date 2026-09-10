@@ -199,6 +199,29 @@ id again. It asserts the path is the same, the branch is where the agent left it
 `branchCreated` is false, the uncommitted work is byte-identical, and the agent
 actually comes up — with **no filesystem step between the two harnesses.**
 
+**Mutation round, with a control.** Nine real mutants and a planted no-op, over
+`src/main/git.ts`, `src/main/profiles.ts` and the shipped runbook.
+
+*(result in the pull request)*
+
+The first mutant is the package's own refutation: it restores the branch-name
+ownership test — the code exactly as it shipped — and the acceptance test dies.
+A restore-then-reactivate test that passed with the defect in place would have
+been worth nothing.
+
+**Adversarial refutation pass.**
+
+| Attempt | Result |
+|---|---|
+| Is the acceptance test green with the defect restored? | No — mutant M1 kills it. That is the whole point of running it. |
+| Is there a SECOND blocker in restart → reactivate that the spawn seam hides? | Walked: `installPlaybooks` replaces (idempotent), `beforeHires` cannot refuse, `targetExists` still holds, `activate` takes over a `down` instance, triggers re-arm from `armed: []`. None refuses. |
+| Is the `activate` → worktree join tested? | **No, and deliberately.** The rehearsal IS that test: the refusal it recorded is `create`'s sentence carried verbatim to the CLI. The join worked; the rule it carried was wrong. Recorded in the decisions log rather than papered over. |
+| Does a worktree left on `main`, or detached, or on a stranger's branch, still come back? | Yes — all three are asserted, and the detached case reports `detached at <sha>` rather than a branch called `HEAD`. |
+| Does a checkout of a DIFFERENT repository still get refused? | Yes, by the test that was always doing that job, and now with a recovery sentence that does not claim to know which repository owns it. |
+| Does an empty leftover directory with a stale git entry still recover? | Yes — the 2026-09-06 path is untouched and its test still passes. |
+| Could a case-different repository path read as a different repository? | Yes — and it could before, identically. Pre-existing, out of acceptance, recorded. |
+| Does deactivating a down crew leak worktrees? | It leaves them, which is the design: the next activation reuses exactly those directories. Recorded as an observation. |
+
 ---
 
 ## 7. Related docs
