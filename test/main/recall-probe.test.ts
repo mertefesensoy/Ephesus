@@ -199,6 +199,49 @@ describe('a command that cannot be started at all', () => {
   })
 })
 
+describe('the probe does not leave the process it gave up on behind', () => {
+  it('kills the child when the deadline passes', async () => {
+    // Found by a mutant that survived: removing `child.kill()` left the probe
+    // reporting the timeout correctly and the 60-second process still running.
+    // The condition was right and the machine was dirtier every boot.
+    const killed: number[] = []
+    const probe = await runRecallProbe({ command: 'x', env: {}, timeoutMs: 10 }, () => {
+      const handlers: Record<string, (value: never) => void> = {}
+      return {
+        stdout: null,
+        stderr: null,
+        on: (event: string, cb: (value: never) => void) => {
+          handlers[event] = cb
+          return undefined
+        },
+        kill: () => killed.push(1)
+      }
+    })
+
+    expect(probe.timedOut).toBe(true)
+    expect(killed).toHaveLength(1)
+  })
+
+  it('does not kill a child that answered in time', async () => {
+    const killed: number[] = []
+    await runRecallProbe({ command: 'x', env: {}, timeoutMs: 5_000 }, () => {
+      const handlers: Record<string, (value: never) => void> = {}
+      queueMicrotask(() => (handlers['close'] as unknown as (c: number) => void)?.(0))
+      return {
+        stdout: null,
+        stderr: null,
+        on: (event: string, cb: (value: never) => void) => {
+          handlers[event] = cb
+          return undefined
+        },
+        kill: () => killed.push(1)
+      }
+    })
+
+    expect(killed).toEqual([])
+  })
+})
+
 describe('the command an agent is handed survives a path with a space', () => {
   it('quotes both halves', () => {
     // The defect this exists for: an unquoted `C:\Program Files\…\node.exe` is
