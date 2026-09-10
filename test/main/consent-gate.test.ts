@@ -4,11 +4,14 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CompanyStart, CONSENT_UNWRITABLE, CONSENT_WITHHELD } from '../../src/main/consent'
 import { ensureHarnessHome } from '../../src/main/home'
+import { budgetAnswerMissing } from '../../src/shared/consent'
 import {
   CONSENT_TERMS_VERSION,
   consentSentences,
   type ConsentDisclosure
 } from '../../src/shared/consent'
+import { CONTROL_VERBS } from '../../src/shared/control'
+import { SUGGESTED_DAILY_TOKENS } from '../../src/shared/gates'
 import type { ConsentRecord } from '../../src/shared/consent'
 import type { DegradationCause } from '../../src/shared/degradation'
 import { removeTempDir } from '../tmpdir'
@@ -447,6 +450,62 @@ describe('another harness is working on this home (ADR-0034)', () => {
  * The Architect may still run unbudgeted, and often should. It just has to be an
  * ANSWER.
  */
+/**
+ * **M8c.3b — one figure, or three that agree by coincidence until they don't.**
+ *
+ * The rehearsal ran §2 as written and the refusal came back naming **300,000**,
+ * five minutes after `EXIT-M8` §2 had been corrected to **5,000,000** with the
+ * measurements behind it. Nothing was wrong with either change: the number
+ * simply lived in four places and one of them moved.
+ *
+ * `maxDailyTokensSchema`'s own comment already records this lesson for the
+ * BOUND — *"written twice they agreed by coincidence"*. This is the same rule
+ * for the SUGGESTION, and this test is the part that makes it hold: a reader
+ * meets the figure on the consent screen, in the refusal, and in the verb's
+ * usage line, and if those three can disagree then two of them are wrong and
+ * nobody finds out until an hour is already running.
+ */
+describe('every surface suggests the SAME ceiling (M8c.3b)', () => {
+  const unbudgeted: ConsentDisclosure = {
+    hire: { agentId: 'chief-of-staff', engine: 'claude' },
+    dailyCeiling: null,
+    triggers: []
+  }
+
+  it('names it on the consent screen, in the refusal, and in the usage line', () => {
+    const suggested = `--daily ${SUGGESTED_DAILY_TOKENS}`
+
+    expect(consentSentences(unbudgeted).join(' ')).toContain(suggested)
+    expect(budgetAnswerMissing(unbudgeted, false)).toContain(suggested)
+    expect(CONTROL_VERBS.find((verb) => verb.name === 'budget:set')?.usage).toContain(suggested)
+  })
+
+  it('says PER HIRE wherever it names the figure, because that is the trap', () => {
+    // A reader who takes 5,000,000 for a company total under-budgets by the
+    // size of the crew. Both surfaces that suggest a number say whose it is.
+    expect(consentSentences(unbudgeted).join(' ')).toMatch(/PER HIRE|per hire/)
+    expect(budgetAnswerMissing(unbudgeted, false)).toMatch(/PER HIRE|per hire/)
+  })
+
+  it('CONTROL — the figure that shipped until M8c.3b would fail this', () => {
+    // Worth nothing unless the drift it describes actually fails it: the three
+    // surfaces on 2026-09-10 morning, two of which named the old number.
+    const before = [
+      '`ephctl budget:set --daily 5000000`',
+      '`ephctl budget:set --daily 300000`',
+      'ephctl budget:set --daily 300000'
+    ]
+    expect(new Set(before).size).not.toBe(1)
+    expect(before.filter((line) => line.includes(String(SUGGESTED_DAILY_TOKENS)))).toHaveLength(1)
+  })
+
+  it('does not put an internal package id on the screen that asks for consent', () => {
+    // The banner is read by the person granting spend authority on their own
+    // subscription. "(M8c.3)" told them nothing and cost them a line of trust.
+    expect(consentSentences(unbudgeted).join(' ')).not.toMatch(/M8[a-z]?\.\d/)
+  })
+})
+
 describe('the ceiling is a question the grant must answer (M8c.3)', () => {
   it('REFUSES to start a company nobody has bounded, and names both ways out', () => {
     const r = rig({ unbudgeted: true })
@@ -457,8 +516,15 @@ describe('the ceiling is a question the grant must answer (M8c.3)', () => {
     expect(outcome.reason).toContain('no daily token ceiling')
     // Both answers, by name — the refusal teaches the rule, to `watch:approve`'s
     // standard, rather than saying no and stopping.
-    expect(outcome.reason).toContain('budget:set --daily')
+    expect(outcome.reason).toContain('budget:set --daily 5000000')
     expect(outcome.reason).toContain('--unbudgeted true')
+    // PER HIRE, with the measured spend — the figure `EXIT-M8` §2 carries, so a
+    // reader who meets this refusal and a reader who reads the script are told
+    // the same number. Two places said 300,000 and one of them was corrected.
+    expect(outcome.reason).toContain('PER HIRE')
+    // And it says it ONCE: the control surface adds its own prefix, and the
+    // rehearsal printed "consent was NOT granted: consent was NOT granted: …".
+    expect(outcome.reason?.startsWith('consent was NOT granted')).toBe(false)
     // Nothing happened: not hired, not scheduled, and NOT written down. A
     // consent recorded for a start that was refused would come back next boot
     // as an answer nobody gave.

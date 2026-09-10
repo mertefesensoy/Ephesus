@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SUGGESTED_DAILY_TOKENS } from './gates'
 
 /**
  * First-launch consent (DD-6, M8.12) — whether the company may start working.
@@ -209,8 +210,9 @@ export function budgetAnswerMissing(
   return (
     'there is no daily token ceiling, and starting without answering that is the step ' +
     'that gets skipped and then regretted — two real runs went out unbudgeted and cost ' +
-    '$11.22 and $17.77. Set one: `ephctl budget:set --daily 300000`, or WATCH → settings ' +
-    '→ Daily budget. To run without a ceiling on purpose, say so: ' +
+    `$11.22 and $17.77. Set one: \`ephctl budget:set --daily ${SUGGESTED_DAILY_TOKENS}\`, ` +
+    'or WATCH → settings → Daily budget — the figure is PER HIRE, and the agents on those ' +
+    'runs spent 4.9M to 16M tokens each. To run without a ceiling on purpose, say so: ' +
     '`ephctl consent:grant --unbudgeted true`.'
   )
 }
@@ -256,9 +258,9 @@ export function consentSentences(disclosure: ConsentDisclosure): readonly string
   lines.push(
     disclosure.dailyCeiling === null
       ? 'There is NO daily token ceiling. Set one before you say go — ' +
-          '`ephctl budget:set --daily 300000`, or WATCH → settings → Daily budget — ' +
-          'or choose to run unbudgeted on purpose. Starting is refused until you answer ' +
-          'one way or the other (M8c.3).'
+          `\`ephctl budget:set --daily ${SUGGESTED_DAILY_TOKENS}\`, or WATCH → settings → ` +
+          'Daily budget — or choose to run unbudgeted on purpose. The figure is PER HIRE. ' +
+          'Starting is refused until you answer one way or the other.'
       : `Spending stops at ${disclosure.dailyCeiling.toLocaleString('en-US')} tokens a day ` +
           'per hire.'
   )
