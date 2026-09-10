@@ -287,6 +287,42 @@ describe('the cold start reads history as history (M8c.2)', () => {
     expect(raised.map((one) => one.incident.ref).sort((a, b) => a - b)).toEqual([80, 81])
   })
 
+  it('orders two runs created in the same second by their run id', () => {
+    // `at` is GitHub's `createdAt` and two runs can share a second. Without the
+    // tiebreak neither overtakes the other and both raise — which is the eight
+    // rows again, one CI cycle narrower.
+    const r = rig([WATCHED])
+
+    const raised = r.endpoint.raise([
+      ciRun({ ref: 90, at: '2026-08-20T10:00:00.000Z', conclusion: 'failure', labels: ['main'] }),
+      ciRun({ ref: 91, at: '2026-08-20T10:00:00.000Z', conclusion: 'failure', labels: ['main'] })
+    ])
+
+    expect(raised.map((one) => one.incident.ref)).toEqual([91])
+  })
+
+  it('does not report an incident it ALREADY raised as superseded', () => {
+    // A run raised on one ingest can be overtaken by the next. Filing a
+    // non-raise against an incident the company already has would put a
+    // "nothing happened" row on the record for something that did.
+    const r = rig([WATCHED])
+    const failure = ciRun({
+      ref: 100,
+      at: '2026-08-20T10:00:00.000Z',
+      conclusion: 'failure',
+      labels: ['main']
+    })
+    expect(r.endpoint.raise([failure])).toHaveLength(1)
+
+    const again = r.endpoint.raise([
+      failure,
+      ciRun({ ref: 101, at: '2026-08-21T10:00:00.000Z', conclusion: 'success', labels: ['main'] })
+    ])
+
+    expect(again).toEqual([])
+    expect(r.logged.filter((row) => row['event'] === 'incident-superseded')).toEqual([])
+  })
+
   it('a binding with no watchingSince keeps the old behaviour exactly', () => {
     // Additive: a caller written before M8c.2 raises what it always raised,
     // rather than silently gaining a filter nobody asked it for.

@@ -312,3 +312,51 @@ describe('foldIncidents', () => {
     expect(board.incidents).toHaveLength(0)
   })
 })
+
+/**
+ * **M8c.2 — a correct non-raise is not an incident.**
+ *
+ * `incident-superseded` says a run predated the activation and a later run on
+ * its branch overtook it. It belongs in the book of record beside
+ * `incident-unclaimed`, where a reader asking "why did nothing raise" finds it.
+ * It does NOT belong on this board, which lists incidents the company HAS: the
+ * 2026-09-09 batch would have put eight rows on the panel for eight things that
+ * correctly did not happen.
+ *
+ * There is deliberately no `case` for it in the fold — the row names an
+ * incident this board never saw raised, so the fall-through drops it, and an
+ * explicit `continue` would be a line that changes no behaviour. This is the
+ * assertion that keeps that true if the row ever gains a shape the fold could
+ * file.
+ */
+describe('a superseded run puts nothing on the board (M8c.2)', () => {
+  const superseded = (over: Record<string, unknown> = {}): LogEntry =>
+    row({
+      event: 'incident-superseded',
+      incident: KEY,
+      repo: 'owner/app',
+      ref: 4021,
+      branch: 'main',
+      because: 'the run predates this activation and a later run on its branch has overtaken it',
+      ...over
+    })
+
+  it('adds no incident, no refusal and no unclaimed row', () => {
+    const board = foldIncidents([superseded()])
+
+    expect(board.incidents).toEqual([])
+    expect(board.unclaimed).toEqual([])
+    expect(board.unattributedRefusals).toEqual([])
+  })
+
+  it('does not attach itself to an incident that WAS raised under the same key', () => {
+    // The pairing cannot happen — `raise` dedupes before it supersedes — but a
+    // board that filed it anyway would show a live incident carrying a row
+    // saying it was never raised.
+    const board = foldIncidents([raised(), superseded()])
+
+    expect(board.incidents).toHaveLength(1)
+    expect(board.incidents[0]?.refusals).toEqual([])
+    expect(board.unattributedRefusals).toEqual([])
+  })
+})

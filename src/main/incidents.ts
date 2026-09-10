@@ -280,6 +280,14 @@ export class IncidentEndpoint {
         continue
       }
 
+      const incident = incidentFrom(item, binding)
+      if (incident === null) continue
+      // Dedupe BEFORE the cold-start rule, and the order matters: a run raised
+      // on one ingest can be overtaken by the next, and reporting it superseded
+      // then would file a "nothing happened" row against an incident the
+      // company already has.
+      if (this.raised.has(incident.key)) continue
+
       // M8c.2's cold-start rule, in two halves. A run from before this instance
       // started watching is history; it raises only if it is still the newest
       // run on its branch, so a repository that is red RIGHT NOW is noticed
@@ -290,6 +298,9 @@ export class IncidentEndpoint {
         this.options.onLogEvent({
           kind: 'profile',
           event: 'incident-superseded',
+          // The incident that was NOT raised, so a reader can join this row to
+          // the key they were looking for and find out why nothing came back.
+          incident: incident.key,
           repo: item.repo,
           ref: item.ref,
           branch: branchOf(item) ?? 'unknown',
@@ -297,10 +308,6 @@ export class IncidentEndpoint {
         })
         continue
       }
-
-      const incident = incidentFrom(item, binding)
-      if (incident === null) continue
-      if (this.raised.has(incident.key)) continue
 
       const raisedOne = this.send(incident)
       this.raised.add(incident.key)
