@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { isolationModeSchema } from './isolation'
 import { toolGrantsSchema } from './engine-tools'
+import { unattendedGrantsSchema } from './engine-permissions'
 import { exitPolicySchema } from './respawn'
 import { budgetSchema } from './agents'
 import type { LogEntry } from './log'
@@ -254,7 +255,20 @@ export const hireTemplateSchema = z
      * and optional, so every document written against the previous shape still
      * validates -- the same reasoning `budget`, `isolation` and `onExit` carry.
      */
-    tools: toolGrantsSchema.optional()
+    tools: toolGrantsSchema.optional(),
+    /**
+     * Commands this hire may run without stopping at its engine's own
+     * permission prompt (M8c.8, ADR-0035).
+     *
+     * Optional, and omitting it grants nothing -- a hire that says nothing
+     * about this parks at every prompt exactly as it did before, which is the
+     * direction an unknown must fail in and the reason this is additive rather
+     * than a new default. The vocabulary and the refusals are in
+     * `engine-permissions.ts`; what matters here is that it is DECLARED, in a
+     * bundle the Architect reads before activating, for the same reason
+     * `tools`, `budget` and `isolation` are.
+     */
+    unattended: unattendedGrantsSchema.optional()
   })
   .strict()
 

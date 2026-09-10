@@ -9,6 +9,7 @@ import type { AgentSpawnConfig, BinarySpec, EngineAdapter, HookPlan, SpawnPlan }
 import type { EngineRegistry } from './engines'
 import { baseAgentEnv } from './engines/spawn-env'
 import { NO_TOOLS, type ResolvedTools } from '../shared/engine-tools'
+import { NO_UNATTENDED } from '../shared/engine-permissions'
 import type { HookServer } from './hooks'
 import type { PromptStore } from './prompts'
 import { composeBudget } from '../shared/cost'
@@ -884,6 +885,10 @@ export class AgentManager {
       // expressions that agree until one of them is edited.
       engineConfigDir: this.options.engineConfigDirFor(request.engine, request.agentId),
       tools: this.options.toolsFor?.(request.agentId) ?? NO_TOOLS,
+      // ADR-0035: declared by the hire and carried on the request, not asked
+      // for through a seam — it needs no resolution, so a seam would be a
+      // second place to be wrong about the same fact.
+      unattended: request.unattended ?? NO_UNATTENDED,
       playbooksDir: this.options.playbooksFor?.(request.agentId) ?? null,
       commitIdentity: this.options.commitIdentity?.() ?? null,
       // `manual` when nobody has an opinion: an agent on no profile does not

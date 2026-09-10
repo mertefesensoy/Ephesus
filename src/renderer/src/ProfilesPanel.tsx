@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { ProfileInstanceView, ProfileSummary } from '../../shared/profile-view'
 import type { ActivationPlan, ComposedAutonomy } from '../../shared/profile-activation'
 import { describeToolGrants } from '../../shared/engine-tools'
+import { describeUnattendedGrants } from '../../shared/engine-permissions'
 import { IncidentsPanel } from './IncidentsPanel'
 
 /**
@@ -289,6 +290,26 @@ export function PlanView({ plan }: { readonly plan: ActivationPlan }): ReactElem
         exactly why it belongs on the screen the Architect reads before saying
         yes, rather than in a file they would have to go looking for.
       */}
+      {/*
+        ADR-0035. A pre-authorised command is a command that runs with nobody
+        watching, so it belongs on the screen that is read before anything
+        starts rather than in a bundle file somebody would have to open. The
+        list is the hire's own declaration, rendered in its own words.
+      */}
+      {plan.hires.some((hire) => describeUnattendedGrants(hire.spawn.unattended).length > 0) && (
+        <>
+          <p style={heading}>What they may do without asking</p>
+          <ul style={{ margin: '0 0 0 16px', padding: 0 }}>
+            {plan.hires
+              .filter((hire) => describeUnattendedGrants(hire.spawn.unattended).length > 0)
+              .map((hire) => (
+                <li key={hire.agentId} style={{ margin: '2px 0' }}>
+                  {hire.agentId} — {describeUnattendedGrants(hire.spawn.unattended).join(', ')}
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
       {plan.hires.some((hire) => hire.tools.length > 0) && (
         <>
           <p style={heading}>Tools the company grants them</p>
