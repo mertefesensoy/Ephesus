@@ -71,7 +71,8 @@ const eph: EphApi = {
   // being consented to is main's to state, so the window cannot widen it.
   consent: {
     get: () => ipcRenderer.invoke(IpcChannels.consentGet) as Promise<ConsentView>,
-    grant: () => ipcRenderer.invoke(IpcChannels.consentGrant) as Promise<ConsentGrantOutcome>
+    grant: (unbudgeted: boolean) =>
+      ipcRenderer.invoke(IpcChannels.consentGrant, { unbudgeted }) as Promise<ConsentGrantOutcome>
   },
   agents: {
     list: () => ipcRenderer.invoke(IpcChannels.agentsList) as Promise<readonly AgentCard[]>,

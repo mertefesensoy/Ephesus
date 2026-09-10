@@ -1,5 +1,6 @@
 import {
   CONSENT_TERMS_VERSION,
+  budgetAnswerMissing,
   decideConsent,
   type ConsentDisclosure,
   type ConsentGrantOutcome,
@@ -183,7 +184,20 @@ export class CompanyStart {
    * already spent against a consent nothing records — the one outcome worse
    * than a button that reports its own failure.
    */
-  grant(): ConsentGrantOutcome {
+  /**
+   * @param acceptUnbudgeted the Architect's explicit answer that this company
+   *   may run with no daily ceiling (M8c.3). Not a default: a caller that
+   *   forgets it gets the refusal rather than the permission.
+   */
+  grant(acceptUnbudgeted = false): ConsentGrantOutcome {
+    // Asked BEFORE the idempotent path, and before anything is written. A
+    // company already running is not re-interrogated — `mayStartWork` is only
+    // true once a grant is on file — but a second `grant()` on a home that has
+    // not answered must meet the same question the first one did.
+    const missing = budgetAnswerMissing(this.options.disclose(), acceptUnbudgeted)
+    if (missing !== null && !this.verdict().mayStartWork) {
+      return { ok: false, reason: `consent was NOT granted: ${missing}`, view: this.view() }
+    }
     if (this.verdict().mayStartWork) {
       // Idempotent: a second click, a second window, or a grant racing boot.
       // Never re-writes `grantedAt` — the record says when consent was FIRST

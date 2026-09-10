@@ -49,7 +49,7 @@ import { z } from 'zod'
  * silently authorise the wider one. Bumping this asks again; leaving it alone
  * never does.
  */
-export const CONSENT_TERMS_VERSION = 1
+export const CONSENT_TERMS_VERSION = 2
 
 export const consentRecordSchema = z
   .object({
@@ -61,6 +61,18 @@ export const consentRecordSchema = z
   .strict()
 
 export type ConsentRecord = z.infer<typeof consentRecordSchema>
+
+/**
+ * What the window sends when the Architect says go (M8c.3).
+ *
+ * `unbudgeted` defaults to `false` rather than being optional-and-ignored: a
+ * renderer that sent nothing is a renderer that has not answered the ceiling
+ * question, and the safe reading of an unanswered question is that it is
+ * unanswered.
+ */
+export const consentGrantPayloadSchema = z
+  .object({ unbudgeted: z.boolean().default(false) })
+  .strict()
 
 /**
  * Why the company is or is not working.
@@ -168,6 +180,41 @@ export interface ConsentGrantOutcome {
   readonly view: ConsentView
 }
 
+/**
+ * Contract: pure. Why a grant cannot be made yet, or null when it can (M8c.3).
+ *
+ * **Silence is not an answer about spend.** `unbudgeted` is the shipped default
+ * (ADR-0029) and stays it — what changes here is that a company may not START
+ * on it by omission. `EXIT-M8.md` §2 calls setting a ceiling *"the step that is
+ * skipped and then regretted"*, and it was skipped on both real runs precisely
+ * because it was optional: 2026-09-09 spent $11.22 and the M8b rehearsal $17.77,
+ * neither bounded by anything.
+ *
+ * The Architect may still run unbudgeted, and often should — it is the right
+ * answer for a company doing one small thing. It just has to be an ANSWER.
+ * `acceptUnbudgeted` is that answer, and it is deliberately not a default
+ * parameter: a caller that forgets it gets the refusal, not the permission.
+ *
+ * This is `decideConsent`'s sibling and not part of it, for the reason
+ * ADR-0034's occupancy guard is also separate: consent is a standing answer
+ * about what the company may do, and this is a condition of the configuration
+ * right now. Collapsing them would make an unbudgeted company read as one
+ * nobody has said go to.
+ */
+export function budgetAnswerMissing(
+  disclosure: ConsentDisclosure,
+  acceptUnbudgeted: boolean
+): string | null {
+  if (disclosure.dailyCeiling !== null || acceptUnbudgeted) return null
+  return (
+    'there is no daily token ceiling, and starting without answering that is the step ' +
+    'that gets skipped and then regretted — two real runs went out unbudgeted and cost ' +
+    '$11.22 and $17.77. Set one: `ephctl budget:set --daily 300000`, or WATCH → settings ' +
+    '→ Daily budget. To run without a ceiling on purpose, say so: ' +
+    '`ephctl consent:grant --unbudgeted true`.'
+  )
+}
+
 /** "every 30 minutes" — coarse on purpose; this is a disclosure, not a clock. */
 export function everyPhrase(everyMs: number): string {
   const minutes = Math.round(everyMs / 60_000)
@@ -208,10 +255,12 @@ export function consentSentences(disclosure: ConsentDisclosure): readonly string
   )
   lines.push(
     disclosure.dailyCeiling === null
-      ? 'There is no company-wide daily token ceiling set — spending is unbudgeted ' +
-          'until you set one in WATCH → settings.'
+      ? 'There is NO daily token ceiling. Set one before you say go — ' +
+          '`ephctl budget:set --daily 300000`, or WATCH → settings → Daily budget — ' +
+          'or choose to run unbudgeted on purpose. Starting is refused until you answer ' +
+          'one way or the other (M8c.3).'
       : `Spending stops at ${disclosure.dailyCeiling.toLocaleString('en-US')} tokens a day ` +
-          'company-wide.'
+          'per hire.'
   )
   lines.push(
     disclosure.triggers.length === 0
