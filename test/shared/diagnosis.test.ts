@@ -533,6 +533,25 @@ describe('an entered pipeline is not a finished one (M8c.4)', () => {
     expect(rowFor(d, 'incidents')?.because).toContain('incident-triaged')
   })
 
+  it('does NOT read working on an orchestrator who was only hired', () => {
+    // Same reasoning, same row: being spawned is entry. FR-5.2 gives the ledger
+    // one scribe and the harness never writes `tasks.json` itself, so a `task`
+    // row is the orchestrator actually doing her job.
+    const d = diagnose(
+      input({ consented: true, events: [row('orchestrator', 'spawned'), row('spawn')] })
+    )
+
+    expect(d.rows.find((r) => r.area === 'orchestrator')?.verdict).toBe('entered')
+  })
+
+  it('reads working on an orchestrator who has opened a task', () => {
+    const d = diagnose(
+      input({ consented: true, events: [row('orchestrator', 'spawned'), row('task')] })
+    )
+
+    expect(d.rows.find((r) => r.area === 'orchestrator')?.verdict).toBe('working')
+  })
+
   it('does NOT read working on a crew that was spawned and never ran', () => {
     // "A spawn proves a process started, not that any agent did work."
     const d = diagnose(entered())
