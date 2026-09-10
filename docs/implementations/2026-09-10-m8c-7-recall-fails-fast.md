@@ -191,6 +191,6 @@ seconds of silence per agent.
 ## 7. Related docs
 
 - [`docs/demo/m8-onehour-aftershock.md`](../demo/m8-onehour-aftershock.md) — Finding 9
-- [`docs/adr/ADR-0006-memory-architecture.md`](../adr/ADR-0006-memory-architecture.md) — layer 2, the agent-facing CLI
-- [`docs/adr/ADR-0016-mempalace-optional-external.md`](../adr/ADR-0016-mempalace-optional-external.md) — the degradation this is NOT
+- [`docs/adr/ADR-0006-library-memory.md`](../adr/ADR-0006-library-memory.md) — layer 2, the agent-facing CLI
+- [`docs/adr/ADR-0016-mempalace-archival.md`](../adr/ADR-0016-mempalace-archival.md) — the degradation this is NOT
 - [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md) — M8c.7 and its acceptance
