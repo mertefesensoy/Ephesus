@@ -6,6 +6,7 @@ import {
   CONTROL_VERBS,
   REFUSED_VERBS,
   activationRequestFromArgs,
+  budgetSetVerdict,
   controlAddressSchema,
   controlRequestSchema,
   renderHelp,
@@ -137,6 +138,9 @@ describe('the verb table', () => {
     // events out of a reader's view for ever.
     const writes = CONTROL_VERBS.filter((verb) => verb.writes).map((verb) => verb.name)
     expect(writes.sort()).toEqual([
+      // M8c.1. A ceiling is a CONSTRAINT, not an authorisation, so a script may
+      // set one — downwards. `budgetSetVerdict` is where that line is drawn.
+      'budget:set',
       'consent:grant',
       // M8b.2. `convene` shipped with no counterpart, so a CLI runner could
       // open a meeting and had no way to end one — the same absent-and-not-
@@ -390,5 +394,78 @@ describe('the address file', () => {
 
   it('is named so nobody mistakes it for configuration', () => {
     expect(CONTROL_ADDRESS_FILE).toBe('control-endpoint.json')
+  })
+})
+
+/**
+ * **M8c.1 — a ceiling must be reachable without a mouse.**
+ *
+ * `EXIT-M8.md` §2 calls setting a daily ceiling *"the step that is skipped and
+ * then regretted"* and marks it mandatory. There was no budget verb at all — not
+ * offered, and, unlike `watch:approve`, not in the deliberately-refused list
+ * either. Both real runs went out `unbudgeted` because of it, and the first
+ * spent 40.45M tokens against a script that calls a few hundred thousand
+ * generous.
+ *
+ * The verb exists, and it may only ever make the company SAFER. ADR-0033's rule
+ * is that a script may run the company and only a human may authorise what the
+ * company is not otherwise allowed to do; a ceiling authorises nothing, it caps.
+ * Lowering one is therefore a script's to make, and raising one is not.
+ */
+describe('budget:set may tighten and never raise (M8c.1)', () => {
+  it('accepts any ceiling when the company is unbudgeted', () => {
+    // ADR-0029 ships `unbudgeted`, so the FIRST ceiling is always a tightening
+    // however large it is — there was nothing to loosen.
+    const verdict = budgetSetVerdict(null, 1_000_000_000)
+    expect(verdict.ok).toBe(true)
+    expect(verdict.because).toContain('unbudgeted')
+  })
+
+  it('accepts a lower ceiling, and says what moved', () => {
+    const verdict = budgetSetVerdict(300_000, 50_000)
+    expect(verdict.ok).toBe(true)
+    expect(verdict.because).toContain('tightened from 300,000 to 50,000')
+  })
+
+  it('accepts the SAME ceiling rather than refusing a no-op', () => {
+    // A script that cannot read the current value first would otherwise be
+    // unable to assert a ceiling idempotently, which is what a setup script does.
+    const verdict = budgetSetVerdict(300_000, 300_000)
+    expect(verdict.ok).toBe(true)
+    expect(verdict.because).toContain('unchanged')
+  })
+
+  it('REFUSES a raise, and the refusal teaches the rule', () => {
+    const verdict = budgetSetVerdict(300_000, 400_000)
+
+    expect(verdict.ok).toBe(false)
+    // The standard `watch:approve` set, and the one Positive B in the exit run
+    // singled out: name the act, give the reason, say where to go instead, and
+    // state the general rule.
+    expect(verdict.because).toContain('not something a script may do')
+    expect(verdict.because).toContain('300,000')
+    expect(verdict.because).toContain('400,000')
+    expect(verdict.because).toContain('open the WATCH tab')
+    expect(verdict.because).toContain('only a human may authorise')
+  })
+
+  it('is a WRITE, so the act reaches the book of record tagged remote', () => {
+    const entry = CONTROL_VERBS.find((candidate) => candidate.name === 'budget:set')
+    expect(entry?.writes).toBe(true)
+  })
+
+  it('coerces the flag a command line actually gives, and refuses a bad one', () => {
+    const entry = CONTROL_VERBS.find((candidate) => candidate.name === 'budget:set')
+    if (!entry) throw new Error('budget:set is not in the table')
+    // Everything arrives from `ephctl` as a string.
+    expect(entry.args.safeParse({ daily: '300000' })).toMatchObject({
+      success: true,
+      data: { daily: 300_000 }
+    })
+    for (const bad of [{ daily: '0' }, { daily: '-5' }, { daily: 'lots' }, { daily: '1e12' }, {}]) {
+      expect(entry.args.safeParse(bad).success, JSON.stringify(bad)).toBe(false)
+    }
+    // Strict: a typo'd flag is refused rather than silently ignored.
+    expect(entry.args.safeParse({ daily: '300000', dally: '1' }).success).toBe(false)
   })
 })

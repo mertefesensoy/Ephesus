@@ -86,6 +86,11 @@ function deps(overrides: Record<string, unknown> = {}): ControlDeps {
     convene: () => ({ ok: true, id: 'meeting-1' }),
     meetingClose: () => ({ ok: true, ref: 'agora/odeon/minutes/meeting-1.md' }),
     diagnosis: { snapshot: () => SNAPSHOT },
+    gatePolicyView: () => ({ autonomy: 'autonomous', maxDailyTokens: null, warning: null }),
+    saveGateCeilings: (ceilings: { autonomy: string; maxDailyTokens: number | null }) => ({
+      ok: true,
+      view: { ...ceilings, warning: null }
+    }),
     ...overrides
   } as unknown as ControlDeps
 }
@@ -116,6 +121,8 @@ describe('the switch is total over the table', () => {
 
 function defaultArgsFor(name: string): unknown {
   switch (name) {
+    case 'budget:set':
+      return { daily: 300_000 }
     case 'profile:activate':
       return { profile: 'skeleton-crew', target: 'repo:myapp', path: 'C:\\src\\myapp' }
     case 'profile:deactivate':
@@ -701,5 +708,95 @@ describe('odeon:adjourn (M8b.2)', () => {
       // authority.
       expect(seen).toEqual([[]])
     })
+  })
+})
+
+/**
+ * **M8c.1** — the handler half. `budgetSetVerdict` decides; this is what the
+ * decision does to the policy file, and the three things it must never do:
+ * touch the autonomy ceiling, write into the deny-all fallback, or report a
+ * save that did not happen.
+ */
+describe('budget:set', () => {
+  const view = (over: Record<string, unknown> = {}) => ({
+    autonomy: 'autonomous',
+    maxDailyTokens: null,
+    warning: null,
+    ...over
+  })
+
+  it('sets the ceiling and leaves the autonomy ceiling exactly where it was', async () => {
+    const saves: unknown[] = []
+    const answer = await performVerb(
+      deps({
+        gatePolicyView: () => view({ autonomy: 'supervised' }),
+        saveGateCeilings: (ceilings: unknown) => {
+          saves.push(ceilings)
+          return { ok: true, view: { ...(ceilings as object), warning: null } }
+        }
+      }),
+      verb('budget:set'),
+      { daily: 300_000 }
+    )
+
+    expect(answer.ok).toBe(true)
+    expect(answer.text).toContain('daily ceiling set')
+    // The one thing this verb must not do: `saveGateCeilings` patches BOTH
+    // ceilings, so a handler that rebuilt the object instead of carrying the
+    // current autonomy through would move a safety dial nobody asked it to.
+    expect(saves).toEqual([{ autonomy: 'supervised', maxDailyTokens: 300_000 }])
+  })
+
+  it('REFUSES a raise without writing anything', async () => {
+    const saves: unknown[] = []
+    const answer = await performVerb(
+      deps({
+        gatePolicyView: () => view({ maxDailyTokens: 300_000 }),
+        saveGateCeilings: (ceilings: unknown) => {
+          saves.push(ceilings)
+          return { ok: true, view: { ...(ceilings as object), warning: null } }
+        }
+      }),
+      verb('budget:set'),
+      { daily: 900_000 }
+    )
+
+    expect(answer.ok).toBe(false)
+    expect(answer.text).toContain('only a human may authorise')
+    expect(saves).toEqual([])
+  })
+
+  it('REFUSES to write into the deny-all fallback, naming it', async () => {
+    // `gate-policy.json` unreadable means the harness is running on
+    // `denyAllPolicy`. Saving a ceiling then would persist that fallback's
+    // `manual` autonomy as though it had been chosen — a degradation written
+    // back as a setting, which is invariant §7's exact failure.
+    const saves: unknown[] = []
+    const answer = await performVerb(
+      deps({
+        gatePolicyView: () => view({ warning: 'gate-policy.json could not be read' }),
+        saveGateCeilings: (ceilings: unknown) => {
+          saves.push(ceilings)
+          return { ok: true, view: { ...(ceilings as object), warning: null } }
+        }
+      }),
+      verb('budget:set'),
+      { daily: 300_000 }
+    )
+
+    expect(answer.ok).toBe(false)
+    expect(answer.text).toContain('could not be read')
+    expect(saves).toEqual([])
+  })
+
+  it('reports a refused save as a failure rather than as done', async () => {
+    const answer = await performVerb(
+      deps({ saveGateCeilings: () => ({ ok: false, reason: 'the home is read-only' }) }),
+      verb('budget:set'),
+      { daily: 300_000 }
+    )
+
+    expect(answer.ok).toBe(false)
+    expect(answer.text).toContain('the home is read-only')
   })
 })

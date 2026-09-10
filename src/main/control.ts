@@ -7,6 +7,7 @@ import {
   CONTROL_ENDPOINT_PATH,
   CONTROL_SCHEMA_VERSION,
   activationRequestFromArgs,
+  budgetSetVerdict,
   controlRequestSchema,
   renderHelp,
   renderRefusal,
@@ -16,6 +17,7 @@ import {
   type ControlVerb
 } from '../shared/control'
 import { everyPhrase, type ConsentDisclosure } from '../shared/consent'
+import { ceilingsOf } from '../shared/gates'
 import { diagnose, renderDiagnosis, type DiagnosisInput } from '../shared/diagnosis'
 import type { ActivationRequest } from '../shared/profile-activation'
 import type { IpcDeps } from './ipc'
@@ -79,6 +81,8 @@ export type ControlDeps = Pick<
   | 'profilesInstances'
   | 'convene'
   | 'meetingClose'
+  | 'gatePolicyView'
+  | 'saveGateCeilings'
 > & {
   /**
    * The writer itself, not a second closure over the same fields.
@@ -527,6 +531,24 @@ export async function performVerb(
             outcome.view
           )
         : fail(verb, `consent was NOT granted: ${outcome.reason ?? 'unknown reason'}`, outcome)
+    }
+    case 'budget:set': {
+      const { daily } = args as { daily: number }
+      const view = deps.gatePolicyView()
+      // The policy file could not be read, so the harness is running on the
+      // deny-all fallback. Writing a ceiling into that would save an autonomy
+      // level nobody chose alongside it — `saveGateCeilings` patches both, and
+      // `ceilingsOf(view)` would carry the fallback's `manual` back to disk as
+      // though it had been decided.
+      if (view.warning !== null) {
+        return fail(verb, `budget NOT set: ${view.warning}`, view)
+      }
+      const verdict = budgetSetVerdict(view.maxDailyTokens, daily)
+      if (!verdict.ok) return fail(verb, `refused: ${verdict.because}`, view)
+      const saved = deps.saveGateCeilings({ ...ceilingsOf(view), maxDailyTokens: daily })
+      return saved.ok
+        ? ok(verb, `daily ceiling set: ${verdict.because}`, saved.view)
+        : fail(verb, `budget NOT set: ${saved.reason}`, view)
     }
     case 'profile:list': {
       const list = deps.profilesList()
