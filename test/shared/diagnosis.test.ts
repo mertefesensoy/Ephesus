@@ -475,3 +475,135 @@ describe('the header and the consent row cannot contradict each other', () => {
     expect(find(d, 'consent')?.verdict).toBe('not-exercised')
   })
 })
+
+/**
+ * **M8c.4 — `WORKING` must cite a row that proves COMPLETION.**
+ *
+ * Finding 7 of the M8 exit run, and the sharpest form of the defect M8.13 was
+ * built to prevent. At 06:12:41Z, with eight ledger refusals already in the log
+ * and zero tasks succeeded, the report said:
+ *
+ * ```text
+ * | incidents | WORKING | profile/incident-raised at seq 85 |
+ * | the crew  | WORKING | spawn at seq 40                   |
+ * ```
+ *
+ * Seq 85 is real and was quoted honestly. It proves the pipeline was ENTERED —
+ * not routed, not triaged, not actioned. *"The result is not a vacuous pass
+ * from silence; it is a false pass in the presence of eight recorded failures
+ * in the same file."* And it stayed wrong for the whole run: `incident-triaged`
+ * was 0 at the final check.
+ */
+describe('an entered pipeline is not a finished one (M8c.4)', () => {
+  const entered = (): DiagnosisInput =>
+    input({
+      consented: true,
+      // Exactly the 2026-09-09 state: raised, and nothing came back.
+      events: [row('profile', 'incident-raised'), row('spawn')]
+    })
+
+  const rowFor = (d: ReturnType<typeof diagnose>, area: string) =>
+    d.rows.find((candidate) => candidate.area === area)
+
+  it('does NOT read working on an incident that was raised and never triaged', () => {
+    const d = diagnose(entered())
+
+    expect(rowFor(d, 'incidents')?.verdict).not.toBe('working')
+    expect(rowFor(d, 'incidents')?.verdict).toBe('entered')
+  })
+
+  it('says which row started it and what would prove it finished', () => {
+    const because = rowFor(diagnose(entered()), 'incidents')?.because ?? ''
+
+    expect(because).toContain('profile/incident-raised')
+    expect(because).toContain('nothing since proves it finished')
+    // The actionable half: the reader is told the row to look for.
+    expect(because).toContain('profile:incident-triaged')
+  })
+
+  it('reads working once the completion row exists', () => {
+    const d = diagnose(
+      input({
+        consented: true,
+        events: [row('profile', 'incident-raised'), row('profile', 'incident-triaged')]
+      })
+    )
+
+    expect(rowFor(d, 'incidents')?.verdict).toBe('working')
+    expect(rowFor(d, 'incidents')?.because).toContain('incident-triaged')
+  })
+
+  it('does NOT read working on an orchestrator who was only hired', () => {
+    // Same reasoning, same row: being spawned is entry. FR-5.2 gives the ledger
+    // one scribe and the harness never writes `tasks.json` itself, so a `task`
+    // row is the orchestrator actually doing her job.
+    const d = diagnose(
+      input({ consented: true, events: [row('orchestrator', 'spawned'), row('spawn')] })
+    )
+
+    expect(d.rows.find((r) => r.area === 'orchestrator')?.verdict).toBe('entered')
+  })
+
+  it('reads working on an orchestrator who has opened a task', () => {
+    const d = diagnose(
+      input({ consented: true, events: [row('orchestrator', 'spawned'), row('task')] })
+    )
+
+    expect(d.rows.find((r) => r.area === 'orchestrator')?.verdict).toBe('working')
+  })
+
+  it('does NOT read working on a crew that was spawned and never ran', () => {
+    // "A spawn proves a process started, not that any agent did work."
+    const d = diagnose(entered())
+
+    expect(rowFor(d, 'the crew')?.verdict).toBe('entered')
+    expect(rowFor(d, 'the crew')?.because).toContain('spawn')
+  })
+
+  it('reads working on a crew whose agents actually reported', () => {
+    const d = diagnose(input({ consented: true, events: [row('spawn'), row('hook')] }))
+
+    expect(rowFor(d, 'the crew')?.verdict).toBe('working')
+  })
+
+  it('does not read a CONTROL act as the Harbor watching a repository', () => {
+    // `kind: "remote"` carries both the ingest and every `ephctl` act (M8.14).
+    // The exit run's own runner grepped `"kind":"remote"` and matched their own
+    // `consent:grant`; this row would have done exactly the same.
+    const script = diagnose(input({ consented: true, events: [row('remote', 'control')] }))
+    expect(rowFor(script, 'watching a repository')?.verdict).toBe('not-exercised')
+
+    const ingest = diagnose(
+      input({
+        consented: true,
+        events: [{ ...row('remote'), inbound: 'ci-run' } as unknown as LogEntry]
+      })
+    )
+    expect(rowFor(ingest, 'watching a repository')?.verdict).toBe('working')
+  })
+
+  it('reads spend off a kind the log actually has', () => {
+    // The old probe named `cost`, which is not in `LOG_KINDS` and never was —
+    // a row that could only ever read `not-exercised`.
+    const d = diagnose(input({ consented: true, events: [row('budget')] }))
+    expect(rowFor(d, 'spend')?.verdict).toBe('working')
+  })
+
+  it('reports the started-and-unfinished areas in the short answer', () => {
+    const text = renderDiagnosis(diagnose(entered()), 5_000_000)
+
+    expect(text).toContain('STARTED and have not finished')
+    expect(text).toContain('STARTED, UNFINISHED')
+    // And says why the reader should care, in the section that explains itself.
+    expect(text).toContain('reported as `WORKING`')
+  })
+
+  it('CONTROL — an area with neither row still reads NOT EXERCISED', () => {
+    // The states must stay three: nothing, started, finished. A change that
+    // made `entered` swallow the empty case would make every fresh company
+    // look mid-flight.
+    const d = diagnose(input({ consented: true, events: [] }))
+    expect(rowFor(d, 'incidents')?.verdict).toBe('not-exercised')
+    expect(rowFor(d, 'the crew')?.verdict).toBe('not-exercised')
+  })
+})
