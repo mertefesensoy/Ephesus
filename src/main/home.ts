@@ -58,6 +58,49 @@ const SEEDED_FILES = [
   { file: 'authority.json', contents: (): unknown => shippedAuthority }
 ] as const
 
+/** One condition the boot reports about a file it had to create for itself. */
+export interface SeededConfigCondition {
+  readonly cause: string
+  readonly detail: string
+}
+
+/**
+ * Contract: pure. One condition per file the harness seeded, keyed by the file.
+ *
+ * **The key carries the file name, and that is the whole of M8c.5.** This was a
+ * loop in `index.ts` reporting a constant `home/seeded-config`, and the
+ * degradation ring dedupes on cause: on 2026-09-09 two files were seeded, so the
+ * count reached 2 and only the LAST file's message survived in `DIAGNOSIS.md`
+ * while `log.jsonl` kept the FIRST. A reader of either artifact learned one file
+ * and could not tell there was another.
+ *
+ * The file the report dropped was `gate-policy.json` — the one the README calls
+ * *"the company-wide autonomy ceiling and which classes are held for a human"*,
+ * and the file SRS §6.1's last clause depends on entirely. Of the two seeded
+ * files, the report discarded the one whose freshly-defaulted state a runner
+ * most needs to know about.
+ *
+ * The rule it now obeys is the one every other per-subject condition in this
+ * codebase already keeps — `settings/restore:<path>`,
+ * `restart/orphan-block:<taskId>`, `secrets/missing-grant:<agentId>`,
+ * `budgets/state:<agentId>`. **A condition reported once per subject carries
+ * the subject in its cause, or the dedupe throws away exactly what
+ * distinguishes the occurrences.**
+ *
+ * It lives here rather than in `index.ts` for the reason ENGINEERING-STANDARDS
+ * §6.7 gives: boot wiring is where a test cannot go, and the `boot` coverage row
+ * exists to measure how true "index.ts holds no logic of its own" is.
+ */
+export function seededConfigConditions(
+  seeded: readonly string[],
+  root: string
+): readonly SeededConfigCondition[] {
+  return seeded.map((file) => ({
+    cause: `home/seeded-config:${file}`,
+    detail: `${file} was missing and has been created with the shipped default — review it at ${root}`
+  }))
+}
+
 /** Creates the harness home if missing (idempotent) and loads the config. */
 export function ensureHarnessHome(root: string): HarnessHome {
   fs.mkdirSync(root, { recursive: true })

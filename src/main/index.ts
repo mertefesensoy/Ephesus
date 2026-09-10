@@ -102,6 +102,7 @@ import { CompanyStart } from './consent'
 import { ControlServer, controlEndpointFor, startControlSurface } from './control'
 import { CONTROL_ADDRESS_FILE } from '../shared/control'
 import { HOME_OCCUPIED, occupiedBy } from './home-lock'
+import { seededConfigConditions } from './home'
 import { DiagnosisWriter } from './diagnosis'
 import type { DiagnosisInput } from '../shared/diagnosis'
 import type { ConsentDisclosure } from '../shared/consent'
@@ -981,12 +982,10 @@ async function boot(): Promise<void> {
   }
   // Files the harness had to create for itself, named rather than done quietly
   // (M8.4): a config file that appears without being mentioned is one the
-  // Architect never learns they can edit.
-  for (const file of home.seeded) {
-    reportDegradation(
-      'home/seeded-config',
-      `${file} was missing and has been created with the shipped default — review it at ${home.root}`
-    )
+  // Architect never learns they can edit. One condition PER FILE, keyed by the
+  // file — the rule and the incident behind it are in `seededConfigConditions`.
+  for (const condition of seededConfigConditions(home.seeded, home.root)) {
+    reportDegradation(condition.cause as DegradationCause, condition.detail)
   }
 
   if (knownTargetsWarning !== null) reportDegradation('profiles/known-targets', knownTargetsWarning)
