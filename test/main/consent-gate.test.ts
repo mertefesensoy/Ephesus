@@ -497,6 +497,24 @@ describe('the ceiling is a question the grant must answer (M8c.3)', () => {
     expect(r.gate.grant().ok).toBe(true)
   })
 
+  it('re-asks a company that consented before the ceiling was a question', () => {
+    // The terms version is exactly the mechanism for this: v1's disclosure said
+    // "spending is unbudgeted until you set one in WATCH → settings" and asked
+    // nothing. A grant made against that is not an answer to the question v2
+    // asks, so it must not carry over — otherwise the one machine that has
+    // already consented is the one machine this package does not reach.
+    const stale = rig({
+      unbudgeted: true,
+      record: { grantedAt: '2026-09-06T12:00:00.000Z', terms: 1 }
+    })
+
+    expect(stale.gate.view().state).toBe('stale-terms')
+    expect(stale.gate.view().mayStartWork).toBe(false)
+    // And it meets the ceiling question, rather than being waved through.
+    expect(stale.gate.grant().ok).toBe(false)
+    expect(stale.gate.grant(true).ok).toBe(true)
+  })
+
   it('says so on the consent screen, in the words the disclosure builds', () => {
     const sentences = consentSentences({ ...DISCLOSURE, dailyCeiling: null })
 
