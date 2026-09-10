@@ -189,8 +189,12 @@ describe('the README states the Node floor where the exit script sends you (M8c.
   it('states 20.19+/22.12+ in Setting it up — the section EXIT-M8 §1 names', () => {
     const setup = named('## Setting it up')
 
-    expect(setup).toContain('20.19')
-    expect(setup).toContain('22.12')
+    // The FLOOR, in the toolchain step itself — not merely the digits somewhere
+    // in the section. The first version of this test asserted `'20.19'` and
+    // passed on a paragraph that happened to quote the lockfile's range while
+    // the toolchain line had reverted to "Node 20 (`.nvmrc`)". Found by a
+    // mutation planted to do exactly that.
+    expect(setup).toMatch(/\*\*1\. The toolchain\.\*\* \*\*Node 20\.19\+ or 22\.12\+\*\*/)
   })
 
   it('still states it in Quick start, where it was already correct', () => {
