@@ -35,7 +35,7 @@ import { randomBytes } from 'node:crypto'
  */
 
 /** @param {readonly string[]} argv @returns {{ dir: string | null }} */
-function parseArgs(argv) {
+export function parseArgs(argv) {
   /** @type {string | null} */
   let dir = null
   for (let i = 0; i < argv.length; i++) {
@@ -61,7 +61,7 @@ function parseArgs(argv) {
  *
  * @param {string | null} agentId
  */
-function reportName(agentId) {
+export function reportName(agentId) {
   if (!agentId) return '_account.json'
   const safe = agentId.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/\.\.+/g, '-')
   return `${safe.slice(0, 100)}.json`
@@ -100,7 +100,7 @@ function readStdin() {
  * @param {unknown} raw
  * @returns {{ usedPercent: number, resetsAt: number } | null}
  */
-function windowOf(raw) {
+export function windowOf(raw) {
   if (typeof raw !== 'object' || raw === null) return null
   const used = /** @type {Record<string, unknown>} */ (raw)['used_percentage']
   const resets = /** @type {Record<string, unknown>} */ (raw)['resets_at']
@@ -117,7 +117,7 @@ function windowOf(raw) {
  *
  * @param {string} file @param {string} data
  */
-function writeAtomic(file, data) {
+export function writeAtomic(file, data) {
   const dir = path.dirname(file)
   fs.mkdirSync(dir, { recursive: true })
   const tmp = path.join(dir, `.${path.basename(file)}.${randomBytes(6).toString('hex')}.tmp`)
@@ -126,7 +126,7 @@ function writeAtomic(file, data) {
 }
 
 /** @param {{ usedPercent: number } | null} w @param {string} label */
-function part(w, label) {
+export function part(w, label) {
   return w ? `${label} ${Math.round(w.usedPercent)}%` : null
 }
 
@@ -139,7 +139,7 @@ function part(w, label) {
  * @param {unknown} raw
  * @returns {number | null}
  */
-function sessionCostOf(raw) {
+export function sessionCostOf(raw) {
   if (typeof raw !== 'object' || raw === null) return null
   const usd = /** @type {Record<string, unknown>} */ (raw)['total_cost_usd']
   if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0) return null
@@ -207,7 +207,10 @@ async function main() {
   process.stdout.write(shown.length > 0 ? shown.join(' · ') : 'usage —')
 }
 
-main().catch((err) => {
-  process.stderr.write(`eph-usage: ${String(err)}\n`)
-  process.exit(0)
-})
+// Only run when executed as a program; importing it for tests must not consume stdin or write output.
+if (process.argv[1] && process.argv[1].endsWith('eph-usage.mjs')) {
+  main().catch((err) => {
+    process.stderr.write(`eph-usage: ${String(err)}\n`)
+    process.exit(0)
+  })
+}
