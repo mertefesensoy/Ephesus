@@ -1,3 +1,5 @@
+// ADR-0023: usage-aware pacing. These helpers run in-process because the existing
+// spawn tests exercise the shipped shim but are invisible to Vitest's V8 coverage.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
