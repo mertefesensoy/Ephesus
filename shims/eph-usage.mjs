@@ -6,7 +6,7 @@ import process from 'node:process'
 import { randomBytes } from 'node:crypto'
 
 /**
- * `eph-usage` — the statusline shim (ADR-0019).
+ * `eph-usage` — the statusline shim (ADR-0023).
  *
  * Engines that render a status line hand the renderer a JSON document on stdin.
  * Claude Code's carries a `rate_limits` block: the account's rolling 5-hour and
