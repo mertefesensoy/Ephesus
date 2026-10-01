@@ -243,7 +243,7 @@ linux artifact.
 CI run 36924116592 failed one test in `test/main/pacing-wakes.test.ts`, a
 teardown race: `ENOTEMPTY` removing a temp Agora's `.git` after
 `agora.drained()`. This change touches neither that file, `src/`, nor
-`test/tmpdir.ts`, and the same test passed on the same tree in the other runs.
+`test/tmpdir.ts`, and the same test passed on the same tree in every other run listed above.
 It emitted no measurement, so the run recorded in its place is the rerun. The
 race, its evidence and the two suspects in its teardown are recorded in
 DECISIONS-LOG (2026-10-01, "FOUND BY CI — RECORDED, NOT FIXED, OUT OF SCOPE"),
