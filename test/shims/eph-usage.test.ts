@@ -2,7 +2,7 @@
 // spawn tests exercise the shipped shim but are invisible to Vitest's V8 coverage.
 // One test still spawns a process: that importing the shim runs nothing is a fact
 // about a whole process, observable only from outside one.
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -147,17 +147,28 @@ describe('eph-usage — atomic writes', () => {
 })
 
 describe('eph-usage — importing it', () => {
-  it('runs nothing: reads no stdin, draws no status line, writes no report', () => {
+  it('runs nothing: reads no stdin, prints nothing, writes no report', () => {
     // The guard at the bottom of the shim is what lets this file import it at all.
     // A process imports it from a file that is not the shim, as this file does, and
     // is handed everything a run of `main()` would act on: a status document on
-    // stdin, a `--dir` to write into and an agent to name the report after.
+    // stdin, a `--dir` to write into and an agent to name the report after. Once
+    // the import settles it records whether anything began reading its stdin.
     const dir = tempDir()
     const importer = path.join(dir, 'importer.mjs')
-    fs.writeFileSync(importer, `await import(${JSON.stringify(SHIM_URL)})\n`, 'utf8')
+    const flowing = path.join(dir, 'stdin-flowing.txt')
+    fs.writeFileSync(
+      importer,
+      [
+        `import fs from 'node:fs'`,
+        `await import(${JSON.stringify(SHIM_URL)})`,
+        `fs.writeFileSync(${JSON.stringify(flowing)}, String(process.stdin.readableFlowing))`,
+        ''
+      ].join('\n'),
+      'utf8'
+    )
     const reports = path.join(dir, 'reports')
 
-    const stdout = execFileSync(process.execPath, [importer, '--dir', reports], {
+    const run = spawnSync(process.execPath, [importer, '--dir', reports], {
       input: JSON.stringify({
         rate_limits: { five_hour: { used_percentage: 12, resets_at: 1788294000 } }
       }),
@@ -166,7 +177,11 @@ describe('eph-usage — importing it', () => {
       timeout: 10_000
     })
 
-    expect(stdout).toBe('')
+    expect(run.status).toBe(0)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toBe('')
+    // `null` until something attaches a reader or resumes the stream: never read.
+    expect(fs.readFileSync(flowing, 'utf8')).toBe('null')
     expect(fs.existsSync(reports)).toBe(false)
   })
 })
