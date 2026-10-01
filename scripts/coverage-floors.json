@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "about": [
-    "The coverage record for the seam rule (ENGINEERING-STANDARDS \u00a76.7, TEST-STRATEGY \u00a72; M8.0).",
+    "The coverage record for the seam rule (ENGINEERING-STANDARDS §6.7, TEST-STRATEGY §2; M8.0).",
     "Checked by scripts/check-coverage.cjs against coverage/coverage-summary.json from `npm run test:coverage`.",
     "subsystems: a TOTAL map of every production file (src/**/*.{ts,tsx} less declarations, shims/**/*.mjs)",
     "  to the one subsystem it belongs to. A member ending in `/` is a directory prefix; otherwise it is one file.",
@@ -11,28 +11,28 @@
     "  enters there. The first record on a platform is `--seed`; `--update` ratchets an existing block and can",
     "  never start one. Floors only rise through --update; a fall is a hand edit with a reason in the diff.",
     "  --update never adds an untested module; a new one is added by hand, which is the review.",
-    "platforms.<name>.candidate: the corroboration window \u2014 the last corroboratingRuns runs measured on one production",
+    "platforms.<name>.candidate: the corroboration window — the last corroboratingRuns runs measured on one production",
     "  tree AND one subsystem map, each with its condition, the identity of the coverage report it read, and the figures",
     "  it measured. A floor rises only once the window is full, and only to the metric-wise MINIMUM across it. The window",
     "  SLIDES (the tree hash covers production files only, so adding tests must still be recordable) and restarts when the",
     "  tree or the subsystem map changes. Absent is legal: a window is evidence a run accumulates, never a human seed.",
-    "tolerance: points a subsystem may sit below its floor before the check fails \u2014 see toleranceReason.",
-    "ratchetLag: points a floor may sit BELOW reality before the check fails as stale \u2014 see ratchetLagReason.",
-    "corroboratingRuns: runs of one tree a RAISE needs before it may happen \u2014 see corroboratingRunsReason.",
+    "tolerance: points a subsystem may sit below its floor before the check fails — see toleranceReason.",
+    "ratchetLag: points a floor may sit BELOW reality before the check fails as stale — see ratchetLagReason.",
+    "corroboratingRuns: runs of one tree a RAISE needs before it may happen — see corroboratingRunsReason.",
     "  Only the raise path waits: a regression past the tolerance still fails on the single run that measured it.",
     "NOTE: the tree hash covers src/**/*.{ts,tsx} and shims/**/*.mjs ONLY. It cannot see assets, node_modules or",
     "  the licensed art drop, so a build input outside that set can move a figure without moving the hash. That",
-    "  happened on 2026-09-04 and cost two wrong diagnoses \u2014 see corroboratingRunsReason."
+    "  happened on 2026-09-04 and cost two wrong diagnoses — see corroboratingRunsReason."
   ],
   "tolerance": 0.25,
-  "toleranceReason": "Measured, not assumed: three full `npm run test:coverage` runs on win32 at the M8.0 baseline (same tree, one of them under load, n = 3) agreed to the hundredth on every subsystem and metric, a spread of 0.00. 0.25 points is headroom for timing-dependent paths the runs happened to take the same way, which is the one thing n = 3 cannot exclude. What it buys varies by row: at the baseline it is between about 0.2 and 2.9 coverable lines per subsystem (home the smallest, boot the largest), so on the large rows a few lines can slip inside it \u2014 which is why the untested-module record exists beside the floors, and why --update ratchets the floor to every measurement. A failure inside this band is a false positive to RE-MEASURE (raise n, record the spread here), never a floor to lower.",
+  "toleranceReason": "Measured, not assumed: three full `npm run test:coverage` runs on win32 at the M8.0 baseline (same tree, one of them under load, n = 3) agreed to the hundredth on every subsystem and metric, a spread of 0.00. 0.25 points is headroom for timing-dependent paths the runs happened to take the same way, which is the one thing n = 3 cannot exclude. What it buys varies by row: at the baseline it is between about 0.2 and 2.9 coverable lines per subsystem (home the smallest, boot the largest), so on the large rows a few lines can slip inside it — which is why the untested-module record exists beside the floors, and why --update ratchets the floor to every measurement. A failure inside this band is a false positive to RE-MEASURE (raise n, record the spread here), never a floor to lower.",
   "ratchetLag": 5,
-  "ratchetLagReason": "A floor is a record of what was measured, and floors rise only when somebody runs --update; nothing in CI writes this file. So a subsystem more than 5 points ABOVE its floor means the record has been left behind by more than a package's worth of coverage, and the check fails until it is ratcheted \u2014 otherwise coverage gained after the baseline could be lost again without any failure, and the record would be a number nobody turned. Set at M8.0 as the size of one package's typical gain; revise with the same reasoning.",
+  "ratchetLagReason": "A floor is a record of what was measured, and floors rise only when somebody runs --update; nothing in CI writes this file. So a subsystem more than 5 points ABOVE its floor means the record has been left behind by more than a package's worth of coverage, and the check fails until it is ratcheted — otherwise coverage gained after the baseline could be lost again without any failure, and the record would be a number nobody turned. Set at M8.0 as the size of one package's typical gain; revise with the same reasoning.",
   "corroboratingRuns": 3,
-  "corroboratingRunsReason": "Measured, not assumed \u2014 and the first diagnosis of WHY was wrong twice, which is the part worth keeping. --update ratcheted terraces.functions to 85.15% on ONE win32 run (9b57f86); later win32 runs in the same checkout read 84.65%; runs in a git worktree and on CI linux read 84.16%. Five runs, three answers, a spread of 0.99 points against a tolerance of 0.25. It was read first as a lucky ratchet, then as machine jitter. Neither was the bulk of it. 0.49 of that point was the LICENSED ART PACK: src/renderer/src/assets/{tileset,characters}/*.png are a deliberate gitignored drop (ATTRIBUTION.md rule 2), so the globs are populated on a machine that bought the pack and empty on every CI runner, fresh clone and worktree \u2014 with them empty the two loader loops in FloorCanvas iterate zero times and loadOne is never called, worth exactly 10 lines, 1 function, 6 branches and 10 statements. That input is invisible to the tree hash, which covers .ts/.tsx only. It is fixed at the source: the test now stubs both glob modules, so the figure is the same with the pack and without it. The REMAINDER, about one line, was genuine jitter from a floating Promise.all no test awaited, and is fixed by the bring-up handle FloorCanvas now hands out. Three runs is the smallest window that outlives a back-to-back pair sharing one machine mood; it costs one extra suite run per ratchet, and lowering it below 3 is refused by the validator. If a row keeps needing a hand correction, the cause is an unrecorded condition, not a number that needs lowering \u2014 GYM-006 metric 2 says never lower a floor, and it is right.",
+  "corroboratingRunsReason": "Measured, not assumed — and the first diagnosis of WHY was wrong twice, which is the part worth keeping. --update ratcheted terraces.functions to 85.15% on ONE win32 run (9b57f86); later win32 runs in the same checkout read 84.65%; runs in a git worktree and on CI linux read 84.16%. Five runs, three answers, a spread of 0.99 points against a tolerance of 0.25. It was read first as a lucky ratchet, then as machine jitter. Neither was the bulk of it. 0.49 of that point was the LICENSED ART PACK: src/renderer/src/assets/{tileset,characters}/*.png are a deliberate gitignored drop (ATTRIBUTION.md rule 2), so the globs are populated on a machine that bought the pack and empty on every CI runner, fresh clone and worktree — with them empty the two loader loops in FloorCanvas iterate zero times and loadOne is never called, worth exactly 10 lines, 1 function, 6 branches and 10 statements. That input is invisible to the tree hash, which covers .ts/.tsx only. It is fixed at the source: the test now stubs both glob modules, so the figure is the same with the pack and without it. The REMAINDER, about one line, was genuine jitter from a floating Promise.all no test awaited, and is fixed by the bring-up handle FloorCanvas now hands out. Three runs is the smallest window that outlives a back-to-back pair sharing one machine mood; it costs one extra suite run per ratchet, and lowering it below 3 is refused by the validator. If a row keeps needing a hand correction, the cause is an unrecorded condition, not a number that needs lowering — GYM-006 metric 2 says never lower a floor, and it is right.",
   "subsystems": {
     "boot": {
-      "is": "Boot and wiring \u2014 SDD \u00a71.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts), M8.8 continued it (restore.ts, state-store.ts)",
+      "is": "Boot and wiring — SDD §1.1 says index.ts holds no logic of its own; this row measures how true that is, and M8.1 began moving logic out of it (shutdown.ts, ui-bridge.ts), M8.8 continued it (restore.ts, state-store.ts)",
       "members": [
         "src/main/index.ts",
         "src/main/ipc.ts",
@@ -251,7 +251,7 @@
       ]
     },
     "herald": {
-      "is": "Voice \u2014 built, tested, unwired (M6.9 deferred indefinitely)",
+      "is": "Voice — built, tested, unwired (M6.9 deferred indefinitely)",
       "members": [
         "src/main/herald/"
       ]
@@ -266,41 +266,41 @@
   "platforms": {
     "win32": {
       "measured": {
-        "at": "2026-09-07T20:37:28.829Z",
-        "commit": "6fdcad2",
+        "at": "2026-10-01T20:45:54.949Z",
+        "commit": "30835f2",
         "ref": "local",
-        "tree": "ffa20b55b23a",
+        "tree": "bffbbf3bd541",
         "platform": "win32",
         "node": "v20.16.0",
         "os": "Windows_NT 10.0.26200",
         "command": "npm run test:coverage"
       },
       "candidate": {
-        "tree": "ffa20b55b23a",
-        "map": "52cf59a4bc05",
+        "tree": "bffbbf3bd541",
+        "map": "4770a924fcf6",
         "runs": [
           {
-            "at": "2026-09-07T20:33:15.228Z",
-            "commit": "6fdcad2",
+            "at": "2026-10-01T20:45:54.949Z",
+            "commit": "30835f2",
             "ref": "local",
-            "tree": "ffa20b55b23a",
+            "tree": "bffbbf3bd541",
             "platform": "win32",
             "node": "v20.16.0",
             "os": "Windows_NT 10.0.26200",
             "command": "npm run test:coverage",
-            "report": "2026-09-07T20:33:15.043Z",
+            "report": "2026-10-01T20:45:54.585Z",
             "floors": {
               "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
+                "lines": 27.94,
+                "branches": 18.03,
+                "functions": 12.99,
+                "statements": 27.03
               },
               "engines": {
-                "lines": 95.45,
-                "branches": 87.93,
-                "functions": 92.59,
-                "statements": 93.25
+                "lines": 95.52,
+                "branches": 88.16,
+                "functions": 92.86,
+                "statements": 93.35
               },
               "hermes": {
                 "lines": 98.65,
@@ -309,10 +309,10 @@
                 "statements": 96.67
               },
               "agora": {
-                "lines": 98.06,
-                "branches": 89.27,
-                "functions": 97.6,
-                "statements": 96.93
+                "lines": 98.48,
+                "branches": 89.64,
+                "functions": 97.51,
+                "statements": 97.33
               },
               "artemis": {
                 "lines": 97.66,
@@ -321,28 +321,28 @@
                 "statements": 97.08
               },
               "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
+                "lines": 90.79,
+                "branches": 79.47,
+                "functions": 87.32,
+                "statements": 88.96
               },
               "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
+                "lines": 92.84,
+                "branches": 79.31,
+                "functions": 95.76,
+                "statements": 90.28
               },
               "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
+                "lines": 91.2,
+                "branches": 77.87,
+                "functions": 91.06,
+                "statements": 89.64
               },
               "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
+                "lines": 96.72,
+                "branches": 88.13,
+                "functions": 91.99,
+                "statements": 95.28
               },
               "terraces": {
                 "lines": 76.39,
@@ -363,22 +363,22 @@
                 "statements": 95.5
               },
               "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
+                "lines": 97.88,
+                "branches": 92.9,
+                "functions": 95.29,
+                "statements": 96.55
               },
               "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
+                "lines": 73.33,
+                "branches": 75,
+                "functions": 62.86,
+                "statements": 72.79
               },
               "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
+                "lines": 46.79,
+                "branches": 46.69,
+                "functions": 34.56,
+                "statements": 44.91
               },
               "herald": {
                 "lines": 93.05,
@@ -387,240 +387,10 @@
                 "statements": 89.17
               },
               "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-07T20:35:23.524Z",
-            "commit": "6fdcad2",
-            "ref": "local",
-            "tree": "ffa20b55b23a",
-            "platform": "win32",
-            "node": "v20.16.0",
-            "os": "Windows_NT 10.0.26200",
-            "command": "npm run test:coverage",
-            "report": "2026-09-07T20:35:23.315Z",
-            "floors": {
-              "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
-              },
-              "engines": {
-                "lines": 95.45,
-                "branches": 87.93,
-                "functions": 92.59,
-                "statements": 93.25
-              },
-              "hermes": {
-                "lines": 98.65,
-                "branches": 91.33,
-                "functions": 98.88,
-                "statements": 96.67
-              },
-              "agora": {
-                "lines": 98.06,
-                "branches": 89.27,
-                "functions": 97.6,
-                "statements": 96.93
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
-              },
-              "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
-              },
-              "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
-              },
-              "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-07T20:37:28.829Z",
-            "commit": "6fdcad2",
-            "ref": "local",
-            "tree": "ffa20b55b23a",
-            "platform": "win32",
-            "node": "v20.16.0",
-            "os": "Windows_NT 10.0.26200",
-            "command": "npm run test:coverage",
-            "report": "2026-09-07T20:37:28.642Z",
-            "floors": {
-              "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
-              },
-              "engines": {
-                "lines": 95.45,
-                "branches": 87.93,
-                "functions": 92.59,
-                "statements": 93.25
-              },
-              "hermes": {
-                "lines": 98.65,
-                "branches": 91.33,
-                "functions": 98.88,
-                "statements": 96.67
-              },
-              "agora": {
-                "lines": 98.06,
-                "branches": 89.27,
-                "functions": 97.6,
-                "statements": 96.93
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
-              },
-              "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
-              },
-              "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
-              },
-              "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
+                "lines": 55.59,
+                "branches": 54.47,
+                "functions": 57.41,
+                "statements": 56.84
               }
             }
           }
@@ -639,7 +409,7 @@
           "branches": 87.93,
           "functions": 92.59,
           "statements": 93.25,
-          "files": 25
+          "files": 26
         },
         "hermes": {
           "lines": 98.65,
@@ -653,7 +423,7 @@
           "branches": 89.27,
           "functions": 97.6,
           "statements": 96.93,
-          "files": 11
+          "files": 14
         },
         "artemis": {
           "lines": 97.66,
@@ -667,7 +437,7 @@
           "branches": 78.75,
           "functions": 86.51,
           "statements": 88.62,
-          "files": 8
+          "files": 9
         },
         "odeon": {
           "lines": 92.5,
@@ -688,7 +458,7 @@
           "branches": 87.1,
           "functions": 90.2,
           "statements": 94.85,
-          "files": 20
+          "files": 22
         },
         "terraces": {
           "lines": 76.39,
@@ -716,7 +486,7 @@
           "branches": 92.92,
           "functions": 94.64,
           "statements": 96.26,
-          "files": 13
+          "files": 15
         },
         "home": {
           "lines": 71.93,
@@ -748,7 +518,6 @@
         }
       },
       "untested": [
-        "shims/eph-usage.mjs",
         "src/main/db.ts",
         "src/main/index.ts",
         "src/main/library-fts-sqlite.ts",
@@ -772,41 +541,41 @@
     },
     "linux": {
       "measured": {
-        "at": "2026-09-07T20:59:28.405Z",
-        "commit": "cfcda90",
-        "ref": "feature/m8-12-exit-review",
-        "tree": "ffa20b55b23a",
+        "at": "2026-10-01T20:45:38.308Z",
+        "commit": "30835f2",
+        "ref": "fix/eph-usage-coverage-10",
+        "tree": "bffbbf3bd541",
         "platform": "linux",
         "node": "v20.20.2",
         "os": "Linux 6.17.0-1022-azure",
         "command": "npm run test:coverage"
       },
       "candidate": {
-        "tree": "ffa20b55b23a",
-        "map": "52cf59a4bc05",
+        "tree": "bffbbf3bd541",
+        "map": "4770a924fcf6",
         "runs": [
           {
-            "at": "2026-09-07T20:53:21.451Z",
-            "commit": "47dedba",
-            "ref": "feature/m8-12-exit-review",
-            "tree": "ffa20b55b23a",
+            "at": "2026-10-01T20:45:38.308Z",
+            "commit": "30835f2",
+            "ref": "fix/eph-usage-coverage-10",
+            "tree": "bffbbf3bd541",
             "platform": "linux",
             "node": "v20.20.2",
             "os": "Linux 6.17.0-1022-azure",
             "command": "npm run test:coverage",
-            "report": "2026-09-07T20:53:21.345Z",
+            "report": "2026-10-01T20:45:38.160Z",
             "floors": {
               "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
+                "lines": 27.94,
+                "branches": 18.03,
+                "functions": 12.99,
+                "statements": 27.03
               },
               "engines": {
-                "lines": 94.88,
-                "branches": 87.07,
-                "functions": 91.11,
-                "statements": 92.89
+                "lines": 94.96,
+                "branches": 87.32,
+                "functions": 91.43,
+                "statements": 93
               },
               "hermes": {
                 "lines": 98.65,
@@ -815,10 +584,10 @@
                 "statements": 96.87
               },
               "agora": {
-                "lines": 97.09,
-                "branches": 88.32,
-                "functions": 96.41,
-                "statements": 95.83
+                "lines": 97.71,
+                "branches": 88.85,
+                "functions": 96.52,
+                "statements": 96.47
               },
               "artemis": {
                 "lines": 97.66,
@@ -827,28 +596,28 @@
                 "statements": 97.08
               },
               "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
+                "lines": 90.79,
+                "branches": 79.47,
+                "functions": 87.32,
+                "statements": 88.96
               },
               "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
+                "lines": 92.84,
+                "branches": 79.31,
+                "functions": 95.76,
+                "statements": 90.28
               },
               "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
+                "lines": 91.2,
+                "branches": 77.87,
+                "functions": 91.06,
+                "statements": 89.64
               },
               "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
+                "lines": 96.64,
+                "branches": 88.36,
+                "functions": 91.99,
+                "statements": 95.42
               },
               "terraces": {
                 "lines": 76.39,
@@ -869,22 +638,22 @@
                 "statements": 95.5
               },
               "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
+                "lines": 97.88,
+                "branches": 92.9,
+                "functions": 95.29,
+                "statements": 96.55
               },
               "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
+                "lines": 73.33,
+                "branches": 75,
+                "functions": 62.86,
+                "statements": 72.79
               },
               "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
+                "lines": 46.79,
+                "branches": 46.69,
+                "functions": 34.56,
+                "statements": 44.91
               },
               "herald": {
                 "lines": 93.05,
@@ -893,240 +662,10 @@
                 "statements": 89.17
               },
               "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-07T20:57:11.457Z",
-            "commit": "ef5f4a1",
-            "ref": "feature/m8-12-exit-review",
-            "tree": "ffa20b55b23a",
-            "platform": "linux",
-            "node": "v20.20.2",
-            "os": "Linux 6.17.0-1022-azure",
-            "command": "npm run test:coverage",
-            "report": "2026-09-07T20:57:11.349Z",
-            "floors": {
-              "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
-              },
-              "engines": {
-                "lines": 94.88,
-                "branches": 87.07,
-                "functions": 91.11,
-                "statements": 92.89
-              },
-              "hermes": {
-                "lines": 98.65,
-                "branches": 91.33,
-                "functions": 98.88,
-                "statements": 96.87
-              },
-              "agora": {
-                "lines": 97.09,
-                "branches": 88.32,
-                "functions": 96.41,
-                "statements": 95.83
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
-              },
-              "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
-              },
-              "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
-              },
-              "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
-              }
-            }
-          },
-          {
-            "at": "2026-09-07T20:59:28.405Z",
-            "commit": "cfcda90",
-            "ref": "feature/m8-12-exit-review",
-            "tree": "ffa20b55b23a",
-            "platform": "linux",
-            "node": "v20.20.2",
-            "os": "Linux 6.17.0-1022-azure",
-            "command": "npm run test:coverage",
-            "report": "2026-09-07T20:59:28.291Z",
-            "floors": {
-              "boot": {
-                "lines": 28.05,
-                "branches": 17.46,
-                "functions": 13.24,
-                "statements": 27.1
-              },
-              "engines": {
-                "lines": 94.88,
-                "branches": 87.07,
-                "functions": 91.11,
-                "statements": 92.89
-              },
-              "hermes": {
-                "lines": 98.65,
-                "branches": 91.33,
-                "functions": 98.88,
-                "statements": 96.87
-              },
-              "agora": {
-                "lines": 97.09,
-                "branches": 88.32,
-                "functions": 96.41,
-                "statements": 95.83
-              },
-              "artemis": {
-                "lines": 97.66,
-                "branches": 91.78,
-                "functions": 91.67,
-                "statements": 97.08
-              },
-              "library": {
-                "lines": 90.39,
-                "branches": 78.7,
-                "functions": 86.51,
-                "statements": 88.62
-              },
-              "odeon": {
-                "lines": 92.5,
-                "branches": 78.8,
-                "functions": 95.61,
-                "statements": 90.14
-              },
-              "harbor": {
-                "lines": 90.99,
-                "branches": 76.63,
-                "functions": 90.7,
-                "statements": 89.38
-              },
-              "watch": {
-                "lines": 96.16,
-                "branches": 87.06,
-                "functions": 90.2,
-                "statements": 94.84
-              },
-              "terraces": {
-                "lines": 76.39,
-                "branches": 72.91,
-                "functions": 85.22,
-                "statements": 76.4
-              },
-              "gymnasium": {
-                "lines": 95.19,
-                "branches": 78.46,
-                "functions": 95.12,
-                "statements": 92.96
-              },
-              "stoa": {
-                "lines": 96.48,
-                "branches": 84.77,
-                "functions": 98.31,
-                "statements": 95.5
-              },
-              "company": {
-                "lines": 97.69,
-                "branches": 92.92,
-                "functions": 94.64,
-                "statements": 96.26
-              },
-              "home": {
-                "lines": 71.93,
-                "branches": 70.18,
-                "functions": 58.06,
-                "statements": 71.09
-              },
-              "panels": {
-                "lines": 46.77,
-                "branches": 46.57,
-                "functions": 34.41,
-                "statements": 44.9
-              },
-              "herald": {
-                "lines": 93.05,
-                "branches": 77.96,
-                "functions": 88,
-                "statements": 89.17
-              },
-              "shims": {
-                "lines": 47.62,
-                "branches": 41.5,
-                "functions": 46.3,
-                "statements": 47.26
+                "lines": 55.59,
+                "branches": 54.47,
+                "functions": 57.41,
+                "statements": 56.84
               }
             }
           }
@@ -1145,7 +684,7 @@
           "branches": 87.07,
           "functions": 91.11,
           "statements": 92.89,
-          "files": 25
+          "files": 26
         },
         "hermes": {
           "lines": 98.65,
@@ -1159,7 +698,7 @@
           "branches": 88.32,
           "functions": 96.41,
           "statements": 95.83,
-          "files": 11
+          "files": 14
         },
         "artemis": {
           "lines": 97.66,
@@ -1173,7 +712,7 @@
           "branches": 78.75,
           "functions": 86.51,
           "statements": 88.62,
-          "files": 8
+          "files": 9
         },
         "odeon": {
           "lines": 92.5,
@@ -1194,7 +733,7 @@
           "branches": 87.1,
           "functions": 90.2,
           "statements": 94.85,
-          "files": 20
+          "files": 22
         },
         "terraces": {
           "lines": 76.39,
@@ -1222,7 +761,7 @@
           "branches": 92.92,
           "functions": 94.64,
           "statements": 96.26,
-          "files": 13
+          "files": 15
         },
         "home": {
           "lines": 71.93,
@@ -1254,7 +793,6 @@
         }
       },
       "untested": [
-        "shims/eph-usage.mjs",
         "src/main/db.ts",
         "src/main/index.ts",
         "src/main/library-fts-sqlite.ts",
