@@ -40,7 +40,7 @@ The decision it implements is ADR-0023.
 | `shims/eph-usage.mjs` | Six pure helpers exported and `main()` guarded, exactly as `eph-hook.mjs`, `eph-recall.mjs` and `eph-gh-token.mjs` do (contributor). The header now cites ADR-0023. |
 | `test/shims/eph-usage.test.ts` | New. In-process tests of the six helpers (contributor), plus: an absent window, the unrounded percentage, an out-of-process test of the import guard, and `removeTempDir` teardown. |
 | `scripts/coverage-floors.json` | Ratcheted by `check-coverage.cjs --update` — win32 from three local runs, linux from three CI push runs, all of one production tree. `shims/eph-usage.mjs` leaves `untested` on both platforms. |
-| `docs/DECISIONS-LOG.md` | Two entries: how a contributor's PR is finished on a maintainer branch and why its author is kept; why the guard is tested through an importer file. |
+| `docs/DECISIONS-LOG.md` | Three entries: how a contributor's PR is finished on a maintainer branch and why its author is kept; why the guard is tested through an importer file; the `pacing-wakes` teardown flake CI hit along the way. |
 | `docs/implementations/2026-10-01-eph-usage-in-process-coverage.md` | This document. |
 
 ## 3. Implementation approach
@@ -48,9 +48,12 @@ The decision it implements is ADR-0023.
 ### Making a shim importable without changing what it does
 
 The pattern is the house one, unchanged: `export` on each pure helper, and
-`main()` called only when the process's entry point is the shim itself —
-`process.argv[1] && process.argv[1].endsWith('eph-usage.mjs')`. Adding `export`
-has no runtime effect. The guard is true on the production path:
+`main()` called only when `process.argv[1]` ends in `eph-usage.mjs` —
+`process.argv[1] && process.argv[1].endsWith('eph-usage.mjs')`. That is a suffix
+match, not an identity: a file named `x-eph-usage.mjs` that imported the shim
+would run `main()`. All four shims match this way, and tightening them to a
+basename comparison is recorded as a follow-up. Adding `export` has no runtime
+effect. The guard is true on the production path:
 `src/main/index.ts:1446` passes `path.join(appRoot, 'shims', 'eph-usage.mjs')`
 to the adapter, and `usageStatusLine` (`src/main/engines/claude.ts:885-891`)
 writes `node "<that path>" --dir "<dir>"` into the engine's settings, so the
@@ -63,13 +66,18 @@ from the other side: a guard that never fires fails eleven of its tests.
 |---|---|---|
 | The six helpers' branches | `test/shims/eph-usage.test.ts`, in-process | V8 sees them only here. |
 | `main()`, stdin, fail-open, the report as the harness reads it | `test/main/engines/claude-usage-statusline.test.ts`, spawned | That is how an engine runs it; V8 cannot see it, by construction. |
-| The import guard | `test/shims/eph-usage.test.ts`, one spawned process | "Importing runs nothing" is a property of a whole process — its stdin, stdout and the files it writes. |
+| The import guard | `test/shims/eph-usage.test.ts`, one spawned process | "Importing runs nothing" is a property of a whole process — its stdin, its stdout and stderr, and the files it writes. |
 
 The guard test writes an `importer.mjs` into a temp directory and runs it with a
 status document on stdin, `--dir <reports>` and an agent id: everything `main()`
-would act on. It must print nothing and create no report. An importer *file*,
-rather than `node -e`, matters: under `-e`, `process.argv[1]` is undefined, so
-the test would pass a guard that had dropped its filename check entirely.
+would act on. After the import settles, the importer records
+`process.stdin.readableFlowing`, which stays `null` until something attaches a
+reader or resumes the stream. The test asserts the guard's whole claim: exit 0,
+empty stdout and stderr, stdin never read, and no report directory. An importer
+*file*, rather than `node -e`, matters because under `-e` `process.argv[1]` is
+never a module path — it is undefined, or the first script argument — so the
+comparison the guard really makes, a module path that is not the shim's, would
+never be exercised. The importer reproduces the argv a real importer has.
 
 ### The history
 
@@ -142,12 +150,15 @@ window's runs `r₁…r₃`: `floor′(s,p,m) = min(r₁, r₂, r₃)` when that
 figure is below `floor − 0.25` (`tolerance`), or more than `5` points above it
 (`ratchetLag` — the stale-record rule PR #60's CI hit).
 
-**The mutation round.** Each mutant replaces one expression in
+**The mutation round.** Each mutant replaces or inserts one expression in
 `shims/eph-usage.mjs`, runs this file and the spawn suite (46 tests), and is
 restored; the file's hash is checked afterwards. Condition: Windows_NT
-10.0.26200, node v20.16.0, the shim as committed at `3f95dce` (sha256
-`3edd4b4b697e…`). A no-op control stayed green, 46 of 46; all 24 mutants were
-killed.
+10.0.26200, node v20.16.0, the shim as committed since `30835f2` (sha256
+`3edd4b4b697e…`) and this file as committed at `4a9c150`. A no-op control stayed
+green, 46 of 46; all 26 mutants were killed. The last two are planted rather
+than edited: each leaves the guard intact and adds one statement at module
+scope, which is exactly what the import test's stdin and stderr assertions exist
+to catch.
 
 | Expression | Mutant | Killed by |
 |---|---|---|
@@ -168,6 +179,8 @@ killed.
 | guard :212 | `if (false)` | the spawn suite (11 tests) |
 | guard :212 | `if (true)` | this file (the importer) — survived before this change |
 | guard :212 | `if (process.argv[1])` | this file (the importer) |
+| module scope, guard intact | a stray `readStdin()` | this file (the importer's `readableFlowing` check) |
+| module scope, guard intact | a stray `process.stderr.write(…)` | this file (the importer's stderr check) |
 
 ## 5. Design decisions
 
@@ -176,11 +189,11 @@ killed.
 | Re-apply the contributor's commits, folded, on a maintainer branch | Push fixes onto PR #60's fork branch | Its two red commits would stay, and `main` merges with merge commits. Rewriting someone else's pushed branch was not on the table. |
 | The same | Squash-merge PR #60 | A one-off departure from the merge-commit policy that `check-attribution.cjs`'s first-parent rule is written around. |
 | Keep the contributor as git author | Re-author the commits as the Architect | The diff is theirs. The attribution rule keeps vendor identities out and the Architect's commits the Architect's; it was never a reason to take a contributor's credit. |
-| Test the guard from an importer file | `node -e "await import(…)"` | `argv[1]` is undefined under `-e`, so a guard without its filename check would pass. |
+| Test the guard from an importer file | `node -e "await import(…)"` | Under `-e`, `argv[1]` is never a module path, so the comparison the guard really makes is never exercised; the importer reproduces a real importer's argv. |
 | `96.5` for the stored percentage | Any non-integer | 96.5 is where rounding crosses the default hold threshold, so the test names the consequence, not just the arithmetic. |
 | Correct the header's ADR here | A separate PR | It is the file under change, and review checks a load-bearing file's edits against the ADRs its header names. |
 | Let `--update` raise every drifted row | Hand-edit only the `shims` rows | A hand edit is the one way the record must not change; the other rows' rises are measured the same way and corroborated the same way. |
-| Leave `eph-hook`, `eph-recall` and `eph-gh-token`'s guards untested here | Fix all four | One issue per PR; recorded as a follow-up. |
+| Leave `eph-hook`, `eph-recall` and `eph-gh-token`'s guards untested here, and all four guards as suffix matches | Fix all four, or tighten them to a basename match | One issue per PR; both are recorded as one follow-up in DECISIONS-LOG. |
 
 ## 6. Verification
 
@@ -223,8 +236,10 @@ CI run 36924116592 failed one test in `test/main/pacing-wakes.test.ts`, a
 teardown race: `ENOTEMPTY` removing a temp Agora's `.git` after
 `agora.drained()`. This change touches neither that file, `src/`, nor
 `test/tmpdir.ts`, and the same test passed on the same tree in the other runs.
-It emitted no measurement, so the run recorded in its place is the rerun; the
-race is recorded as its own follow-up.
+It emitted no measurement, so the run recorded in its place is the rerun. The
+race, its evidence and the two suspects in its teardown are recorded in
+DECISIONS-LOG (2026-10-01, "FOUND BY CI — RECORDED, NOT FIXED, OUT OF SCOPE"),
+so the next red is recognised rather than re-diagnosed.
 
 ## 7. Related docs
 
@@ -233,5 +248,5 @@ race is recorded as its own follow-up.
 - [TEST-STRATEGY](../TEST-STRATEGY.md) — §2, the per-subsystem ratchet
 - [Usage-aware pacing](2026-09-01-usage-aware-pacing.md) — where the shim and the spawn suite were built
 - [The temp-directory teardown](2026-09-01-flaky-temp-dir-teardown.md) — why `removeTempDir` is the one remover
-- [DECISIONS-LOG](../DECISIONS-LOG.md) — the 2026-10-01 entries on finishing a contributor's PR and on testing the guard
+- [DECISIONS-LOG](../DECISIONS-LOG.md) — the 2026-10-01 entries on finishing a contributor's PR, on testing the guard, and on the `pacing-wakes` teardown flake
 - Issue [#10](https://github.com/mertefesensoy/Ephesus/issues/10) and PR [#60](https://github.com/mertefesensoy/Ephesus/pull/60)
