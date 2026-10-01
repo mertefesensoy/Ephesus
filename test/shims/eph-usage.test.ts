@@ -1,5 +1,8 @@
 // ADR-0023: usage-aware pacing. These helpers run in-process because the existing
 // spawn tests exercise the shipped shim but are invisible to Vitest's V8 coverage.
+// One test still spawns a process: that importing the shim runs nothing is a fact
+// about a whole process, observable only from outside one.
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -12,11 +15,13 @@ import {
   windowOf,
   writeAtomic
 } from '../../shims/eph-usage.mjs'
+import { removeTempDir } from '../tmpdir'
 
+const SHIM_URL = new URL('../../shims/eph-usage.mjs', import.meta.url).href
 const temps: string[] = []
 
 afterEach(() => {
-  for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 function tempDir(): string {
@@ -67,6 +72,21 @@ describe('eph-usage — rate-limit windows', () => {
       expect(windowOf({ used_percentage: 1, resets_at: resetsAt })).toBeNull()
     }
   )
+
+  it.each([null, undefined, 'five_hour', 42])(
+    'reads a window the engine did not send as no window: %s',
+    (raw) => {
+      // The first render of every session carries no `rate_limits` block at all.
+      expect(windowOf(raw)).toBeNull()
+    }
+  )
+
+  it('stores the percentage the engine reported, unrounded', () => {
+    // Pacing compares this figure with its thresholds (slow at 90%, hold at 97% by
+    // default — `src/shared/pacing.ts`). Rounded here, 96.5% would read as 97 and
+    // hold a company that should only have slowed. Only the status line rounds.
+    expect(windowOf({ used_percentage: 96.5, resets_at: 123 })?.usedPercent).toBe(96.5)
+  })
 })
 
 describe('eph-usage — report names', () => {
@@ -123,5 +143,30 @@ describe('eph-usage — atomic writes', () => {
 
     expect(fs.readFileSync(file, 'utf8')).toBe('new\n')
     expect(fs.statSync(file, { bigint: true }).ino).not.toBe(before)
+  })
+})
+
+describe('eph-usage — importing it', () => {
+  it('runs nothing: reads no stdin, draws no status line, writes no report', () => {
+    // The guard at the bottom of the shim is what lets this file import it at all.
+    // A process imports it from a file that is not the shim, as this file does, and
+    // is handed everything a run of `main()` would act on: a status document on
+    // stdin, a `--dir` to write into and an agent to name the report after.
+    const dir = tempDir()
+    const importer = path.join(dir, 'importer.mjs')
+    fs.writeFileSync(importer, `await import(${JSON.stringify(SHIM_URL)})\n`, 'utf8')
+    const reports = path.join(dir, 'reports')
+
+    const stdout = execFileSync(process.execPath, [importer, '--dir', reports], {
+      input: JSON.stringify({
+        rate_limits: { five_hour: { used_percentage: 12, resets_at: 1788294000 } }
+      }),
+      encoding: 'utf8',
+      env: { ...process.env, EPH_AGENT_ID: 'agent.importer' },
+      timeout: 10_000
+    })
+
+    expect(stdout).toBe('')
+    expect(fs.existsSync(reports)).toBe(false)
   })
 })
