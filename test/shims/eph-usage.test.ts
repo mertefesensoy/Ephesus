@@ -152,36 +152,48 @@ describe('eph-usage — importing it', () => {
     // A process imports it from a file that is not the shim, as this file does, and
     // is handed everything a run of `main()` would act on: a status document on
     // stdin, a `--dir` to write into and an agent to name the report after. Once
-    // the import settles it records whether anything began reading its stdin.
+    // the import settles it records whether anything attached a reader to its
+    // stdin, then reads stdin to the end itself, so nothing can have taken any.
     const dir = tempDir()
     const importer = path.join(dir, 'importer.mjs')
     const flowing = path.join(dir, 'stdin-flowing.txt')
+    const unread = path.join(dir, 'stdin-unread.txt')
     fs.writeFileSync(
       importer,
       [
         `import fs from 'node:fs'`,
         `await import(${JSON.stringify(SHIM_URL)})`,
         `fs.writeFileSync(${JSON.stringify(flowing)}, String(process.stdin.readableFlowing))`,
+        `let rest = ''`,
+        `for await (const chunk of process.stdin) rest += chunk`,
+        `fs.writeFileSync(${JSON.stringify(unread)}, rest)`,
         ''
       ].join('\n'),
       'utf8'
     )
     const reports = path.join(dir, 'reports')
+    const status = JSON.stringify({
+      rate_limits: { five_hour: { used_percentage: 12, resets_at: 1788294000 } }
+    })
+    // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
+    // Node itself write to stderr, which would fail this for nothing the shim did.
+    const env: NodeJS.ProcessEnv = { ...process.env, EPH_AGENT_ID: 'agent.importer' }
+    delete env['NODE_OPTIONS']
 
     const run = spawnSync(process.execPath, [importer, '--dir', reports], {
-      input: JSON.stringify({
-        rate_limits: { five_hour: { used_percentage: 12, resets_at: 1788294000 } }
-      }),
+      input: status,
       encoding: 'utf8',
-      env: { ...process.env, EPH_AGENT_ID: 'agent.importer' },
+      env,
       timeout: 10_000
     })
 
     expect(run.status).toBe(0)
     expect(run.stdout).toBe('')
     expect(run.stderr).toBe('')
-    // `null` until something attaches a reader or resumes the stream: never read.
+    // `null` until something attaches a reader or resumes the stream.
     expect(fs.readFileSync(flowing, 'utf8')).toBe('null')
+    // And nothing took any of it: the importer still reads the whole document.
+    expect(fs.readFileSync(unread, 'utf8')).toBe(status)
     expect(fs.existsSync(reports)).toBe(false)
   })
 })
