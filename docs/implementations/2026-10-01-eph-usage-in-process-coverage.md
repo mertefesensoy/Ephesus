@@ -72,8 +72,11 @@ The guard test writes an `importer.mjs` into a temp directory and runs it with a
 status document on stdin, `--dir <reports>` and an agent id: everything `main()`
 would act on. After the import settles, the importer records
 `process.stdin.readableFlowing`, which stays `null` until something attaches a
-reader or resumes the stream. The test asserts the guard's whole claim: exit 0,
-empty stdout and stderr, stdin never read, and no report directory. An importer
+reader or resumes the stream, and then reads stdin to the end itself. The test
+asserts the guard's whole claim: exit 0, empty stdout and stderr, no reader
+attached, the whole document still unread, and no report directory. The child
+does not inherit `NODE_OPTIONS`, whose loaders and flags make Node write its own
+warnings to stderr. An importer
 *file*, rather than `node -e`, matters because under `-e` `process.argv[1]` is
 never a module path — it is undefined, or the first script argument — so the
 comparison the guard really makes, a module path that is not the shim's, would
@@ -154,11 +157,15 @@ figure is below `floor − 0.25` (`tolerance`), or more than `5` points above it
 `shims/eph-usage.mjs`, runs this file and the spawn suite (46 tests), and is
 restored; the file's hash is checked afterwards. Condition: Windows_NT
 10.0.26200, node v20.16.0, the shim as committed since `30835f2` (sha256
-`3edd4b4b697e…`) and this file as committed at `4a9c150`. A no-op control stayed
-green, 46 of 46; all 26 mutants were killed. The last two are planted rather
-than edited: each leaves the guard intact and adds one statement at module
-scope, which is exactly what the import test's stdin and stderr assertions exist
-to catch.
+`3edd4b4b697e…`) and this file as committed at `ff56a7a`. A no-op control stayed
+green, 46 of 46. The last three mutants are planted rather than edited: each
+leaves the guard intact and adds one statement at module scope, which is what the
+import test's stdin and stderr assertions exist to catch. The first 26 were run
+under vitest and all killed. The 27th, a synchronous `fs.readFileSync(0)`,
+cannot be scored that way: it blocks the in-process import, so the vitest run
+never finishes. It was scored by replaying the import test in plain node against
+a mutated copy of the shim. The unmutated shim passes every check; the mutant
+fails only the whole-document check, which is the assertion added to catch it.
 
 | Expression | Mutant | Killed by |
 |---|---|---|
@@ -181,6 +188,7 @@ to catch.
 | guard :212 | `if (process.argv[1])` | this file (the importer) |
 | module scope, guard intact | a stray `readStdin()` | this file (the importer's `readableFlowing` check) |
 | module scope, guard intact | a stray `process.stderr.write(…)` | this file (the importer's stderr check) |
+| module scope, guard intact | a stray `fs.readFileSync(0)` | this file (the whole-document check), replayed in plain node |
 
 ## 5. Design decisions
 
