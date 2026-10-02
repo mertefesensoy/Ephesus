@@ -37,13 +37,18 @@ interface Rig {
 }
 
 const rigs: Rig[] = []
+const homes: string[] = []
 
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.close()
+  // After every rig is closed, and whether or not a rig was ever registered:
+  // a home removed only by its rig's close() leaked if the rig was not pushed.
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 async function startRig(options: { withLibrary?: boolean } = {}): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-recall-shim-'))
+  homes.push(home)
   const agoraRoot = path.join(home, 'agora')
   const prompts = new PromptStore(path.join(home, 'prompts'), path.join(REPO, 'prompts'))
   const library = new Library({
@@ -77,7 +82,6 @@ async function startRig(options: { withLibrary?: boolean } = {}): Promise<Rig> {
     },
     async close() {
       await hookServer.stop()
-      removeTempDir(home)
     }
   }
   rigs.push(rig)

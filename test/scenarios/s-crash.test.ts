@@ -67,13 +67,18 @@ interface Rig {
 }
 
 const rigs: Rig[] = []
+const homes: string[] = []
 
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.close()
+  // After every rig is closed, and whether or not a rig was ever registered:
+  // a home removed only by its rig's close() leaked if the rig was not pushed.
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 async function startRig(options: { resumable?: boolean } = {}): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-s-crash-'))
+  homes.push(home)
   const target = path.join(home, 'target-repo')
   fs.mkdirSync(target, { recursive: true })
   const prompts = new PromptStore(path.join(home, 'prompts'), path.join(REPO, 'prompts'))
