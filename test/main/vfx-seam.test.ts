@@ -31,7 +31,7 @@ const agoras: Agora[] = []
 
 afterEach(async () => {
   for (const hermes of routers.splice(0)) hermes.stop()
-  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
+  for (const agora of agoras.splice(0)) await agora.drained()
   for (const dir of temps.splice(0)) {
     removeTempDir(dir)
   }

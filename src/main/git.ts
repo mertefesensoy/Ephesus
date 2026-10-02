@@ -35,7 +35,12 @@ export interface GitResult {
 }
 
 export interface GitRunner {
-  /** Contract: never throws. A failed git command is a result, not an exception. */
+  /**
+   * Contract: never throws. A failed git command is a result, not an exception.
+   * `ExecGitRunner` also resolves only once the housekeeping a `git commit`
+   * starts has finished — unless its timeout killed the commit first (see
+   * `IDENTITY_ARGS`).
+   */
   run(cwd: string, args: readonly string[]): Promise<GitResult>
 }
 
@@ -49,7 +54,31 @@ const IDENTITY_ARGS = [
   '-c',
   'commit.gpgsign=false',
   '-c',
-  'core.hooksPath=/dev/null'
+  'core.hooksPath=/dev/null',
+  // The housekeeping a commit starts finishes inside the commit. `git commit`
+  // ends by running `git maintenance run --auto`, and on POSIX that DETACHES:
+  // it daemonizes, the commit exits, and the work carries on in a process no
+  // `await` can reach. git 2.55's default strategy repacks in that phase
+  // whenever two loose objects share the `objects/17` shard — routine in a
+  // long-lived Agora, chance in a test-sized one — so `Agora.drained()`
+  // resolved with `git repack` still writing `.git/objects/pack`, and a
+  // teardown deleting the directory met ENOTEMPTY
+  // (docs/implementations/2026-10-02-pacing-wakes-teardown.md, which also
+  // measures the price: an occasional slow commit, never a slow delivery). In
+  // the foreground the commit waits for it, which Git for Windows already does
+  // because it cannot daemonize. A commit the runner's timeout kills still
+  // orphans its housekeeping, exactly as before.
+  //
+  // `maintenance.autoDetach` is explicit so that a user's own setting cannot
+  // win: git 2.47 and later read it first. `gc.autoDetach` is what older git's
+  // `gc --auto` reads, and newer git never consults it while the first is set,
+  // so only an old git can tell whether it is there. Of the commands the
+  // harness runs only `commit` starts maintenance at all, so a target
+  // repository's `worktree`, `remote` and `rev-parse` calls are unaffected.
+  '-c',
+  'maintenance.autoDetach=false',
+  '-c',
+  'gc.autoDetach=false'
 ]
 
 export class ExecGitRunner implements GitRunner {

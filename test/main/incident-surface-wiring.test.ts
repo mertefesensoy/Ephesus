@@ -14,6 +14,7 @@ import { foldIncidents } from '../../src/shared/incident-view'
 import { HARBOR_ENDPOINT } from '../../src/shared/reserved'
 import { composeMessage, makeMessageId, type Message } from '../../src/shared/message'
 import type { InboundItem } from '../../src/shared/harbor'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * The seam between what the incident endpoint WRITES and what the panel READS
@@ -42,7 +43,7 @@ const homes: string[] = []
 afterEach(() => {
   while (homes.length > 0) {
     const home = homes.pop()
-    if (home !== undefined) fs.rmSync(home, { recursive: true, force: true })
+    if (home !== undefined) removeTempDir(home)
   }
 })
 
