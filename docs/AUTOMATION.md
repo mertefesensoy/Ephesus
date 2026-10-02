@@ -45,7 +45,7 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 ### Goal prompts (`docs/*GOAL.md` — pasted into the built-in `/goal`)
 | File | Purpose |
 |---|---|
-| [`GOAL.md`](./GOAL.md) | The standing goal prompt. It does not name a milestone: the Architect chooses the scope in the session. It defines the three end states the goal evaluator accepts (DONE, `EPHESUS-BLOCKED:`, BOUND at 200 turns) and the constraints every session holds to. It must stay under the CLI's 4,000-character limit, and the file shows how to measure it. |
+| [`GOAL.md`](./GOAL.md) | The standing goal prompt for any session. It names no task: the session reads the record, asks the Architect through AskUserQuestion what to do next, and asks again after each task until the Architect ends the session. It defines the three end states the goal evaluator accepts (DONE, `EPHESUS-BLOCKED:`, BOUND at 200 turns) and the constraints every session holds to. It must stay under the CLI's 4,000-character limit, and the file shows how to measure it. |
 | [`M8c-GOAL.md`](./M8c-GOAL.md), [`M9-GOAL.md`](./M9-GOAL.md) | Milestone handovers: scope, build order, settled decisions and the questions still owed. The skill tells the session to read the milestone's goal doc before it asks anything. |
 
 ### Subagents (`.claude/agents/`)
