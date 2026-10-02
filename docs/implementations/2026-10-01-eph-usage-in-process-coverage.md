@@ -1,13 +1,13 @@
-# eph-usage is tested where coverage can see it, and a contributor's PR lands green
+# eph-usage is tested where coverage can see it, and PR #60 lands as the contributor's
 
 Issue #10 asked for tests of `shims/eph-usage.mjs`, the statusline shim that is
 ADR-0023's only observation point. A contributor delivered them in PR #60:
 the shim's pure helpers exported, `main()` behind the guard the other shims
 use, and an in-process test file. Review found the code right and six things
-around it wanting. This change finishes the PR on a maintainer branch — the
-contributor's commits re-applied so each one is green, with their authorship
-kept — adds the tests review asked for, corrects the ADR the shim's header
-cites, and ratchets the `shims` coverage floors on both platforms.
+around it wanting. This change finishes PR #60 on its own branch — the
+Architect's commits go on top of the contributor's, so their PR is the one
+that merges — adding the tests review asked for, correcting the ADR the shim's
+header cites, and ratcheting the `shims` coverage floors on both platforms.
 
 ## 1. Problem / motivation
 
@@ -39,8 +39,8 @@ The decision it implements is ADR-0023.
 |---|---|
 | `shims/eph-usage.mjs` | Six pure helpers exported and `main()` guarded, exactly as `eph-hook.mjs`, `eph-recall.mjs` and `eph-gh-token.mjs` do (contributor). The header now cites ADR-0023. |
 | `test/shims/eph-usage.test.ts` | New. In-process tests of the six helpers (contributor), plus: an absent window, the unrounded percentage, an out-of-process test of the import guard, and `removeTempDir` teardown. |
-| `scripts/coverage-floors.json` | Ratcheted by `check-coverage.cjs --update` — win32 from three local runs, linux from three CI push runs, all of one production tree. `shims/eph-usage.mjs` leaves `untested` on both platforms. |
-| `docs/DECISIONS-LOG.md` | Three entries: how a contributor's PR is finished on a maintainer branch and why its author is kept; why the guard is tested through an importer file; the `pacing-wakes` teardown flake CI hit along the way. |
+| `scripts/coverage-floors.json` | Ratcheted by `check-coverage.cjs --update` — win32 from three local runs, linux from three CI push runs, all of one production tree, measured on a maintainer branch of this repository (§3). `shims/eph-usage.mjs` leaves `untested` on both platforms. |
+| `docs/DECISIONS-LOG.md` | Three entries: why the guard is tested through an importer file; the `pacing-wakes` teardown flake CI hit along the way; and how #60 is finished on its own branch and merged. |
 | `docs/implementations/2026-10-01-eph-usage-in-process-coverage.md` | This document. |
 
 ## 3. Implementation approach
@@ -76,28 +76,39 @@ reader or resumes the stream, and then reads stdin to the end itself. The test
 asserts the guard's whole claim: exit 0, empty stdout and stderr, no reader
 attached, the whole document still unread, and no report directory. The child
 does not inherit `NODE_OPTIONS`, whose loaders and flags make Node write its own
-warnings to stderr. An importer
-*file*, rather than `node -e`, matters because under `-e` `process.argv[1]` is
-never a module path — it is undefined, or the first script argument — so the
-comparison the guard really makes, a module path that is not the shim's, would
-never be exercised. The importer reproduces the argv a real importer has.
+warnings to stderr. An importer *file*, rather than `node -e`, matters because
+under `-e` `process.argv[1]` is never a module path — it is undefined, or the
+first script argument — so the comparison the guard really makes, a module path
+that is not the shim's, would never be exercised. The importer reproduces the
+argv a real importer has.
 
-### The history
+### How the PR is finished
 
-The fork branch belongs to the contributor and is not rewritten. Instead
-`fix/eph-usage-coverage-10` re-applies its seven commits as five, folding each
-broken commit into the one that repaired it:
+PR #60's branch lives on the contributor's fork. The Architect's four commits go
+on top of its head, `b437907`, by maintainer edit — the PR allows maintainers to
+push — and nothing the contributor pushed is rewritten:
 
-| PR #60 | Here | Typecheck at the commit |
-|---|---|---|
-| `6562d49` | kept | green |
-| `cbe9cb6` | kept | green |
-| `3b2d51e` | kept | green |
-| `9352bf3` + `fc4ccad` | folded | green (was red at `9352bf3`) |
-| `60947ed` + `b437907` | folded | green (was red at `60947ed`) |
+| Commit | What |
+|---|---|
+| `test:` | the absent window, the unrounded percentage, the import test, `removeTempDir` teardown |
+| `docs(shims):` | the header cites ADR-0023 |
+| `chore(coverage):` | the ratcheted floors (below) |
+| `docs:` | DECISIONS-LOG and this document |
 
-The fifth commit's tree is byte-identical to PR #60's head. Every commit keeps
-the contributor as git author.
+Two of the contributor's seven commits do not typecheck: `9352bf3` and `60947ed`
+carry a test file whose `import fs` sits inside the header comment, and the next
+two commits repair it. They cannot be removed without rewriting a branch that is
+not ours, so **#60 is squash-merged**: one commit reaches `main`, and its tree
+typechecks. That commit is authored by the PR's author with the Architect as
+co-author, which `check-attribution.cjs` accepts — it refuses a co-author only
+when it names a Claude or Anthropic identity, and on the first-parent chain only
+a `[bot]` identity.
+
+A different finish was built first. `fix/eph-usage-coverage-10` in this
+repository re-applies the seven commits as five green ones, with the contributor
+kept as author, and then carries the same maintainer changes; its tree differs
+from this branch's only in this document and in DECISIONS-LOG. It was set aside so that the contributor's PR is the one
+that merges, and it is kept, because the coverage runs below were measured on it.
 
 ### The ratchet
 
@@ -110,6 +121,13 @@ and three linux CI push runs recorded with `--update --from <artifact>
 --platform linux`, each recording committed and pushed so that the push itself
 starts the next run — the procedure the linux floors were first raised by on
 2026-09-07.
+
+Those runs were taken on the maintainer branch, not on #60: upstream CI makes push
+runs only for this repository's own branches, and a `pull_request` run measures a
+synthetic merge commit rather than a commit on any branch. The window keys on the
+production tree, and #60's production tree after its header commit is that same
+`bffbbf3bd541`; the commits the record names (`30835f2`, `adaa6e8`, `2feed06`)
+are on the maintainer branch, which is why it is kept.
 
 All six runs measured the same `shims` figures, so the floors rose to them:
 
@@ -156,16 +174,17 @@ figure is below `floor − 0.25` (`tolerance`), or more than `5` points above it
 **The mutation round.** Each mutant replaces or inserts one expression in
 `shims/eph-usage.mjs`, runs this file and the spawn suite (46 tests), and is
 restored; the file's hash is checked afterwards. Condition: Windows_NT
-10.0.26200, node v20.16.0, the shim as committed since `30835f2` (sha256
-`3edd4b4b697e…`) and this file as committed at `ff56a7a`. A no-op control stayed
-green, 46 of 46. The last three mutants are planted rather than edited: each
-leaves the guard intact and adds one statement at module scope, which is what the
-import test's stdin and stderr assertions exist to catch. The first 26 were run
-under vitest and all killed. The 27th, a synchronous `fs.readFileSync(0)`,
-cannot be scored that way: it blocks the in-process import, so the vitest run
-never finishes. It was scored by replaying the import test in plain node against
-a mutated copy of the shim. The unmutated shim passes every check; the mutant
-fails only the whole-document check, which is the assertion added to catch it.
+10.0.26200, node v20.16.0, run on the maintainer branch at `ff56a7a`, whose shim
+(sha256 `3edd4b4b697e…`) and test file are byte-identical to the ones this change
+ends with. A no-op control stayed green, 46 of 46. The last three mutants are
+planted rather than edited: each leaves the guard intact and adds one statement
+at module scope, which is what the import test's stdin and stderr assertions
+exist to catch. The first 26 were run under vitest and all killed. The 27th, a
+synchronous `fs.readFileSync(0)`, cannot be scored that way: it blocks the
+in-process import, so the vitest run never finishes. It was scored by replaying
+the import test in plain node against a mutated copy of the shim. The unmutated
+shim passes every check; the mutant fails only the whole-document check, which is
+the assertion added to catch it.
 
 | Expression | Mutant | Killed by |
 |---|---|---|
@@ -194,9 +213,10 @@ fails only the whole-document check, which is the assertion added to catch it.
 
 | Decision | Alternative rejected | Why |
 |---|---|---|
-| Re-apply the contributor's commits, folded, on a maintainer branch | Push fixes onto PR #60's fork branch | Its two red commits would stay, and `main` merges with merge commits. Rewriting someone else's pushed branch was not on the table. |
-| The same | Squash-merge PR #60 | A one-off departure from the merge-commit policy that `check-attribution.cjs`'s first-parent rule is written around. |
-| Keep the contributor as git author | Re-author the commits as the Architect | The diff is theirs. The attribution rule keeps vendor identities out and the Architect's commits the Architect's; it was never a reason to take a contributor's credit. |
+| Finish #60 on its own branch, by maintainer edit | Re-apply the commits, folded, on a maintainer branch | That was built first and gives a clean history, but it supersedes the contributor's PR. The fix is theirs, so their PR is the one that merges (the Architect's decision). |
+| The same | Force-push a cleaned history to the fork | It rewrites a branch someone else pushed. |
+| Squash-merge #60 | A merge commit | A merge commit would land `9352bf3` and `60947ed`, which do not typecheck, on `main` (ENGINEERING-STANDARDS §1). |
+| Measure the floors on an upstream branch of the same production tree | Measure from #60's `pull_request` runs | A `pull_request` run measures a synthetic merge commit, so the record would name a commit on no branch. |
 | Test the guard from an importer file | `node -e "await import(…)"` | Under `-e`, `argv[1]` is never a module path, so the comparison the guard really makes is never exercised; the importer reproduces a real importer's argv. |
 | `96.5` for the stored percentage | Any non-integer | 96.5 is where rounding crosses the default hold threshold, so the test names the consequence, not just the arithmetic. |
 | Correct the header's ADR here | A separate PR | It is the file under change, and review checks a load-bearing file's edits against the ADRs its header names. |
@@ -213,41 +233,46 @@ npm run test:coverage
 node scripts/check-coverage.cjs
 ```
 
-**Every commit of the re-applied history**, checked on Windows_NT 10.0.26200
-(node v20.16.0) with `tsc --noEmit -p tsconfig.node.json` (the project that holds
-`shims/` and `test/`), ESLint and Prettier on the changed files, and
-`test/shims/` with the spawn suite:
+**Every commit on #60's branch.** The contributor's seven, from CI where it ran
+and from the same trees on the maintainer branch where it did not; the
+Architect's four, checked on Windows_NT 10.0.26200 (node v20.16.0) with
+`tsc --noEmit -p tsconfig.node.json` (the project that holds `shims/` and
+`test/`), ESLint and Prettier on the changed files, and the shim tests:
 
-| Commit | Subject | tsc | lint | tests |
-|---|---|---|---|---|
-| `68b83ab` | test: expose eph-usage helpers for coverage | 0 | 0 | 52 passed |
-| `deeed14` | test: cover eph-usage helper branches | 0 | 0 | 73 passed |
-| `1e1fbb4` | test: strengthen eph-usage helper coverage | 0 | 0 | 77 passed |
-| `077b65b` | test: document eph-usage coverage seam | 0 | 0 | 77 passed |
-| `dc2f18b` | style: wrap eph-usage import guard comment | 0 | 0 | 77 passed |
+| Commit | Author | Typecheck | Evidence |
+|---|---|---|---|
+| `6562d49` | contributor | green | the same tree as the maintainer branch's `68b83ab`, checked locally |
+| `cbe9cb6` | contributor | green | CI run 36027164626 failed only the stale-floor step |
+| `3b2d51e` | contributor | green | the same tree as the maintainer branch's `1e1fbb4`, checked locally |
+| `9352bf3` | contributor | **red** | its test file has no live `import fs`; the same file as at `60947ed` |
+| `60947ed` | contributor | **red** | CI run 36589970581: `TS2304` ×8 |
+| `fc4ccad` | contributor | green | checked locally |
+| `b437907` | contributor | green | CI run 36601477521 failed only the stale-floor step |
+| the four above | Architect | green | checked locally before the push |
 
 **The full suite, before and after:**
 
 | Run | Condition | Files | Tests | `shims` lines / branches / functions / statements |
 |---|---|---|---|---|
 | main @ `bb3e016`, CI push run 34981836416 | ubuntu-24.04, node v20.20.2 | 236 | 4602 passed, 15 skipped | 47.62 / 41.5 / 46.3 / 47.26, `eph-usage.mjs` untested |
-| three CI push runs of tree `bffbbf3bd541` | ubuntu-24.04, node v20.20.2 | 237 | 4633 passed, 15 skipped | 55.59 / 54.47 / 57.41 / 56.84 |
+| three CI push runs of tree `bffbbf3bd541`, maintainer branch | ubuntu-24.04, node v20.20.2 | 237 | 4633 passed, 15 skipped | 55.59 / 54.47 / 57.41 / 56.84 |
 | three local runs of tree `bffbbf3bd541` | Windows_NT 10.0.26200, node v20.16.0 | 237 | 4640 passed, 8 skipped | 55.59 / 54.47 / 57.41 / 56.84 |
 
 The skipped counts differ by platform because some tests are gated to one OS;
 the totals agree (4648). After the ratchet, `node scripts/check-coverage.cjs`
 without `--update` exits 0 against the last win32 report and against the last
-linux artifact.
+linux artifact. #60's own CI runs on its head as `pull_request` runs, on the same
+production tree.
 
-**One unrelated failure, reported rather than absorbed.** The first attempt of
-CI run 36924116592 failed one test in `test/main/pacing-wakes.test.ts`, a
-teardown race: `ENOTEMPTY` removing a temp Agora's `.git` after
-`agora.drained()`. This change touches neither that file, `src/`, nor
-`test/tmpdir.ts`, and the same test passed on the same tree in every other run listed above.
-It emitted no measurement, so the run recorded in its place is the rerun. The
-race, its evidence and the two suspects in its teardown are recorded in
-DECISIONS-LOG (2026-10-01, "FOUND BY CI — RECORDED, NOT FIXED, OUT OF SCOPE"),
-so the next red is recognised rather than re-diagnosed.
+**One unrelated failure, reported rather than absorbed.** The first attempt of CI
+run 36924116592, on the maintainer branch, failed one test in
+`test/main/pacing-wakes.test.ts`, a teardown race: `ENOTEMPTY` removing a temp
+Agora's `.git` after `agora.drained()`. This change touches neither that file,
+`src/`, nor `test/tmpdir.ts`, and the same test passed on the same tree in every
+other run listed above. It emitted no measurement, so the run recorded in its
+place is the rerun. The race, its evidence and the two suspects in its teardown
+are recorded in DECISIONS-LOG (2026-10-01, "FOUND BY CI — RECORDED, NOT FIXED,
+OUT OF SCOPE"), so the next red is recognised rather than re-diagnosed.
 
 ## 7. Related docs
 
@@ -256,5 +281,5 @@ so the next red is recognised rather than re-diagnosed.
 - [TEST-STRATEGY](../TEST-STRATEGY.md) — §2, the per-subsystem ratchet
 - [Usage-aware pacing](2026-09-01-usage-aware-pacing.md) — where the shim and the spawn suite were built
 - [The temp-directory teardown](2026-09-01-flaky-temp-dir-teardown.md) — why `removeTempDir` is the one remover
-- [DECISIONS-LOG](../DECISIONS-LOG.md) — the 2026-10-01 entries on finishing a contributor's PR, on testing the guard, and on the `pacing-wakes` teardown flake
-- Issue [#10](https://github.com/mertefesensoy/Ephesus/issues/10) and PR [#60](https://github.com/mertefesensoy/Ephesus/pull/60)
+- [DECISIONS-LOG](../DECISIONS-LOG.md) — the 2026-10-01 entries on testing the guard and on the `pacing-wakes` teardown flake, and the 2026-10-02 entry on how #60 is finished and merged
+- Issue [#10](https://github.com/mertefesensoy/Ephesus/issues/10), PR [#60](https://github.com/mertefesensoy/Ephesus/pull/60), and the maintainer branch [`fix/eph-usage-coverage-10`](https://github.com/mertefesensoy/Ephesus/tree/fix/eph-usage-coverage-10) where the coverage runs were measured
