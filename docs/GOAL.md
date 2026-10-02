@@ -106,10 +106,17 @@ and the tree stays free of a model name (ENGINEERING-STANDARDS §2).
 
 1. **Run the final gate from a checkout outside OneDrive.** This applies to every
    session, because the full chain runs in every final turn. Inside a OneDrive-synced
-   path, `npm run test:coverage` can exit 1 *after every test passed*, because vitest
-   loses the `rmdir` of `coverage\.tmp` to OneDrive's file handle (DECISIONS-LOG
-   2026-09-10, M8c.3b; PROGRESS M8's gate caveat). The prompt requires exit 0 and must
-   not be weakened, so run the chain somewhere it can return 0 and say where it ran.
+   path, `npm run test:coverage` can exit 1 because vitest loses the `rmdir` of
+   `coverage\.tmp` to OneDrive's file handle. It has done so after every test passed
+   (DECISIONS-LOG 2026-09-10, M8c.3b; PROGRESS M8's gate caveat). On 2026-10-03 it did so
+   at startup, before a single test ran: a run of zero tests, which proves nothing. The
+   prompt requires exit 0 and must not be weakened, so run the chain somewhere it can
+   return 0 and say where it ran. One way is a detached `git worktree add` outside
+   OneDrive. A worktree under `.claude/worktrees/` usually has no `node_modules` of its
+   own and borrows the main checkout's by walking up the folder tree. A worktree
+   elsewhere has nothing to walk up to, so junction the main checkout's `node_modules`
+   into it, after checking every installed version against that commit's
+   `package-lock.json`. Remove the junction with `cmd /c rmdir`, never recursively.
 2. **The `goal` name is shared.** This repository has a project skill named `goal`
    (`.claude/skills/goal/`, the M3-era milestone runner), and the CLI has a built-in
    `/goal` (*"Set a goal — keep working until the condition is met"*). This file did
