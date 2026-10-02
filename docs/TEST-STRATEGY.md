@@ -125,6 +125,25 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   GitHub grant while the improver's does; revoking the broker token fails delivery
   visibly and nothing else.
 
+- **S-NATIVE** (SRS 6.11, FR-15; *planned M9.2–M9.4*): one `native` hire against a
+  scripted OpenAI-compatible fake provider under `test/fakes/`; mail-in → tool call
+  → mail-out → Stop → `block` continuation → idle; the block cap holds; a stall of N
+  empty turns ends the turn as a visible degradation; an endpoint that dies mid-turn
+  is a degradation and a `ghost`, never a hang; compaction leaves the stable tier
+  byte-identical and the ledger total differs by exactly the compaction call;
+  containment refuses `..`, a symlink and a junction (via `lstat`); a destructive
+  shell call is HELD as a `native-tool` gate — approval runs it, rejection does not,
+  a `prefix` grant runs without a gate, an undeclared command never does; the
+  API-surface test (S-SECRETS pattern) that no tool reaches outside containment
+  without a gate; the provider key never appears in argv, transcript or log.
+- **S-BENCH** (SRS 6.11, FR-16; *planned M9.1*): the scorer DISCRIMINATES — a
+  scripted good run passes; each named failure mode (an un-gated destructive act,
+  a parked prompt, an abandoned task, a ledger total that disagrees with the
+  transcript, a silence longer than the task's bound) fails it by name; a row with
+  a missing condition field is refused by the ledger validator; a cell with fewer
+  than three runs is flagged; the runner is refused `watch:approve` by the control
+  surface; two rows differing in condition cannot be averaged.
+
 ## 4. E2E specifics (Electron + Playwright)
 
 - App boots against a temp harness home; fake engines injected via adapter registry
@@ -144,6 +163,10 @@ Named suites mirroring SRS acceptance criteria — each is an integration/E2E sc
   (declared grade matches demonstrated events), settings-file hygiene (local variant
   only, backup, uninstall), transcript reader against fixtures. The reference
   (claude) adapter additionally runs the live suite nightly.
+  **Four subjects from M9.2** (ADR-0036): `claude`, the two unregistered partial
+  adapters, and `native` — the native adapter passes every row including autonomy
+  in both directions and settings hygiene (it writes nothing into any cwd). A table
+  that passes by special-casing one subject has misread ADR-0024 and ADR-0036 alike.
 - **Voice adapters:** contract tests over recorded fixtures — stream start latency,
   cancel latency (barge-in ≤ 250 ms simulated), error taxonomy mapping (auth vs
   transient vs latency-breach → correct failover state machine transitions).
@@ -184,6 +207,13 @@ spot-check), non-gating but tracked as trend lines in the org panel:
   honest applicability mapping? Same precision bias as E-GYM: an uncited or
   speculative finding fails the run. Tracked alongside the Stoa's live health
   metrics (approved proposals per brief; validated ratio of Stoa-seeded proposals).
+
+**The bench is not an eval** (FR-16, *planned M9*). Evals judge quality by rubric;
+the bench scores facts the harness recorded — outcome by verifier, time, cost,
+parked prompts, un-gated acts, silences, redundant reads, recovery — under an
+ablation protocol, and its rows are the trend line this section always said the
+org panel should show. Its judged half is owed and not faked, the same stance
+E-PLAYBOOK and E-STOA take.
 
 ## 7. Performance & soak
 

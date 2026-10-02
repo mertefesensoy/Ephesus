@@ -91,6 +91,9 @@ The hook socket is `0600` with a per-spawn token in each payload.
 | `ui-bridge.ts` | The one door from main to the renderer (M8.1): owns the window, forgets it when it closes, refuses to send to a destroyed one, and is the `PtySink` the terminal stream writes to. A `webContents.send` anywhere else fails `check-invariants` | 0001, 0014 |
 | `ipc.ts` | Registers every handler behind the typed preload surface | 0001 |
 | `control.ts` | The control surface (M8.14): a second front door onto the SAME `IpcDeps` the window is served from, so a script can run the company without the window. Owner-only socket / local named pipe mirroring `hooks.ts`, a separate address from it (agents hold that one); validates in main like any untrusted caller; refuses the four verbs only a human may perform, by name and with a reason; tags every act that CHANGES something `remote` in `log.jsonl` (FR-10.3) and deliberately logs no reads. `ControlDeps` is a `Pick<IpcDeps, …>`, which is what makes the window and the CLI unable to drift. The verb table, the refusal list and every rendered answer are pure, in `shared/control.ts`; the client is `scripts/ephctl.cjs` and holds none of them | 0033, 0010 |
+| `engines/native.ts` *(planned, M9.2)* | The native engine's adapter (ADR-0036): spawns `eph-agent` in a PTY, declares `hooks: 'native'` and `autonomySupport: 'enforced'`, writes no settings into any cwd, exports the provider endpoint and the hire's model as spawn env, and reads the engine's own JSONL transcript. A fourth subject in the conformance table, never a special case | 0036 |
+| `src/engine/` *(planned, M9.2–M9.5)* | `eph-agent`, Ephesus's own agent program — a separate TypeScript build target (`tsconfig.engine.json` → `out/engine/`, DD-M9-5) run by system `node`, importing only `node:` builtins and the shared hook client, like the shims. Owns the loop, the provider seam, the closed tool registry, context compaction and the transcript. §13 | 0036, 0038, 0039 |
+| `bench/` + `scripts/bench.cjs` *(planned, M9.1)* | The bench (ADR-0037): schema'd tasks, a runner that drives the company through the control surface only, a scorer over `log.jsonl` and the cost ledger, and the append-only `docs/bench/LEDGER.md`. §13.5 | 0037, 0033 |
 
 ---
 
@@ -314,6 +317,16 @@ Defined normatively in ADR-0009. Runtime notes:
 - **Hook fidelity grades** (`native` | `wrapper` | `pty-heuristic`) surface on the agent
   card and scale down floor detail and breaker sensitivity (ADR-0011, 0014).
 - `TranscriptReader` yields token/cost facts folded into the ledger (FR-11.2).
+- **The native kind (ADR-0036, planned M9).** `native.ts` builds a `SpawnPlan` whose
+  argv is `node out/engine/eph-agent.js`, whose env carries the harness pair plus
+  `EPH_PROVIDER_URL`, `EPH_MODEL` and the broker-released provider key if the hire
+  declares one, and whose `settings` is empty — the program reads nothing from any
+  cwd, so settings hygiene is trivially satisfied and the conformance case asserts
+  it. `injectIdentity` writes the composed identity + protocol + memory text to a
+  file in `engineConfigDir` the program loads as its system prompt's stable tier.
+  `interrupt()` is `Ctrl-C` with a label. `resume` replays the JSONL transcript by
+  session id. `transcripts` reads `<engineConfigDir>/sessions/<id>.jsonl`. Hook
+  grade `native` is backed by the program emitting every §13.3 envelope itself.
 
 ---
 
@@ -932,3 +945,94 @@ Persona (voice id, style prompt, phrase book) loads from `prompts/herald/*`.
 | FR-13 | §2, §4.7, §7.7 (stoa.ts), ADR-0017 |
 | FR-14 | §9, §7.7 (watch/gates.ts, scheduler.ts), ADR-0018 |
 | NFR-5 | §2, §4.8, §7.9, §10 (restore.ts, state-store.ts), ADR-0027 |
+| FR-15 | §1.1 (`engines/native.ts`, `src/engine/`), §3, §13.1–13.4, ADR-0036/0038/0039 *(planned)* |
+| FR-16 | §1.1 (`bench/`), §13.5, ADR-0037 *(planned)* |
+
+---
+
+## 13. The native engine and the bench (ADR-0036 · planned for M9 — design, not yet built)
+
+Written at plan time (2026-10-02) so M9's packages are built against a design
+rather than discovering one. Where a package lands differently, this section is
+amended in that package's PR and the difference is recorded; until then every
+statement here is a *decision about shape*, not a description of code.
+
+### 13.1 The loop (`src/engine/loop.ts`)
+
+```
+spawn → load stable tier (identity · PROTOCOL · memory, from the file §3 names)
+      → emit session-start
+      → loop:
+          messages = stable tier + context tier + volatile tier (§13.2)
+          response = provider.complete(messages, tools, { stream: true })
+          for each tool call in response, in call order:
+              emit pre-tool {tool, args}            ← the harness may answer HOLD (§13.4)
+              result = registry.dispatch(call)      ← contained; may raise a gate
+              emit post-tool {tool, ok, provenance}
+              append result to transcript, tagged trusted:false
+          if no tool calls and no text for N turns → emit notification{stall} → end turn
+          at end of turn: emit stop → reply {decision:'block', reason} ⇒ continue with reason as input
+                                      reply ∅ ⇒ idle; wait for PTY input or an inbox wake
+```
+
+The Stop reply contract, block cap and `stop_hook_active` are ADR-0013's and are
+not re-implemented: the program sends the same envelope `eph-hook` would and obeys
+the same answer. What is new is only that the program *is* the engine, so nothing
+has to be installed into a settings file to make it ask.
+
+### 13.2 Prompt tiers and compaction
+
+Three tiers, in the order §3.2 of the Hermes Agent study observed and this design
+adopts: **stable** (identity, protocol, memory — never changes within a session, so
+a provider that caches prefixes can), **context** (granted runbooks, the task spec
+and inbox mail delivered this session), **volatile** (the turn history). Compaction
+(`prompts/engine/compact.md`) runs when the volatile tier crosses a declared share
+of the model's context length: the model is asked to summarise the volatile tier
+only, the summary replaces it, a `compacting` envelope is emitted, and a
+`{"kind":"compaction"}` boundary row is written to the transcript so the ledger
+folds usage once. The stable tier is compared byte for byte before and after, and
+a mismatch is a refusal, not a warning — the ADR-0026 hook-author rule applied to
+the agent's own instructions.
+
+### 13.3 Hook emission
+
+The program posts the existing `HookEnvelope` (`src/shared/hooks.ts`,
+`schemaVersion` 1) for `session-start`, `pre-tool`, `post-tool`, `stop`,
+`notification` and `compacting`, through `shims/hook-client.mjs`, authenticated by
+the per-spawn token like any shim. No new envelope kinds: the avatar state machine,
+the breaker, telemetry and Hermes consume what they consume today. `pre-tool` is the
+one envelope whose *reply* carries meaning for a native agent (§13.4).
+
+### 13.4 Tools and the gate (ADR-0039, planned)
+
+The registry is closed: `read`, `write`, `edit`, `list`, `search`, `shell`,
+`recall`, `mail`. Each is a zod schema in `src/shared/tools/` and a dispatcher in
+`src/engine/tools/`. Containment is the `tool-grants.ts` rule at every path
+argument — inside the worktree, a granted tool directory, the mailbox or the
+runbooks, resolved through `realpath` and checked with `lstat` for junctions, or
+refused with the root named. `shell` consults the hire's `unattended` grants
+(ADR-0035) exactly as `claude.ts` renders them today: a match runs; a non-match
+sends `pre-tool` with `wants: 'decision'`, and the harness opens a gate of a **new
+kind** (`native-tool`) through `GateManager` — the `tool-permission` kind stays
+refused for wrapped engines, so the two never share a path. The program blocks on
+the gate's verdict; approval runs the command, rejection returns a refusal to the
+model as a tool result, and both are rows. A script cannot settle it (ADR-0033).
+`mail` writes the agent's own outbox atomically; the router is unchanged.
+
+### 13.5 The bench (ADR-0037, planned)
+
+```
+bench/tasks/<id>.json      { schemaVersion, id, fixture, break, verifier, timeBoxMs, clauses[] }
+scripts/bench.cjs          → EPH_HOME=<fresh> · harness boot (headless when M9.7 lands)
+                           → ephctl consent:grant · budget:set · profile:activate --target <fixture>
+                           → apply the break · wait for the time box or completion
+                           → score: log.jsonl + cost ledger → row
+docs/bench/LEDGER.md       append-only; one row per run; refused without a full condition
+```
+
+Switches (`switches: { identity, memory, playbooks, mail, gates, stopLoop }`) are
+passed to the harness as a bench-only activation option that disables the named
+contribution for that instance and records which were off on every row. The
+scorer is pure over the two durable sources and has its own discrimination suite
+(S-BENCH): a scripted good run passes, each named failure mode fails, and a row
+with a missing condition is refused.

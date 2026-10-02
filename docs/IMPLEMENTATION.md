@@ -503,7 +503,70 @@ verified by planting an entered-but-failing pipeline and reading the report; a
 restarted company brings its crew back with no manual filesystem step; and the
 hour ends because the work ended rather than because an agent met a prompt.
 
+## M9 — The harness is the product (≈ 5–6 weeks) — *the pivot*
+
+> **Inserted 2026-10-02, and it runs BEFORE M7b.** Planned and approved for
+> planning on 2026-10-02; **the build has not started** — the Architect's words were
+> *"i just want to plan this out not build it yet. i approve the documentation and
+> planning for the future milestone."* The full plan, the evidence behind it and the
+> seven decisions it rested on are in [`M9-PLAN.md`](./M9-PLAN.md); this section is
+> the register's digest of it and does not restate what that file says.
+
+The direction (M9-PLAN §2): the environment is not the differentiator, the upstream
+concept had become a constraint, and a harness that only wraps one vendor's CLI can
+neither run a local model nor measure itself. M9 builds **Ephesus's own agent
+engine** (`eph-agent`, ADR-0036 — a CLI in a PTY behind the existing adapter seam,
+speaking any OpenAI-compatible local endpoint first and Claude natively second), and
+builds the **bench** before the engine so the exit is a measured **harness uplift**
+under ablation (M9-PLAN §4), not a feature list. Zero new runtime dependencies;
+every invariant and both data planes unchanged; one sentence of ADR-0009 superseded.
+
+Packages (acceptance, tests and risk per package in M9-PLAN §6):
+
+- **M9.0 The contract** — ADR-0036 accepted (done at plan time), ADR-0037 (the
+  bench and its ledger) and ADR-0038 (the provider seam) written; SRS FR-15/FR-16/
+  §6.11; SDD §13; TEST-STRATEGY S-NATIVE/S-BENCH; the two watchlist sources studied
+  at a pin into RB-002 and RB-003 before any engine code.
+- **M9.1 The bench, v0** — schema'd tasks (T1 = `EXIT-M8.md` made mechanical, T2 a
+  dependency bump, T3 a docs drift), a runner that drives the company only through
+  the control surface, a scorer reading `log.jsonl` and the cost ledger,
+  `docs/bench/LEDGER.md` append-only with every row's condition; deterministic
+  discrimination suite in CI; one live baseline row on the wrapped `claude` adapter.
+- **M9.2 `eph-agent`: the native engine** — the loop, the provider seam with the
+  OpenAI-compatible local implementation over platform `fetch`, native hook
+  emission (`hooks: 'native'`), the Stop question asked of the harness (ADR-0013
+  unchanged), a `schemaVersion`'d JSONL transcript, refusal by name of an
+  unreachable endpoint or a model without native tool calls or below the context
+  floor; `native.ts` registered and passing the whole conformance table.
+- **M9.3 Tools, and the gate as the permission prompt** — a closed tool registry
+  with containment at every path; `shell` honours ADR-0035 grants as the allowlist
+  and everything else is a real Ephesus gate (ADR-0039); tool results tagged
+  untrusted with provenance (NFR-18 as a record).
+- **M9.4 Memory and context** — the Library layer, `recall` as a tool, compaction
+  as a `compacting` event that preserves identity and protocol byte for byte.
+- **M9.5 Claude, natively** — the Anthropic Messages API over `fetch`, key as a
+  broker secret; the same loop runs the reference model, so a bench cell can
+  isolate the loop from the model.
+- **M9.6 The first uplift** — ablation switches, N ≥ 3 per cell on one local model
+  and `claude` native, rows with conditions, README quoting the ledger; the weekly
+  bench cadence under company-mode governance.
+- **M9.7 Headless-first** — `npm run headless`; the window a client of the same
+  `IpcDeps`; nothing deleted (DD-M9-4).
+- **M9.8 Exit review.**
+
+**Exit (M9-PLAN §7):** the native adapter passes the whole conformance table in
+both directions; a native-engine Skeleton Crew on a local model completes bench T1
+from the control surface with no window, zero parked prompts and zero un-gated
+destructive actions; the harness uplift is measured and recorded for one local
+model and `claude` native, N ≥ 3 per cell, whatever the numbers are; zero new
+runtime dependencies; no accepted ADR edited; docs synced. **The unattended hour
+of `EXIT-M8.md` is subsumed by T1 (DD-M9-7)**: the M7, M8b and M8c exit boxes stay
+open until T1's first live row exists, and they are the Architect's to tick on it.
+
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
+
+> **Follows M9 (2026-10-02, DD-M9-1).** Content unchanged; M7b.2's proposals about the
+> harness now cite bench rows as evidence and bench deltas as metrics (M9-PLAN §9).
 
 **Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa
 and modes): researcher + improver roles, mode-gated activation, delivery as PRs
@@ -549,12 +612,17 @@ bridges · multi-machine crews.
 | R14 | Autonomy enabled before the loop is trustworthy, or left on through a failure | Low | High | ADR-0018: proof gate refuses the first enable until §6.9 evidence exists; mode is architect-only, always visible, mode-tagged records; breaker rung 3 auto-reverts (FR-14.5) |
 | R15 | Recursive Improvement floods the Architect with PRs, or review decays into rubber-stamping | Medium | Medium | One scoped change per proposal (FR-12.2) bounds PR size; Artemis ranks before anything is implemented; the gym budget slice (FR-12.5) bounds volume; PR throughput + time-in-review become org-panel health metrics reviewed in retros (UC-12) |
 | R16 | Company GitHub credential leaks or the account is misused | Low | High | ADR-0020: fine-grained PAT, broker write-only, env-grant to improver roles only; account holds write not admin; `main` PR-and-review protected so the host blocks merges; every remote act logged; one broker action revokes |
+| R17 | The native engine grows engine-specific knowledge into core (NFR-12's failure from the other side of ADR-0024) | Medium | High | `native.ts` is a fourth adapter behind the same interface; import-boundary lint; a conformance suite with four subjects, never one special case (M9-PLAN §11) |
+| R18 | The bench is gamed — prompts tuned to its tasks, or the company reading its own score (R11 for an instrument) | Medium | High | ablation scores contribution not absolute; T2/T3 not written by the prompt author; verifiers outside agent worktrees; bench-seeded proposals Architect-gated; the ledger is total |
+| R19 | Local-model quality makes T1 unreachable at any harness setting, read as "the harness failed" | Medium | Medium | the exit asks for a measured uplift, not a positive one; the row names the model and its tool-use declaration; `claude` native is the second cell so a model limit and a harness limit can be told apart |
+| R20 | Owning tool execution moves THREAT-MODEL §6.7 one layer closer with no OS sandbox | Medium | High | containment at every path (`tool-grants.ts` rule), the gate as the shell's permission prompt, worktree isolation (M8.6); §6.7 amended to say what is bounded; a sandbox is a later ADR |
+| R21 | A provider key is a kind of money the consent screen does not yet name | Low | Medium | ADR-0032's consent names provider spend per hire before start; the key is broker-held and never read back |
 
 ## Dependency order (what blocks what)
 
 ```
-M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M8b ─► M8c ─► M7b
-            │          │      ▲ └► M5b ──┘                            ▲
+M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M8b ─► M8c ─► M9 ─► M7b
+            │          │      ▲ └► M5b ──┘                                  ▲
             │          └──────┘     └────────────────────────────────┘
             │                       (Stoa + modes need only Gymnasium v1; M7b's
             │                        cadences and its Recursive Improvement

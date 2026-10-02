@@ -6854,6 +6854,58 @@ restarted at M6.9 or M7b. Every figure above is quoted from the package's own re
 implementation doc did not already evidence. See
 [the status snapshot](status/2026-09-15-status.md).
 
+## M9 — The harness is the product (plan drafted and APPROVED FOR PLANNING 2026-10-02; build NOT started)
+
+Derived from the Architect's 2026-10-02 direction and recorded in full in
+[`M9-PLAN.md`](./M9-PLAN.md) (thesis, evidence, packages with acceptance and tests,
+exit, risks, the seven decisions). Digest in IMPLEMENTATION M9. **Inserted before
+M7b** (DD-M9-1). The Architect approved *the documentation and planning*, in those
+words, and said not to build yet — so every box below is unticked on purpose, and a
+session resuming here starts by asking the Architect whether the build may begin,
+not by starting it. ADR-0036 is accepted; ADR-0037/0038/0039 are owed by M9.0 and
+M9.3.
+
+Decisions recorded 2026-10-02 (DECISIONS-LOG, seven entries): native engine = own
+loop as own CLI in TS (DD-M9-2); first provider = OpenAI-compatible local endpoint
+over `fetch` (DD-M9-3); headless-first, nothing deleted (DD-M9-4); a third TS build
+target for `eph-agent` (DD-M9-5); Odysseus registered and Hermes Agent's tags amended
+on the watchlist (DD-M9-6); bench T1 subsumes the unattended hour (DD-M9-7).
+
+- [ ] **M9.0 The contract** — ADR-0037, ADR-0038; SRS FR-15/FR-16/§6.11 and SDD
+      §13 were drafted at plan time and are refined here; TEST-STRATEGY S-NATIVE and
+      S-BENCH; `/research` run against `src-odysseus` and `src-hermes-agent` at
+      pinned commits → RB-002, RB-003; M9-PLAN §3 replaced by citations.
+      *Docs: M9-PLAN §6. Evidence owed: the two briefs validated (uncited finding
+      refused), ADR append-only check green.*
+- [ ] **M9.1 The bench, v0** — `bench/tasks/*.json`, runner over the control
+      surface only, scorer over `log.jsonl` + cost ledger, `docs/bench/LEDGER.md`;
+      S-BENCH discrimination in CI; one live baseline row on wrapped `claude`.
+      *Evidence owed: S-BENCH output; the baseline row with its full condition.*
+- [ ] **M9.2 `eph-agent`: the native engine** — `src/engine/` (third TS build,
+      DD-M9-5), provider seam + OpenAI-compatible local provider, native hook
+      emission, Stop question over the hook endpoint, JSONL transcript, refusals by
+      name (endpoint, tool calls, context floor), stall guard; `native.ts`
+      registered and in the conformance table.
+      *Evidence owed: conformance table green for four subjects; S-NATIVE output;
+      mutation round from `test/mutation/m9-2.json` with a control.*
+- [ ] **M9.3 Tools, and the gate as the permission prompt** — closed tool registry,
+      containment, `shell` grants as allowlist, native gate kind (ADR-0039), tool
+      results tagged untrusted with provenance.
+      *Evidence owed: S-GATE native cases; API-surface containment test; the
+      adversarial refutation pass recorded with what it tried.*
+- [ ] **M9.4 Memory and context** — Library layer, `recall` tool, compaction as
+      `compacting` with byte-for-byte identity/protocol preservation.
+- [ ] **M9.5 Claude, natively** — Anthropic Messages API over `fetch`, broker key,
+      provider conformance against recorded fixtures; S-SECRETS for the key.
+- [ ] **M9.6 The first uplift** — ablation switches, N ≥ 3 per cell on one local
+      model and `claude` native, ledger rows, README section quoting the ledger,
+      mode-gated weekly cadence.
+- [ ] **M9.7 Headless-first** — `npm run headless`; reachability from the headless
+      entry reaches zero renderer code; T1 runs end to end with no window.
+- [ ] **M9.8 Exit review** — M9-PLAN §7, by `/milestone-review`; PROGRESS updated
+      in the same session; a `docs/status/` snapshot.
+- [ ] **M9 exit** — the six criteria of M9-PLAN §7, each with tier A/B evidence.
+
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
 
 Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +

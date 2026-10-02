@@ -14,7 +14,7 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0006](./ADR-0006-library-memory.md) | The Library: markdown-first memory, optional semantic index | accepted (layer 2 superseded by ADR-0016) |
 | [ADR-0007](./ADR-0007-herald-voice-seam.md) | The Herald: provider-agnostic voice seam; ElevenLabs primary, OpenAI Realtime fallback | accepted |
 | [ADR-0008](./ADR-0008-odeon-accountability.md) | The Odeon: accountability as an enforced subsystem, not a convention | accepted |
-| [ADR-0009](./ADR-0009-engine-adapters.md) | Engine adapters: wrap real CLIs, never reimplement an agent runtime | accepted |
+| [ADR-0009](./ADR-0009-engine-adapters.md) | Engine adapters: wrap real CLIs, never reimplement an agent runtime | accepted (the "never reimplement" sentence superseded by ADR-0036; the adapter seam unchanged) |
 | [ADR-0010](./ADR-0010-secret-broker.md) | Write-only secret broker with env injection at spawn | accepted |
 | [ADR-0011](./ADR-0011-watch-breaker-budgets.md) | The Watch: circuit-breaker ladder and a durable cost ledger | accepted |
 | [ADR-0012](./ADR-0012-mission-profiles.md) | Mission profiles as declarative, versioned bundles | accepted |
@@ -41,6 +41,7 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0033](./ADR-0033-a-script-may-run-the-company.md) | A script may run the company; only a human may authorise | accepted |
 | [ADR-0034](./ADR-0034-one-harness-per-home.md) | One harness per home | accepted |
 | [ADR-0035](./ADR-0035-an-engine-prompt-is-declared-in-advance.md) | An engine's permission prompt is answered in advance, by name | accepted |
+| [ADR-0036](./ADR-0036-two-engine-kinds.md) | Two engine kinds: a wrapped CLI, and a native agent the harness owns (supersedes one sentence of ADR-0009; planned for M9, not yet built) | accepted |
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):
