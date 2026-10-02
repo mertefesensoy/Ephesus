@@ -124,17 +124,18 @@ function sourcesOf(files: readonly string[]): ReadonlyMap<string, string> {
  * to a remover, and a remover counts only if this file RUNS it whenever the
  * directory is made: in the same function body, or from a test, a hook or
  * the file's top level. A removal in a function the file only exports, or
- * only keeps — a rig object's `close()`, a closure it returns — counts for
- * nothing: that is what moved `cleanupHomes()` into a module-level hook of
- * `company.ts`'s own, and the rigs' homes into lists their hooks empty. A
- * function that hands a directory back is judged at each of its calls, and
- * refused when no call here can be judged. Variables are told apart by scope,
- * through a type checker over the one file, because test after test declares
- * its own `const home`. And a path named on the temp root outside an mkdtemp
- * call is treated as a directory nothing removes, unless `UNMADE_TEMP_PATHS`
- * lists it, with how many times the file names it and why nothing is left
- * there. What this still cannot see is recorded in
- * docs/implementations/2026-10-02-temp-hygiene-blind-spots.md.
+ * only keeps — a rig object's `close()`, a closure it returns or pushes onto
+ * a list — counts for nothing, and so does one in a named function that only
+ * such code calls: that is what moved `cleanupHomes()` into a module-level
+ * hook of `company.ts`'s own, and the rigs' homes into lists their hooks
+ * empty. A function that hands a directory back is judged at each of its
+ * calls when calls are all the file does with it, and refused otherwise.
+ * Variables are told apart by scope, through a type checker over the one
+ * file, because test after test declares its own `const home`. And a path
+ * named on the temp root outside an mkdtemp call is treated as a directory
+ * nothing removes, unless `UNMADE_TEMP_PATHS` lists it, with how many times
+ * the file names it and why nothing is left there. What this still cannot
+ * see is recorded in docs/implementations/2026-10-02-temp-hygiene-blind-spots.md.
  */
 
 /**
@@ -239,6 +240,8 @@ const GIT_SCRIPTS = GIT_DOORS.filter((door) => !door.startsWith('src/')).map((do
 
 const TEMP_MAKERS = new Set(['mkdtempSync', 'mkdtemp'])
 const RAW_REMOVERS = new Set(['rmSync', 'rm', 'rmdirSync', 'rmdir'])
+/** The raw removers that, without `recursive`, still remove an EMPTY directory. */
+const EMPTY_DIR_REMOVERS = new Set(['rmdirSync', 'rmdir'])
 const CHILD_PROCESS = new Set(['child_process', 'node:child_process'])
 /** The modules a directory is made and removed through, and the one that names the temp root. */
 const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises'])
@@ -616,14 +619,15 @@ export function readHygiene(
   // The names the temp-directory functions go by here when imported under
   // another: `import { mkdtempSync as mk } from 'node:fs'` makes `mk(` a maker.
   const makerNames = new Set<string>()
-  const rawNames = new Set<string>()
+  /** Each local name of a raw remover, with the name it is imported by. */
+  const rawNames = new Map<string, string>()
   const helperNames = new Set<string>()
   const rootNames = new Set<string>()
 
   /** Records a name a function this guard knows is imported under, from `from`. */
   const alias = (from: string, imported: string, local: string): void => {
     if (FS_MODULES.has(from) && TEMP_MAKERS.has(imported)) makerNames.add(local)
-    if (FS_MODULES.has(from) && RAW_REMOVERS.has(imported)) rawNames.add(local)
+    if (FS_MODULES.has(from) && RAW_REMOVERS.has(imported)) rawNames.set(local, imported)
     if (OS_MODULES.has(from) && imported === 'tmpdir') rootNames.add(local)
     if (imported === 'removeTempDir' && candidatesFor(fileName, from).includes(TMPDIR_HELPER)) {
       helperNames.add(local)
@@ -941,9 +945,11 @@ export function readHygiene(
         else {
           nonRemovals.set(
             node,
-            recursion === 'no'
-              ? `it calls ${name} on it without recursive, which cannot remove a directory`
-              : `it calls ${name} on it with options this guard cannot read as recursive: write recursive: true in the call`
+            recursion !== 'no'
+              ? `it calls ${name} on it with options this guard cannot read as recursive: write recursive: true in the call`
+              : EMPTY_DIR_REMOVERS.has(rawNames.get(local) ?? name)
+                ? `it calls ${name} on it without recursive, which removes a directory only while it is empty`
+                : `it calls ${name} on it without recursive, which cannot remove a directory`
           )
         }
         if (recursion !== 'no' && !inTest(node)) {
@@ -1023,30 +1029,41 @@ export function readHygiene(
     ts.isExportSpecifier(identifier.parent) || ts.isExportAssignment(identifier.parent)
 
   /**
+   * Whether `use` names the named function `fn`: a method through a property
+   * (`rig.cleanup`), any other function through its own name as the checker
+   * binds it, so `server.close` names no function `close`. The name in the
+   * declaration itself is no use of it.
+   */
+  const names = (use: ts.Identifier, fn: ts.Node): boolean => {
+    const property = ts.isPropertyAccessExpression(use.parent) && use.parent.name === use
+    if (property !== ts.isMethodDeclaration(fn)) return false
+    if (property) return true
+    const declared = ts.isFunctionDeclaration(fn) ? fn.name : fn.parent
+    const named =
+      declared !== undefined && ts.isVariableDeclaration(declared) ? declared.name : declared
+    return (
+      named !== undefined && named !== use && symbolOf(use) === symbolOf(named as ts.Identifier)
+    )
+  }
+
+  /**
    * The call a use of the named function `fn` takes part in: as its callee
-   * (`cleanup()`), or handed to it whole (`afterAll(cleanupHomes)`). A method
-   * is reached through a property (`rig.cleanup()`); any other function only
-   * through its own name, as the checker binds it, so `server.close()` is no
-   * call of a function `close`. Stored in an object, exported, or named in a
+   * (`cleanup()`), or handed to it whole (`afterAll(cleanupHomes)`). Stored —
+   * in an object, or by `push`, `add` or `set` — exported, or named in a
    * type, a function takes part in no call.
    */
   const callTaking = (
     use: ts.Identifier,
     fn: ts.Node
   ): { readonly call: ts.CallExpression; readonly called: boolean } | null => {
-    const property = ts.isPropertyAccessExpression(use.parent) && use.parent.name === use
-    if (property !== ts.isMethodDeclaration(fn)) return null
-    const declared = ts.isFunctionDeclaration(fn) ? fn.name : fn.parent
-    const named =
-      declared !== undefined && ts.isVariableDeclaration(declared) ? declared.name : declared
-    if (!property && (named === undefined || symbolOf(use) !== symbolOf(named as ts.Identifier))) {
-      return null
-    }
-    const reference: ts.Node = property ? use.parent : use
+    if (!names(use, fn)) return null
+    const reference: ts.Node =
+      ts.isPropertyAccessExpression(use.parent) && use.parent.name === use ? use.parent : use
     const call = reference.parent
     if (!ts.isCallExpression(call)) return null
     if (call.expression === reference) return { call, called: true }
-    return call.arguments.some((argument) => argument === reference)
+    return call.arguments.some((argument) => argument === reference) &&
+      !(ts.isPropertyAccessExpression(call.expression) && COLLECTORS.has(call.expression.name.text))
       ? { call, called: false }
       : null
   }
@@ -1057,10 +1074,13 @@ export function readHygiene(
    * Whether the code in `home` runs when this file is loaded and its tests
    * run. The file's own top level does, and so does everything a hook, a
    * test or a `describe` is handed there. A named function does when a call
-   * of it, or a call it is handed to, does — `afterAll(cleanupHomes)`. A
-   * function this file only exports runs for other files, which is exactly
-   * what this cannot see. A use met again while tracing — the function
-   * calling itself, or two calling each other — decides nothing.
+   * of it, or a call it is handed to, is itself run — every function around
+   * that call, as `executes` reads them — so `afterAll(cleanupHomes)` runs
+   * `cleanupHomes`, and a call of it inside an object's method, a returned
+   * closure or one pushed onto a list does not. A function this file only
+   * exports runs for other files, which is exactly what this cannot see. A
+   * use met again while tracing — the function calling itself, or two
+   * calling each other — decides nothing.
    */
   const runs = (home: ts.Node): boolean => {
     if (ts.isSourceFile(home)) return true
@@ -1068,7 +1088,7 @@ export function readHygiene(
     if (name === null || tracing.has(home)) return false
     tracing.add(home)
     const ran = (uses.get(name) ?? []).some(
-      (use) => callTaking(use, home) !== null && runs(homeOf(use))
+      (use) => callTaking(use, home) !== null && executes(use)
     )
     tracing.delete(home)
     return ran
@@ -1092,6 +1112,20 @@ export function readHygiene(
       const taking = callTaking(use, fn)
       return taking?.called === true ? [taking.call] : []
     })
+
+  /** Whether a node sits in a type, where naming a function hands nothing on: `typeof fresh`. */
+  const inType = (node: ts.Node): boolean =>
+    !ts.isSourceFile(node) && (ts.isTypeNode(node) || inType(node.parent))
+
+  /**
+   * A use of the named function `fn` that hands the function itself on
+   * instead of calling it — kept in an object, handed to a call, held under
+   * another name — so that what it returns goes where no call here is judged.
+   */
+  const handedOnAt = (fn: ts.Node): ts.Identifier | undefined =>
+    (uses.get(nameOfFunction(fn) ?? '') ?? []).find(
+      (use) => names(use, fn) && callTaking(use, fn)?.called !== true && !inType(use)
+    )
 
   /**
    * Whether the file runs `node`: every function it sits in has to be run. An
@@ -1365,16 +1399,31 @@ export function readHygiene(
     if (handedBackOnly) {
       const calls = [...fate.returnedBy].map((fn) => [fn, callsOf(fn)] as const)
       const uncalled = calls.find(([, found]) => found.length === 0)?.[0]
-      if (uncalled === undefined) {
+      // Judged at its calls only when calls are all that is done with it: a
+      // function also handed on, as `{ makeTempDir }` or by reference, makes
+      // directories at calls this file never sees.
+      const handedOn = calls.flatMap(([fn]) => {
+        const use = handedOnAt(fn)
+        return use === undefined
+          ? []
+          : [{ name: nameOfFunction(fn) ?? 'a function', line: lineOf(use) }]
+      })[0]
+      if (uncalled === undefined && handedOn === undefined) {
         for (const [fn, found] of calls) {
           for (const call of found) through.set(call, nameOfFunction(fn) ?? 'a function')
           pending.push(...found)
         }
         continue
       }
-      fate.strays.push(
-        `${nameOfFunction(uncalled) ?? 'a function'} hands it back, and nothing in this file calls that: remove it where it is made, or from a module-level hook`
-      )
+      if (uncalled !== undefined) {
+        fate.strays.push(
+          `${nameOfFunction(uncalled) ?? 'a function'} hands it back, and nothing in this file calls that: remove it where it is made, or from a module-level hook`
+        )
+      } else if (handedOn !== undefined) {
+        fate.strays.push(
+          `${handedOn.name} hands it back, and line ${String(handedOn.line)} passes ${handedOn.name} itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook`
+        )
+      }
     }
     const stranded = [...fate.stranded][0]
     const sampled = [...fate.sampled].join(' and ')
@@ -2723,6 +2772,19 @@ describe('every directory a file makes reaches a remover the file runs', () => {
       'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmSync on it without recursive, which cannot remove a directory'
     ],
     [
+      'calls rmdirSync on it without recursive, which removes it only while it is empty',
+      "it('x', () => { const home = fs.mkdtempSync('x'); fs.rmdirSync(home) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmdirSync on it without recursive, which removes a directory only while it is empty'
+    ],
+    [
+      'calls rmdir imported under another name without recursive',
+      lines(
+        "import { rmdir as drop } from 'node:fs/promises'",
+        "it('x', async () => { const home = fs.mkdtempSync('x'); await drop(home) })"
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it calls drop on it without recursive, which removes a directory only while it is empty'
+    ],
+    [
       'removes it with options this guard cannot read',
       "it('x', () => { const home = fs.mkdtempSync('x'); fs.rmSync(home, OPTIONS) })",
       'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmSync on it with options this guard cannot read as recursive: write recursive: true in the call'
@@ -2885,6 +2947,12 @@ describe("vitest runs a file's after-hooks last-registered first, which company.
   })
 
   it('and they ran in the reverse of that order', () => {
+    // Run alone (`-t`), or before the case above, this case finds nothing
+    // recorded, which says nothing about the order: it says so first.
+    expect(
+      ran.length,
+      'the case above has not run, so no order is recorded: run the describe whole'
+    ).toBe(2)
     expect(ran).toEqual(['registered second', 'registered first'])
   })
 })
@@ -3259,6 +3327,187 @@ describe('shapes an adversarial pass found the rule accepting (2026-10-02)', () 
       "it('x', () => { const r = rig(); try { work(r.home) } finally { r.cleanup() } })"
     )
     expect(readHygiene(runsItsCleanup).made.map((dir) => dir.why)).toEqual([keptOnly('rig')])
+  })
+})
+
+describe('shapes review of #68 found the rule still accepting', () => {
+  // The rule above refused a removal inside a kept function, but asked of a
+  // NAMED function only whether some call of it sat in code that runs, and
+  // took a function handed to `push` as run: so the same removal, moved into
+  // a named function, passed. Each of these left every directory behind with
+  // the guard green.
+  const onlyRuns = (name: string): string =>
+    `only ${name} would remove it, and nothing in this file runs ${name}: remove it from a hook, or put it in a list a hook empties`
+  const never = (line: number, why: string): string =>
+    `makes a temp directory at line ${String(line)} and never removes it with removeTempDir or rmSync: ${why}`
+
+  it.each([
+    [
+      'a named cleanup pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        'const disposers: (() => void)[] = []',
+        'function cleanup(): void {',
+        '  for (const d of temps.splice(0)) removeTempDir(d)',
+        '}',
+        'disposers.push(cleanup)',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      ),
+      never(7, onlyRuns('cleanup'))
+    ],
+    [
+      'a closure calling a named cleanup, pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        'const disposers: (() => void)[] = []',
+        'function cleanup(): void {',
+        '  for (const d of temps.splice(0)) removeTempDir(d)',
+        '}',
+        'disposers.push(() => cleanup())',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      ),
+      never(7, onlyRuns('cleanup'))
+    ],
+    [
+      'a named closure over the directory, pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const disposers: (() => void)[] = []',
+        "it('x', () => { const home = fs.mkdtempSync('x'); const drop = () => removeTempDir(home); disposers.push(drop) })"
+      ),
+      never(2, onlyRuns('drop'))
+    ],
+    [
+      'the rig with its push deleted, its close() calling a named drain',
+      'test/main/control-server.test.ts',
+      lines(
+        'const rigs: Rig[] = []',
+        'const homes: string[] = []',
+        'afterEach(async () => {',
+        '  for (const rig of rigs.splice(0)) await rig.close()',
+        '})',
+        'function dropHomes(): void {',
+        '  for (const home of homes.splice(0)) removeTempDir(home)',
+        '}',
+        'async function startRig(): Promise<Rig> {',
+        "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))",
+        '  homes.push(home)',
+        '  const server = new ControlServer({ deps })',
+        '  return {',
+        '    home,',
+        '    async close() {',
+        '      await server.stop()',
+        '      dropHomes()',
+        '    }',
+        '  }',
+        '}',
+        "it('x', async () => { await startRig() })"
+      ),
+      never(10, onlyRuns('dropHomes'))
+    ],
+    [
+      'the rig with its push deleted, its close() calling a named closure over the home',
+      'test/main/control-server.test.ts',
+      lines(
+        'const rigs: { close(): Promise<void> }[] = []',
+        'afterEach(async () => { for (const rig of rigs.splice(0)) await rig.close() })',
+        'async function startRig() {',
+        "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-x-'))",
+        '  const dropHome = () => removeTempDir(home)',
+        '  const rig = { home, async close() { await stop(); dropHome() } }',
+        '  return rig',
+        '}',
+        "it('x', async () => { await startRig() })"
+      ),
+      never(4, onlyRuns('dropHome'))
+    ],
+    [
+      'a returned dispose closure calling a named cleanup the test never runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'function rig() {',
+        "  const home = fs.mkdtempSync('x')",
+        '  const cleanup = () => removeTempDir(home)',
+        '  return { home, dispose: () => cleanup() }',
+        '}',
+        "it('x', () => { const r = rig(); work(r.home) })"
+      ),
+      never(2, onlyRuns('cleanup'))
+    ],
+    [
+      'a module-level object whose method calls the named cleanup',
+      'test/fakes/rig.ts',
+      lines(
+        'const homes: string[] = []',
+        'function cleanup(): void { for (const h of homes.splice(0)) removeTempDir(h) }',
+        'export const rigKit = { close() { cleanup() } }',
+        "export function startRig(): void { const home = fs.mkdtempSync('x'); homes.push(home) }"
+      ),
+      never(4, onlyRuns('cleanup'))
+    ],
+    [
+      'a hand-back called here and exported inside an object',
+      'test/main/fixture.test.ts',
+      lines(
+        'function makeTempDir(prefix: string): string {',
+        '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '}',
+        'export const tmp = { makeTempDir }',
+        "it('x', () => { const d = makeTempDir('p'); removeTempDir(d) })"
+      ),
+      never(
+        2,
+        'makeTempDir hands it back, and line 4 passes makeTempDir itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook'
+      )
+    ],
+    [
+      'a hand-back called here and handed by reference to Array.from',
+      'test/main/fixture.test.ts',
+      lines(
+        "function freshHome(): string { return fs.mkdtempSync('x') }",
+        "it('x', () => { const one = freshHome(); removeTempDir(one); use(Array.from({ length: 3 }, freshHome)) })"
+      ),
+      never(
+        1,
+        'freshHome hands it back, and line 2 passes freshHome itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook'
+      )
+    ]
+  ])('fails %s', (_shape, file, source, fault) => {
+    expect(faultsAt(file, source)).toEqual([fault])
+  })
+
+  it.each([
+    [
+      'a named cleanup a hook calls from a closure',
+      lines(
+        'const temps: string[] = []',
+        'function cleanup(): void { for (const d of temps.splice(0)) removeTempDir(d) }',
+        'afterEach(() => { cleanup() })',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      )
+    ],
+    [
+      'a named cleanup a named function handed to the hook calls',
+      lines(
+        'const temps: string[] = []',
+        'function cleanup(): void { for (const d of temps.splice(0)) removeTempDir(d) }',
+        'function teardown(): void { cleanup() }',
+        'afterEach(teardown)',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      )
+    ],
+    [
+      'a hand-back named in a type beside its calls',
+      lines(
+        "function fresh(): string { return fs.mkdtempSync('x') }",
+        'export type Fresh = typeof fresh',
+        "it('x', () => { const home = fresh(); removeTempDir(home) })"
+      )
+    ]
+  ])('still accepts %s', (_shape, source) => {
+    expect(faultsAt('test/main/fixture.test.ts', source)).toEqual([])
   })
 })
 
