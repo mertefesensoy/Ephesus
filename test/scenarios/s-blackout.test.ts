@@ -235,7 +235,7 @@ async function restartOver(home: string): Promise<Company> {
       ) as never,
     close: async () => {
       hermes.stop()
-      await agora.drained().catch(() => {})
+      await agora.drained()
     }
   }
   companies.push(company)
@@ -348,7 +348,15 @@ describe('S-BLACKOUT — killed mid-commit', () => {
     await company.runTurn('agent.a', [sendStep(sent)])
     armed = true
     await company.hermes.sweep()
-    await company.agora.drained().catch(() => {})
+    // The drain resolves although the commit it waited on was killed: the
+    // error goes to whoever queued that commit (the sweep's `commitSoon`
+    // records it), never to the drain. Both halves are asserted — a dirty tree
+    // alone cannot tell "killed between stage and commit" from "never tried".
+    await company.agora.drained()
+    expect(company.agora.commitFailures()).toContainEqual({
+      subject: 'hermes: deliver 1, reject 0',
+      reason: 'blackout between stage and commit'
+    })
 
     // Delivered on disk, but never committed.
     expect(company.inbox('agent.b')).toEqual([`${sent.id}.json`])
