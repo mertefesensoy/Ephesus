@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-02 · **Branch:** `fix/invariants-see-wrapped-calls` (from `main` at
 `cab9e1b`) · **Commits:** `1971a28` (the fix and its tests), `fa0aeaf` (a parameter no
-caller varied, removed), and the commit carrying this document.
+caller varied, removed), `91e4f55` (this document), `e445aa6` (the review fixes, §5.3)
+and the commit filing GYM-010 (§5.1). `main` was merged in at `7146684` and `75e4fbb`.
 
 ---
 
@@ -71,7 +72,8 @@ against `HEAD`'s blob by hash and by `git status`.
 |---|---|
 | `scripts/check-invariants.cjs` | The git, truncating-write and ledger-rewrite rules match the whole file text and report the line each match starts on (`matchLines`). The four per-line rules are untouched. The scan is exposed as `fileFailures(rel, text, gitAllowlist?)` and `invariantFailures(gitAllowlist?)` behind a `require.main === module` guard, the shape `reachability.cjs`, `check-coverage.cjs` and `check-attribution.cjs` already have, with `main()` returning the exit status. The CLI's output on this tree is byte-identical to `main`'s. |
 | `test/scripts/check-invariants.test.ts` | **New.** 20 cases, listed in §3.4. |
-| `docs/DECISIONS-LOG.md` | One entry: the fix, and why it is a log entry rather than a Gymnasium ledger row (§5.1). |
+| `docs/DECISIONS-LOG.md` | One entry: the fix, its ledger row, and why that row was filed after review (§5.1). |
+| `docs/gymnasium/proposals/GYM-010-the-invariant-tripwires-read-the-whole-file.md`, `docs/gymnasium/LEDGER.md` | The Gymnasium row §3 of ENGINEERING-STANDARDS requires for a changed CI gate, status *proposed* (§5.1). |
 | `docs/implementations/2026-10-02-invariants-see-wrapped-calls.md` | This document. |
 
 ## 3. Implementation approach
@@ -220,35 +222,29 @@ baseline's test count (32). The round is certified only if the control survives.
 | Syntax-tree oracle | Hard-coded line 69 | Line 69 is already 98 on PR #62's branch. |
 | No dead-allowlist failure in the gate | Fail an allowlist entry that matches nothing, as `reachability.cjs` does | That is a new failure mode, which is an altered gate, which is a Gymnasium proposal (§5.2). The test suite now holds the rule's eyesight against the syntax tree instead. |
 
-### 5.1 A DECISIONS-LOG entry, not a Gymnasium ledger row
+### 5.1 A Gymnasium ledger row: GYM-010, filed after review
 
-ENGINEERING-STANDARDS §3 calls an *altered* CI gate without a ledger entry a defect. The
-question is whether a fix that restores a gate's documented behaviour is an alteration.
-The repository's precedent is **split**, and both sides are recorded:
+ENGINEERING-STANDARDS §3 calls an *altered* CI gate without a ledger entry a defect.
+This change alters what a CI gate refuses, so it is owed a row, and the row is
+[GYM-010](../gymnasium/proposals/GYM-010-the-invariant-tripwires-read-the-whole-file.md).
+The row carries this document as its evidence and the review's metric: a planted wrapped
+call fails by file and line at landing, with zero false positives through 2026-10-16.
 
-- **Ledger.** GYM-005 (2026-08-28) was a fix that also restored a check's documented
-  intent: ADRs are append-only, so additions are legal. But it *loosened* the check, so
-  that additions passed, and it changed how CI fetches history (`fetch-depth: 0`, the
-  merge base, `set -e`). Whether it held depended on CI's environment, so it carried a
-  standing metric that a probe could not settle. On the other side of the line are new
-  gates and new costs: GYM-006 (new gates), GYM-007 (a three-run ratchet cost), the
-  NUL-byte check RAISED instead of written (2026-08-31), and M6.10's floor-clock rule,
-  faulted on 2026-09-02 for having no entry.
-- **Log.** Fixes that make a rule match what it already claims to, proven by planted
-  probes in both directions: the voice-SDK lint false positive (2026-08-29) and the
-  `test/` scope correction (2026-08-27).
+**The first version of this section argued the opposite, and it was wrong.** It read the
+precedent as split. On one side was GYM-005, a gate fix that took a row, but one that
+loosened its check and changed how CI fetches history. On the other were fixes logged
+without a row, the voice-SDK lint false positive (2026-08-29) and the `test/` scope
+correction (2026-08-27). From that it concluded that a fix which only tightens a gate
+back to its documented behaviour needs a log entry and nothing more.
 
-This fix is the second kind:
+The design review of #65 pointed out that both "log" precedents **predate the ruling of
+2026-09-02**, "A changed CI gate gets a ledger entry". That ruling is the one that
+governs. It also faulted a rule in this very script, M6.10's floor-clock tripwire, for
+landing without a row. The Architect chose the row over recording an exemption.
 
-- no rule is added, no allowlist entry changes, nothing is loosened;
-- it can only fail more files (§4), its correctness does not depend on CI's environment,
-  and the behaviour it restores is the one this log recorded on 2026-08-26 (M2.1:
-  "`scripts/check-invariants.cjs` fails CI on a `git` call anywhere else");
-- the probe in §1 is the whole measurement, so a ledger row would have nothing left to
-  measure.
-
-If the Architect reads §3 as covering any edit to a gate script, the row is owed and this
-document is its evidence.
+The change was built before its proposal, so the order the `/improve` skill asks for
+(proposal, then approval, then code) was not followed. GYM-010 records that rather than
+excusing it, and #65 waits on its verdict.
 
 ### 5.2 Found, recorded, not done here
 
@@ -298,9 +294,9 @@ three smaller defects. The three are fixed:
   names is a comment or string quoting a git call. A line only the tree names is a
   blind spot in the gate (GYM-009).
 
-The oracle's overclaim is corrected in §3.4. The blocker is §5.1's question, whether
-this change needed a Gymnasium ledger row. That is a ruling for the Architect, and the
-outcome is recorded with the DECISIONS-LOG entry.
+The oracle's overclaim is corrected in §3.4. The blocker was §5.1's question, whether
+this change needed a Gymnasium ledger row. The Architect ruled that it does, and the row
+is GYM-010 (§5.1).
 
 ## 6. Verification
 
@@ -319,6 +315,8 @@ npx vitest run test/scripts/check-invariants.test.ts test/shared/secret-shapes.t
 | OneDrive worktree, the `1971a28` tree (2.31 GB free) | ok | ok | ok | 238 files, 4660 passed, 8 skipped; **exit 1** from `EPERM … rmdir coverage\.tmp` after the report was written | ok on that run's report (11:58:58) |
 | OneDrive worktree, the `fa0aeaf` tree (1.61 GB free) | ok | ok | ok | 238 files, 4660 passed, 8 skipped; same `EPERM` | ok on that run's report (12:05:50) |
 | detached worktree outside OneDrive at `fa0aeaf` (2.68 GB free) | ok | ok | ok | 238 files, 4660 passed, 8 skipped, exit 0 | ok, **chain exit 0** |
+| detached worktree outside OneDrive at `75e4fbb`, with `main` (#61–#64) merged in (1.78 GB free) | ok | ok | ok | 239 files, 4799 passed, 8 skipped, exit 0 | ok, **chain exit 0** |
+| OneDrive worktree, the `e445aa6` tree (the review fixes; 2.10 GB free) | ok | ok | ok | 239 files, 4799 passed, 8 skipped; same `EPERM` | ok on that run's report (16:12:17) |
 
 The `EPERM` is the v8 provider losing its scratch-directory `rmdir` to OneDrive's file
 handle. It was recorded in DECISIONS-LOG on 2026-09-07 and 2026-09-10, it comes after
@@ -387,8 +385,10 @@ what looked past that.
   script allowlist; the `test/` scope), 2026-08-29 (the lint false positive), 2026-09-02
   (a changed CI gate gets a ledger entry), 2026-09-07 and 2026-09-10 (the coverage
   `EPERM`), and this change's entry
-- [GYM-005](../gymnasium/proposals/GYM-005-adr-append-only-check-fix.md) — the gate fix
-  that did take a ledger row, and why
+- [GYM-010](../gymnasium/proposals/GYM-010-the-invariant-tripwires-read-the-whole-file.md)
+  — this change's ledger row
+- [GYM-005](../gymnasium/proposals/GYM-005-adr-append-only-check-fix.md) — an earlier
+  gate fix that took a ledger row
 - [GYM-008](../gymnasium/proposals/GYM-008-a-mutation-round-is-a-tool-not-a-scratch-script.md)
   — the mutation tool this round's harness stands in for
 
