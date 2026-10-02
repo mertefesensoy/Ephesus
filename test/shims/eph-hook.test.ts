@@ -10,6 +10,7 @@ import {
   sessionIdOf
 } from '../../shims/eph-hook.mjs'
 import { startHookStubServer, tempEndpoint, type HookStubServer } from '../fakes/hook-stub-server'
+import { runImporter } from './importer'
 
 /**
  * The shim is what a real engine actually executes, so it is exercised the way
@@ -17,7 +18,8 @@ import { startHookStubServer, tempEndpoint, type HookStubServer } from '../fakes
  * the adapter would write them into the settings file.
  */
 
-const SHIM = fileURLToPath(new URL('../../shims/eph-hook.mjs', import.meta.url))
+const SHIM_URL = new URL('../../shims/eph-hook.mjs', import.meta.url)
+const SHIM = fileURLToPath(SHIM_URL)
 const servers: HookStubServer[] = []
 
 afterEach(async () => {
@@ -352,5 +354,44 @@ describe('eph-hook — relaying the autonomy decision (ADR-0013)', () => {
     // The stub answers `{"ok":true,...}` with no decision, so the shim stays
     // silent — the property M1.4 established and M2.5 must not break.
     expect(child).toBe('')
+  })
+})
+
+describe('eph-hook — importing it', () => {
+  // The guard at the bottom of the shim is what lets this file import it at all.
+  // A process imports it from a file that is not the shim and is handed what
+  // `main()` acts on — an event, a wired endpoint that answers, and an engine
+  // payload on stdin — so a guard that let `main()` run would really read the
+  // payload and really post. `x-eph-hook.mjs` merely ends in the shim's name.
+  it.each(['importer.mjs', 'x-eph-hook.mjs'])('runs nothing when %s imports it', async (name) => {
+    const server = await stub()
+    const args = [
+      '--event',
+      'pre-tool',
+      '--field',
+      'tool=tool_name',
+      '--session-field',
+      'session_id'
+    ]
+    const env = {
+      EPH_AGENT_ID: 'agent.mason',
+      EPH_HOOK_TOKEN: 'spawn-token-1',
+      EPH_HOOK_ENDPOINT: server.endpoint
+    }
+
+    const run = await runImporter({ shim: SHIM_URL, name, args, env, input: CLAUDE_PRE_TOOL })
+
+    expect(run.status).toBe(0)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toBe('')
+    // `null` until something attaches a reader or resumes the stream.
+    expect(run.flowing).toBe('null')
+    // And nothing took any of it: the importer still reads the whole payload.
+    expect(run.unread).toBe(CLAUDE_PRE_TOOL)
+    expect(server.posts).toHaveLength(0)
+
+    // The same inputs are live: run as the program, they post to this endpoint.
+    expect((await runShim(args, env, CLAUDE_PRE_TOOL)).code).toBe(0)
+    expect(await server.waitForPosts(1)).toHaveLength(1)
   })
 })

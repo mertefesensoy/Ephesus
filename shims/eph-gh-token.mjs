@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+import path from 'node:path'
 import process from 'node:process'
 import { postJson } from './hook-client.mjs'
 
@@ -95,6 +96,7 @@ async function main() {
 }
 
 // Only run when invoked directly, so the pure parts stay importable by tests.
-if (process.argv[1] && process.argv[1].endsWith('eph-gh-token.mjs')) {
+// The whole file name is compared: a suffix also matches `x-eph-gh-token.mjs`.
+if (process.argv[1] && path.basename(process.argv[1]) === 'eph-gh-token.mjs') {
   void main()
 }

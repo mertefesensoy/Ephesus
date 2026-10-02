@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+import path from 'node:path'
 import process from 'node:process'
 import { postJson } from './hook-client.mjs'
 
@@ -160,7 +161,8 @@ async function main() {
 }
 
 // Only run when invoked as a program; the test imports the helpers above.
-if (process.argv[1] && process.argv[1].endsWith('eph-recall.mjs')) {
+// The whole file name is compared: a suffix also matches `x-eph-recall.mjs`.
+if (process.argv[1] && path.basename(process.argv[1]) === 'eph-recall.mjs') {
   main().catch((err) => {
     process.stderr.write(
       `recall unavailable: ${err instanceof Error ? err.message : String(err)}\n`

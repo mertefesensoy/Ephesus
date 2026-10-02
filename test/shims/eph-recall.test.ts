@@ -10,6 +10,7 @@ import { Library } from '../../src/main/library'
 import { PromptStore } from '../../src/main/prompts'
 import { FtsIndex } from '../../src/main/library-fts'
 import { removeTempDir } from '../tmpdir'
+import { runImporter } from './importer'
 
 /**
  * `eph-recall` is what an agent actually runs, so it is exercised the way an
@@ -22,13 +23,16 @@ import { removeTempDir } from '../tmpdir'
  */
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url))
-const SHIM = fileURLToPath(new URL('../../shims/eph-recall.mjs', import.meta.url))
+const SHIM_URL = new URL('../../shims/eph-recall.mjs', import.meta.url)
+const SHIM = fileURLToPath(SHIM_URL)
 const AGENT = 'agent.mason'
 const TOKEN = 'recall-token'
 
 interface Rig {
   readonly endpoint: string
   readonly library: Library
+  /** How many recall requests reached the Library. */
+  readonly recalls: number
   close(): Promise<void>
 }
 
@@ -49,12 +53,18 @@ async function startRig(options: { withLibrary?: boolean } = {}): Promise<Rig> {
   })
   library.note(AGENT, AGENT, 'The checkout suite is flaky because the fixture seeds two carts.')
 
+  let recalls = 0
   const hookServer = new HookServer({
     onEvent: () => undefined,
     onRejected: () => undefined,
     ...(options.withLibrary === false
       ? {}
-      : { onRecall: (request) => library.recall(request.query, request.scope, request.limit) })
+      : {
+          onRecall: (request) => {
+            recalls += 1
+            return library.recall(request.query, request.scope, request.limit)
+          }
+        })
   })
   const endpoint = await hookServer.start(home)
   hookServer.registerSpawn(AGENT, TOKEN)
@@ -62,6 +72,9 @@ async function startRig(options: { withLibrary?: boolean } = {}): Promise<Rig> {
   const rig: Rig = {
     endpoint,
     library,
+    get recalls() {
+      return recalls
+    },
     async close() {
       await hookServer.stop()
       removeTempDir(home)
@@ -215,5 +228,37 @@ describe('the shim against a real socket', () => {
     })
     expect(result.code).toBe(1)
     expect(result.stderr).toContain('nothing to search for')
+  })
+})
+
+describe('eph-recall — importing it', () => {
+  // The guard at the bottom of the shim is what lets this file import its
+  // helpers. A process imports it from a file that is not the shim and is handed
+  // what `main()` acts on — a query, and the environment of a live spawn whose
+  // harness answers — so a guard that let `main()` run would really ask the
+  // Library and print the answer. It is handed stdin too, which the shim never
+  // reads. `x-eph-recall.mjs` merely ends in the shim's name.
+  it.each(['importer.mjs', 'x-eph-recall.mjs'])('runs nothing when %s imports it', async (name) => {
+    const rig = await startRig()
+    const args = ['flaky', 'checkout']
+    const env = { EPH_AGENT_ID: AGENT, EPH_HOOK_TOKEN: TOKEN, EPH_HOOK_ENDPOINT: rig.endpoint }
+    const input = 'flaky checkout\n'
+
+    const run = await runImporter({ shim: SHIM_URL, name, args, env, input })
+
+    expect(run.status).toBe(0)
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toBe('')
+    // `null` until something attaches a reader or resumes the stream.
+    expect(run.flowing).toBe('null')
+    // And nothing took any of it: the importer still reads all of it.
+    expect(run.unread).toBe(input)
+    expect(rig.recalls).toBe(0)
+
+    // The same inputs are live: run as the program, they reach the Library.
+    const direct = await runShim(args, env)
+    expect(direct.code).toBe(0)
+    expect(direct.stdout).toContain('two carts')
+    expect(rig.recalls).toBe(1)
   })
 })
