@@ -423,8 +423,19 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | [`docs/AUTOMATION.md`](./docs/AUTOMATION.md) | The Claude Code automation installed in this repo (hooks, skills, subagents, CI) — what exists, why, and what's deferred. |
 | [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
 | [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
+| [`docs/M9-PLAN.md`](./docs/M9-PLAN.md) | **The next milestone, planned and not yet started** — the harness as the product: Ephesus's own agent engine running local models behind the existing adapter seam, and a bench that measures the harness's own uplift. Approved for planning on 2026-10-02. |
 
 ## Where the build stands
+
+> **What comes next is decided and not started.** On 2026-10-02 the Architect
+> planned **M9 — The harness is the product**: Ephesus's own agent engine
+> (`eph-agent`, [ADR-0036](./docs/adr/ADR-0036-two-engine-kinds.md)) running any
+> OpenAI-compatible local model first and Claude natively second, behind the same
+> adapter seam every wrapped CLI passes; a bench built before the engine so the
+> milestone exits on a **measured harness uplift** rather than a feature list; and
+> a headless-first core with the window as one client. The plan, its evidence and
+> the seven decisions it rests on are in [`docs/M9-PLAN.md`](./docs/M9-PLAN.md).
+> Nothing below this note has changed; M9 has no landed package.
 
 **M8's thirteen packages have all landed — and M8 has not closed.** M6 and M7
 landed the spoken company and the two outward missions; M8 is the hardening
