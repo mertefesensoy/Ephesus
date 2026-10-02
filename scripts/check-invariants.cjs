@@ -161,60 +161,128 @@ const slashed = (rel) => rel.split(path.sep).join('/')
  */
 const IS_COMMENT = /^\s*(\/\/|\/\*|\*)/
 
-const failures = []
-for (const dir of SEARCH_DIRS) {
-  const appRules = !SECRET_RULES_ONLY.includes(dir)
-  for (const file of walk(path.join(ROOT, dir))) {
-    const rel = path.relative(ROOT, file)
-    const text = fs.readFileSync(file, 'utf8')
-    text.split('\n').forEach((line, i) => {
-      if (appRules && GIT_INVOCATION.test(line) && !GIT_ALLOWLIST.has(rel)) {
+/**
+ * The 1-based line on which each match of `pattern` in `text` STARTS, each line
+ * once, in order.
+ *
+ * Contract: pure. `pattern` is used as written plus the global flag, so a `\s`
+ * in it spans a line break exactly as it spans a space — which it can only do
+ * when it is handed the text the line break is in.
+ */
+function matchLines(text, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+  const starts = [...text.matchAll(new RegExp(pattern.source, flags))].map(
+    (match) => text.slice(0, match.index).split('\n').length
+  )
+  return [...new Set(starts)]
+}
+
+/**
+ * Every tripwire failure in one source file, in the `<file>:<line>  <why>` form
+ * the CLI prints.
+ *
+ * Contract: pure — it reads nothing but its arguments. `searchDir` is the entry
+ * of `SEARCH_DIRS` the walk found the file under, and it alone decides which
+ * rules apply, as it did when this was the walk's own loop body: reading it out
+ * of `rel` would hand that decision to the platform's path separator, on a gate
+ * CI runs on one platform. `rel` is the file's path from the repository root in
+ * the platform's own separators, exactly as `invariantFailures` derives it and
+ * as the allowlists above are written. `gitAllowlist` is a parameter only so
+ * that a test can empty it.
+ *
+ * **Three rules read the whole file; the other four read one line at a time.**
+ * The git, truncating-write and ledger-rewrite patterns each span tokens that
+ * ordinary code puts on different lines. Prettier gives every argument of a
+ * call too long for one line a line of its own, so a long git call has its
+ * `'git'` on the line after the parenthesis. That is the shape of the one call
+ * in `src/main/git.ts` in every version since this rule was written beside it,
+ * so the allowlist entry naming that file was never once exercised before
+ * 2026-10-02 — and it is the shape a new call of that length takes anywhere
+ * else. A long `writeFileSync` call loses its path to the next line the same
+ * way, and SQL inside a template literal is wrapped by hand, where Prettier
+ * never reaches (`src/main/db.ts` already puts `FROM cost_ledger` a line below
+ * its verb). Read a line at a time, each of the three caught only what fit on
+ * one line.
+ *
+ * The four that stay per line hunt for spans Prettier never breaks — a clock
+ * call, a `webContents.send`, an environment read, a credential literal — and
+ * the clock rule's comment skip is a per-line idea. That was checked against
+ * the formatter, not assumed: the measurements are in
+ * `docs/implementations/2026-10-02-invariants-see-wrapped-calls.md`.
+ */
+function fileFailures(searchDir, rel, text, gitAllowlist = GIT_ALLOWLIST) {
+  const failures = []
+  const appRules = !SECRET_RULES_ONLY.includes(searchDir)
+  if (appRules) {
+    if (!gitAllowlist.has(rel)) {
+      for (const line of matchLines(text, GIT_INVOCATION)) {
         failures.push(
-          `${rel}:${i + 1}  git is invoked outside src/main/git.ts — ADR-0004 allows exactly one committer`
+          `${rel}:${line}  git is invoked outside src/main/git.ts — ADR-0004 allows exactly one committer`
         )
       }
-      if (appRules && TRUNCATING_LOG_WRITE.test(line)) {
+    }
+    for (const line of matchLines(text, TRUNCATING_LOG_WRITE)) {
+      failures.push(
+        `${rel}:${line}  truncating write to an append-only record — invariant §5 forbids rewriting it`
+      )
+    }
+    for (const line of matchLines(text, LEDGER_REWRITE)) {
+      failures.push(
+        `${rel}:${line}  UPDATE/DELETE against cost_ledger — the ledger is append-only (invariant §5, ADR-0011)`
+      )
+    }
+  }
+  text.split('\n').forEach((line, i) => {
+    const floorModel =
+      slashed(rel).startsWith(FLOOR_MODEL_DIR) && !CLOCK_ALLOWLIST.has(slashed(rel))
+    if (appRules && floorModel && !IS_COMMENT.test(line)) {
+      const clock = line.match(RENDERER_CLOCK)
+      if (clock) {
         failures.push(
-          `${rel}:${i + 1}  truncating write to an append-only record — invariant §5 forbids rewriting it`
+          `${rel}:${i + 1}  ${clock[0]} in a floor model — UI-DESIGN §6 makes these projections; take the clock as an argument (M6.10)`
         )
       }
-      if (appRules && LEDGER_REWRITE.test(line)) {
-        failures.push(
-          `${rel}:${i + 1}  UPDATE/DELETE against cost_ledger — the ledger is append-only (invariant §5, ADR-0011)`
-        )
-      }
-      const floorModel =
-        slashed(rel).startsWith(FLOOR_MODEL_DIR) && !CLOCK_ALLOWLIST.has(slashed(rel))
-      if (appRules && floorModel && !IS_COMMENT.test(line)) {
-        const clock = line.match(RENDERER_CLOCK)
-        if (clock) {
+    }
+    if (rel === SELF) return
+    if (appRules && RENDERER_SEND.test(line) && !RENDERER_SEND_ALLOWLIST.has(rel)) {
+      failures.push(
+        `${rel}:${i + 1}  webContents.send outside src/main/ui-bridge.ts — a destroyed window is not null, and every send on the quit path threw (M8.1); send through the bridge`
+      )
+    }
+    if (!ENV_SECRET_ALLOWED_DIRS.some((dir) => rel.startsWith(dir + path.sep))) {
+      for (const match of line.matchAll(ENV_SECRET_READ)) {
+        if (SECRET_NAMED.test(match[0]) && !HARNESS_ENV.test(match[0])) {
           failures.push(
-            `${rel}:${i + 1}  ${clock[0]} in a floor model — UI-DESIGN §6 makes these projections; take the clock as an argument (M6.10)`
+            `${rel}:${i + 1}  credential read from process.env outside src/main/watch/ or src/main/herald/ — ADR-0010 routes every credential through the broker`
           )
         }
       }
-      if (rel === SELF) return
-      if (appRules && RENDERER_SEND.test(line) && !RENDERER_SEND_ALLOWLIST.has(rel)) {
-        failures.push(
-          `${rel}:${i + 1}  webContents.send outside src/main/ui-bridge.ts — a destroyed window is not null, and every send on the quit path threw (M8.1); send through the bridge`
-        )
-      }
-      if (!ENV_SECRET_ALLOWED_DIRS.some((dir) => rel.startsWith(dir + path.sep))) {
-        for (const match of line.matchAll(ENV_SECRET_READ)) {
-          if (SECRET_NAMED.test(match[0]) && !HARNESS_ENV.test(match[0])) {
-            failures.push(
-              `${rel}:${i + 1}  credential read from process.env outside src/main/watch/ or src/main/herald/ — ADR-0010 routes every credential through the broker`
-            )
-          }
-        }
-      }
-      if (SECRET_SHAPED.test(line)) {
-        failures.push(
-          `${rel}:${i + 1}  secret-shaped string — ENGINEERING-STANDARDS §5 forbids one in code or fixtures`
-        )
-      }
-    })
+    }
+    if (SECRET_SHAPED.test(line)) {
+      failures.push(
+        `${rel}:${i + 1}  secret-shaped string — ENGINEERING-STANDARDS §5 forbids one in code or fixtures`
+      )
+    }
+  })
+  return failures
+}
+
+/**
+ * Every tripwire failure in the source files of the searched directories.
+ *
+ * Contract: reads every source file under them, writes nothing. It reads the
+ * tree this script sits in, so a test that needs a fixture tree runs a copy of
+ * `scripts/` inside one. `gitAllowlist` is passed through to `fileFailures`.
+ */
+function invariantFailures(gitAllowlist = GIT_ALLOWLIST) {
+  const failures = []
+  for (const dir of SEARCH_DIRS) {
+    for (const file of walk(path.join(ROOT, dir))) {
+      const rel = path.relative(ROOT, file)
+      failures.push(...fileFailures(dir, rel, fs.readFileSync(file, 'utf8'), gitAllowlist))
+    }
   }
+  return failures
 }
 
 /**
@@ -227,7 +295,6 @@ for (const dir of SEARCH_DIRS) {
  *    the defect it exists to catch, and it is the first entry on its allowlist.
  */
 const { reachabilityFailures, reachableModules } = require('./reachability.cjs')
-failures.push(...reachabilityFailures())
 
 /**
  * 6. Recorded engine output (Architect decision 2026-09-04) — an engine adapter
@@ -254,11 +321,14 @@ const NOT_AN_ADAPTER = new Set(['types.ts', 'index.ts', 'settings-install.ts', '
 /** The probe declarations a `BinarySpec` can carry, as they appear in source. */
 const DECLARED_PROBES = ['versionProbe', 'authProbe']
 
-if (!fs.existsSync(PROVENANCE)) {
-  failures.push(
-    `test/fixtures/engine-output/PROVENANCE.json is missing — every engine probe needs a recorded capture or a written waiver`
-  )
-} else {
+function provenanceFailures() {
+  const failures = []
+  if (!fs.existsSync(PROVENANCE)) {
+    failures.push(
+      `test/fixtures/engine-output/PROVENANCE.json is missing — every engine probe needs a recorded capture or a written waiver`
+    )
+    return failures
+  }
   let provenance = null
   try {
     provenance = JSON.parse(fs.readFileSync(PROVENANCE, 'utf8'))
@@ -312,15 +382,28 @@ if (!fs.existsSync(PROVENANCE)) {
       }
     }
   }
+  return failures
 }
 
-if (failures.length > 0) {
-  console.error('Invariant tripwire failures:\n')
-  for (const failure of failures) console.error(`  ${failure}`)
-  console.error('')
-  process.exit(1)
+/**
+ * What CI runs: every rule above over this repository, printed. Returns the
+ * exit status — 1 with every failure listed, 0 with one summary line.
+ */
+function main() {
+  const failures = [...invariantFailures(), ...reachabilityFailures(), ...provenanceFailures()]
+  if (failures.length > 0) {
+    console.error('Invariant tripwire failures:\n')
+    for (const failure of failures) console.error(`  ${failure}`)
+    console.error('')
+    return 1
+  }
+  const { reached, universe, typeOnly } = reachableModules()
+  console.log(
+    `invariants ok (${SEARCH_DIRS.join(', ')}; reachability ${String(reached.size)}/${String(universe.size)} src modules reached, ${String(universe.size - reached.size)} unreachable by recorded decision, ${String(typeOnly.size)} type-only)`
+  )
+  return 0
 }
-const { reached, universe, typeOnly } = reachableModules()
-console.log(
-  `invariants ok (${SEARCH_DIRS.join(', ')}; reachability ${String(reached.size)}/${String(universe.size)} src modules reached, ${String(universe.size - reached.size)} unreachable by recorded decision, ${String(typeOnly.size)} type-only)`
-)
+
+if (require.main === module) process.exit(main())
+
+module.exports = { GIT_ALLOWLIST, GIT_INVOCATION, fileFailures, invariantFailures }
