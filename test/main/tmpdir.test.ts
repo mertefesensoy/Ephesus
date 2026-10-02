@@ -33,8 +33,9 @@ import { removeTempDir, TEMP_REMOVE_BUDGET_MS } from '../tmpdir'
  * covered — the retry it exists for cannot be provoked.
  *
  * What still runs everywhere: that an unheld directory is removed without
- * waiting, and that the budget is large enough for a git child. Those are the
- * only claims a non-pinning platform can make.
+ * waiting, that the budget is large enough for a git child, and — since
+ * 2026-10-02 — the other way a directory resists removal, which every platform
+ * shares: a process still writing into it, failing the `rmdir` with ENOTEMPTY.
  */
 
 const temps: string[] = []
@@ -196,5 +197,105 @@ describe('removeTempDir on any platform', () => {
   it('gives a git child long enough to finish and exit', () => {
     // Commits under parallel workers were observed outlasting the old ~2.75 s.
     expect(TEMP_REMOVE_BUDGET_MS).toBeGreaterThan(8_000)
+  })
+})
+
+/**
+ * A child process that keeps adding files to `dir`, the way a detached
+ * `git repack` kept writing `.git/objects/pack` after the commit that started
+ * it had returned (2026-10-02, CI run 36924116592). It writes at least
+ * `minWrites` files and for at least `writeMs`, so a stalled scheduler cannot
+ * quietly turn it into a writer that wrote nothing. Resolves once it has
+ * REALLY started, by the same handshake `pinnedHome` uses.
+ *
+ * It runs in the OS temp directory rather than in `dir`, so the Windows cwd
+ * pin above cannot be what these cases measure — they run on every platform.
+ */
+async function writerInto(
+  dir: string,
+  writeMs: number,
+  minWrites: number
+): Promise<{ stopped(): boolean }> {
+  const flags = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-pin-flags-'))
+  temps.push(flags)
+  const started = path.join(flags, 'started')
+  const done = path.join(flags, 'done')
+  const source = [
+    `const fs = require('fs'), path = require('path')`,
+    `const end = Date.now() + ${String(writeMs)}`,
+    `const nap = new Int32Array(new SharedArrayBuffer(4))`,
+    `fs.writeFileSync(${JSON.stringify(started)}, 'x')`,
+    `for (let i = 0; i < ${String(minWrites)} || Date.now() < end; i += 1) {`,
+    `  try { fs.writeFileSync(path.join(${JSON.stringify(dir)}, 'late-' + i), 'x') } catch {}`,
+    `  Atomics.wait(nap, 0, 0, 1)`,
+    `}`,
+    `fs.writeFileSync(${JSON.stringify(done)}, 'x')`
+  ].join('\n')
+  const child = spawn(process.execPath, ['-e', source], { cwd: os.tmpdir(), stdio: 'ignore' })
+  children.push(child)
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve)
+    child.once('error', reject)
+  })
+  for (let i = 0; i < 600 && !fs.existsSync(started); i += 1) await sleep(5)
+  if (!fs.existsSync(started)) throw new Error('the writing child never started')
+  return { stopped: () => fs.existsSync(done) }
+}
+
+/**
+ * A temp home whose `agora/.git` already holds `entries` files.
+ *
+ * The entries are what make a race into a measurement. Against an empty
+ * directory a sweep lists, unlinks and removes it in microseconds, between two
+ * of the writer's writes, and the removal simply succeeds — the first draft of
+ * these cases did exactly that on linux. Two thousand keep the first sweep
+ * unlinking for long enough that the writer lands entries it never listed.
+ */
+function homeWithRepo(entries: number): { home: string; git: string } {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-pin-'))
+  temps.push(home)
+  const git = path.join(home, 'agora', '.git')
+  fs.mkdirSync(git, { recursive: true })
+  for (let i = 0; i < entries; i += 1) fs.writeFileSync(path.join(git, `f${String(i)}`), 'x')
+  return { home, git }
+}
+
+describe('removing a temp directory something is still writing into', () => {
+  /**
+   * The CI failure's arithmetic. `rmSync`'s budget is spent retrying the
+   * `rmdir` of a directory whose children it listed ONCE, so a single entry
+   * written after that listing is never deleted and every retry fails: the
+   * pacing-wakes teardown gave up with ENOTEMPTY on `agora/.git` after its
+   * whole ~2.75 s, though the writer had long finished. Measured on win32
+   * node v20.16.0 and reproduced on linux node v20.20.2 with git 2.55.0.
+   *
+   * If a future node makes the built-in look again, this fails, and a
+   * teardown budget becomes a real wait instead of a delay.
+   */
+  it('defeats rmSync’s own retry budget, which lists the directory once', async () => {
+    const { home, git } = homeWithRepo(2000)
+    const writer = await writerInto(git, 250, 50)
+
+    // Eight retries of linear backoff (50, 100, … 400 ms) sleep 1.8 s, more than
+    // seven times as long as the writer writes for: a remover that looked again
+    // would succeed.
+    expect(() =>
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 })
+    ).toThrow(/ENOTEMPTY|EPERM|EBUSY/)
+    // The proof, rather than a stopwatch: it gave up AFTER the writer stopped.
+    expect(writer.stopped()).toBe(true)
+  })
+
+  it('is outlasted by removeTempDir, which lists the tree again on every attempt', async () => {
+    // The same two thousand make the first attempt fail on purpose rather than
+    // by luck. Nothing here can count the attempts, so the evidence that the
+    // retry is what succeeds is the mutation record: with ENOTEMPTY dropped
+    // from the transient set, this fails ten runs in ten on linux.
+    const { home, git } = homeWithRepo(2000)
+    await writerInto(git, 500, 50)
+
+    expect(() => removeTempDir(home)).not.toThrow()
+
+    expect(fs.existsSync(home)).toBe(false)
   })
 })
