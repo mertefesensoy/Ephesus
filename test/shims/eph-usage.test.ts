@@ -17,6 +17,7 @@ import {
   writeAtomic
 } from '../../shims/eph-usage.mjs'
 import { removeTempDir } from '../tmpdir'
+import { importWithStdinOpen } from './importer'
 
 const SHIM_URL = new URL('../../shims/eph-usage.mjs', import.meta.url).href
 const SHIM = fileURLToPath(SHIM_URL)
@@ -149,7 +150,7 @@ describe('eph-usage — atomic writes', () => {
 })
 
 describe('eph-usage — importing it', () => {
-  it.each(['importer.mjs', 'x-eph-usage.mjs'])('runs nothing when %s imports it', (name) => {
+  it.each(['importer.mjs', 'x-eph-usage.mjs'])('runs nothing when %s imports it', async (name) => {
     // The guard at the bottom of the shim is what lets this file import it at all.
     // A process imports it from a file that is not the shim, as this file does, and
     // is handed everything a run of `main()` would act on: a status document on
@@ -189,6 +190,13 @@ describe('eph-usage — importing it', () => {
       env,
       timeout: 10_000
     })
+    const heldOpen = await importWithStdinOpen({
+      shim: new URL(SHIM_URL),
+      name,
+      args: ['--dir', reports],
+      env: { EPH_AGENT_ID: 'agent.importer' },
+      input: status
+    })
 
     expect(run.status).toBe(0)
     expect(run.stdout).toBe('')
@@ -197,6 +205,9 @@ describe('eph-usage — importing it', () => {
     expect(fs.readFileSync(flowing, 'utf8')).toBe('null')
     // And nothing took any of it: the importer still reads the whole document.
     expect(fs.readFileSync(unread, 'utf8')).toBe(status)
+    // Nor started a read that took nothing: with stdin never ended, a pending
+    // read would keep the importer alive, and it exits by itself instead.
+    expect(heldOpen).toBe(0)
     expect(fs.existsSync(reports)).toBe(false)
 
     // The same inputs are live: run as the program, they write the report.

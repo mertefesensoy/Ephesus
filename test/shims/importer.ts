@@ -39,6 +39,8 @@ export interface ImporterRun {
   readonly flowing: string | null
   /** What the importer could still read from stdin afterwards; `null` if never recorded. */
   readonly unread: string | null
+  /** The exit code of the same import with stdin never ended — see `importWithStdinOpen`. */
+  readonly heldOpen: number | null
 }
 
 export interface ImporterOptions {
@@ -53,6 +55,66 @@ export interface ImporterOptions {
 }
 
 const TIMEOUT_MS = 10_000
+
+function spawnImporter(
+  importer: string,
+  options: ImporterOptions,
+  endStdin: boolean
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
+  // Node itself write to stderr, which would fail a test for nothing the shim did.
+  const env: NodeJS.ProcessEnv = { ...process.env, ...options.env }
+  delete env['NODE_OPTIONS']
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [importer, ...options.args], {
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: TIMEOUT_MS
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    // A child that exits before reading stdin closes the pipe under this
+    // write. Its exit code and the missing records already say so.
+    child.stdin.on('error', () => undefined)
+    child.on('error', reject)
+    child.on('close', (status) => {
+      child.stdin.destroy()
+      resolve({ status, stdout, stderr })
+    })
+    if (endStdin) child.stdin.end(options.input)
+    else child.stdin.write(options.input)
+  })
+}
+
+/**
+ * Imports the shim the same way, handed the same input, but never the end of
+ * it, and resolves to the importer's exit code — `null` when it had to be
+ * killed because it could not exit by itself.
+ *
+ * A read left pending on stdin keeps a process alive until stdin ends. So this
+ * sees a stray read that takes nothing — a bare `process.stdin.read()` at
+ * module scope, which leaves the stream paused and every byte still readable,
+ * so `flowing` and `unread` cannot. An import that started no read lets the
+ * importer exit as soon as it settles.
+ */
+export async function importWithStdinOpen(options: ImporterOptions): Promise<number | null> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-importer-'))
+  try {
+    const importer = path.join(dir, options.name)
+    fs.writeFileSync(importer, `await import(${JSON.stringify(options.shim.href)})\n`, 'utf8')
+    return (await spawnImporter(importer, options, false)).status
+  } finally {
+    removeTempDir(dir)
+  }
+}
 
 export async function runImporter(options: ImporterOptions): Promise<ImporterRun> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-importer-'))
@@ -73,40 +135,15 @@ export async function runImporter(options: ImporterOptions): Promise<ImporterRun
       ].join('\n'),
       'utf8'
     )
-    // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
-    // Node itself write to stderr, which would fail a test for nothing the shim did.
-    const env: NodeJS.ProcessEnv = { ...process.env, ...options.env }
-    delete env['NODE_OPTIONS']
-
-    const run = await new Promise<{ status: number | null; stdout: string; stderr: string }>(
-      (resolve, reject) => {
-        const child = spawn(process.execPath, [importer, ...options.args], {
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: TIMEOUT_MS
-        })
-        let stdout = ''
-        let stderr = ''
-        child.stdout.setEncoding('utf8')
-        child.stderr.setEncoding('utf8')
-        child.stdout.on('data', (chunk: string) => {
-          stdout += chunk
-        })
-        child.stderr.on('data', (chunk: string) => {
-          stderr += chunk
-        })
-        // A child that exits before reading stdin closes the pipe under this
-        // write. Its exit code and the missing records already say so.
-        child.stdin.on('error', () => undefined)
-        child.on('error', reject)
-        child.on('close', (status) => resolve({ status, stdout, stderr }))
-        child.stdin.end(options.input)
-      }
-    )
-
+    const run = await spawnImporter(importer, options, true)
     const recorded = (file: string): string | null =>
       fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
-    return { ...run, flowing: recorded(flowing), unread: recorded(unread) }
+    return {
+      ...run,
+      flowing: recorded(flowing),
+      unread: recorded(unread),
+      heldOpen: await importWithStdinOpen(options)
+    }
   } finally {
     removeTempDir(dir)
   }

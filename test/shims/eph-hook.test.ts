@@ -388,6 +388,9 @@ describe('eph-hook — importing it', () => {
     expect(run.flowing).toBe('null')
     // And nothing took any of it: the importer still reads the whole payload.
     expect(run.unread).toBe(CLAUDE_PRE_TOOL)
+    // Nor started a read that took nothing: with stdin never ended, a pending
+    // read would keep the importer alive, and it exits by itself instead.
+    expect(run.heldOpen).toBe(0)
     expect(server.posts).toHaveLength(0)
 
     // The same inputs are live: run as the program, they post to this endpoint.

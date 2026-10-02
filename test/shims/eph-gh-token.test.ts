@@ -165,6 +165,9 @@ describe('eph-gh-token — importing it', () => {
       expect(run.flowing).toBe('null')
       // And nothing took any of it: the importer still reads all of it.
       expect(run.unread).toBe(input)
+      // Nor started a read that took nothing: with stdin never ended, a pending
+      // read would keep the importer alive, and it exits by itself instead.
+      expect(run.heldOpen).toBe(0)
       expect(rig.asked).toBe(0)
 
       // The same inputs are live: run as the program, they fetch a credential.
