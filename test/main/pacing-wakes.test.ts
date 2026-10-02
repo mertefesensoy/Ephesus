@@ -10,6 +10,7 @@ import { composeMessage, makeMessageId, type Message } from '../../src/shared/me
 import { DEFAULT_PACE_THRESHOLDS, type Pace } from '../../src/shared/pacing'
 import { UsageWatch } from '../../src/main/watch/usage-watch'
 import { canDeliverWake, DEFAULT_WAKE_CAP_MS, WakeClock } from '../../src/main/watch/wake-clock'
+import { removeTempDir } from '../tmpdir'
 
 /**
  * Usage-aware pacing at the seam it actually runs on (ADR-0023).
@@ -35,9 +36,7 @@ const agoras: Agora[] = []
 afterEach(async () => {
   for (const hermes of routers.splice(0)) hermes.stop()
   for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
-  for (const dir of temps.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
-  }
+  for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
 const START = Date.UTC(2026, 8, 1, 12, 0, 0)
