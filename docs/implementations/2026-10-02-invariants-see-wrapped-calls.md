@@ -166,9 +166,15 @@ Two choices keep the cases honest:
 
 - **The syntax tree is the oracle for real files.** `gitCalls()` walks a
   `ts.createSourceFile` tree for calls to the six functions whose first argument is the
-  literal `git`, and returns the line of the callee and the line of the `'git'`. It shares
-  no code with the regex, so they agree only by both being right, and no line number is
-  hard-coded. That matters because open PR #62 moves `git.ts`'s call from line 69 to 98.
+  literal `git`, and returns the line of the callee and the line of the `'git'`. No line
+  number is hard-coded, which mattered at once: PR #62 moved `git.ts`'s call from line 69
+  to 98. The oracle shares no code with the regex, **but it asks the regex's own question**
+  (one of six names, called with the literal `'git'`). Agreement therefore proves the
+  regex reads every call of that shape wherever the line breaks fall. It proves nothing
+  about shapes outside the question: a shell string, a path, an alias. GYM-009's
+  catalogue found the oracle blind to 16 shapes, all of them among the regex's own misses.
+  The first version of this document said the two "agree only by both being right", and
+  that overclaimed (corrected after review, §5.3).
 - **Nothing is mocked.** Real files are read from disk and the CLI is run as a process.
   The fixture tree is a real temp directory, removed with `removeTempDir`.
 
@@ -266,7 +272,35 @@ in the real tree, the "allowlist emptied" case would fail on the disagreement. T
 syntax-tree derivation of git's entry points on branch `fix/temp-hygiene-requires-remover`
 already handles aliases, paths and `shell: true`, and is the obvious base for a stronger
 rule. Every item above changes what the gate refuses, so it belongs in an `/improve`
-proposal and not in this fix.
+proposal and not in this fix. That proposal is GYM-009 (status *proposed*, on branch
+`docs/gym-009-git-tripwire-syntax-tree`). It builds on this change and does not cover it.
+
+### 5.3 After review
+
+The design review posted on the PR (2026-10-02, at `91e4f55`) found one blocker and
+three smaller defects. The three are fixed:
+
+- **The `test/` exemption no longer depends on the path separator.** The first version
+  read the search directory back out of `rel` (`slashed(rel).split('/')[0]`). The walk
+  it replaced had used its own loop variable. CI runs ubuntu, so the only mutant that
+  could catch a wrong parse there (#11 in §6) died on win32 alone. Now
+  `fileFailures(searchDir, rel, text)` takes the directory from the walk. A case passes
+  `src` with a `test/` path and expects the app rules, so a parse fails it on every
+  platform.
+- **The CLI cases no longer inherit the caller's environment.** The three spawned
+  children get `process.env` minus `NODE_OPTIONS`, and a 20 s timeout under vitest's 30 s.
+  This follows `test/shims/eph-usage.test.ts` and the 2026-10-01 log entry. To
+  demonstrate it, a `--require` module that writes to stderr stood in for a debugging
+  terminal's bootloader. Under it the bare CLI writes `bootloader: attached` to stderr,
+  which the old `stderr === ''` cases would have read as the checker's, and the test
+  file passes 20 of 20.
+- **The syntax-tree comparison now explains a disagreement.** A line only the rule
+  names is a comment or string quoting a git call. A line only the tree names is a
+  blind spot in the gate (GYM-009).
+
+The oracle's overclaim is corrected in §3.4. The blocker is §5.1's question, whether
+this change needed a Gymnasium ledger row. That is a ruling for the Architect, and the
+outcome is recorded with the DECISIONS-LOG entry.
 
 ## 6. Verification
 
@@ -323,7 +357,7 @@ files that load the checker), 32 tests at baseline. Free memory stayed between 2
 | 8 | first match only | killed | many calls; repository vs syntax tree (`arm-hooks.cjs` has two); the SQL fixture (two statements); the one-line forms |
 | 9 | no per-line de-duplication | killed | many calls (two on line 4) |
 | 10 | `test/` held to the app rules | killed | 5 cases |
-| 11 | scope read with raw separators | killed **on win32** | 5 cases. On linux `path.sep` is `/` and this mutant is equivalent: the `slashed()` it removes exists for Windows. |
+| 11 | scope read with raw separators | killed **on win32** | 5 cases. On linux `path.sep` is `/` and this mutant is equivalent: the `slashed()` it removes exists for Windows. **Review found this a defect, not a footnote.** CI runs ubuntu, so the rule deciding the `test/` exemption was tested on one platform only. The parse is gone (§5.3), and with it this mutant. |
 | 12 | allowlist not passed through the walk | killed | repository vs syntax tree |
 | 13 | CLI skips the per-file rules | killed | the fixture-tree CLI only |
 | 14 | CLI exits 0 on failure | killed | the fixture-tree CLI only |

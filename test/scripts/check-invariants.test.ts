@@ -25,8 +25,12 @@ import { removeTempDir } from '../tmpdir'
  * Two things keep these cases honest. Every wrapped fixture is checked to be
  * exactly what Prettier writes, so "nobody would write it like that" is no
  * answer: `npm run lint` would insist on it. And where a real file's git calls
- * are is decided by the TypeScript syntax tree — an oracle that shares nothing
- * with the regex, so the two agree only by both being right.
+ * are is decided by the TypeScript syntax tree, which shares no code with the
+ * regex. It does ask the regex's own question — one of six function names,
+ * called with the literal `'git'` — so agreement proves the regex reads every
+ * call of that shape however the formatter lays it out, and nothing about the
+ * shapes outside the question (a shell string, a path, an alias), which
+ * GYM-009 catalogues.
  */
 
 const require_ = createRequire(import.meta.url)
@@ -36,7 +40,12 @@ const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const checker = require_(SCRIPT) as {
   GIT_ALLOWLIST: ReadonlySet<string>
   GIT_INVOCATION: RegExp
-  fileFailures: (rel: string, text: string, gitAllowlist?: ReadonlySet<string>) => string[]
+  fileFailures: (
+    searchDir: string,
+    rel: string,
+    text: string,
+    gitAllowlist?: ReadonlySet<string>
+  ) => string[]
   invariantFailures: (gitAllowlist?: ReadonlySet<string>) => string[]
 }
 
@@ -158,7 +167,9 @@ interface GitCall {
 
 /**
  * Every call to one of `STARTERS` whose first argument is the literal `git`,
- * found by the syntax tree rather than by text — the oracle the rule is held to.
+ * found by the syntax tree rather than by text. It is the rule's own question
+ * asked of a different reader, so it settles whether the regex reads that shape
+ * wherever the line breaks fall, and nothing wider (see the header).
  */
 function gitCalls(file: string, text: string): GitCall[] {
   const kind = file.endsWith('.tsx')
@@ -208,15 +219,15 @@ function sourceFiles(dir: string): string[] {
 
 describe('the single-committer rule reads the whole file (ADR-0004)', () => {
   it('fails a git call Prettier has wrapped, on the line the call starts', () => {
-    expect(checker.fileFailures(AGORA, WRAPPED_GIT)).toEqual([gitFailure(AGORA, 4)])
+    expect(checker.fileFailures('src', AGORA, WRAPPED_GIT)).toEqual([gitFailure(AGORA, 4)])
   })
 
   it('still fails a git call that fits on one line', () => {
-    expect(checker.fileFailures(AGORA, ONE_LINE_GIT)).toEqual([gitFailure(AGORA, 4)])
+    expect(checker.fileFailures('src', AGORA, ONE_LINE_GIT)).toEqual([gitFailure(AGORA, 4)])
   })
 
   it('names every call in a file, each line once', () => {
-    expect(checker.fileFailures(AGORA, MANY_GIT)).toEqual([
+    expect(checker.fileFailures('src', AGORA, MANY_GIT)).toEqual([
       gitFailure(AGORA, 4),
       gitFailure(AGORA, 8)
     ])
@@ -224,8 +235,11 @@ describe('the single-committer rule reads the whole file (ADR-0004)', () => {
 
   it('leaves test/ alone, where TEST-STRATEGY §6 wants real git in temp dirs', () => {
     const testFile = path.join('test', 'main', 'agora.test.ts')
-    expect(checker.fileFailures(testFile, WRAPPED_GIT)).toEqual([])
-    expect(checker.fileFailures(testFile, ONE_LINE_GIT)).toEqual([])
+    expect(checker.fileFailures('test', testFile, WRAPPED_GIT)).toEqual([])
+    expect(checker.fileFailures('test', testFile, ONE_LINE_GIT)).toEqual([])
+    // The directory the walk found the file in decides, never a parse of its
+    // path: a parse would depend on the separator, and CI runs one platform.
+    expect(checker.fileFailures('src', testFile, WRAPPED_GIT)).toEqual([gitFailure(testFile, 4)])
   })
 })
 
@@ -249,11 +263,11 @@ describe('the real src/main/git.ts', () => {
   })
 
   it('is seen: the same text in any other file fails, on the lines its calls start', () => {
-    expect(checker.fileFailures(AGORA, real)).toEqual(gitFailuresFor(AGORA, calls))
+    expect(checker.fileFailures('src', AGORA, real)).toEqual(gitFailuresFor(AGORA, calls))
   })
 
   it('is allowed: at its own path it passes', () => {
-    expect(checker.fileFailures(GIT_TS, real)).toEqual([])
+    expect(checker.fileFailures('src', GIT_TS, real)).toEqual([])
   })
 })
 
@@ -264,7 +278,13 @@ describe('this repository', () => {
       .flatMap((rel) => gitFailuresFor(rel, gitCalls(rel, readRepo(rel))))
     // Not vacuous: the one committer is always among them.
     expect(expected.filter((entry) => entry.startsWith(`${GIT_TS}:`))).not.toEqual([])
-    expect(gitFailures(checker.invariantFailures(new Set())).sort()).toEqual(expected.sort())
+    expect(
+      gitFailures(checker.invariantFailures(new Set())).sort(),
+      'the rule and the syntax tree disagree about where git is called. A line only the rule ' +
+        'names is a comment or string quoting a git call: the gate refuses that outside an ' +
+        'allowlisted file, so reword it. A line only the syntax tree names is a call the regex ' +
+        'cannot see, which is a blind spot in the gate (GYM-009).'
+    ).toEqual(expected.sort())
   })
 
   it('with the allowlist as written, passes the single-committer rule', () => {
@@ -276,11 +296,13 @@ describe('the append-only rules read the whole file too (invariant §5)', () => 
   const file = path.join('src', 'main', 'ledger.ts')
 
   it('fails a writeFileSync whose log path Prettier moved to the next line', () => {
-    expect(checker.fileFailures(file, WRAPPED_LOG_WRITE)).toEqual([failure(file, 5, LOG_WHY)])
+    expect(checker.fileFailures('src', file, WRAPPED_LOG_WRITE)).toEqual([
+      failure(file, 5, LOG_WHY)
+    ])
   })
 
   it('fails ledger SQL whose verb and table are on different lines', () => {
-    expect(checker.fileFailures(file, WRAPPED_LEDGER_SQL)).toEqual([
+    expect(checker.fileFailures('src', file, WRAPPED_LEDGER_SQL)).toEqual([
       failure(file, 5, LEDGER_WHY),
       failure(file, 11, LEDGER_WHY)
     ])
@@ -292,7 +314,7 @@ describe('the append-only rules read the whole file too (invariant §5)', () => 
       "db.exec('DELETE FROM cost_ledger')",
       "db.exec('update cost_ledger set cost_usd = 0')"
     )
-    expect(checker.fileFailures(file, oneLine)).toEqual([
+    expect(checker.fileFailures('src', file, oneLine)).toEqual([
       failure(file, 1, LOG_WHY),
       failure(file, 2, LEDGER_WHY),
       failure(file, 3, LEDGER_WHY)
@@ -311,7 +333,7 @@ describe('the append-only rules read the whole file too (invariant §5)', () => 
       '  JSON.stringify(registry)',
       ')'
     )
-    expect(checker.fileFailures(file, legal)).toEqual([])
+    expect(checker.fileFailures('src', file, legal)).toEqual([])
   })
 })
 
@@ -323,16 +345,18 @@ describe('the per-line rules are where they were', () => {
       '// the caller passes Date.now() in',
       'export const now = (): number => Date.now()'
     )
-    expect(where(checker.fileFailures(model, source))).toEqual([`${model}:2`])
-    expect(checker.fileFailures(canvas, source)).toEqual([])
+    expect(where(checker.fileFailures('src', model, source))).toEqual([`${model}:2`])
+    expect(checker.fileFailures('src', canvas, source)).toEqual([])
   })
 
   it('only the bridge sends to the renderer, and the checker may name what it hunts', () => {
     const send = lines("win.webContents.send('agents:state', state)")
     const index = path.join('src', 'main', 'index.ts')
-    expect(where(checker.fileFailures(index, send))).toEqual([`${index}:1`])
-    expect(checker.fileFailures(path.join('src', 'main', 'ui-bridge.ts'), send)).toEqual([])
-    expect(checker.fileFailures(path.join('scripts', 'check-invariants.cjs'), send)).toEqual([])
+    expect(where(checker.fileFailures('src', index, send))).toEqual([`${index}:1`])
+    expect(checker.fileFailures('src', path.join('src', 'main', 'ui-bridge.ts'), send)).toEqual([])
+    expect(
+      checker.fileFailures('scripts', path.join('scripts', 'check-invariants.cjs'), send)
+    ).toEqual([])
   })
 
   it('only the Watch and the Herald read a credential from the environment', () => {
@@ -340,22 +364,46 @@ describe('the per-line rules are where they were', () => {
     const env = 'process' + '.env'
     // Line 2 is credential-NAMED, and still allowed: `EPH_*` is the harness's own.
     const reads = lines(`const token = ${env}.GH_TOKEN`, `const hook = ${env}.EPH_HOOK_TOKEN`)
-    expect(where(checker.fileFailures(AGORA, reads))).toEqual([`${AGORA}:1`])
+    expect(where(checker.fileFailures('src', AGORA, reads))).toEqual([`${AGORA}:1`])
     const broker = path.join('src', 'main', 'watch', 'broker.ts')
-    expect(checker.fileFailures(broker, reads)).toEqual([])
+    expect(checker.fileFailures('src', broker, reads)).toEqual([])
   })
 
   it('no file anywhere, test/ included, carries a secret-shaped string', () => {
     // Assembled from halves for the same reason (see test/shared/secret-shapes.test.ts).
     const leak = lines(`const key = '${'ghp' + '_'}abcdefghijklmnopqrstuvwxyz0123'`)
     const testFile = path.join('test', 'main', 'agora.test.ts')
-    expect(where(checker.fileFailures(testFile, leak))).toEqual([`${testFile}:1`])
+    expect(where(checker.fileFailures('test', testFile, leak))).toEqual([`${testFile}:1`])
   })
 })
 
+/**
+ * The environment a spawned checker gets: this one, minus `NODE_OPTIONS`. A
+ * loader or flag there (a debugging terminal's `--require`, for one) makes Node
+ * itself write to stderr, which these cases would read as the checker's own.
+ */
+function childEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
+  delete env['NODE_OPTIONS']
+  return env
+}
+
+/**
+ * Under vitest's 30 s `testTimeout`, so a hung child fails here and says so,
+ * rather than as an anonymous test timeout. The full checker takes about 2.5 s
+ * on an idle machine; the margin is for a suite running every worker at once.
+ */
+const CHILD_TIMEOUT_MS = 20_000
+
 describe('the CLI, run as CI runs it', () => {
   it('exits 0 over this repository', () => {
-    const run = spawnSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, encoding: 'utf8' })
+    const run = spawnSync(process.execPath, [SCRIPT], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: childEnv(),
+      timeout: CHILD_TIMEOUT_MS
+    })
+    expect(run.error).toBeUndefined()
     expect(run.stderr).toBe('')
     expect(run.status).toBe(0)
     expect(run.stdout).toMatch(/^invariants ok \(src, shims, scripts, test; /)
@@ -379,8 +427,10 @@ describe('the CLI, run as CI runs it', () => {
     const run = spawnSync(process.execPath, [path.join(root, 'scripts', 'check-invariants.cjs')], {
       cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, NODE_PATH: path.join(REPO_ROOT, 'node_modules') }
+      env: childEnv({ NODE_PATH: path.join(REPO_ROOT, 'node_modules') }),
+      timeout: CHILD_TIMEOUT_MS
     })
+    expect(run.error).toBeUndefined()
     expect(run.status).toBe(1)
     const printed = run.stderr
       .split('\n')
@@ -391,8 +441,11 @@ describe('the CLI, run as CI runs it', () => {
 
   it('runs nothing when it is required rather than run', () => {
     const run = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(SCRIPT)})`], {
-      encoding: 'utf8'
+      encoding: 'utf8',
+      env: childEnv(),
+      timeout: CHILD_TIMEOUT_MS
     })
+    expect(run.error).toBeUndefined()
     expect(run).toMatchObject({ status: 0, stdout: '', stderr: '' })
   })
 })

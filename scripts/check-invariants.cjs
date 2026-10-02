@@ -181,10 +181,14 @@ function matchLines(text, pattern) {
  * Every tripwire failure in one source file, in the `<file>:<line>  <why>` form
  * the CLI prints.
  *
- * Contract: pure — it reads nothing but its arguments. `rel` is the file's path
- * from the repository root in the platform's own separators, exactly as
- * `invariantFailures` derives it and as the allowlists above are written.
- * `gitAllowlist` is a parameter only so that a test can empty it.
+ * Contract: pure — it reads nothing but its arguments. `searchDir` is the entry
+ * of `SEARCH_DIRS` the walk found the file under, and it alone decides which
+ * rules apply, as it did when this was the walk's own loop body: reading it out
+ * of `rel` would hand that decision to the platform's path separator, on a gate
+ * CI runs on one platform. `rel` is the file's path from the repository root in
+ * the platform's own separators, exactly as `invariantFailures` derives it and
+ * as the allowlists above are written. `gitAllowlist` is a parameter only so
+ * that a test can empty it.
  *
  * **Three rules read the whole file; the other four read one line at a time.**
  * The git, truncating-write and ledger-rewrite patterns each span tokens that
@@ -206,9 +210,9 @@ function matchLines(text, pattern) {
  * the formatter, not assumed: the measurements are in
  * `docs/implementations/2026-10-02-invariants-see-wrapped-calls.md`.
  */
-function fileFailures(rel, text, gitAllowlist = GIT_ALLOWLIST) {
+function fileFailures(searchDir, rel, text, gitAllowlist = GIT_ALLOWLIST) {
   const failures = []
-  const appRules = !SECRET_RULES_ONLY.includes(slashed(rel).split('/')[0])
+  const appRules = !SECRET_RULES_ONLY.includes(searchDir)
   if (appRules) {
     if (!gitAllowlist.has(rel)) {
       for (const line of matchLines(text, GIT_INVOCATION)) {
@@ -275,7 +279,7 @@ function invariantFailures(gitAllowlist = GIT_ALLOWLIST) {
   for (const dir of SEARCH_DIRS) {
     for (const file of walk(path.join(ROOT, dir))) {
       const rel = path.relative(ROOT, file)
-      failures.push(...fileFailures(rel, fs.readFileSync(file, 'utf8'), gitAllowlist))
+      failures.push(...fileFailures(dir, rel, fs.readFileSync(file, 'utf8'), gitAllowlist))
     }
   }
   return failures
