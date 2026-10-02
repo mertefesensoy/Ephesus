@@ -8,6 +8,8 @@ somewhere? This change fixes the leak that rule could not see, and makes the rul
 its question of every DIRECTORY, wherever it is made, including the ones no `mkdtemp`
 made at all — and then, after an adversarial pass found its first version accepting
 four files in the tree that it should not have, of every function the removal sits in.
+Review of the change found that question still answered too generously for a NAMED
+function, and the Gymnasium row the change owed; both are answered in §3.8.
 
 ## 1. Problem / motivation
 
@@ -61,9 +63,10 @@ eight green under the first version of this change (§3.7).
 | `test/main/control-server.test.ts`, `test/shims/eph-recall.test.ts` | Each rig's home goes into a `homes` list the `afterEach` empties after closing the rigs; `close()` no longer removes it. |
 | `test/scripts/ephctl.test.ts` | The rig's home goes into the existing `temps` list, which the `afterEach` empties after closing the rigs; `close()` no longer removes it. |
 | `test/scenarios/s-crash.test.ts` | The rig's home goes into a `homes` list the `afterEach` empties after closing the rigs. `close()` keeps its own removal, deliberately (§5). |
-| `test/temp-hygiene.test.ts` | The leak rule follows each directory from the call that makes it to a remover the file runs; flags any path named on the temp root outside an `mkdtemp` call unless `UNMADE_TEMP_PATHS` lists it, how often, and why; resolves `fs`/`os`/`removeTempDir` imported under other names; reasons every fault. New regression fixtures (the old rule's misses, and every bypass the adversarial pass confirmed and this closed), premise tests, and a hook-order tripwire. |
+| `test/temp-hygiene.test.ts` | The leak rule follows each directory from the call that makes it to a remover the file runs; flags any path named on the temp root outside an `mkdtemp` call unless `UNMADE_TEMP_PATHS` lists it, how often, and why; resolves `fs`/`os`/`removeTempDir` imported under other names; reasons every fault. New regression fixtures (the old rule's misses, every bypass the adversarial pass confirmed and this closed, and every shape review found), premise tests, and a hook-order tripwire. |
 | `docs/implementations/2026-10-02-temp-hygiene-blind-spots.md` | This document. |
-| `docs/DECISIONS-LOG.md` | Two entries: the helper removes its own homes; a removal only a kept function performs counts for nothing. |
+| `docs/DECISIONS-LOG.md` | Four entries: the helper removes its own homes; a removal only a kept function performs counts for nothing; the named-function hole review found; the ledger row, filed after review and approved. |
+| `docs/gymnasium/proposals/GYM-011-the-temp-hygiene-guard-follows-every-directory.md`, `docs/gymnasium/LEDGER.md` | The Gymnasium row this change owed (ENGINEERING-STANDARDS §3), filed after review and approved by the Architect (§3.8). |
 
 ## 3. Implementation approach
 
@@ -121,7 +124,7 @@ times the file names each one, and why. Eleven sites in nine files:
 | `test/main/eventlog.test.ts` | `eph-nonexistent/log.jsonl` | 1 | `EventLog.read()` of a missing file returns nothing and creates nothing. |
 | `test/main/repo-remotes.test.ts` | `eph-nope-does-not-exist` | 1 | git cannot start in a missing directory. |
 | `test/main/tmpdir.test.ts` | (the root) | 1 | The working directory of the writing child #62 added: the root itself, so the handle a process holds on its cwd cannot pin the directory the case measures; the child writes only into directories the test made. |
-| `test/main/worktrees.test.ts` | `no-agora-here` | 3 | `Worktrees` only `path.resolve`s and compares the forbidden root (`src/main/git.ts:217`). |
+| `test/main/worktrees.test.ts` | `no-agora-here` | 3 | `Worktrees` only `path.resolve`s and compares the forbidden root (`src/main/git.ts:246-248`). |
 | `test/scripts/check-coverage.test.ts` | (the root) | 1 | `headCommit` reads a `.git` it does not find, and only when the test has no directory of its own. |
 | `test/shims/eph-recall.test.ts` | `eph-no-such.sock` | 1 | An endpoint nothing listens on. |
 | `test/temp-hygiene.test.ts` | `eph-does-not-exist-at-all` | 1 | A root the sweep must survive not finding. |
@@ -185,12 +188,15 @@ removal counts only if it runs whenever the directory is made:
 - the file **executes** it: every function between it and the file's top level is run.
   An anonymous function handed to a call or a `new` is taken to be run by it — a hook, a
   test, `forEach`, a `Promise` executor, an IIFE — unless the call only stores it
-  (`push`, `add`, `set`). A named function runs when a call of it runs, or a call it is
-  handed to (`afterAll(cleanupHomes)`): calls of a function are matched by the checker's
-  symbol, so `server.close()` is no call of a function `close`, and only a method runs
-  through a property (`rig.cleanup()`). Stored in an object, exported, or named in a
-  type, a function takes part in no call. Any other function — a method of an object
-  literal, a closure returned or assigned — is only kept.
+  (`push`, `add`, `set`). A named function runs when a call of it, or a call it is
+  handed to (`afterAll(cleanupHomes)`), is itself executed — the same question, asked of
+  the call — so a call of it inside an object's method or a returned closure counts for
+  nothing, and a named function handed to `push`, `add` or `set` is stored, not run,
+  exactly as an anonymous one is (§3.8). Calls of a function are matched by the
+  checker's symbol, so `server.close()` is no call of a function `close`, and only a
+  method runs through a property (`rig.cleanup()`). Stored in an object, exported, or
+  named in a type, a function takes part in no call. Any other function — a method of an
+  object literal, a closure returned or assigned — is only kept.
 
 A removal that fails both is *stranded*, and the fault says how: *only cleanupHomes
 would remove it, and nothing in this file runs cleanupHomes*, or *only a function
@@ -198,19 +204,24 @@ startRig keeps — an object's method, or one stored or returned — would remov
 nothing in this file is seen to run that*, each with the remedy *remove it from a hook,
 or put it in a list a hook empties*.
 
-A function that hands its directory back is refused when no call of it here can be
-judged. EXPORTED, its callers live in files no rule follows the directory into: that is
-blind spot (c), and a `makeTempDir()` in `test/tmpdir.ts` that returned
-`fs.mkdtempSync(…)` fails with *makeTempDir hands it to callers in other files, where
-this guard does not follow it: remove it here, from a module-level hook*. Not called
-here at all — exported inside an object, under another name, through `module.exports`,
-from a class a factory hands out, or only handed by reference to `Array.from` — it
-fails with *… hands it back, and nothing in this file calls that*. One that lists its
-directories and empties the list from a module-level `afterEach` passes.
+A function that hands its directory back is judged at its calls only when calls are all
+the file does with it. EXPORTED, its callers live in files no rule follows the
+directory into: that is blind spot (c), and a `makeTempDir()` in `test/tmpdir.ts` that
+returned `fs.mkdtempSync(…)` fails with *makeTempDir hands it to callers in other
+files, where this guard does not follow it: remove it here, from a module-level hook*.
+Not called here at all — exported inside an object, under another name, through
+`module.exports`, from a class a factory hands out, or only handed by reference to
+`Array.from` — it fails with *… hands it back, and nothing in this file calls that*.
+Called here, but also handed on itself — kept in an object, passed to a call, held
+under another name — it fails with *… line 4 passes makeTempDir itself on, where this
+guard does not follow what it returns* (§3.8); naming it in a type (`typeof fresh`)
+hands nothing on. One that lists its directories and empties the list from a
+module-level `afterEach` passes.
 
-For company.ts the remedy is the one the fault names, and the one
-`test/conformance/adapter-conformance.ts:75` already uses: `afterAll(cleanupHomes)` at
-module level (§5 explains why it cannot race a company still closing). The scenarios
+For company.ts the remedy is the one the fault names — remove from a module-level hook,
+the shape `test/conformance/adapter-conformance.ts:75` already has (an `afterEach` that
+empties its `temps` list): `afterAll(cleanupHomes)` at module level (§5 explains why it
+cannot race a company still closing). The scenarios
 still call `cleanupHomes()` themselves, per test where they close companies per test;
 the hook removes what a forgetful one leaves. Measured on `s-livelock.test.ts` with its
 call deleted, `TEMP` isolated: the old company.ts left 3 homes, the new one 0, and the
@@ -232,9 +243,12 @@ raw-teardown rule.
 
 ### 3.6 The fixtures the old rule was tested with
 
-Four existing cases changed, each because the old rule could not see what they now
+Six existing cases changed, each because the old rule could not see what they now
 assert:
 
+- *catches a file that makes a directory and removes nothing* reads *makes a temp
+  directory at line 1 …* instead of *creates a temp directory …*: the verdict is per
+  directory now, so the fault names its line.
 - *accepts a file that actually calls one of the two removers* used
   `fs.mkdtempSync(x)\nremoveTempDir(home)` — a removal of a different `home` than the
   dropped directory. The directory now flows to the remover.
@@ -245,8 +259,10 @@ assert:
 - The company fixture under *judges a file that reaches git through a helper* gains
   `afterAll(cleanupHomes)`, as the real file did; without it, company.ts is now the
   file at fault.
-- The git-file messages read *never removes the temp directory it makes at line N with
-  removeTempDir* instead of *never calls removeTempDir*.
+- Two git-file cases — *fails the teardown pacing-wakes shipped with, which lost to a
+  git repack on CI*, and the relay through `company.ts` — read *never removes the temp
+  directory it makes at line N with removeTempDir* instead of *never calls
+  removeTempDir*.
 
 ### 3.7 What the adversarial pass found
 
@@ -291,13 +307,85 @@ closure the test does run (`r.cleanup()`) are refused. Each would need the guard
 follow values through objects or parameters; each fault now names the shape that
 passes. None occurs in the tree.
 
+### 3.8 What review found
+
+Review of the PR at `35b0edf` ran two passes: one against the repository's documents
+and standards, and one for correctness, over the guard and every changed file. Both
+found the same hole on their own, each with its own inputs. Every shape below was then
+run through the real guard, before and after the fix.
+
+**A removal moved into a named function counted wherever a call of it was written.**
+§3.4's rule refused a removal inside a kept function, but asked of a NAMED function
+only whether some call of it sat in code that runs. It judged that call by the nearest
+named function around it, skipping any object method or closure in between, and it
+took a function handed to `push`, `add` or `set` as run. So the same removal, one
+refactor away from fixtures the guard refused, passed with every directory left
+behind:
+
+| Shape | Before | Now |
+|---|---|---|
+| A named cleanup pushed onto a list nothing runs: `disposers.push(cleanup)` | passed | *only cleanup would remove it, and nothing in this file runs cleanup* |
+| A closure calling it, pushed onto such a list: `disposers.push(() => cleanup())` | passed | the same |
+| A named closure over the directory, pushed: `const drop = () => removeTempDir(home); disposers.push(drop)` | passed | *only drop …* |
+| The rig with `rigs.push(rig)` deleted, its `close()` calling a named drain `dropHomes()` — the four rigs' defect again | passed | *only dropHomes …* |
+| The rig with its push deleted, its `close()` calling a named closure over its home | passed | *only dropHome …* |
+| A returned `dispose: () => cleanup()` that the test never runs | passed | *only cleanup …* |
+| A module-level `export const rigKit = { close() { cleanup() } }` | passed | *only cleanup …* |
+
+Two edits close it. First, `runs` asks of each call of a named function the question
+`executes` asks of a removal: is every function around the call run? Second, a function
+handed to `push`, `add` or `set` is stored, not run, whether it is named or not. The
+shapes that must keep passing do, and are fixtures now: `afterAll(cleanupHomes)`,
+`afterEach(() => { cleanup() })`, and `afterEach(teardown)` where `teardown` calls
+`cleanup`. Over the tree nothing changed, so no file relied on the hole.
+
+**A hand-back the file both calls and hands on was judged only at its calls.** A
+`makeTempDir` exported as `export const tmp = { makeTempDir }` passed whenever the file
+also called it once and removed what that call returned. The call was judged; the
+export was not. §3.4's refusal covered only a hand-back that nothing here calls. It now
+covers any hand-back the file uses other than by calling it: kept in an object, passed
+to a call (`Array.from({ length: 3 }, freshHome)`), or held under another name. Naming
+it in a type hands nothing on.
+
+**Messages and records.**
+
+- **`rmdir` and `rmdirSync`.** Called without `recursive`, they were said to be unable
+  to remove a directory, but they remove an empty one, and the fault now says so. It
+  reads the name the function was imported by, so an alias is described correctly too.
+- **The hook-order tripwire.** Its second case, run alone with `-t` or before the
+  first, failed on an empty list, which read as a broken hook order. It now says the
+  first case has not run.
+- **Corrected in the record:**
+  - the `adapter-conformance.ts` quote (§3.4);
+  - the `git.ts` citation (§3.2);
+  - "four existing cases" (§3.6): it is six;
+  - counts measured before the rebase (§4, §5);
+  - "the final tip" for a commit that was amended away (§6);
+  - the reason the DECISIONS-LOG entry gave for `s-crash.test.ts`, which went stale
+    when #61 merged.
+
+**The ledger row.** ENGINEERING-STANDARDS §3 calls an altered CI gate, or a new
+convention, without a Gymnasium ledger entry a defect. This change alters what a test
+inside the required `Typecheck · lint · test` check refuses, and it adds four
+conventions every test author meets. Review found no row, and found that the question
+had never been asked.
+
+`#64`'s document had argued that this guard owed no row, citing changes to it on
+2026-09-01 and 2026-09-07. The second of those came after the 2026-09-02 ruling, "A
+changed CI gate gets a ledger entry", and #65's ruling on the same day went to the row.
+Asked, the Architect chose the row over an exemption and approved it. It is
+[GYM-011](../gymnasium/proposals/GYM-011-the-temp-hygiene-guard-follows-every-directory.md),
+filed after review, as GYM-010 was. The order the Gymnasium asks for (proposal, then
+approval, then code) was not followed; the row records that, and does not excuse it.
+
 ## 4. Mathematical / statistical details
 
 ### The fate of a directory
 
 Let *M* be the set of make sites in a file: every `mkdtemp` call, plus every call of a
-named function in the file that does nothing with its made directory but return it
-(computed as a worklist; each site is judged once). For a site *m*, the removals that
+named function in the file that does nothing with its made directory but return it, and
+that the file uses nowhere but in calls (computed as a worklist; each site is judged
+once). For a site *m*, the removals that
 reach it are found by following edges of a small value graph:
 
 - *value → variable v* when the value initialises or is assigned to *v*; *v → each
@@ -319,14 +407,17 @@ executes(x) = for each function f around x, innermost first:
                 otherwise          → return false
               → true at the file's top level
 runs(file)  = true
-runs(f)     = ∃ use u of f's name that calls f or hands f to a call
-              (a method through a property; any other function only through
-               an identifier the checker binds to f) such that runs(home(u))
+runs(f)     = ∃ use u of f's name that calls f, or hands f to a call that is
+              not a collector (a method through a property; any other function
+              only through an identifier the checker binds to f), such that
+              executes(u)
 ```
 
-with `home(u)` the nearest NAMED function around *u*, or the file. `runs` is the least
-fixed point, computed by depth-first search that answers *false* on re-entry, so a
-function calling itself, or two calling each other, decide nothing. With *K(m)* the
+`runs` and `executes` are the least fixed point, computed by depth-first search that
+answers *false* on re-entry, so a function calling itself, or two calling each other,
+decide nothing. Until review, the last line read `runs(home(u))`, with `home(u)` the
+nearest NAMED function around *u*: every unnamed function between *u* and that one was
+skipped, and a collector counted as a call. That is the hole in §3.8. With *K(m)* the
 kinds of the counted removals, the verdict is: no fault iff `K(m) ≠ ∅` for a file that
 does not reach git, and iff `removeTempDir ∈ K(m)` for one that does. The analysis is
 path-insensitive: a removal counts whether or not a branch around it is taken (§7).
@@ -337,8 +428,9 @@ pass and the rest fault; the premise test asserts *a(n) = s(n)* for every entry.
 
 ### Mutation rounds
 
-Both rounds ran in a detached worktree outside OneDrive (`%TEMP%\mut-hyg-*`,
-`node_modules` by junction) against a committed restore point, one mutant at a time,
+Every round ran in a detached worktree outside OneDrive (`%TEMP%\mut-hyg-*`, and
+`%TEMP%\mh3` after review, `node_modules` by junction) against a committed restore
+point, one mutant at a time,
 running `test/temp-hygiene.test.ts` (whose whole-tree test reads every other round
 file). The harness required a green baseline first, scored a run that executed zero
 tests as INVALID and retried it, hashed every round file before the round and after
@@ -349,9 +441,40 @@ mutant ran. Mutants are named for the enforcement point they disable.
 |---|---|---|---|---|---|---|
 | 1 | `035b142` (on `70d028e`) | 59 | 56 | 3: two no-op controls; a scenario dropping `cleanupHomes()`, predicted to survive | 0 | 206/206 |
 | 2 | `216cefb` (on `9a21f2e`) | 98 | 94 | 4: three no-op controls (the guard, company.ts, a rig file); the scenario case, predicted to survive | 0 | 240/240 |
+| 3 | `2b1b106` (the review fix, on `35b0edf`) | 113 | 107 | 6: five no-op controls (three in the guard, two of them inside the new code; company.ts; a rig file); the scenario case | 0 | 254/254 |
 
-Both rounds ran before the rebase onto `9723c10` (§6). Since round 2 the guard's code is
-unchanged but for one `UNMADE_TEMP_PATHS` entry, and its 240 tests are the same.
+Rounds 1 and 2 ran before the rebase onto `9723c10` (§6); between round 2 and review the
+guard's code changed by one `UNMADE_TEMP_PATHS` entry. Round 3 ran after review, on the
+fixed guard. It carried round 2's mutants, with the six whose text the fix rewrote ported
+to the new text, and ten mutants for the fix's own enforcement points: each edit
+reverted, the declaration counted as a use, the hand-on check dropped, a type counted
+as a hand-on and a hand-over as none, and three on the `rmdir` message. It also carried
+two more no-op controls inside the new code, and review's three shapes written into the
+real `company.ts` in place of its hook. Every mutant of the fix was killed by the
+fixture written for it.
+
+**The plants against three guards (GYM-011's metric 1).** The fifteen defects put back
+into the real tree were run against three guards: round 2's twelve, and review's three
+shapes in `company.ts`. The no-op controls and the scenario case ran with them, and
+survived each time.
+
+| Guard | Plants that fail it | Baseline |
+|---|---|---|
+| this change, after review (`2b1b106`) | 15 of 15 | 254/254 |
+| this change, before review (`35b0edf`) | 12 of 15: review's three shapes pass | 240/240 |
+| `main`'s (`f048eb3`) | 0 of 15 | 134/134 |
+
+`2b1b106` is a scratch restore point. The guard merged differs from it only in its
+header comment, which was brought up to date with the fix afterwards. For the first
+row, each plant was also run with the default reporter, which is what CI prints. Each output names the planted file, with a fault that gives a line: *"runs real
+git (imports src/main/agora.ts at line 14) and never removes the temp directory it makes
+at line 272 with removeTempDir: only cleanupHomes would remove it …"*. The JSON reporter
+the rounds score with keeps only the assertion's first line, so it shows neither.
+
+The round harness (`mutate-hygiene.mjs`), its plans and the message check are scratch
+tools, kept outside the repository. They are not committed: GYM-008's checked-in tool
+does not exist yet, so none of these rounds can be re-run from the repository as it
+stands.
 
 Round 1 was the first version, before the adversarial pass; its 56 kills include all
 seven defects put back into the real tree (the gates home, the capacity test's shim
@@ -366,8 +489,9 @@ were killed, by the whole-tree test.
 
 ### Cost
 
-The checker is built only for a file with a make site: 98 of the 254 files under
-`test/` the walk reads. Measured 2026-10-02 on this machine (win32, the file run
+The checker is built only for a file with a make site: 101 of the 257 files under
+`test/` the walk reads, on the rebased tree (98 of 254 before the rebase; the three
+files `main` added account for both differences). Measured 2026-10-02 on this machine (win32, the file run
 alone from a worktree outside OneDrive, two runs each, interleaved, about 1.2 GB free
 at the end):
 
@@ -376,7 +500,15 @@ at the end):
 | `9a21f2e` (the base) | 134 | 2.71 s, 2.49 s | 3.55 s, 3.28 s |
 | this change | 240 | 3.95 s, 3.65 s | 4.93 s, 4.50 s |
 
-About 1.2 s more, for 106 more tests and the per-directory walk.
+About 1.2 s more, for 106 more tests and the per-directory walk. Re-measured after
+review, 2026-10-03, the same way, from `%TEMP%\mh3`, at about 2.7 GB free:
+
+| Guard | Tests | vitest `tests` time | Duration |
+|---|---|---|---|
+| `main`'s (`f048eb3`) | 134 | 2.24 s, 2.32 s | 3.01 s, 3.03 s |
+| this change, after review | 254 | 3.27 s, 3.44 s | 4.25 s, 4.22 s |
+
+Still about 1.2 s more.
 
 ## 5. Design decisions
 
@@ -434,9 +566,10 @@ says how to comply. If a caller-removes helper is ever wanted, the guard has to 
 cross-file judgement first, and this decision is the place to revisit.
 
 **A type checker for scope, rather than a hand-written resolver or name matching.**
-Names alone fail a common shape in the tree: seventeen files bind two or more of their
-directories to the same name, test after test (`s-secrets.test.ts` declares
-`const home` eight times). A resolver written here would be fifty lines of
+Names alone fail a common shape in the tree: nineteen files declare two or more of
+their directories under the same name, test after test (`s-secrets.test.ts` declares
+`const home` eight times; counted on the rebased tree, where seventeen became
+nineteen). A resolver written here would be fifty lines of
 JavaScript scoping rules (blocks, parameters, `for…of`, `catch`, hoisting) to test
 and mutate; the compiler already has them, and the same checker answers which
 function a call names (§3.4).
@@ -456,19 +589,40 @@ on the first one's reason.
 is taken to run — a hook's body, a `forEach` callback, a `Promise` executor. Deciding
 otherwise needs to know what each callee does with the function it is handed. Storage
 calls (`push`, `add`, `set`) are the one exception the rule spells out, because a
-removal closure pushed onto a list is the shape that otherwise passes for free.
+removal closure pushed onto a list is the shape that otherwise passes for free. Until
+review the exception covered only anonymous functions; it covers named ones too (§3.8).
+
+**Close the named-function hole, rather than record it as a residual and narrow the
+claims.** Review offered both. Recording it would have left this change's headline
+rule, and a DECISIONS-LOG title that cannot be edited once merged, untrue; and one of
+the shapes was the four rigs' defect after a one-line refactor. The fix is two
+conditions in code the rule already had: `executes` asked of a call instead of
+`home(u)`, and the collector test `executes` already applied, applied in `callTaking`.
+No file in the tree changed verdict.
+
+**A Gymnasium row, filed after review, rather than an exemption: the Architect's
+ruling.** The alternative put to the Architect was a ruling that a guard inside the
+test suite is not a CI gate under ENGINEERING-STANDARDS §3. That reading still leaves
+§3's "new conventions", which this change adds; the Architect chose the row and
+approved it as GYM-011 (§3.8).
 
 ## 6. Verification
 
 ```bash
-# the guard, its fixtures and the tree (240 tests)
+# the guard, its fixtures and the tree (254 tests)
 npx vitest run test/temp-hygiene.test.ts
 
 # the files this change touched, and two scenarios that import company.ts
 npx vitest run test/main/gates.test.ts test/main/engines/claude-capacity.test.ts test/main/control-server.test.ts test/scenarios/s-crash.test.ts test/scripts/ephctl.test.ts test/shims/eph-recall.test.ts test/scenarios/s-livelock.test.ts test/scenarios/s-blackout.test.ts
 
+# the shapes review found, and the shapes that must still pass
+npx vitest run test/temp-hygiene.test.ts -t "shapes review of #68"
+
 # the tripwire trips, and only it
 npx vitest run test/temp-hygiene.test.ts --sequence.hooks=list
+
+# its second case, run alone, says the first has not run
+npx vitest run test/temp-hygiene.test.ts -t "and they ran in the reverse of that order"
 
 # the Definition-of-Done gate
 npm run typecheck && npm run lint && node scripts/check-invariants.cjs && npm run test:coverage && node scripts/check-coverage.cjs
@@ -507,7 +661,9 @@ as a failure under memory pressure that did not recur, not as explained. The two
 intermediate commits were checked on their own outside OneDrive: each typechecks and
 passes the base guard and every file it touches (259 tests).
 
-After the rebase onto `main` at `9723c10` (below), on the final tip:
+After the rebase onto `main` at `9723c10` (below), on `4f1e5db`: the docs commit as it
+stood before a doc-only amend made it `546253e`. Its code is `546253e`'s; only this
+document differs, by sixteen lines.
 
 | Run | Tree | Free at start | typecheck | lint | invariants | suite | check-coverage |
 |---|---|---|---|---|---|---|---|
@@ -522,6 +678,17 @@ resolved from the main checkout by walking up — so the copy could not load
 `typescript`: 19/20 twice, deterministically. With `node_modules` linked to the main
 checkout's (lockfile matched, 328 packages, no mismatch) the file passed 20/20 twice,
 and run 5 is the whole gate on that tree. CI installs its own packages.
+
+After review (§3.8), 2026-10-03, run outside OneDrive (`%TEMP%\mh3`, `node_modules`
+linked to the main checkout's, lockfile matched: 328 packages, no mismatch). It ran on
+`b7cfbbe`, a scratch commit whose tree is this change's final content without this
+paragraph:
+
+| Run | Tree | Free at start | typecheck | lint | invariants | suite | check-coverage |
+|---|---|---|---|---|---|---|---|
+| 6 | `b7cfbbe` (on `35b0edf`) | 2.76 GB | exit 0 | exit 0 | ok | 239 files; 4919 passed, 8 skipped; exit 0 | floors ok |
+
+That is fourteen more tests than run 5, all of them review's fixtures.
 
 ### Rebased onto `main` at `9723c10`
 
@@ -552,7 +719,7 @@ different kind of analysis, or does not occur here:
 | **Cadence.** A directory made per test but removed once — `beforeEach(() => { root = mkdtemp() })` with `afterAll(() => removeTempDir(root))`, a list reset by `temps = []` or `temps.length = 0` before its drain — removes only the last. A one-word edit of `home.test.ts` (`afterEach` → `afterAll`) leaks 11 of its 12 homes with the guard green. | It needs to know how often each hook runs, and that a variable's next value replaces the last. Every such pair in the tree today is matched. |
 | **Hook scope.** A drain hook inside one `describe` empties a file-level list for that `describe`'s tests only; a maker used by tests elsewhere leaks there. A removal hook in a skipped suite never runs. | It needs to map hooks to the tests they apply to. Each of the seven describe-scoped drains in the tree empties a list declared inside the same `describe` (read 2026-10-02). |
 | **Path-insensitivity.** A removal counts whether or not the branch around it is taken: after an early `return`, under an `if` that is never true, under an inverted condition on a push (`if (reuse !== undefined) temps.push(home)`). | Deciding it needs control flow, not a value graph. |
-| **Red-path leaks.** A removal at the end of a test body, after assertions, does not run when an assertion fails: `control-server.test.ts` makes and removes three homes that way, and `agent-worktree.test.ts`'s `afterEach` removes its temps after closers that can throw. | The rule asks whether a removal runs, not whether it runs on failure; requiring `finally` or a hook for every directory is a policy change. These leaks are bounded by the global sweep (two hours) for `eph-*` names. |
+| **Red-path leaks.** A removal at the end of a test body, after assertions, does not run when an assertion fails: `control-server.test.ts` makes and removes three homes that way, and `agent-worktree.test.ts`'s `afterEach` removes its temps after closers that can throw. `company.ts`'s `afterAll(cleanupHomes)` is skipped when an after-hook that runs before it throws: vitest runs a suite's after-hooks one after another and stops at the first that throws (`@vitest/runner/dist/chunk-artifact.js:2628-2630`), so the backstop holds on the green path only — as the scenario's own `cleanupHomes()`, after the same throwing teardown, always did. | The rule asks whether a removal runs, not whether it runs on failure; requiring `finally` or a hook for every directory is a policy change. These leaks are bounded by the global sweep (two hours) for `eph-*` names, company homes (`eph-scenario-*`) included. |
 | **Closures handed to calls.** A removal inside a callback counts whenever its enclosing code runs: `server.on('close', () => removeTempDir(home))` for an event that never fires, a `setTimeout(…).unref()` that never fires, a `process.on('exit')` handler vitest's fork kill may not run. | Deciding it needs to know what each callee does with a function. |
 | **Lists partly emptied in a loop.** `for (const dir of temps.slice(1))`, a loop that `break`s. | The values are followed, not the iteration. |
 | **A variable reassigned before its removal.** `let home = mkdtemp(); … home = other; removeTempDir(home)` credits the removal to both. | Flow-insensitive by design. The four directory variables in the tree that are assigned rather than declared (`gates.test.ts`, `home.test.ts`, two in `pin.ts`) are each removed before they are assigned again. |
@@ -560,8 +727,9 @@ different kind of analysis, or does not occur here:
 | **What other code makes.** The rule reads files under `test/` only. A directory production code creates on the temp root, or one a spawned program creates outside a directory the test made, or a sibling a test makes from one (`fs.cpSync(home, home + '-copy')`, `path.dirname(home)`), is not seen. | Production code never touches the temp root (only `spawn-env.ts` passes `TMPDIR` through); programs a test spawns write inside the directory the test gives them. |
 | **Other spellings of the temp root.** A literal (`'/tmp/x'`), `os.tmpdir` held in a variable and called under another name, `const { tmpdir: t } = os` from an existing binding, `env.TMPDIR` read from a copy of `process.env`, Electron's `app.getPath('temp')`. | Seven files under `test/` spell a `'/tmp…'` literal, every one as data that is never created (`'/tmp/eph/events.sock'`, `'/tmp/repo'`); the eighth, `s-secrets.test.ts`, uses `'/tmp'` as the fallback of an mkdtemp prefix. Flagging literals would be seven allowlist entries saying "data". The other spellings do not occur in `test/`. |
 | **Removal that does not finish.** `void fsp.rm(dir, { recursive: true })` never awaited; `try { removeTempDir(d) } catch {}` swallowing the failure; a helper that removes in a `finally` while an async callback it did not await still uses the directory. | Each is a removal that runs; whether it succeeds is `removeTempDir`'s contract (it throws after its budget), which these shapes defeat on purpose. None occurs in the tree. |
-| **False positives, by decision.** A directory removed through an object's property, a list drained through a copy, a local remover helper, a cleanup closure the test does call, a prefix built outside the mkdtemp call (`const PREFIX = path.join(os.tmpdir(), 'eph-x-')`), a directory nested in one already removed recursively, class fields and array literals holding directories. | Each needs values followed through objects, parameters or containment. Each fault names a shape that passes; none occurs in the tree. |
-| **The order company.ts relies on.** `afterAll(cleanupHomes)` is safe only while vitest runs after-hooks last-registered first, and isolates each file so that every scenario registers the hook. The tripwire catches a changed `sequence.hooks`; it would also fail, misleadingly, under `sequence.shuffle`, since it observes order across two tests; `isolate: false` is not tripwired. | Configuration changes nobody has proposed; the tripwire's name names the dependency. |
+| **False positives, by decision.** A directory removed through an object's property, a list drained through a copy, a local remover helper, a cleanup closure the test does call, a prefix built outside the mkdtemp call (`const PREFIX = path.join(os.tmpdir(), 'eph-x-')`), a directory nested in one already removed recursively, class fields and array literals holding directories, and a hand-back the file names other than by calling it or in a type — `typeof fresh` in an expression, or a test that hands it to a call that only inspects it. | Each needs values followed through objects, parameters or containment, or to know what a callee does with a function. Each fault names a shape that passes; none occurs in the tree. |
+| **A list nothing empties goes unnamed.** When a directory's list has no drain — `control-server.test.ts` with its `afterEach` drain deleted — the fault names the file and the line, and gives as its reason whatever else the directory met (*it keeps it in an object or an array …*), or none (`eph-recall.test.ts` with its push deleted). Measured on the plants of §4. | The verdict and the line are right; the message could name the list. A message change, left for a change of its own. |
+| **The order company.ts relies on.** `afterAll(cleanupHomes)` is safe only while vitest runs after-hooks last-registered first, and isolates each file so that every scenario registers the hook. The tripwire catches a changed `sequence.hooks`. It observes order across two tests, so under `sequence.shuffle`, or a `-t` run of its second case, it fails too, saying that its first case has not run rather than that the order changed. `isolate: false` is not tripwired. | Configuration changes nobody has proposed; the tripwire's name names the dependency. |
 
 Noticed in passing, outside this change: `test/main/version-probe.test.ts` names its
 directories `'eph probe-'`, with a space, which the global sweep's `eph-` prefix never
