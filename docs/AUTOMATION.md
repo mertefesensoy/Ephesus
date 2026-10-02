@@ -42,6 +42,12 @@ ENGINEERING-STANDARDS §2; the hooks above cover the identity half.
 | `/research` | Runs one Stoa research cycle: studies ONE Architect-registered source from `docs/stoa/WATCHLIST.md` at a pinned commit and files a provenance-cited brief whose candidates feed `/improve`. See ADR-0017. |
 | `/ephesus-engineer` | The senior-engineer operating protocol that governs all of the above: when the Architect must be consulted through AskUserQuestion (and never in prose), the thirteen invariants a diff is checked against, the A-D evidence tiers, and the eight verification rules this build paid for. Not a task skill - it is the standard the task skills are executed to. |
 
+### Goal prompts (`docs/*GOAL.md` — pasted into the built-in `/goal`)
+| File | Purpose |
+|---|---|
+| [`GOAL.md`](./GOAL.md) | The standing goal prompt. It does not name a milestone: the Architect chooses the scope in the session. It defines the three end states the goal evaluator accepts (DONE, `EPHESUS-BLOCKED:`, BOUND at 200 turns) and the constraints every session holds to. It must stay under the CLI's 4,000-character limit, and the file shows how to measure it. |
+| [`M8c-GOAL.md`](./M8c-GOAL.md), [`M9-GOAL.md`](./M9-GOAL.md) | Milestone handovers: scope, build order, settled decisions and the questions still owed. The skill tells the session to read the milestone's goal doc before it asks anything. |
+
 ### Subagents (`.claude/agents/`)
 | Agent | Purpose |
 |---|---|
