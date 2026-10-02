@@ -37,7 +37,7 @@ const checker = require_(SCRIPT) as {
   GIT_ALLOWLIST: ReadonlySet<string>
   GIT_INVOCATION: RegExp
   fileFailures: (rel: string, text: string, gitAllowlist?: ReadonlySet<string>) => string[]
-  invariantFailures: (root?: string, gitAllowlist?: ReadonlySet<string>) => string[]
+  invariantFailures: (gitAllowlist?: ReadonlySet<string>) => string[]
 }
 
 const temps: string[] = []
@@ -264,13 +264,11 @@ describe('this repository', () => {
       .flatMap((rel) => gitFailuresFor(rel, gitCalls(rel, readRepo(rel))))
     // Not vacuous: the one committer is always among them.
     expect(expected.filter((entry) => entry.startsWith(`${GIT_TS}:`))).not.toEqual([])
-    expect(gitFailures(checker.invariantFailures(REPO_ROOT, new Set())).sort()).toEqual(
-      expected.sort()
-    )
+    expect(gitFailures(checker.invariantFailures(new Set())).sort()).toEqual(expected.sort())
   })
 
   it('with the allowlist as written, passes the single-committer rule', () => {
-    expect(gitFailures(checker.invariantFailures(REPO_ROOT))).toEqual([])
+    expect(gitFailures(checker.invariantFailures())).toEqual([])
   })
 })
 

@@ -264,18 +264,17 @@ function fileFailures(rel, text, gitAllowlist = GIT_ALLOWLIST) {
 }
 
 /**
- * Every tripwire failure in the source files under `root`'s searched
- * directories.
+ * Every tripwire failure in the source files of the searched directories.
  *
- * Contract: reads every source file under `root`, writes nothing. `root` is a
- * parameter so that a test can hand it a fixture tree; CI runs it over this
- * repository.
+ * Contract: reads every source file under them, writes nothing. It reads the
+ * tree this script sits in, so a test that needs a fixture tree runs a copy of
+ * `scripts/` inside one. `gitAllowlist` is passed through to `fileFailures`.
  */
-function invariantFailures(root = ROOT, gitAllowlist = GIT_ALLOWLIST) {
+function invariantFailures(gitAllowlist = GIT_ALLOWLIST) {
   const failures = []
   for (const dir of SEARCH_DIRS) {
-    for (const file of walk(path.join(root, dir))) {
-      const rel = path.relative(root, file)
+    for (const file of walk(path.join(ROOT, dir))) {
+      const rel = path.relative(ROOT, file)
       failures.push(...fileFailures(rel, fs.readFileSync(file, 'utf8'), gitAllowlist))
     }
   }
