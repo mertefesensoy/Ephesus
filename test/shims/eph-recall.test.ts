@@ -10,7 +10,7 @@ import { Library } from '../../src/main/library'
 import { PromptStore } from '../../src/main/prompts'
 import { FtsIndex } from '../../src/main/library-fts'
 import { removeTempDir } from '../tmpdir'
-import { runImporter } from './importer'
+import { importWithoutModulePath, runImporter } from './importer'
 
 /**
  * `eph-recall` is what an agent actually runs, so it is exercised the way an
@@ -263,5 +263,11 @@ describe('eph-recall — importing it', () => {
     expect(direct.code).toBe(0)
     expect(direct.stdout).toContain('two carts')
     expect(rig.recalls).toBe(1)
+  })
+
+  it('runs nothing when imported with no module path in argv[1]', async () => {
+    // `node -e` with no arguments leaves `process.argv[1]` undefined, as a REPL
+    // does, and `path.basename(undefined)` throws: the guard checks it first.
+    expect(await importWithoutModulePath(SHIM_URL)).toEqual({ status: 0, stdout: '', stderr: '' })
   })
 })

@@ -14,11 +14,13 @@ import { removeTempDir } from '../tmpdir'
  * stderr, and what it asks of the harness — so it is observable only from
  * outside one.
  *
- * The importer is a FILE, never `node -e`: under `-e`, `process.argv[1]` is not
+ * The importer is a FILE, not `node -e`: under `-e`, `process.argv[1]` is not
  * a module path (it is undefined, or the first script argument), so the
  * comparison the guard really makes — a module path that is not the shim's —
  * would never happen. The file's name is the other half: `x-eph-hook.mjs` ends
  * in the shim's name, and only a whole-name comparison tells it from the shim.
+ * `importWithoutModulePath` is the one probe that uses `-e`, for that same
+ * reason: it is there to leave `argv[1]` undefined.
  *
  * Once the import settles, the importer records `process.stdin.readableFlowing`
  * — `null` until something attaches a reader or resumes the stream — and then
@@ -30,11 +32,7 @@ import { removeTempDir } from '../tmpdir'
  * answers it (DECISIONS-LOG 2026-10-02).
  */
 
-export interface ImporterRun {
-  /** The exit code; `null` when the child was killed, which is how a timeout shows. */
-  readonly status: number | null
-  readonly stdout: string
-  readonly stderr: string
+export interface ImporterRun extends ChildRun {
   /** `String(process.stdin.readableFlowing)` once the import settled; `null` if never recorded. */
   readonly flowing: string | null
   /** What the importer could still read from stdin afterwards; `null` if never recorded. */
@@ -56,18 +54,29 @@ export interface ImporterOptions {
 
 const TIMEOUT_MS = 10_000
 
-function spawnImporter(
-  importer: string,
-  options: ImporterOptions,
-  endStdin: boolean
-): Promise<{ status: number | null; stdout: string; stderr: string }> {
+export interface ChildRun {
+  /** The exit code; `null` when the child was killed, which is how a timeout shows. */
+  readonly status: number | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/**
+ * Runs `node <nodeArgs>`, writes `stdin.input` to its stdin, and then ends
+ * stdin or, when `stdin.end` is false, leaves it open.
+ */
+function spawnNode(
+  nodeArgs: readonly string[],
+  env: Readonly<Record<string, string>>,
+  stdin: { readonly input: string; readonly end: boolean }
+): Promise<ChildRun> {
   // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
   // Node itself write to stderr, which would fail a test for nothing the shim did.
-  const env: NodeJS.ProcessEnv = { ...process.env, ...options.env }
-  delete env['NODE_OPTIONS']
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env }
+  delete childEnv['NODE_OPTIONS']
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [importer, ...options.args], {
-      env,
+    const child = spawn(process.execPath, [...nodeArgs], {
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: TIMEOUT_MS
     })
@@ -89,9 +98,23 @@ function spawnImporter(
       child.stdin.destroy()
       resolve({ status, stdout, stderr })
     })
-    if (endStdin) child.stdin.end(options.input)
-    else child.stdin.write(options.input)
+    if (stdin.end) child.stdin.end(stdin.input)
+    else child.stdin.write(stdin.input)
   })
+}
+
+/**
+ * Imports the shim from `node -e` with no arguments, so `process.argv[1]` is
+ * undefined, as it is in a REPL. This is the one probe where `-e` is the point:
+ * the guard must check that `argv[1]` exists before asking `path.basename`
+ * about it, because `path.basename(undefined)` throws and the import crashes.
+ */
+export function importWithoutModulePath(shim: URL): Promise<ChildRun> {
+  return spawnNode(
+    ['--input-type=module', '-e', `await import(${JSON.stringify(shim.href)})`],
+    {},
+    { input: '', end: true }
+  )
 }
 
 /**
@@ -110,7 +133,8 @@ export async function importWithStdinOpen(options: ImporterOptions): Promise<num
   try {
     const importer = path.join(dir, options.name)
     fs.writeFileSync(importer, `await import(${JSON.stringify(options.shim.href)})\n`, 'utf8')
-    return (await spawnImporter(importer, options, false)).status
+    const stdin = { input: options.input, end: false }
+    return (await spawnNode([importer, ...options.args], options.env, stdin)).status
   } finally {
     removeTempDir(dir)
   }
@@ -135,7 +159,8 @@ export async function runImporter(options: ImporterOptions): Promise<ImporterRun
       ].join('\n'),
       'utf8'
     )
-    const run = await spawnImporter(importer, options, true)
+    const stdin = { input: options.input, end: true }
+    const run = await spawnNode([importer, ...options.args], options.env, stdin)
     const recorded = (file: string): string | null =>
       fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
     return {

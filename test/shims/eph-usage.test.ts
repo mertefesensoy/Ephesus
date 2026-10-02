@@ -17,7 +17,7 @@ import {
   writeAtomic
 } from '../../shims/eph-usage.mjs'
 import { removeTempDir } from '../tmpdir'
-import { importWithStdinOpen } from './importer'
+import { importWithoutModulePath, importWithStdinOpen } from './importer'
 
 const SHIM_URL = new URL('../../shims/eph-usage.mjs', import.meta.url).href
 const SHIM = fileURLToPath(SHIM_URL)
@@ -219,5 +219,15 @@ describe('eph-usage — importing it', () => {
     })
     expect(direct.status).toBe(0)
     expect(fs.existsSync(path.join(reports, 'agent.importer.json'))).toBe(true)
+  })
+
+  it('runs nothing when imported with no module path in argv[1]', async () => {
+    // `node -e` with no arguments leaves `process.argv[1]` undefined, as a REPL
+    // does, and `path.basename(undefined)` throws: the guard checks it first.
+    expect(await importWithoutModulePath(new URL(SHIM_URL))).toEqual({
+      status: 0,
+      stdout: '',
+      stderr: ''
+    })
   })
 })

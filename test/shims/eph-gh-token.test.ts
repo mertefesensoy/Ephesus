@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { HookServer } from '../../src/main/hooks'
 import { GH_TOKEN_SCHEMA_VERSION, type GhTokenResponse } from '../../src/shared/gh-token'
 import { removeTempDir } from '../tmpdir'
-import { runImporter } from './importer'
+import { importWithoutModulePath, runImporter } from './importer'
 
 /**
  * `eph-gh-token` is what an agent actually runs (ADR-0022), so it is exercised
@@ -80,9 +80,13 @@ function runShim(
   args: readonly string[],
   env: Readonly<Record<string, string>>
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
+  // Node itself write to stderr, and a test here holds stderr to be empty.
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env }
+  delete childEnv['NODE_OPTIONS']
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SHIM, ...args], {
-      env: { ...process.env, ...env },
+      env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stdout = ''
@@ -176,4 +180,10 @@ describe('eph-gh-token — importing it', () => {
       expect(rig.asked).toBe(1)
     }
   )
+
+  it('runs nothing when imported with no module path in argv[1]', async () => {
+    // `node -e` with no arguments leaves `process.argv[1]` undefined, as a REPL
+    // does, and `path.basename(undefined)` throws: the guard checks it first.
+    expect(await importWithoutModulePath(SHIM_URL)).toEqual({ status: 0, stdout: '', stderr: '' })
+  })
 })

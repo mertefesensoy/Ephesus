@@ -10,7 +10,7 @@ import {
   sessionIdOf
 } from '../../shims/eph-hook.mjs'
 import { startHookStubServer, tempEndpoint, type HookStubServer } from '../fakes/hook-stub-server'
-import { runImporter } from './importer'
+import { importWithoutModulePath, runImporter } from './importer'
 
 /**
  * The shim is what a real engine actually executes, so it is exercised the way
@@ -396,5 +396,11 @@ describe('eph-hook — importing it', () => {
     // The same inputs are live: run as the program, they post to this endpoint.
     expect((await runShim(args, env, CLAUDE_PRE_TOOL)).code).toBe(0)
     expect(await server.waitForPosts(1)).toHaveLength(1)
+  })
+
+  it('runs nothing when imported with no module path in argv[1]', async () => {
+    // `node -e` with no arguments leaves `process.argv[1]` undefined, as a REPL
+    // does, and `path.basename(undefined)` throws: the guard checks it first.
+    expect(await importWithoutModulePath(SHIM_URL)).toEqual({ status: 0, stdout: '', stderr: '' })
   })
 })
