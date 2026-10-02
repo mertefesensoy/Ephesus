@@ -1,0 +1,175 @@
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { removeTempDir } from '../tmpdir'
+
+/**
+ * Imports a shim from a file that is not the shim, in a process of its own, and
+ * reports what that process did.
+ *
+ * Every shim ends in a guard that runs `main()` only when the shim is the
+ * program, which is what lets a test import its helpers at all. That importing
+ * it runs nothing is a fact about a whole process — its stdin, its stdout and
+ * stderr, and what it asks of the harness — so it is observable only from
+ * outside one.
+ *
+ * The importer is a FILE, not `node -e`: under `-e`, `process.argv[1]` is not
+ * a module path (it is undefined, or the first script argument), so the
+ * comparison the guard really makes — a module path that is not the shim's —
+ * would never happen. The file's name is the other half: `x-eph-hook.mjs` ends
+ * in the shim's name, and only a whole-name comparison tells it from the shim.
+ * `importWithoutModulePath` is the one probe that uses `-e`, for that same
+ * reason: it is there to leave `argv[1]` undefined.
+ *
+ * Once the import settles, the importer records `process.stdin.readableFlowing`
+ * — `null` until something attaches a reader or resumes the stream — and then
+ * reads stdin to the end itself, so a shim that took any of it leaves a shorter
+ * document behind.
+ *
+ * The spawn is asynchronous because the endpoint a stray `main()` would call is
+ * served by the test's own process: `spawnSync` would block the loop that
+ * answers it (DECISIONS-LOG 2026-10-02).
+ */
+
+export interface ImporterRun extends ChildRun {
+  /** `String(process.stdin.readableFlowing)` once the import settled; `null` if never recorded. */
+  readonly flowing: string | null
+  /** What the importer could still read from stdin afterwards; `null` if never recorded. */
+  readonly unread: string | null
+  /** The exit code of the same import with stdin never ended — see `importWithStdinOpen`. */
+  readonly heldOpen: number | null
+}
+
+export interface ImporterOptions {
+  /** The shim to import. */
+  readonly shim: URL
+  /** The importer's own file name. */
+  readonly name: string
+  /** What `main()` would act on, handed to the importer as if it were the shim. */
+  readonly args: readonly string[]
+  readonly env: Readonly<Record<string, string>>
+  readonly input: string
+}
+
+const TIMEOUT_MS = 10_000
+
+export interface ChildRun {
+  /** The exit code; `null` when the child was killed, which is how a timeout shows. */
+  readonly status: number | null
+  readonly stdout: string
+  readonly stderr: string
+}
+
+/**
+ * Runs `node <nodeArgs>`, writes `stdin.input` to its stdin, and then ends
+ * stdin or, when `stdin.end` is false, leaves it open.
+ */
+function spawnNode(
+  nodeArgs: readonly string[],
+  env: Readonly<Record<string, string>>,
+  stdin: { readonly input: string; readonly end: boolean }
+): Promise<ChildRun> {
+  // The caller's environment, minus NODE_OPTIONS: a loader or flag there makes
+  // Node itself write to stderr, which would fail a test for nothing the shim did.
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env }
+  delete childEnv['NODE_OPTIONS']
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [...nodeArgs], {
+      env: childEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: TIMEOUT_MS
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    // A child that exits before reading stdin closes the pipe under this
+    // write. Its exit code and the missing records already say so.
+    child.stdin.on('error', () => undefined)
+    child.on('error', reject)
+    child.on('close', (status) => {
+      child.stdin.destroy()
+      resolve({ status, stdout, stderr })
+    })
+    if (stdin.end) child.stdin.end(stdin.input)
+    else child.stdin.write(stdin.input)
+  })
+}
+
+/**
+ * Imports the shim from `node -e` with no arguments, so `process.argv[1]` is
+ * undefined, as it is in a REPL. This is the one probe where `-e` is the point:
+ * the guard must check that `argv[1]` exists before asking `path.basename`
+ * about it, because `path.basename(undefined)` throws and the import crashes.
+ */
+export function importWithoutModulePath(shim: URL): Promise<ChildRun> {
+  return spawnNode(
+    ['--input-type=module', '-e', `await import(${JSON.stringify(shim.href)})`],
+    {},
+    { input: '', end: true }
+  )
+}
+
+/**
+ * Imports the shim the same way, handed the same input, but never the end of
+ * it, and resolves to the importer's exit code — `null` when it had to be
+ * killed because it could not exit by itself.
+ *
+ * A read left pending on stdin keeps a process alive until stdin ends. So this
+ * sees a stray read that takes nothing — a bare `process.stdin.read()` at
+ * module scope, which leaves the stream paused and every byte still readable,
+ * so `flowing` and `unread` cannot. An import that started no read lets the
+ * importer exit as soon as it settles.
+ */
+export async function importWithStdinOpen(options: ImporterOptions): Promise<number | null> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-importer-'))
+  try {
+    const importer = path.join(dir, options.name)
+    fs.writeFileSync(importer, `await import(${JSON.stringify(options.shim.href)})\n`, 'utf8')
+    const stdin = { input: options.input, end: false }
+    return (await spawnNode([importer, ...options.args], options.env, stdin)).status
+  } finally {
+    removeTempDir(dir)
+  }
+}
+
+export async function runImporter(options: ImporterOptions): Promise<ImporterRun> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-importer-'))
+  try {
+    const importer = path.join(dir, options.name)
+    const flowing = path.join(dir, 'stdin-flowing.txt')
+    const unread = path.join(dir, 'stdin-unread.txt')
+    fs.writeFileSync(
+      importer,
+      [
+        `import fs from 'node:fs'`,
+        `await import(${JSON.stringify(options.shim.href)})`,
+        `fs.writeFileSync(${JSON.stringify(flowing)}, String(process.stdin.readableFlowing))`,
+        `let rest = ''`,
+        `for await (const chunk of process.stdin) rest += chunk`,
+        `fs.writeFileSync(${JSON.stringify(unread)}, rest)`,
+        ''
+      ].join('\n'),
+      'utf8'
+    )
+    const stdin = { input: options.input, end: true }
+    const run = await spawnNode([importer, ...options.args], options.env, stdin)
+    const recorded = (file: string): string | null =>
+      fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+    return {
+      ...run,
+      flowing: recorded(flowing),
+      unread: recorded(unread),
+      heldOpen: await importWithStdinOpen(options)
+    }
+  } finally {
+    removeTempDir(dir)
+  }
+}
