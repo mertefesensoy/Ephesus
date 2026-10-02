@@ -180,7 +180,7 @@ async function startRig(options: { resumable?: boolean } = {}): Promise<Rig> {
       spawner.killAll()
       avatars.stop()
       await hookServer.stop()
-      await agora.drained().catch(() => {})
+      await agora.drained()
       removeTempDir(home)
     }
   }

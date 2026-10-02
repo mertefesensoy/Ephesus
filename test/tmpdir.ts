@@ -41,12 +41,34 @@ import fs from 'node:fs'
  * bounded, and it does NOT swallow the failure: a teardown that still cannot
  * remove its directory after a fair wait is a leak — a process nobody shut
  * down — and hiding that would trade a flaky suite for a silent one.
+ *
+ * ## ENOTEMPTY: a writer, on every platform (2026-10-02)
+ *
+ * The other thing that blocks it needs no Windows: a process still writing
+ * into the tree adds an entry after the tree was listed. `rmSync`'s budget
+ * retries the `rmdir` of a directory whose children it listed ONCE, so one
+ * late entry spends all of it — the pacing-wakes teardown gave up after
+ * ~2.75 s with ENOTEMPTY on `agora/.git` while a detached `git repack` wrote
+ * `.git/objects/pack`. Every attempt here lists the tree afresh, so a writer
+ * that stops inside the budget is outlasted (`tmpdir.test.ts`).
+ *
+ * ## What it cannot do
+ *
+ * Wait for a writer it has no handle on. On linux an attempt can land between
+ * two writes and report success while the writer is still running, and a
+ * writer that recreates the directories it needs — git does — then puts the
+ * tree back after this has returned. With such a writer, measured: the tree
+ * was back on disk 3 times in 3 on linux and 0 in 3 on win32, where an open
+ * writer kept every attempt failing until it stopped. So a teardown waits for
+ * its writers BEFORE calling this — for the committer's git that wait is
+ * `Agora.drained()` (`src/main/agora.ts`), which the runner's flags in
+ * `src/main/git.ts` keep honest — and this is the backstop, not the wait.
  */
 
 /** How long to keep trying before calling it a leak rather than a wait. */
 export const TEMP_REMOVE_BUDGET_MS = 10_000
 
-/** Codes that mean "something still holds this", as opposed to a real fault. */
+/** Codes that mean "something still holds or writes this", not a real fault. */
 const TRANSIENT = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY', 'EACCES', 'EMFILE', 'ENFILE'])
 
 /**

@@ -34,8 +34,16 @@ const routers: Hermes[] = []
 const agoras: Agora[] = []
 
 afterEach(async () => {
-  for (const hermes of routers.splice(0)) hermes.stop()
-  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
+  // Stop, settle, then drain — the order `hermes.test.ts` documents — and a
+  // drain that REJECTS fails the test: the `.catch(() => {})` this used to
+  // carry would have read a failed drain as a finished one. What this teardown
+  // actually lost to on CI was git's own housekeeping, still repacking after
+  // `drained()` resolved (run 36924116592); `drained()` outlasts that now.
+  for (const hermes of routers.splice(0)) {
+    hermes.stop()
+    await hermes.settled()
+  }
+  for (const agora of agoras.splice(0)) await agora.drained()
   for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 
