@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { ClaudeAdapter, claudeCapacityLimit } from '../../../src/main/engines/claude'
 import { PromptStore } from '../../../src/main/prompts'
+import { removeTempDir } from '../../tmpdir'
 
 /**
  * The usage-limit detector (`src/main/engines/claude.ts`).
@@ -150,14 +151,22 @@ describe('claudeCapacityLimit', () => {
     // The M6 lesson, made a test: a detector nothing calls is decoration. The
     // Watch reaches this function through the adapter's transcript reader and
     // nowhere else, so that edge is the one worth pinning.
-    const adapter = new ClaudeAdapter({
-      prompts: new PromptStore(
-        path.join(os.tmpdir(), 'eph-capacity-prompts'),
-        path.join(process.cwd(), 'prompts')
-      ),
-      hookShimPath: path.join(os.tmpdir(), 'eph-hook.mjs')
-    })
-    expect(adapter.transcripts?.limitOf).toBe(claudeCapacityLimit)
-    expect(adapter.transcripts?.limitOf?.(recordNamed('u-limit-1'))).not.toBeNull()
+    //
+    // Its prompt home and shim path live in a directory of its own. They were
+    // fixed names on the temp root, safe only because nothing here makes the
+    // adapter compose an identity, the one thing that reads a prompt and so
+    // creates the home — the shape that left `eph-prompts-<pid>` directories
+    // behind `gates.test.ts`.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-capacity-'))
+    try {
+      const adapter = new ClaudeAdapter({
+        prompts: new PromptStore(path.join(home, 'prompts'), path.join(process.cwd(), 'prompts')),
+        hookShimPath: path.join(home, 'eph-hook.mjs')
+      })
+      expect(adapter.transcripts?.limitOf).toBe(claudeCapacityLimit)
+      expect(adapter.transcripts?.limitOf?.(recordNamed('u-limit-1'))).not.toBeNull()
+    } finally {
+      removeTempDir(home)
+    }
   })
 })

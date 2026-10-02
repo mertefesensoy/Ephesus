@@ -100,6 +100,44 @@ function sourcesOf(files: readonly string[]): ReadonlyMap<string, string> {
  * fooled by all three.
  */
 
+/*
+ * # One directory at a time, and the ones mkdtemp never made (2026-10-02)
+ *
+ * The rule above was a property of a FILE: one that made a temp directory had
+ * to call a remover somewhere. That let four kinds of leak through, one of
+ * them live:
+ *
+ * - `test/main/gates.test.ts` gave a `PromptStore` the home
+ *   `path.join(os.tmpdir(), 'eph-prompts-<pid>')`. `read()` creates the home
+ *   and seeds it, nothing removed it, and nine of them were in %TEMP% on
+ *   2026-10-02 — invisible here, because no mkdtemp made them.
+ * - `test/scenarios/company.ts` made every company's home and left removing it
+ *   to `cleanupHomes()`, which each scenario file had to call. The call sat in
+ *   an exported function, so the helper "called a remover" whether or not any
+ *   scenario ever ran it.
+ * - A `makeTempDir()` beside `removeTempDir` would have handed every directory
+ *   it made to callers no file is judged for.
+ * - A file that removed its first directory was excused every other.
+ *
+ * So each directory is now followed from the call that makes it — through
+ * variables, the lists it is pushed into, and functions here that return it —
+ * to a remover, and a remover counts only if this file RUNS it whenever the
+ * directory is made: in the same function body, or from a test, a hook or
+ * the file's top level. A removal in a function the file only exports, or
+ * only keeps — a rig object's `close()`, a closure it returns or pushes onto
+ * a list — counts for nothing, and so does one in a named function that only
+ * such code calls: that is what moved `cleanupHomes()` into a module-level
+ * hook of `company.ts`'s own, and the rigs' homes into lists their hooks
+ * empty. A function that hands a directory back is judged at each of its
+ * calls when calls are all the file does with it, and refused otherwise.
+ * Variables are told apart by scope, through a type checker over the one
+ * file, because test after test declares its own `const home`. And a path
+ * named on the temp root outside an mkdtemp call is treated as a directory
+ * nothing removes, unless `UNMADE_TEMP_PATHS` lists it, with how many times
+ * the file names it and why nothing is left there. What this still cannot
+ * see is recorded in docs/implementations/2026-10-02-temp-hygiene-blind-spots.md.
+ */
+
 /**
  * Every module outside `test/` that git can start through: the modules that
  * run git themselves, and — to a fixed point — every module that imports one
@@ -124,6 +162,77 @@ const GIT_DOORS: readonly string[] = [
 ]
 const DOORS = new Set(GIT_DOORS)
 
+/** Paths on the temp root a file may name without mkdtemp: by file, then by name, how often and why. */
+export type UnmadeTempPaths = Readonly<
+  Record<string, Readonly<Record<string, { readonly sites: number; readonly why: string }>>>
+>
+
+/**
+ * The paths a file under `test/` names on the temp root OUTSIDE an mkdtemp
+ * call, each allowed because nothing is left there: the code under test only
+ * reads it, compares against it, fails to reach it, or removes what it puts
+ * there itself. Keyed by file, then by the name the guard reads off the path —
+ * the pieces added to the root, `*` for anything computed, empty for the root
+ * itself — with how many times the file names it, and why.
+ *
+ * Anything else is treated as a directory nothing removes. That is how
+ * `test/main/gates.test.ts` came to give its `PromptStore` the home
+ * `eph-prompts-<pid>`: `read()` creates the home and seeds it, and nine of them
+ * were in %TEMP% on 2026-10-02, one per vitest worker that had run the file. A
+ * premise test holds every entry to exactly as many paths as its file names,
+ * so an entry neither outlives its paths nor covers a new one.
+ */
+export const UNMADE_TEMP_PATHS: UnmadeTempPaths = {
+  'test/fakes/hook-stub-server.ts': {
+    '*.sock': {
+      sites: 1,
+      why: 'the stub server listens on it on POSIX, and libuv unlinks a socket it bound when the server closes; on win32 the endpoint is a named pipe and this branch never runs'
+    }
+  },
+  'test/global-setup.ts': {
+    '': { sites: 1, why: 'the root the stale-directory sweep reads, which it never creates' }
+  },
+  'test/main/eventlog.test.ts': {
+    'eph-nonexistent/log.jsonl': {
+      sites: 1,
+      why: 'a log that must not exist: read() of a missing file returns nothing and creates nothing'
+    }
+  },
+  'test/main/repo-remotes.test.ts': {
+    'eph-nope-does-not-exist': {
+      sites: 1,
+      why: 'a directory that must not exist: git cannot even start in it'
+    }
+  },
+  'test/main/tmpdir.test.ts': {
+    '': {
+      sites: 1,
+      why: 'the working directory of the writing child: the root itself, so the handle a process holds on its cwd cannot pin the directory the case measures; it writes only into directories the test made'
+    }
+  },
+  'test/main/worktrees.test.ts': {
+    'no-agora-here': {
+      sites: 3,
+      why: 'the Agora root Worktrees is told to refuse, which it only ever compares against'
+    }
+  },
+  'test/scripts/check-coverage.test.ts': {
+    '': {
+      sites: 1,
+      why: 'read for a .git/HEAD it does not have, and only when the test has no directory of its own'
+    }
+  },
+  'test/shims/eph-recall.test.ts': {
+    'eph-no-such.sock': {
+      sites: 1,
+      why: 'an endpoint nothing listens on, which the shim must fail to reach'
+    }
+  },
+  'test/temp-hygiene.test.ts': {
+    'eph-does-not-exist-at-all': { sites: 1, why: 'a root the sweep must survive not finding' }
+  }
+}
+
 /** The doors a test reaches by running them: the git-starting scripts, by file name. */
 const GIT_SCRIPTS = GIT_DOORS.filter((door) => !door.startsWith('src/')).map((door) =>
   path.posix.basename(door)
@@ -131,7 +240,26 @@ const GIT_SCRIPTS = GIT_DOORS.filter((door) => !door.startsWith('src/')).map((do
 
 const TEMP_MAKERS = new Set(['mkdtempSync', 'mkdtemp'])
 const RAW_REMOVERS = new Set(['rmSync', 'rm', 'rmdirSync', 'rmdir'])
+/** The raw removers that, without `recursive`, still remove an EMPTY directory. */
+const EMPTY_DIR_REMOVERS = new Set(['rmdirSync', 'rmdir'])
 const CHILD_PROCESS = new Set(['child_process', 'node:child_process'])
+/** The modules a directory is made and removed through, and the one that names the temp root. */
+const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises'])
+const OS_MODULES = new Set(['os', 'node:os'])
+/** Where `removeTempDir` lives, so an import of it under another name still counts. */
+const TMPDIR_HELPER = 'test/tmpdir.ts'
+/** The environment variables a temp root is read from, as `s-secrets.test.ts` reads `TMPDIR`. */
+const TEMP_ENV = new Set(['TMPDIR', 'TMP', 'TEMP'])
+/** The calls that put a directory into a list: `homes.push(home)`, `homes.set(id, home)`. */
+const COLLECTORS = new Set(['push', 'unshift', 'add', 'set'])
+/** The calls that return the directory they are handed, by its real path. */
+const REALPATH = new Set(['realpathSync', 'realpath'])
+/** The operators a value passes through unchanged when it is the one chosen. */
+const CHOOSERS = new Set([
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.AmpersandAmpersandToken
+])
 /** The `child_process` functions that start a process. `fork` runs a module, by path. */
 const RUNNERS = new Set([
   'execFile',
@@ -189,11 +317,49 @@ export interface GitSighting {
   readonly starts: boolean
 }
 
+/** What removes a temp directory: the helper, or a raw recursive remove. */
+export type Remover = 'removeTempDir' | 'raw'
+
+/** One temp directory a file makes, and what this file runs that removes it. */
+export interface MadeDir {
+  /** Where it is made: the mkdtemp call, or the call of a function here that returns one. */
+  readonly line: number
+  /** The function here that made it, when `line` is a call of one rather than mkdtemp's own. */
+  readonly through: string | null
+  /** The removers that run whenever it is made. Empty when nothing does. */
+  readonly removedBy: readonly Remover[]
+  /** Why nothing here answers for it, when the file says: a clause, or null. */
+  readonly why: string | null
+}
+
+/** What becomes of one directory, gathered while following it through its file. */
+interface Fate {
+  readonly removedBy: Set<Remover>
+  /** Named functions that would remove it, which nothing in the file runs. */
+  readonly stranded: Set<string>
+  /** Lists it went into that the file only takes one directory out of at a time, outside a loop. */
+  readonly sampled: Set<string>
+  /** Functions in the file that return it, whose calls are judged in its place. */
+  readonly returnedBy: Set<ts.Node>
+  /** Where it went that the file cannot answer for, as clauses, first found first. */
+  readonly strays: string[]
+  /** What a use of a variable holding it did that removes nothing, for the message alone. */
+  readonly notes: string[]
+}
+
+/** A path a file builds on the temp root without mkdtemp, and what it names there. */
+export interface TempPath {
+  readonly line: number
+  /** The pieces joined after the root, `*` for anything computed; empty for the root itself. */
+  readonly name: string
+}
+
 /** What the rule needs to know about one file, read from its syntax tree. */
 export interface HygieneReading {
-  readonly makesTempDir: boolean
-  readonly callsRemoveTempDir: boolean
-  readonly callsRmSync: boolean
+  /** Every temp directory the file makes, in source order. */
+  readonly made: readonly MadeDir[]
+  /** Every path it builds on the temp root outside an mkdtemp call, in source order. */
+  readonly tempPaths: readonly TempPath[]
   /** Every way the file runs git itself, in source order; empty when it does not. */
   readonly git: readonly GitSighting[]
   /** Raw recursive removals that are no part of a test, as `rmSync at line 39`. */
@@ -346,6 +512,79 @@ function within(node: ts.Node, ancestor: ts.Node): boolean {
 }
 
 /**
+ * The expression that receives `value`, climbing what hands a value on
+ * unchanged: `await`, parentheses, a type assertion, either branch of `?:`,
+ * either side of `??`, `||` or `&&` — so the directory in
+ * `options.reuseHome ?? fs.mkdtempSync(…)` is the one the declaration holds —
+ * and `realpathSync`, which names the same directory by its real path.
+ */
+function receiving(value: ts.Expression): ts.Expression {
+  let held = value
+  for (;;) {
+    const parent = held.parent
+    const handsOn =
+      ts.isAwaitExpression(parent) ||
+      ts.isParenthesizedExpression(parent) ||
+      ts.isNonNullExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isSatisfiesExpression(parent) ||
+      ts.isTypeAssertionExpression(parent) ||
+      (ts.isConditionalExpression(parent) && parent.condition !== held) ||
+      (ts.isBinaryExpression(parent) && CHOOSERS.has(parent.operatorToken.kind)) ||
+      (ts.isCallExpression(parent) &&
+        parent.arguments[0] === held &&
+        REALPATH.has(nameOf(parent.expression) ?? ''))
+    if (!handsOn) return held
+    held = parent
+  }
+}
+
+/** The variable an expression is read from: `homes` in `homes.splice(0)`, `homes.pop()!` or `homes[0]`. */
+function rootOf(expression: ts.Expression): ts.Identifier | null {
+  let inner = unwrap(expression)
+  while (
+    ts.isPropertyAccessExpression(inner) ||
+    ts.isElementAccessExpression(inner) ||
+    ts.isCallExpression(inner)
+  ) {
+    inner = unwrap(inner.expression)
+  }
+  return ts.isIdentifier(inner) ? inner : null
+}
+
+/**
+ * A type checker over `tree` alone, which is all it takes to tell one `home`
+ * from another: a test file declares `const home = fs.mkdtempSync(…)` in test
+ * after test, and only scope says which of them went into the list the
+ * teardown empties. No library and no imports are loaded, so it binds names
+ * and checks nothing.
+ */
+function checkerFor(tree: ts.SourceFile): ts.TypeChecker {
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => (name === tree.fileName ? tree : undefined),
+    getDefaultLibFileName: () => 'lib.d.ts',
+    writeFile: () => {},
+    getCurrentDirectory: () => '',
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (name) => name === tree.fileName,
+    readFile: () => undefined
+  }
+  const options: ts.CompilerOptions = { noLib: true, noResolve: true, allowJs: true, types: [] }
+  return ts.createProgram([tree.fileName], options, host).getTypeChecker()
+}
+
+/** One piece of a path joined onto the temp root: its text, with `*` for whatever is computed. */
+function pieceOf(piece: ts.Expression): string {
+  if (ts.isStringLiteralLike(piece)) return piece.text
+  if (ts.isTemplateExpression(piece)) {
+    return piece.head.text + piece.templateSpans.map((span) => `*${span.literal.text}`).join('')
+  }
+  return '*'
+}
+
+/**
  * Contract: pure. What `source` does with temp directories and with git, read
  * from its syntax tree. `fileName` is where it lives, repo-relative, which is
  * how its imports resolve, and chooses the dialect (`.tsx`, `.cjs`).
@@ -377,6 +616,23 @@ export function readHygiene(
   const registrars = new Set(['it', 'test'])
   const uses = new Map<string, ts.Identifier[]>()
   const constants: ts.VariableDeclaration[] = []
+  // The names the temp-directory functions go by here when imported under
+  // another: `import { mkdtempSync as mk } from 'node:fs'` makes `mk(` a maker.
+  const makerNames = new Set<string>()
+  /** Each local name of a raw remover, with the name it is imported by. */
+  const rawNames = new Map<string, string>()
+  const helperNames = new Set<string>()
+  const rootNames = new Set<string>()
+
+  /** Records a name a function this guard knows is imported under, from `from`. */
+  const alias = (from: string, imported: string, local: string): void => {
+    if (FS_MODULES.has(from) && TEMP_MAKERS.has(imported)) makerNames.add(local)
+    if (FS_MODULES.has(from) && RAW_REMOVERS.has(imported)) rawNames.set(local, imported)
+    if (OS_MODULES.has(from) && imported === 'tmpdir') rootNames.add(local)
+    if (imported === 'removeTempDir' && candidatesFor(fileName, from).includes(TMPDIR_HELPER)) {
+      helperNames.add(local)
+    }
+  }
 
   const bind = (node: ts.Node): void => {
     if (ts.isIdentifier(node)) uses.set(node.text, [...(uses.get(node.text) ?? []), node])
@@ -402,13 +658,32 @@ export function readHygiene(
             if (RUNNERS.has(imported)) runners.set(element.name.text, imported)
           }
         }
+      } else if (
+        clause?.isTypeOnly === false &&
+        bindings !== undefined &&
+        ts.isNamedImports(bindings)
+      ) {
+        for (const element of bindings.elements) {
+          if (!element.isTypeOnly) {
+            alias(from, (element.propertyName ?? element.name).text, element.name.text)
+          }
+        }
       }
     } else if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       const value = unwrap(node.initializer)
-      const required =
-        ts.isCallExpression(value) &&
-        nameOf(value.expression) === 'require' &&
-        CHILD_PROCESS.has(literalText(value.arguments[0]) ?? '')
+      const requiredFrom =
+        ts.isCallExpression(value) && nameOf(value.expression) === 'require'
+          ? literalText(value.arguments[0])
+          : null
+      if (requiredFrom !== null && ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          const key = element.propertyName ?? element.name
+          if (ts.isIdentifier(key) && ts.isIdentifier(element.name)) {
+            alias(requiredFrom, key.text, element.name.text)
+          }
+        }
+      }
+      const required = CHILD_PROCESS.has(requiredFrom ?? '')
       if (required && ts.isIdentifier(node.name)) runnerSpaces.add(node.name.text)
       if (required && ts.isObjectBindingPattern(node.name)) {
         for (const element of node.name.elements) {
@@ -536,9 +811,9 @@ export function readHygiene(
   }
 
   /**
-   * Whether `node` runs as part of a test. The first test registration,
-   * after-test hook, `finally` or named function it sits in decides; at the
-   * top of the file it is no test.
+   * Whether `node` runs as part of a test. The first test registration, hook,
+   * `finally` or named function it sits in decides; at the top of the file it
+   * is no test.
    */
   function inTest(node: ts.Node): boolean {
     let child = node
@@ -566,9 +841,14 @@ export function readHygiene(
     return false
   }
 
-  let makesTempDir = false
-  let callsRemoveTempDir = false
-  let callsRmSync = false
+  // What the walk collects for following each temp directory: every call that
+  // makes one, every removal and its kind, every remover handed a whole list
+  // (`homes.forEach(removeTempDir)`), and every path built on the temp root.
+  const makes: ts.CallExpression[] = []
+  const removals = new Map<ts.CallExpression, Remover>()
+  const nonRemovals = new Map<ts.CallExpression, string>()
+  const handedRemovers = new Set<ts.CallExpression>()
+  const tempPaths: TempPath[] = []
   const git: GitSighting[] = []
   const rawTeardowns: string[] = []
   const imports: string[] = []
@@ -579,20 +859,110 @@ export function readHygiene(
     if (door !== undefined) git.push({ how: `imports ${door}`, line: lineOf(at), starts: false })
   }
 
+  /** Whether a call makes a temp directory: mkdtemp by its name, or by a name it was imported under. */
+  const isMaker = (call: ts.CallExpression): boolean =>
+    TEMP_MAKERS.has(nameOf(call.expression) ?? '') ||
+    (ts.isIdentifier(call.expression) && makerNames.has(call.expression.text))
+
+  /** Whether an expression names the temp root: `os.tmpdir()` however it is reached, or `process.env.TMPDIR`. */
+  const isTempRoot = (node: ts.Node): node is ts.Expression => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      return nameOf(callee) === 'tmpdir' || (ts.isIdentifier(callee) && rootNames.has(callee.text))
+    }
+    if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false
+    const owner = unwrap(node.expression)
+    return (
+      TEMP_ENV.has(nameOf(node) ?? '') &&
+      ts.isPropertyAccessExpression(owner) &&
+      owner.name.text === 'env' &&
+      ts.isIdentifier(owner.expression) &&
+      owner.expression.text === 'process'
+    )
+  }
+
+  /** Whether `node` is, or is part of, the prefix an mkdtemp call is handed. */
+  const isPrefix = (node: ts.Node): boolean => {
+    let child = node
+    for (let parent = node.parent as ts.Node | undefined; parent !== undefined;) {
+      if (ts.isCallExpression(parent) && isMaker(parent) && parent.arguments[0] === child)
+        return true
+      child = parent
+      parent = parent.parent
+    }
+    return false
+  }
+
+  /**
+   * The pieces a path adds to the temp root, `*` for anything computed, read
+   * from `path.join`/`path.resolve`, a template (`${os.tmpdir()}/eph-x`) or a
+   * `+` chain alike; empty when nothing is added — the root itself.
+   */
+  const nameUnderRoot = (root: ts.Expression): string => {
+    const value = receiving(root)
+    const parent = value.parent
+    if (
+      ts.isCallExpression(parent) &&
+      parent.arguments[0] === value &&
+      ['join', 'resolve'].includes(nameOf(parent.expression) ?? '')
+    ) {
+      return parent.arguments.slice(1).map(pieceOf).join('/')
+    }
+    let added = ''
+    if (ts.isTemplateSpan(parent)) {
+      const spans = parent.parent.templateSpans
+      for (const span of spans.slice(spans.indexOf(parent))) {
+        added += (span === parent ? '' : '*') + span.literal.text
+      }
+    }
+    for (
+      let left: ts.Expression = value;
+      ts.isBinaryExpression(left.parent) &&
+      left.parent.operatorToken.kind === ts.SyntaxKind.PlusToken &&
+      left.parent.left === left;
+      left = left.parent
+    ) {
+      added += pieceOf(left.parent.right)
+    }
+    return added.replace(/^[/\\]+/, '')
+  }
+
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const name = nameOf(node.expression) ?? ''
+      const local = ts.isIdentifier(node.expression) ? node.expression.text : ''
       const first = literalText(node.arguments[0])
-      if (TEMP_MAKERS.has(name)) makesTempDir = true
-      if (name === 'removeTempDir') callsRemoveTempDir = true
-      if (name === 'rmSync') callsRmSync = true
-      if (RAW_REMOVERS.has(name)) {
+      if (isMaker(node)) makes.push(node)
+      if (name === 'removeTempDir' || helperNames.has(local)) {
+        removals.set(node, 'removeTempDir')
+      } else if (RAW_REMOVERS.has(name) || rawNames.has(local)) {
         const recursion = recursionOf(node)
+        // Credited as a removal only when its options plainly say recursive,
+        // and held against a git-running file whenever they might: a check
+        // that gives the benefit of the doubt in either direction can pass
+        // what it could not read.
+        if (recursion === 'yes') removals.set(node, 'raw')
+        else {
+          nonRemovals.set(
+            node,
+            recursion !== 'no'
+              ? `it calls ${name} on it with options this guard cannot read as recursive: write recursive: true in the call`
+              : EMPTY_DIR_REMOVERS.has(rawNames.get(local) ?? name)
+                ? `it calls ${name} on it without recursive, which removes a directory only while it is empty`
+                : `it calls ${name} on it without recursive, which cannot remove a directory`
+          )
+        }
         if (recursion !== 'no' && !inTest(node)) {
           const unread = recursion === 'unread' ? ' (options it cannot read)' : ''
           rawTeardowns.push(`${name} at line ${String(lineOf(node))}${unread}`)
         }
       }
+      const handed = node.arguments.some(
+        (argument) =>
+          ts.isIdentifier(argument) &&
+          (argument.text === 'removeTempDir' || helperNames.has(argument.text))
+      )
+      if (handed) handedRemovers.add(node)
       const runner = runnerOf(node.expression)
       if (
         runner !== null &&
@@ -619,13 +989,464 @@ export function readHygiene(
         git.push({ how: `runs ${script}`, line: lineOf(node), starts: true })
       }
     }
+    if (isTempRoot(node) && !isPrefix(node)) {
+      tempPaths.push({ line: lineOf(node), name: nameUnderRoot(node) })
+    }
     ts.forEachChild(node, visit)
   }
   visit(tree)
+
+  let checker: ts.TypeChecker | undefined
+  /**
+   * The variable an identifier names, told apart by scope — the value's, for
+   * the `home` in `{ home }`, which otherwise names the property. Built only
+   * for a file that makes a directory.
+   */
+  const symbolOf = (identifier: ts.Identifier): ts.Symbol | undefined => {
+    checker ??= checkerFor(tree)
+    const parent = identifier.parent
+    return ts.isShorthandPropertyAssignment(parent) && parent.name === identifier
+      ? checker.getShorthandAssignmentValueSymbol(parent)
+      : checker.getSymbolAtLocation(identifier)
+  }
+
+  /** The named function `node` runs in, or the file when it sits in none. */
+  const homeOf = (node: ts.Node): ts.Node => {
+    let home: ts.Node = node.parent
+    while (!ts.isSourceFile(home) && nameOfFunction(home) === null) home = home.parent
+    return home
+  }
+
+  /** The function whose own body `node` is in, named or not, or the file. */
+  const bodyOf = (node: ts.Node): ts.Node => {
+    let body: ts.Node = node.parent
+    while (!ts.isSourceFile(body) && !ts.isFunctionLike(body)) body = body.parent
+    return body
+  }
+
+  /** Whether an identifier only names its function for other files: `export { f }`, `export default f`. */
+  const isExport = (identifier: ts.Identifier): boolean =>
+    ts.isExportSpecifier(identifier.parent) || ts.isExportAssignment(identifier.parent)
+
+  /**
+   * Whether `use` names the named function `fn`: a method through a property
+   * (`rig.cleanup`), any other function through its own name as the checker
+   * binds it, so `server.close` names no function `close`. The name in the
+   * declaration itself is no use of it.
+   */
+  const names = (use: ts.Identifier, fn: ts.Node): boolean => {
+    const property = ts.isPropertyAccessExpression(use.parent) && use.parent.name === use
+    if (property !== ts.isMethodDeclaration(fn)) return false
+    if (property) return true
+    const declared = ts.isFunctionDeclaration(fn) ? fn.name : fn.parent
+    const named =
+      declared !== undefined && ts.isVariableDeclaration(declared) ? declared.name : declared
+    return (
+      named !== undefined && named !== use && symbolOf(use) === symbolOf(named as ts.Identifier)
+    )
+  }
+
+  /**
+   * The call a use of the named function `fn` takes part in: as its callee
+   * (`cleanup()`), or handed to it whole (`afterAll(cleanupHomes)`). Stored —
+   * in an object, or by `push`, `add` or `set` — exported, or named in a
+   * type, a function takes part in no call.
+   */
+  const callTaking = (
+    use: ts.Identifier,
+    fn: ts.Node
+  ): { readonly call: ts.CallExpression; readonly called: boolean } | null => {
+    if (!names(use, fn)) return null
+    const reference: ts.Node =
+      ts.isPropertyAccessExpression(use.parent) && use.parent.name === use ? use.parent : use
+    const call = reference.parent
+    if (!ts.isCallExpression(call)) return null
+    if (call.expression === reference) return { call, called: true }
+    return call.arguments.some((argument) => argument === reference) &&
+      !(ts.isPropertyAccessExpression(call.expression) && COLLECTORS.has(call.expression.name.text))
+      ? { call, called: false }
+      : null
+  }
+
+  const tracing = new Set<ts.Node>()
+
+  /**
+   * Whether the code in `home` runs when this file is loaded and its tests
+   * run. The file's own top level does, and so does everything a hook, a
+   * test or a `describe` is handed there. A named function does when a call
+   * of it, or a call it is handed to, is itself run — every function around
+   * that call, as `executes` reads them — so `afterAll(cleanupHomes)` runs
+   * `cleanupHomes`, and a call of it inside an object's method, a returned
+   * closure or one pushed onto a list does not. A function this file only
+   * exports runs for other files, which is exactly what this cannot see. A
+   * use met again while tracing — the function calling itself, or two
+   * calling each other — decides nothing.
+   */
+  const runs = (home: ts.Node): boolean => {
+    if (ts.isSourceFile(home)) return true
+    const name = nameOfFunction(home)
+    if (name === null || tracing.has(home)) return false
+    tracing.add(home)
+    const ran = (uses.get(name) ?? []).some(
+      (use) => callTaking(use, home) !== null && executes(use)
+    )
+    tracing.delete(home)
+    return ran
+  }
+
+  /** Whether another file can call `fn`, the function named `name`. */
+  const exported = (fn: ts.Node, name: string): boolean => {
+    const declaration = ts.isFunctionDeclaration(fn) ? fn : fn.parent
+    const flags =
+      ts.isFunctionDeclaration(declaration) ||
+      ts.isVariableDeclaration(declaration) ||
+      ts.isClassDeclaration(declaration)
+        ? ts.getCombinedModifierFlags(declaration)
+        : ts.ModifierFlags.None
+    return (flags & ts.ModifierFlags.Export) !== 0 || (uses.get(name) ?? []).some(isExport)
+  }
+
+  /** Every call of the named function `fn` in this file, as `callTaking` reads a call. */
+  const callsOf = (fn: ts.Node): readonly ts.CallExpression[] =>
+    (uses.get(nameOfFunction(fn) ?? '') ?? []).flatMap((use) => {
+      const taking = callTaking(use, fn)
+      return taking?.called === true ? [taking.call] : []
+    })
+
+  /** Whether a node sits in a type, where naming a function hands nothing on: `typeof fresh`. */
+  const inType = (node: ts.Node): boolean =>
+    !ts.isSourceFile(node) && (ts.isTypeNode(node) || inType(node.parent))
+
+  /**
+   * A use of the named function `fn` that hands the function itself on
+   * instead of calling it — kept in an object, handed to a call, held under
+   * another name — so that what it returns goes where no call here is judged.
+   */
+  const handedOnAt = (fn: ts.Node): ts.Identifier | undefined =>
+    (uses.get(nameOfFunction(fn) ?? '') ?? []).find(
+      (use) => names(use, fn) && callTaking(use, fn)?.called !== true && !inType(use)
+    )
+
+  /**
+   * Whether the file runs `node`: every function it sits in has to be run. An
+   * anonymous function handed to a call or a `new` is taken to be run by it —
+   * a hook, a test, `forEach`, a `Promise` executor, an IIFE — unless the call
+   * only stores it (`push`, `add`, `set`); a named one runs when `runs` says
+   * so; any other — a method of an object literal, a function returned or
+   * assigned — is only kept, and nothing here shows it run. That is the shape
+   * a rig's `close()` has, which removed its home only if the rig had also
+   * been pushed onto the list a hook closes.
+   */
+  const executes = (node: ts.Node): boolean => {
+    for (let fn = bodyOf(node); !ts.isSourceFile(fn); fn = bodyOf(fn)) {
+      if (nameOfFunction(fn) !== null) return runs(fn)
+      let reference: ts.Node = fn
+      while (ts.isParenthesizedExpression(reference.parent)) reference = reference.parent
+      const holder = reference.parent
+      const handed =
+        (ts.isCallExpression(holder) || ts.isNewExpression(holder)) &&
+        (holder.expression === reference ||
+          (holder.arguments?.some((argument) => argument === reference) === true &&
+            !(
+              ts.isPropertyAccessExpression(holder.expression) &&
+              COLLECTORS.has(holder.expression.name.text)
+            )))
+      if (!handed) return false
+    }
+    return true
+  }
+
+  /**
+   * A removal counts for a directory when it runs whenever the directory is
+   * made: in the same function body, or from code this file runs. One that
+   * only an exported function would run is stranded — the helper shape
+   * `test/scenarios/company.ts` had, where every scenario had to remember to
+   * call `cleanupHomes()` and deleting the call leaked every company home —
+   * and so is one in a function the file only keeps.
+   */
+  const removes = (removal: ts.CallExpression, by: Remover, made: ts.Node, fate: Fate): void => {
+    if (bodyOf(removal) === bodyOf(made) || executes(removal)) {
+      fate.removedBy.add(by)
+      return
+    }
+    const home = homeOf(removal)
+    const name = nameOfFunction(home)
+    fate.stranded.add(
+      bodyOf(removal) === home && name !== null
+        ? `only ${name} would remove it, and nothing in this file runs ${name}`
+        : `only a function ${name ?? 'the file'} keeps — an object's method, or one stored or returned — would remove it, and nothing in this file is seen to run that`
+    )
+  }
+
+  /** Whether `expression` reads from the list `list`: `homes.splice(0)`, `homes.pop()`, `homes[0]`. */
+  const readsFrom = (expression: ts.Expression, list: ts.Symbol): boolean => {
+    const root = rootOf(expression)
+    return root !== null && symbolOf(root) === list
+  }
+
+  /** Whether `node` repeats within its own function: inside a `while`, a `do` or any `for`. */
+  const inLoop = (node: ts.Node): boolean => {
+    for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
+      if (ts.isFunctionLike(parent)) return false
+      if (ts.isIterationStatement(parent, false)) return true
+    }
+    return false
+  }
+
+  /**
+   * How much of `list` a remover's `target` takes: `whole` when it walks the
+   * list (`for (const dir of homes.splice(0))`, `homes.forEach((dir) => …)`)
+   * or reads from it in a loop (`while (homes.length) removeTempDir(homes.pop()!)`,
+   * `const home = homes.pop()` inside one), `one` when it reads a single item
+   * outside any loop, which leaves the rest behind; null when it is not from
+   * the list at all.
+   */
+  const takenFrom = (target: ts.Expression, list: ts.Symbol): 'whole' | 'one' | null => {
+    if (readsFrom(target, list)) return inLoop(target) ? 'whole' : 'one'
+    const held = unwrap(target)
+    const declaration = ts.isIdentifier(held) ? symbolOf(held)?.valueDeclaration : undefined
+    if (declaration === undefined) return null
+    if (ts.isVariableDeclaration(declaration)) {
+      const loop = declaration.parent.parent
+      if (ts.isForOfStatement(loop)) return readsFrom(loop.expression, list) ? 'whole' : null
+      if (declaration.initializer === undefined || !readsFrom(declaration.initializer, list)) {
+        return null
+      }
+      return inLoop(declaration) ? 'whole' : 'one'
+    }
+    const walker = declaration.parent
+    const call = walker.parent
+    const walks =
+      ts.isParameter(declaration) &&
+      ts.isCallExpression(call) &&
+      call.arguments.some((argument) => argument === walker) &&
+      ts.isPropertyAccessExpression(call.expression) &&
+      readsFrom(call.expression.expression, list)
+    return walks ? 'whole' : null
+  }
+
+  /** Follows a list a directory was put into, to every removal that empties it. */
+  const followList = (
+    receiver: ts.Expression,
+    made: ts.Node,
+    fate: Fate,
+    seen: Set<ts.Symbol>
+  ): void => {
+    const root = rootOf(receiver)
+    const list = root === null ? undefined : symbolOf(root)
+    if (root === null || list === undefined) {
+      fate.strays.push('it puts it in a list this guard cannot name')
+      return
+    }
+    if (seen.has(list)) return
+    seen.add(list)
+    for (const [removal, by] of removals) {
+      const target = removal.arguments[0]
+      const taken = target === undefined ? null : takenFrom(target, list)
+      if (taken === 'whole') removes(removal, by, made, fate)
+      else if (taken === 'one') fate.sampled.add(root.text)
+    }
+    for (const call of handedRemovers) {
+      const callee = call.expression
+      if (ts.isPropertyAccessExpression(callee) && readsFrom(callee.expression, list)) {
+        removes(call, 'removeTempDir', made, fate)
+      }
+    }
+  }
+
+  /** A function here that returns the directory: its calls are judged in its place, unless other files make them. */
+  const followReturn = (held: ts.Node, fate: Fate): void => {
+    let fn: ts.Node = held.parent
+    while (!ts.isSourceFile(fn) && !ts.isFunctionLike(fn)) fn = fn.parent
+    const name = nameOfFunction(fn)
+    if (name === null) {
+      fate.strays.push('it returns it from a function this guard cannot name')
+      return
+    }
+    if (exported(fn, name)) {
+      fate.strays.push(
+        `${name} hands it to callers in other files, where this guard does not follow it: remove it here, from a module-level hook`
+      )
+    }
+    fate.returnedBy.add(fn)
+  }
+
+  /** Follows a variable holding the directory to every use that removes it, lists it, returns it or copies it. */
+  const followVariable = (
+    name: ts.Identifier,
+    made: ts.Node,
+    fate: Fate,
+    seen: Set<ts.Symbol>
+  ): void => {
+    const symbol = symbolOf(name)
+    if (symbol === undefined || seen.has(symbol)) return
+    seen.add(symbol)
+    // Every identifier for the variable, its declaration and the left of each
+    // `home = …` included: from those, `follow` finds nowhere to go.
+    for (const use of uses.get(name.text) ?? []) {
+      if (symbolOf(use) === symbol) follow(use, made, fate, seen, false)
+    }
+  }
+
+  /**
+   * Where the directory `value` holds goes next: into a variable, a list, a
+   * remover or a `return`. `fresh` is true for the call that made it, the one
+   * place where any other destination means it has gone where this cannot
+   * follow; a variable's other uses (`path.join(home, 'x')`) just read it.
+   */
+  function follow(
+    value: ts.Expression,
+    made: ts.Node,
+    fate: Fate,
+    seen: Set<ts.Symbol>,
+    fresh: boolean
+  ): void {
+    const held = receiving(value)
+    const parent = held.parent
+    if (ts.isVariableDeclaration(parent) && parent.initializer === held) {
+      if (ts.isIdentifier(parent.name)) followVariable(parent.name, made, fate, seen)
+      else if (fresh) fate.strays.push('it destructures it, which this guard does not follow')
+    } else if (
+      ts.isBinaryExpression(parent) &&
+      parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      parent.right === held &&
+      ts.isIdentifier(parent.left)
+    ) {
+      followVariable(parent.left, made, fate, seen)
+    } else if (ts.isCallExpression(parent) && parent.arguments.some((arg) => arg === held)) {
+      const by = removals.get(parent)
+      const callee = parent.expression
+      const notRemoving = nonRemovals.get(parent)
+      if (by !== undefined) removes(parent, by, made, fate)
+      else if (ts.isPropertyAccessExpression(callee) && COLLECTORS.has(callee.name.text)) {
+        followList(callee.expression, made, fate, seen)
+      } else if (notRemoving !== undefined) {
+        fate.notes.push(notRemoving)
+      } else if (fresh) {
+        fate.strays.push(
+          `it passes it to ${nameOf(callee) ?? 'a call'}(), where this guard cannot follow it`
+        )
+      }
+    } else if (
+      (ts.isReturnStatement(parent) && parent.expression === held) ||
+      (ts.isArrowFunction(parent) && parent.body === held)
+    ) {
+      followReturn(held, fate)
+    } else if (fresh && ts.isExpressionStatement(parent)) {
+      fate.strays.push('it drops the path, so nothing can remove it')
+    } else if (fresh) {
+      fate.strays.push('it keeps it where this guard cannot follow it')
+    } else if (keptInside(parent)) {
+      fate.notes.push(
+        'it keeps it in an object or an array, and this guard does not follow it out of one: put it in a list a hook empties'
+      )
+    }
+  }
+
+  /**
+   * Whether `parent` puts a value into an object or array the file keeps —
+   * declares, assigns, returns or pushes — as `rig = { home, close() … }`
+   * does, rather than one handed to a call and dropped, as `{ cwd: home }` is.
+   */
+  function keptInside(parent: ts.Node): boolean {
+    const literal =
+      ts.isShorthandPropertyAssignment(parent) || ts.isPropertyAssignment(parent)
+        ? parent.parent
+        : parent
+    if (!ts.isObjectLiteralExpression(literal) && !ts.isArrayLiteralExpression(literal)) {
+      return false
+    }
+    const kept = receiving(literal)
+    const holder = kept.parent
+    return (
+      ts.isVariableDeclaration(holder) ||
+      ts.isReturnStatement(holder) ||
+      (ts.isArrowFunction(holder) && holder.body === kept) ||
+      (ts.isBinaryExpression(holder) && holder.operatorToken.kind === ts.SyntaxKind.EqualsToken) ||
+      (ts.isCallExpression(holder) &&
+        ts.isPropertyAccessExpression(holder.expression) &&
+        COLLECTORS.has(holder.expression.name.text))
+    )
+  }
+
+  const made: MadeDir[] = []
+  const judged = new Set<ts.Node>()
+  const through = new Map<ts.Node, string>()
+  const pending = [...makes]
+  // `pending` grows while it is read: a function here that returns a
+  // directory nothing removes hands its judgement to each call of it.
+  for (const make of pending) {
+    if (judged.has(make)) continue
+    judged.add(make)
+    const fate: Fate = {
+      removedBy: new Set(),
+      stranded: new Set(),
+      sampled: new Set(),
+      returnedBy: new Set(),
+      strays: [],
+      notes: []
+    }
+    follow(make, make, fate, new Set(), true)
+    // Judged at its calls only when the function does nothing with it but
+    // hand it back: one that also lists it, or strands its removal, is
+    // answered for here, where the reason is.
+    const handedBackOnly =
+      fate.returnedBy.size > 0 &&
+      fate.removedBy.size === 0 &&
+      fate.strays.length === 0 &&
+      fate.stranded.size === 0 &&
+      fate.sampled.size === 0
+    if (handedBackOnly) {
+      const calls = [...fate.returnedBy].map((fn) => [fn, callsOf(fn)] as const)
+      const uncalled = calls.find(([, found]) => found.length === 0)?.[0]
+      // Judged at its calls only when calls are all that is done with it: a
+      // function also handed on, as `{ makeTempDir }` or by reference, makes
+      // directories at calls this file never sees.
+      const handedOn = calls.flatMap(([fn]) => {
+        const use = handedOnAt(fn)
+        return use === undefined
+          ? []
+          : [{ name: nameOfFunction(fn) ?? 'a function', line: lineOf(use) }]
+      })[0]
+      if (uncalled === undefined && handedOn === undefined) {
+        for (const [fn, found] of calls) {
+          for (const call of found) through.set(call, nameOfFunction(fn) ?? 'a function')
+          pending.push(...found)
+        }
+        continue
+      }
+      if (uncalled !== undefined) {
+        fate.strays.push(
+          `${nameOfFunction(uncalled) ?? 'a function'} hands it back, and nothing in this file calls that: remove it where it is made, or from a module-level hook`
+        )
+      } else if (handedOn !== undefined) {
+        fate.strays.push(
+          `${handedOn.name} hands it back, and line ${String(handedOn.line)} passes ${handedOn.name} itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook`
+        )
+      }
+    }
+    const stranded = [...fate.stranded][0]
+    const sampled = [...fate.sampled].join(' and ')
+    made.push({
+      line: lineOf(make),
+      through: through.get(make) ?? null,
+      removedBy: [...fate.removedBy].sort(),
+      why:
+        fate.strays[0] ??
+        (stranded === undefined
+          ? undefined
+          : `${stranded}: remove it from a hook, or put it in a list a hook empties`) ??
+        (sampled === ''
+          ? undefined
+          : `it takes one directory at a time out of ${sampled} outside a loop, so the rest are never removed`) ??
+        fate.notes[0] ??
+        null
+    })
+  }
+
   return {
-    makesTempDir,
-    callsRemoveTempDir,
-    callsRmSync,
+    made: made.sort((a, b) => a.line - b.line),
+    tempPaths,
     git,
     rawTeardowns,
     imports
@@ -642,22 +1463,46 @@ function gitVia(reading: HygieneReading, helpers: readonly string[]): string | n
 /**
  * Contract: pure. How `reading` breaks the rule, one sentence per fault; empty
  * when it keeps it. `helpers` is the chain of modules under `test/` the file
- * reaches git through, for a file that does not reach it itself.
+ * reaches git through, for a file that does not reach it itself, and `unmade`
+ * how many times this file may build each name on the temp root without
+ * mkdtemp (its entry in `UNMADE_TEMP_PATHS`).
+ *
+ * Judged one directory at a time, not one file: a file that removes its first
+ * directory is not thereby excused a second it forgot.
  */
 export function hygieneFaults(
   reading: HygieneReading,
-  helpers: readonly string[] = []
+  helpers: readonly string[] = [],
+  unmade: ReadonlyMap<string, number> = new Map()
 ): readonly string[] {
   const via = gitVia(reading, helpers)
-  if (via === null) {
-    return reading.makesTempDir && !reading.callsRemoveTempDir && !reading.callsRmSync
-      ? ['creates a temp directory and never removes it with removeTempDir or rmSync']
-      : []
-  }
   const faults: string[] = []
-  if (reading.makesTempDir && !reading.callsRemoveTempDir) {
-    faults.push(`runs real git (${via}) and never calls removeTempDir`)
+  for (const dir of reading.made) {
+    const at = `${String(dir.line)}${dir.through === null ? '' : ` (through ${dir.through}())`}`
+    const why = dir.why === null ? '' : `: ${dir.why}`
+    if (via === null && dir.removedBy.length === 0) {
+      faults.push(
+        `makes a temp directory at line ${at} and never removes it with removeTempDir or rmSync${why}`
+      )
+    } else if (via !== null && !dir.removedBy.includes('removeTempDir')) {
+      faults.push(
+        `runs real git (${via}) and never removes the temp directory it makes at line ${at} with removeTempDir${why}`
+      )
+    }
   }
+  const allowed = new Map(unmade)
+  for (const { line, name } of reading.tempPaths) {
+    const left = allowed.get(name) ?? 0
+    if (left > 0) {
+      allowed.set(name, left - 1)
+      continue
+    }
+    const what = name === '' ? 'the temp root itself' : `'${name}' on the temp root`
+    faults.push(
+      `names ${what} at line ${String(line)} outside an mkdtemp call: make the directory with mkdtemp, the root inside its prefix argument, or, if nothing is ever left there, list it in UNMADE_TEMP_PATHS with the reason`
+    )
+  }
+  if (via === null) return faults
   for (const removal of reading.rawTeardowns) {
     faults.push(`runs real git (${via}) and removes a tree with ${removal}, outside a test body`)
   }
@@ -681,9 +1526,13 @@ export interface Judgement {
  * `startCompany` without ever naming one. Helpers are followed through value
  * imports and re-exports, as deep as they go — and a file that reaches git is
  * judged whether or not it makes a temp directory, because the teardown that
- * failed on CI would fail the same way on a helper's directory.
+ * failed on CI would fail the same way on a helper's directory. `unmade` is the
+ * allowlist of paths built on the temp root without mkdtemp, by file.
  */
-export function judgeTree(sources: ReadonlyMap<string, string>): ReadonlyMap<string, Judgement> {
+export function judgeTree(
+  sources: ReadonlyMap<string, string>,
+  unmade: UnmadeTempPaths = UNMADE_TEMP_PATHS
+): ReadonlyMap<string, Judgement> {
   const readings = new Map<string, HygieneReading>()
   const readingOf = (file: string): HygieneReading | null => {
     const text = sources.get(file)
@@ -709,8 +1558,11 @@ export function judgeTree(sources: ReadonlyMap<string, string>): ReadonlyMap<str
     if (reading === null) continue
     const helpers = helpersOf(file, new Set([file]))
     const via = gitVia(reading, helpers)
-    if (!reading.makesTempDir && via === null) continue
-    judged.set(file, { git: via, faults: hygieneFaults(reading, helpers) })
+    if (reading.made.length === 0 && reading.tempPaths.length === 0 && via === null) continue
+    const allowed = new Map(
+      Object.entries(unmade[file] ?? {}).map(([name, { sites }]) => [name, sites] as const)
+    )
+    judged.set(file, { git: via, faults: hygieneFaults(reading, helpers, allowed) })
   }
   return judged
 }
@@ -797,12 +1649,20 @@ const OLD_PACING_WAKES = lines(
 )
 
 const RULE = [
-  'these files leave a temp directory behind, or remove a tree that git may still be writing into',
-  'with a raw recursive remove. A file that runs real git must remove its temp directories with',
-  "removeTempDir (test/tmpdir.ts): rmSync's maxRetries retries the rmdir of a directory whose",
-  'children it listed ONCE, so one entry a still-running git writes after that listing (a',
-  'detached `git repack`, CI run 36924116592) spends the whole budget and throws ENOTEMPTY.',
-  'A raw removal inside a test, called from nowhere else, is the test and stays allowed.'
+  'these files may leave a temp directory behind, or remove a tree git may still be writing into',
+  'with a raw recursive remove. EVERY directory a file makes with mkdtemp must reach a remover the',
+  'file itself runs, along a path this guard follows: a variable, a list a hook empties in a loop,',
+  'or a function here that returns it — not an object, and not a closure the file keeps (a rig',
+  "object's close()) rather than runs. A helper that makes one removes it from a module-level hook",
+  '(test/conformance/adapter-conformance.ts, test/scenarios/company.ts), never leaving it to',
+  'callers. A path named on the temp root outside an mkdtemp call is treated as a directory nothing',
+  'removes: build it inside the mkdtemp prefix argument, or, if nothing is ever left there, list',
+  'it in UNMADE_TEMP_PATHS with the reason. A file that runs real git must remove every temp',
+  "directory it makes with removeTempDir (test/tmpdir.ts): rmSync's maxRetries retries the rmdir",
+  'of a directory whose children it listed ONCE, so one entry a still-running git writes after',
+  'that listing (a detached `git repack`, CI run 36924116592) spends the whole budget and throws',
+  'ENOTEMPTY. Inside a test body a raw removal of something IN a temp directory is the test and',
+  'stays allowed; the temp directory itself still goes through removeTempDir.'
 ].join(' ')
 
 const PREMISE = [
@@ -841,11 +1701,26 @@ describe('a test that makes a temp directory takes it away again', () => {
       'a file that runs the git program itself'
     ).toMatch(/^execFileSync\('git'\)/)
     expect(judged.get('test/main/tmpdir.test.ts')?.git, 'the rmSync measurement').toBeNull()
+
+    // And per directory, not per file: the walk found the directories the
+    // files make, followed them to their removers, and found the paths on the
+    // temp root nothing makes. `gates.test.ts` holds one of each kind of fix:
+    // its policy files through a list, and its prompt home since 2026-10-02.
+    const gates = readHygiene(
+      fs.readFileSync('test/main/gates.test.ts', 'utf8'),
+      'test/main/gates.test.ts'
+    )
+    expect(
+      gates.made.map((dir) => dir.removedBy),
+      'gates.test.ts'
+    ).toEqual([['removeTempDir'], ['removeTempDir']])
+    expect(gates.tempPaths, 'gates.test.ts').toEqual([])
+    expect(judged.get('test/main/repo-remotes.test.ts')?.faults, 'an allowed path').toEqual([])
   })
 
   it('catches a file that makes a directory and removes nothing', () => {
     expect(faultsIn("const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-x-'))")).toEqual([
-      'creates a temp directory and never removes it with removeTempDir or rmSync'
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync'
     ])
   })
 
@@ -870,8 +1745,10 @@ describe('a test that makes a temp directory takes it away again', () => {
 
   it('accepts a file that actually calls one of the two removers', () => {
     // Both directions, or the guard could pass by refusing everything.
-    expect(faultsIn('fs.mkdtempSync(x)\nremoveTempDir(home)')).toEqual([])
-    expect(faultsIn('fs.mkdtempSync(x)\nfs.rmSync(home, { recursive: true })')).toEqual([])
+    expect(faultsIn('const home = fs.mkdtempSync(x)\nremoveTempDir(home)')).toEqual([])
+    expect(
+      faultsIn('const home = fs.mkdtempSync(x)\nfs.rmSync(home, { recursive: true })')
+    ).toEqual([])
   })
 
   it('says nothing about a file that makes no temp directory and runs no git', () => {
@@ -895,7 +1772,7 @@ describe('a test that makes a temp directory takes it away again', () => {
 describe('a file that runs real git removes its temp directories with removeTempDir', () => {
   it('fails the teardown pacing-wakes shipped with, which lost to a git repack on CI', () => {
     expect(faultsIn(OLD_PACING_WAKES)).toEqual([
-      'runs real git (imports src/main/agora.ts at line 1) and never calls removeTempDir',
+      'runs real git (imports src/main/agora.ts at line 1) and never removes the temp directory it makes at line 15 with removeTempDir',
       'runs real git (imports src/main/agora.ts at line 1) and removes a tree with rmSync at line 10, outside a test body'
     ])
   })
@@ -911,10 +1788,13 @@ describe('a file that runs real git removes its temp directories with removeTemp
   })
 
   it('fails a file that removes one list with removeTempDir and another with rmSync', () => {
-    // Calling the helper once is not removing every temp directory with it.
+    // Calling the helper once is not removing every temp directory with it,
+    // and since the rule went per directory it says so of the directory too.
     const mixed = lines(
       CHILD,
+      'const repos: string[] = []',
       "const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-repo-'))",
+      'repos.push(repo)',
       "execFileSync('git', ['init'], { cwd: repo })",
       'afterEach(() => {',
       '  for (const dir of homes.splice(0)) removeTempDir(dir)',
@@ -922,7 +1802,8 @@ describe('a file that runs real git removes its temp directories with removeTemp
       '})'
     )
     expect(faultsIn(mixed)).toEqual([
-      "runs real git (execFileSync('git') at line 3) and removes a tree with rmSync at line 6, outside a test body"
+      "runs real git (execFileSync('git') at line 5) and never removes the temp directory it makes at line 3 with removeTempDir",
+      "runs real git (execFileSync('git') at line 5) and removes a tree with rmSync at line 8, outside a test body"
     ])
   })
 
@@ -933,7 +1814,8 @@ describe('a file that runs real git removes its temp directories with removeTemp
       "import { Agora } from '../../src/main/agora'",
       'const openHomes: string[] = []',
       "export async function startCompany() { const home = fs.mkdtempSync('x'); openHomes.push(home); return { home } }",
-      'export function cleanupHomes(): void { for (const home of openHomes.splice(0)) removeTempDir(home) }'
+      'export function cleanupHomes(): void { for (const home of openHomes.splice(0)) removeTempDir(home) }',
+      'afterAll(cleanupHomes)'
     )
     const scenario = (teardown: string): string =>
       lines(
@@ -1466,7 +2348,7 @@ describe('a file that runs real git removes its temp directories with removeTemp
       'test/scenarios/s-x.test.ts'
     ])
     expect(faults.get('test/main/s-y.test.ts')).toEqual([
-      'runs real git (through test/scenarios/relay.ts → test/scenarios/company.ts) and never calls removeTempDir',
+      'runs real git (through test/scenarios/relay.ts → test/scenarios/company.ts) and never removes the temp directory it makes at line 2 with removeTempDir',
       'runs real git (through test/scenarios/relay.ts → test/scenarios/company.ts) and removes a tree with rmSync at line 3, outside a test body'
     ])
   })
@@ -1518,6 +2400,1114 @@ describe('a file that runs real git removes its temp directories with removeTemp
     ])
 
     expect(doorsOf(modules), PREMISE).toEqual([...GIT_DOORS].sort())
+  })
+})
+
+/** The faults the rule finds in a fixture standing at `file`, as the tree walk would. */
+const faultsAt = (file: string, source: string): readonly string[] =>
+  hygieneFaults(readHygiene(source, file))
+
+describe('every directory a file makes reaches a remover the file runs', () => {
+  it('fails a second directory the file forgot, though it removes the first', () => {
+    // Judged per FILE, this passed: the file calls removeTempDir, so the rule
+    // was kept, whatever else it made.
+    const forgot = lines(
+      'const temps: string[] = []',
+      'afterEach(() => { for (const dir of temps.splice(0)) removeTempDir(dir) })',
+      "it('a', () => { const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-a-')); temps.push(home) })",
+      "it('b', () => { const extra = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-b-')); use(extra) })"
+    )
+    expect(faultsIn(forgot)).toEqual([
+      'makes a temp directory at line 4 and never removes it with removeTempDir or rmSync'
+    ])
+  })
+
+  it('tells one home from another by scope, not by name', () => {
+    // Test after test declares `const home`. Matched by name, the one that
+    // went into the list would vouch for the one that did not.
+    const shadowed = lines(
+      'const temps: string[] = []',
+      'afterEach(() => { for (const dir of temps.splice(0)) removeTempDir(dir) })',
+      "it('a', () => { const home = fs.mkdtempSync('a'); temps.push(home) })",
+      "it('b', () => { const home = fs.mkdtempSync('b'); use(home) })"
+    )
+    expect(faultsIn(shadowed)).toEqual([
+      'makes a temp directory at line 4 and never removes it with removeTempDir or rmSync'
+    ])
+  })
+
+  it.each([
+    [
+      'into a remover beside it',
+      "it('x', () => { const home = fs.mkdtempSync('x'); try { work(home) } finally { removeTempDir(home) } })",
+      ['removeTempDir']
+    ],
+    [
+      'through a variable one hook sets and another removes',
+      lines(
+        'let root: string',
+        "beforeEach(() => { root = fs.mkdtempSync('x') })",
+        'afterEach(() => { removeTempDir(root) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a list a loop empties',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { const home = fs.mkdtempSync('x'); temps.push(home) })",
+        'afterEach(() => { for (const dir of temps.splice(0)) removeTempDir(dir) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a list popped until empty',
+      lines(
+        'const homes: string[] = []',
+        "it('x', () => { homes.push(fs.mkdtempSync('x')) })",
+        'afterEach(() => {',
+        '  while (homes.length > 0) {',
+        '    const home = homes.pop()',
+        '    if (home !== undefined) removeTempDir(home)',
+        '  }',
+        '})'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a list a callback empties',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'afterEach(() => { temps.splice(0).forEach((dir) => removeTempDir(dir)) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a list handed to the remover whole',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'afterEach(() => { temps.splice(0).forEach(removeTempDir) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through whichever directory a fallback picks',
+      lines(
+        'const temps: string[] = []',
+        'async function startRig(options: { reuseHome?: string } = {}) {',
+        "  const home = options.reuseHome ?? fs.mkdtempSync(path.join(os.tmpdir(), 'eph-agent-wt-'))",
+        '  if (options.reuseHome === undefined) temps.push(home)',
+        '}',
+        'afterEach(() => { for (const dir of temps.splice(0)) removeTempDir(dir) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a helper that lists it and hands it back',
+      lines(
+        'const dirs: string[] = []',
+        'afterEach(() => { for (const dir of dirs.splice(0)) removeTempDir(dir) })',
+        'function tempDir(): string {',
+        "  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-policy-'))",
+        '  dirs.push(dir)',
+        '  return dir',
+        '}',
+        "it('x', () => { fs.writeFileSync(path.join(tempDir(), 'f'), 'x') })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through each call of a helper that only hands it back',
+      lines(
+        'function fresh(): string {',
+        "  return fs.mkdtempSync('x')",
+        '}',
+        "it('x', () => { const home = fresh(); try { work(home) } finally { removeTempDir(home) } })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through each call of an arrow that only hands it back',
+      lines(
+        "const fresh = (): string => fs.mkdtempSync('x')",
+        "it('x', () => { const home = fresh(); removeTempDir(home) })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through each call of a method that only hands it back',
+      lines(
+        "class Rig { fresh(): string { return fs.mkdtempSync('x') } }",
+        'const rig = new Rig()',
+        "it('x', () => { const home = rig.fresh(); removeTempDir(home) })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through either branch of a conditional',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { const home = reuse ? existing : fs.mkdtempSync('x'); temps.push(home) })",
+        'afterEach(() => { for (const dir of temps.splice(0)) removeTempDir(dir) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through an item handed straight out of the list',
+      lines(
+        'const homes: string[] = []',
+        "it('x', () => { homes.push(fs.mkdtempSync('x')) })",
+        'afterEach(() => { while (homes.length > 0) removeTempDir(homes.pop()!) })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'through a Map a loop empties',
+      lines(
+        'const homes = new Map<string, string>()',
+        "it('x', () => { homes.set('a', fs.mkdtempSync('x')) })",
+        'afterEach(() => { for (const dir of homes.values()) removeTempDir(dir); homes.clear() })'
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'into a remover in an IIFE inside the test',
+      "it('x', () => { const home = fs.mkdtempSync('x'); (() => removeTempDir(home))() })",
+      ['removeTempDir']
+    ],
+    [
+      'into a remover in a Promise executor',
+      "it('x', async () => { const home = fs.mkdtempSync('x'); await new Promise<void>((done) => { removeTempDir(home); done() }) })",
+      ['removeTempDir']
+    ],
+    [
+      'through a copy of its variable',
+      "it('x', () => { const home = fs.mkdtempSync('x'); const dir = home; removeTempDir(dir) })",
+      ['removeTempDir']
+    ],
+    [
+      'made by an awaited mkdtemp',
+      "it('x', async () => { const home = await fs.promises.mkdtemp('x'); removeTempDir(home) })",
+      ['removeTempDir']
+    ],
+    [
+      'made by mkdtempSync imported under another name',
+      lines(
+        "import { mkdtempSync as makeDir } from 'node:fs'",
+        "it('x', () => { const home = makeDir('x'); removeTempDir(home) })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'made by mkdtempSync required under another name',
+      lines(
+        "const { mkdtempSync: makeDir } = require('node:fs')",
+        "it('x', () => { const home = makeDir('x'); removeTempDir(home) })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'removed by removeTempDir imported under another name',
+      lines(
+        "import { removeTempDir as drop } from '../tmpdir'",
+        "it('x', () => { const home = fs.mkdtempSync('x'); drop(home) })"
+      ),
+      ['removeTempDir']
+    ],
+    [
+      'removed by rmSync imported under another name',
+      lines(
+        "import { rmSync as nuke } from 'node:fs'",
+        "it('x', () => { const home = fs.mkdtempSync('x'); nuke(home, { recursive: true }) })"
+      ),
+      ['raw']
+    ],
+    [
+      // `test/pin.ts`: other files call `pinHolds`, and its directory never
+      // leaves the call, so the removal beside it runs whenever it is made.
+      'removed beside it in a function only other files call',
+      lines(
+        'export function pinHolds(): void {',
+        '  let home: string | undefined',
+        '  try {',
+        "    home = fs.mkdtempSync('x')",
+        '  } finally {',
+        '    if (home !== undefined) fs.rmSync(home, { recursive: true, force: true })',
+        '  }',
+        '}'
+      ),
+      ['raw']
+    ]
+  ])('follows a directory %s', (_how, source, removedBy) => {
+    // One directory, seen, and removed by what the case says: no faults alone
+    // would also be the answer for a directory the walk never found.
+    expect(readHygiene(source).made.map((dir) => dir.removedBy)).toEqual([removedBy])
+    expect(faultsIn(source)).toEqual([])
+  })
+
+  it.each([
+    [
+      'drops the path',
+      "it('x', () => { fs.mkdtempSync('x') })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it drops the path, so nothing can remove it'
+    ],
+    [
+      'hands it to a function this does not follow',
+      "it('x', () => { track(fs.mkdtempSync('x')) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it passes it to track(), where this guard cannot follow it'
+    ],
+    [
+      'keeps it in an object',
+      "it('x', () => { const rig = { home: fs.mkdtempSync('x') }; use(rig) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it keeps it where this guard cannot follow it'
+    ],
+    [
+      'lists it where nothing empties the list',
+      lines('const kept: string[] = []', "it('x', () => { kept.push(fs.mkdtempSync('x')) })"),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync'
+    ],
+    [
+      'lists it in a list it cannot name',
+      "it('x', () => { this.temps.push(fs.mkdtempSync('x')) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it puts it in a list this guard cannot name'
+    ],
+    [
+      'leaves its removal to a function nothing runs',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'function cleanup(): void { for (const dir of temps.splice(0)) removeTempDir(dir) }'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'leaves its removal to a function only other files can run',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'export function cleanup(): void { for (const dir of temps.splice(0)) removeTempDir(dir) }'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'leaves its removal to a function it exports by default',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'function cleanup(): void { for (const dir of temps.splice(0)) removeTempDir(dir) }',
+        'export default cleanup'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'leaves its removal to a function it exports under another name',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'function cleanup(): void { for (const dir of temps.splice(0)) removeTempDir(dir) }',
+        'export { cleanup as tidy }'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'hands a directory back from a function it exports by name',
+      lines('function fresh(): string {', "  return fs.mkdtempSync('x')", '}', 'export { fresh }'),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: fresh hands it to callers in other files, where this guard does not follow it: remove it here, from a module-level hook'
+    ],
+    [
+      'hands a directory back from a function it exports and also calls here',
+      lines(
+        'export function makeTempDir(): string {',
+        "  return fs.mkdtempSync('x')",
+        '}',
+        "it('x', () => { const dir = makeTempDir(); removeTempDir(dir) })"
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: makeTempDir hands it to callers in other files, where this guard does not follow it: remove it here, from a module-level hook'
+    ],
+    [
+      'lists it where only a stranded function empties the list, and hands it back',
+      lines(
+        'const homes: string[] = []',
+        'export function cleanup(): void { for (const h of homes.splice(0)) removeTempDir(h) }',
+        "function startRig(): string { const home = fs.mkdtempSync('x'); homes.push(home); return home }",
+        "it('x', () => { use(startRig()) })"
+      ),
+      'makes a temp directory at line 3 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'leaves its removal to a function only a same-named local is called by',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'function cleanup(): void { for (const dir of temps.splice(0)) removeTempDir(dir) }',
+        'afterEach(() => { const cleanup = (): void => {}; cleanup() })'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: only cleanup would remove it, and nothing in this file runs cleanup: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'takes one directory out of the list in a hook registered inside a loop',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('a')) })",
+        'for (const hook of [afterEach]) hook(() => { const d = temps.pop(); if (d) removeTempDir(d) })'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it takes one directory at a time out of temps outside a loop, so the rest are never removed'
+    ],
+    [
+      'removes what one call of a helper hands back and not another',
+      lines(
+        'function fresh(): string {',
+        "  return fs.mkdtempSync('x')",
+        '}',
+        "it('a', () => { const home = fresh(); removeTempDir(home) })",
+        "it('b', () => { const leak = fresh(); use(leak) })"
+      ),
+      'makes a temp directory at line 5 (through fresh()) and never removes it with removeTempDir or rmSync'
+    ],
+    [
+      'calls rmSync on it without recursive, which cannot remove a directory',
+      "it('x', () => { const home = fs.mkdtempSync('x'); fs.rmSync(home) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmSync on it without recursive, which cannot remove a directory'
+    ],
+    [
+      'calls rmdirSync on it without recursive, which removes it only while it is empty',
+      "it('x', () => { const home = fs.mkdtempSync('x'); fs.rmdirSync(home) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmdirSync on it without recursive, which removes a directory only while it is empty'
+    ],
+    [
+      'calls rmdir imported under another name without recursive',
+      lines(
+        "import { rmdir as drop } from 'node:fs/promises'",
+        "it('x', async () => { const home = fs.mkdtempSync('x'); await drop(home) })"
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it calls drop on it without recursive, which removes a directory only while it is empty'
+    ],
+    [
+      'removes it with options this guard cannot read',
+      "it('x', () => { const home = fs.mkdtempSync('x'); fs.rmSync(home, OPTIONS) })",
+      'makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: it calls rmSync on it with options this guard cannot read as recursive: write recursive: true in the call'
+    ],
+    [
+      'keeps it in an object and removes it through a property',
+      lines(
+        'const rigs: { home: string }[] = []',
+        "it('x', () => { const home = fs.mkdtempSync('x'); rigs.push({ home }) })",
+        'afterEach(() => { for (const rig of rigs.splice(0)) removeTempDir(rig.home) })'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it keeps it in an object or an array, and this guard does not follow it out of one: put it in a list a hook empties'
+    ],
+    [
+      'makes it with mkdtempSync imported under another name',
+      lines("import { mkdtempSync as makeDir } from 'node:fs'", "const home = makeDir('x')"),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync'
+    ]
+  ])('fails a file that %s', (_how, source, fault) => {
+    expect(faultsIn(source)).toEqual([fault])
+  })
+
+  it('holds a file that runs git to removeTempDir for every directory, one removed in a test body included', () => {
+    // A raw removal inside a test body is the test, and stays allowed — but
+    // when the directory it removes is a temp ROOT, nothing else removes it,
+    // and git's detached housekeeping can still be writing into it.
+    const repoInTest = lines(
+      "import { Agora } from '../../src/main/agora'",
+      "it('x', () => {",
+      "  const repo = fs.mkdtempSync('r')",
+      '  work(repo)',
+      '  fs.rmSync(repo, { recursive: true, force: true })',
+      '})'
+    )
+    expect(readHygiene(repoInTest).rawTeardowns).toEqual([])
+    expect(faultsIn(repoInTest)).toEqual([
+      'runs real git (imports src/main/agora.ts at line 1) and never removes the temp directory it makes at line 3 with removeTempDir'
+    ])
+  })
+})
+
+/**
+ * `test/scenarios/company.ts` as it was until 2026-10-02, cut to the lines the
+ * rule reads and otherwise verbatim. It made each company's home and left the
+ * removal to `cleanupHomes()`, which every one of the twenty scenario files had
+ * to remember to call: deleting the call from any of them leaked every home
+ * that file made, and the guard, which saw a `removeTempDir(` in the helper,
+ * stayed green.
+ */
+const OLD_COMPANY = lines(
+  "import { Agora } from '../../src/main/agora'",
+  "import { removeTempDir } from '../tmpdir'",
+  'const openHomes: string[] = []',
+  '',
+  '/** Removes every temp home created this run. Call after closing the companies. */',
+  'export function cleanupHomes(): void {',
+  '  for (const home of openHomes.splice(0)) removeTempDir(home)',
+  '}',
+  '',
+  'export async function startCompany(options: CompanyOptions = {}): Promise<Company> {',
+  "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-scenario-'))",
+  '  openHomes.push(home)',
+  '}'
+)
+
+describe('a helper removes the directories it makes, rather than trusting its callers to', () => {
+  it('fails the company helper as it was, with its removal left to every scenario', () => {
+    expect(faultsAt('test/scenarios/company.ts', OLD_COMPANY)).toEqual([
+      'runs real git (imports src/main/agora.ts at line 1) and never removes the temp directory it makes at line 11 with removeTempDir: only cleanupHomes would remove it, and nothing in this file runs cleanupHomes: remove it from a hook, or put it in a list a hook empties'
+    ])
+  })
+
+  it('accepts it once a module-level hook runs the removal, by name or in a callback', () => {
+    for (const hook of ['afterAll(cleanupHomes)', 'afterAll(() => { cleanupHomes() })']) {
+      expect(faultsAt('test/scenarios/company.ts', lines(OLD_COMPANY, hook)), hook).toEqual([])
+    }
+  })
+
+  it('then needs nothing from a scenario that forgets cleanupHomes()', () => {
+    // The point of moving the removal: the leak is no longer something a
+    // scenario can cause, so there is nothing left in one for the guard to find.
+    const forgetful = lines(
+      "import { startCompany } from './company'",
+      'afterAll(async () => { await company.close() })',
+      "it('x', async () => { company = await startCompany() })"
+    )
+    const tree = (helper: string): ReadonlyMap<string, readonly string[]> =>
+      treeFaults(
+        new Map([
+          ['test/scenarios/company.ts', helper],
+          ['test/scenarios/s-forgetful.test.ts', forgetful]
+        ])
+      )
+    expect([...tree(OLD_COMPANY).keys()]).toEqual(['test/scenarios/company.ts'])
+    expect(tree(lines(OLD_COMPANY, 'afterAll(cleanupHomes)')).size).toBe(0)
+  })
+
+  it('fails a makeTempDir that hands its directory back for callers to remove', () => {
+    // The shape a `makeTempDir()` beside `removeTempDir` in test/tmpdir.ts
+    // would have: every directory it made would leave the file, and no
+    // caller's file is judged for it.
+    const handsBack = lines(
+      "import fs from 'node:fs'",
+      "import os from 'node:os'",
+      "import path from 'node:path'",
+      'export function makeTempDir(prefix: string): string {',
+      '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+      '}'
+    )
+    expect(faultsAt('test/tmpdir.ts', handsBack)).toEqual([
+      'makes a temp directory at line 5 and never removes it with removeTempDir or rmSync: makeTempDir hands it to callers in other files, where this guard does not follow it: remove it here, from a module-level hook'
+    ])
+  })
+
+  it('accepts a makeTempDir that removes what it made itself', () => {
+    const selfCleaning = lines(
+      "import { afterEach } from 'vitest'",
+      'const made: string[] = []',
+      'afterEach(() => { for (const dir of made.splice(0)) removeTempDir(dir) })',
+      'export function makeTempDir(prefix: string): string {',
+      '  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+      '  made.push(dir)',
+      '  return dir',
+      '}'
+    )
+    expect(faultsAt('test/tmpdir.ts', selfCleaning)).toEqual([])
+  })
+
+  it('reads the real helpers as removing their own directories', () => {
+    // The two that make directories for other files, as they stand: each
+    // removes them from a hook of its own, with the helper.
+    for (const file of ['test/scenarios/company.ts', 'test/conformance/adapter-conformance.ts']) {
+      const made = readHygiene(fs.readFileSync(file, 'utf8'), file).made
+      expect(made.length, file).toBeGreaterThan(0)
+      expect(
+        made.map((dir) => dir.removedBy),
+        file
+      ).toEqual(made.map(() => ['removeTempDir']))
+    }
+  })
+})
+
+describe("vitest runs a file's after-hooks last-registered first, which company.ts relies on", () => {
+  // `test/scenarios/company.ts` registers `afterAll(cleanupHomes)` when a
+  // scenario imports it: before the scenario registers the teardown that
+  // closes its companies. Removing a home first would race a commit still in
+  // flight, and nothing but this order prevents it. It is vitest's default
+  // (`sequence.hooks: 'stack'`), and the one setting orders `afterAll` and
+  // `afterEach` alike, so this watches the one a test can observe.
+  const ran: string[] = []
+  afterEach(() => {
+    ran.push('registered first')
+  })
+  afterEach(() => {
+    ran.push('registered second')
+  })
+
+  it('registers two hooks', () => {
+    expect(ran).toEqual([])
+  })
+
+  it('and they ran in the reverse of that order', () => {
+    // Run alone (`-t`), or before the case above, this case finds nothing
+    // recorded, which says nothing about the order: it says so first.
+    expect(
+      ran.length,
+      'the case above has not run, so no order is recorded: run the describe whole'
+    ).toBe(2)
+    expect(ran).toEqual(['registered second', 'registered first'])
+  })
+})
+
+/**
+ * The `PromptStore` home `test/main/gates.test.ts` built until 2026-10-02, cut
+ * to the lines the rule reads and otherwise verbatim. `read()` creates the home
+ * and seeds it, and nothing removed it: nine `eph-prompts-<pid>` directories
+ * were in %TEMP% that day, one per vitest worker that had run the file.
+ */
+const OLD_GATES_PROMPTS = lines(
+  "import os from 'node:os'",
+  "describe('the choke-point wiring (SDD §9), shared with production', () => {",
+  '  const prompts = new PromptStore(',
+  '    path.join(os.tmpdir(), `eph-prompts-${String(process.pid)}`),',
+  "    path.join(process.cwd(), 'prompts')",
+  '  )',
+  '})'
+)
+
+describe('a path built on the temp root without mkdtemp is a directory nothing removes', () => {
+  it('fails the prompt home gates.test.ts shipped with', () => {
+    expect(faultsIn(OLD_GATES_PROMPTS)).toEqual([
+      "names 'eph-prompts-*' on the temp root at line 4 outside an mkdtemp call: make the directory with mkdtemp, the root inside its prefix argument, or, if nothing is ever left there, list it in UNMADE_TEMP_PATHS with the reason"
+    ])
+  })
+
+  it('accepts the same home once mkdtemp makes it and the describe removes it', () => {
+    const fixed = lines(
+      "import os from 'node:os'",
+      "describe('the choke-point wiring (SDD §9), shared with production', () => {",
+      "  let home = ''",
+      '  let prompts: PromptStore',
+      '  beforeAll(() => {',
+      "    home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-prompts-'))",
+      "    prompts = new PromptStore(home, path.join(process.cwd(), 'prompts'))",
+      '  })',
+      '  afterAll(() => {',
+      '    removeTempDir(home)',
+      '  })',
+      '})'
+    )
+    expect(faultsIn(fixed)).toEqual([])
+    expect(readHygiene(fixed).made).toEqual([
+      { line: 6, through: null, removedBy: ['removeTempDir'], why: null }
+    ])
+  })
+
+  it.each([
+    ["os's default export", "import os from 'node:os'\nconst p = path.join(os.tmpdir(), 'x')"],
+    ["os's namespace", "import * as os from 'os'\nconst p = path.join(os.tmpdir(), 'x')"],
+    [
+      'tmpdir imported by name',
+      "import { tmpdir } from 'node:os'\nconst p = path.join(tmpdir(), 'x')"
+    ],
+    [
+      'tmpdir imported under another name',
+      "import { tmpdir as scratchRoot } from 'node:os'\nconst p = path.join(scratchRoot(), 'x')"
+    ],
+    ['a required os', "const p = path.join(require('node:os').tmpdir(), 'x')"],
+    [
+      'tmpdir required under another name',
+      "const { tmpdir: scratchRoot } = require('os')\nconst p = path.join(scratchRoot(), 'x')"
+    ],
+    ['TMPDIR from the environment', "const p = path.join(process.env.TMPDIR ?? '/tmp', 'x')"],
+    ['TEMP read by key', "const p = path.join(process.env['TEMP'] ?? 'C:/Temp', 'x')"],
+    ['TMP from the environment', "const p = path.join(process.env.TMP ?? '/tmp', 'x')"],
+    ['the root itself as a working directory', "spawnSync('npm', ['init'], { cwd: os.tmpdir() })"],
+    ['a template on the root', 'const p = `${os.tmpdir()}/eph-x`']
+  ])('sees a path built on the temp root through %s', (_how, source) => {
+    expect(readHygiene(source).tempPaths).toHaveLength(1)
+    expect(faultsIn(source)).toHaveLength(1)
+  })
+
+  it.each([
+    [
+      'the prefix mkdtempSync is handed',
+      "const d = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-x-'))"
+    ],
+    ['a template prefix', 'const d = fs.mkdtempSync(`${os.tmpdir()}/eph-x-`)'],
+    [
+      "an awaited mkdtemp's prefix",
+      "const d = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'eph-x-'))"
+    ],
+    [
+      "a renamed mkdtempSync's prefix",
+      "import { mkdtempSync as makeDir } from 'node:fs'\nconst d = makeDir(path.join(os.tmpdir(), 'eph-x-'))"
+    ],
+    [
+      'a prefix read from the environment',
+      "const d = fs.mkdtempSync(path.join(process.env['TMPDIR'] ?? '/tmp', 'eph-x-'))"
+    ],
+    ['another environment variable', "const p = path.join(process.env.HOME ?? '', 'x')"],
+    ['the home directory', "const p = path.join(os.homedir(), 'x')"],
+    ['tmpdir named but never called', 'const root = os.tmpdir'],
+    ["an env that is not process's", 'const p = config.env.TMPDIR'],
+    ['a comment', "// path.join(os.tmpdir(), 'x')"],
+    ['a string', 'const source = "path.join(os.tmpdir(), \'x\')"']
+  ])('sees no path built on the temp root in %s', (_what, source) => {
+    expect(readHygiene(source).tempPaths).toEqual([])
+  })
+
+  it.each([
+    ["path.join(os.tmpdir(), 'a', 'b')", 'a/b'],
+    ['path.join(os.tmpdir(), `x-${id}.sock`)', 'x-*.sock'],
+    ['path.join(os.tmpdir(), label)', '*'],
+    ["path.resolve(os.tmpdir(), 'r')", 'r'],
+    ['check(temps[0] ?? os.tmpdir())', ''],
+    ["path.join(base ?? os.tmpdir(), 'q')", 'q'],
+    ["path.join(process.env.TMPDIR ?? '/tmp', 'eph-x')", 'eph-x'],
+    ['path.join(prefix, os.tmpdir())', '']
+  ])('names %s as %j, the key UNMADE_TEMP_PATHS lists it by', (source, name) => {
+    expect(readHygiene(source).tempPaths.map((built) => built.name)).toEqual([name])
+  })
+
+  it('allows a listed name in its own file, as often as listed, and nowhere else', () => {
+    const nope = "const p = path.join(os.tmpdir(), 'eph-nope')"
+    const fault = (name: string, line: number): string =>
+      `names '${name}' on the temp root at line ${String(line)} outside an mkdtemp call: make the directory with mkdtemp, the root inside its prefix argument, or, if nothing is ever left there, list it in UNMADE_TEMP_PATHS with the reason`
+    const judged = judgeTree(
+      new Map([
+        ['test/main/a.test.ts', nope],
+        ['test/main/b.test.ts', nope],
+        ['test/main/c.test.ts', "const p = path.join(os.tmpdir(), 'eph-other')"],
+        ['test/main/d.test.ts', lines(nope, nope)]
+      ]),
+      {
+        'test/main/a.test.ts': { 'eph-nope': { sites: 1, why: 'never made' } },
+        'test/main/c.test.ts': { 'eph-nope': { sites: 1, why: 'never made' } },
+        'test/main/d.test.ts': { 'eph-nope': { sites: 1, why: 'never made' } }
+      }
+    )
+    expect(Object.fromEntries([...judged].map(([file, { faults }]) => [file, faults]))).toEqual({
+      'test/main/a.test.ts': [],
+      'test/main/b.test.ts': [fault('eph-nope', 1)],
+      'test/main/c.test.ts': [fault('eph-other', 1)],
+      // A second use of an allowed name is a second path nobody has vouched for.
+      'test/main/d.test.ts': [fault('eph-nope', 2)]
+    })
+  })
+
+  it('lists exactly the paths its files name, each with its reason', () => {
+    // An entry that outlived its path would allow the next one of that name
+    // without anybody having asked whether it is ever made, and one that
+    // allowed more than its file names would allow the next one silently.
+    for (const [file, names] of Object.entries(UNMADE_TEMP_PATHS)) {
+      const built = readHygiene(fs.readFileSync(file, 'utf8'), file).tempPaths
+      for (const [name, { sites, why }] of Object.entries(names)) {
+        expect(
+          built.filter((each) => each.name === name).length,
+          `${file} names '${name}' on the temp root a different number of times than its entry says`
+        ).toBe(sites)
+        expect(why.length, `${file}: '${name}' needs a reason`).toBeGreaterThan(20)
+      }
+    }
+  })
+})
+
+/**
+ * A rig as `test/main/control-server.test.ts` and three other files built one
+ * until 2026-10-02, cut to the lines the rule reads: the home was removed only
+ * by the rig's `close()`, which ran only if `rigs.push(rig)` had registered
+ * it. Deleting either that push or the hook's drain leaked every home with
+ * the guard green; an adversarial pass did both, in all four files.
+ */
+const OLD_RIG = lines(
+  'const rigs: Rig[] = []',
+  'afterEach(async () => {',
+  '  for (const rig of rigs.splice(0)) await rig.close()',
+  '})',
+  'async function startRig(): Promise<Rig> {',
+  "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))",
+  '  const server = new ControlServer({ deps })',
+  '  const rig: Rig = {',
+  '    home,',
+  '    async close() {',
+  '      await server.stop()',
+  '      removeTempDir(home)',
+  '    }',
+  '  }',
+  '  rigs.push(rig)',
+  '  return rig',
+  '}',
+  "it('x', async () => { await startRig() })"
+)
+
+describe('shapes an adversarial pass found the rule accepting (2026-10-02)', () => {
+  const keptOnly = (owner: string): string =>
+    `only a function ${owner} keeps — an object's method, or one stored or returned — would remove it, and nothing in this file is seen to run that: remove it from a hook, or put it in a list a hook empties`
+  const uncalled = (name: string): string =>
+    `${name} hands it back, and nothing in this file calls that: remove it where it is made, or from a module-level hook`
+
+  it.each([
+    [
+      "a rig whose close() alone removed its home, the four files' shape",
+      'test/main/control-server.test.ts',
+      OLD_RIG,
+      `makes a temp directory at line 6 and never removes it with removeTempDir or rmSync: ${keptOnly('startRig')}`
+    ],
+    [
+      'a helper that hands back a cleanup closure, the tmp-promise shape',
+      'test/fakes/temp-home.ts',
+      lines(
+        'export function tempHome(prefix: string) {',
+        '  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '  return { home, cleanup: () => removeTempDir(home) }',
+        '}'
+      ),
+      `makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: ${keptOnly('tempHome')}`
+    ],
+    [
+      'a removal closure pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const disposers: (() => void)[] = []',
+        "it('x', () => { const home = fs.mkdtempSync('x'); disposers.push(() => removeTempDir(home)) })"
+      ),
+      `makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: ${keptOnly('the file')}`
+    ],
+    [
+      'a stranded remover exported inside an object',
+      'test/scenarios/company.ts',
+      lines(OLD_COMPANY, 'export const company = { startCompany, cleanupHomes }'),
+      'runs real git (imports src/main/agora.ts at line 1) and never removes the temp directory it makes at line 11 with removeTempDir: only cleanupHomes would remove it, and nothing in this file runs cleanupHomes: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'a stranded remover named in a type',
+      'test/scenarios/company.ts',
+      lines(OLD_COMPANY, 'export type Cleanup = typeof cleanupHomes'),
+      'runs real git (imports src/main/agora.ts at line 1) and never removes the temp directory it makes at line 11 with removeTempDir: only cleanupHomes would remove it, and nothing in this file runs cleanupHomes: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'a stranded close() beside an unrelated server.close() in a hook',
+      'test/fakes/rig.ts',
+      lines(
+        'const homes: string[] = []',
+        'export function close(): void { for (const h of homes.splice(0)) removeTempDir(h) }',
+        "export function startRig() { const home = fs.mkdtempSync('x'); homes.push(home) }",
+        'afterAll(() => { server.close() })'
+      ),
+      'makes a temp directory at line 3 and never removes it with removeTempDir or rmSync: only close would remove it, and nothing in this file runs close: remove it from a hook, or put it in a list a hook empties'
+    ],
+    [
+      'a hand-back exported inside an object',
+      'test/tmpdir.ts',
+      lines(
+        'function makeTempDir(prefix: string): string {',
+        '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '}',
+        'export const tmp = { makeTempDir }'
+      ),
+      `makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: ${uncalled('makeTempDir')}`
+    ],
+    [
+      'a hand-back exported under another name',
+      'test/tmpdir.ts',
+      lines(
+        'function makeTempDir(prefix: string): string {',
+        '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '}',
+        'export const mkTemp = makeTempDir'
+      ),
+      `makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: ${uncalled('makeTempDir')}`
+    ],
+    [
+      'a hand-back through module.exports',
+      'test/fakes/temp.cjs',
+      lines(
+        'function makeTempDir(prefix) {',
+        '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '}',
+        'module.exports = { makeTempDir }'
+      ),
+      `makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: ${uncalled('makeTempDir')}`
+    ],
+    [
+      'a hand-back from a method of a class a factory hands out',
+      'test/fakes/homes.ts',
+      lines(
+        "class TempHomes { make(): string { return fs.mkdtempSync('x') } }",
+        'export function tempHomes(): TempHomes { return new TempHomes() }'
+      ),
+      `makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: ${uncalled('make')}`
+    ],
+    [
+      'a hand-back handed by reference to Array.from',
+      'test/main/fixture.test.ts',
+      lines(
+        "function freshHome(): string { return fs.mkdtempSync('x') }",
+        "it('x', () => { const homes = Array.from({ length: 3 }, freshHome); use(homes) })"
+      ),
+      `makes a temp directory at line 1 and never removes it with removeTempDir or rmSync: ${uncalled('freshHome')}`
+    ],
+    [
+      'a list a hook takes one directory out of, while a test makes two',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        "function tempDir(): string { const d = fs.mkdtempSync('x'); temps.push(d); return d }",
+        'afterEach(() => { const d = temps.pop(); if (d) removeTempDir(d) })',
+        "it('x', () => { use(tempDir(), tempDir()) })"
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it takes one directory at a time out of temps outside a loop, so the rest are never removed'
+    ],
+    [
+      'a list an afterAll removes only the first of',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })",
+        'afterAll(() => removeTempDir(temps[0]!))'
+      ),
+      'makes a temp directory at line 2 and never removes it with removeTempDir or rmSync: it takes one directory at a time out of temps outside a loop, so the rest are never removed'
+    ]
+  ])('fails %s', (_shape, file, source, fault) => {
+    expect(faultsAt(file, source)).toEqual([fault])
+  })
+
+  it('fails a second bare temp root in a file whose one bare use is listed', () => {
+    // The empty name covers the root itself, so one listed bare use must not
+    // let a second through: the entry says how many there are.
+    const setup = lines(
+      'export function sweep(now: number, root: string = os.tmpdir()): number { return 0 }',
+      'const scratchRoot = os.tmpdir()'
+    )
+    expect(
+      Object.fromEntries(
+        [...judgeTree(new Map([['test/global-setup.ts', setup]]))].map(([file, j]) => [
+          file,
+          j.faults
+        ])
+      )
+    ).toEqual({
+      'test/global-setup.ts': [
+        'names the temp root itself at line 2 outside an mkdtemp call: make the directory with mkdtemp, the root inside its prefix argument, or, if nothing is ever left there, list it in UNMADE_TEMP_PATHS with the reason'
+      ]
+    })
+  })
+
+  it.each([
+    ['a template', 'fs.mkdirSync(`${os.tmpdir()}/eph-leak-${id}`)', 'eph-leak-*'],
+    ['a + chain', "fs.mkdirSync(os.tmpdir() + '/eph-leak-' + pid)", 'eph-leak-*'],
+    ['a realpath of the root', "path.join(fs.realpathSync(os.tmpdir()), 'eph-x')", 'eph-x']
+  ])('names a path built from the root by %s', (_how, source, name) => {
+    expect(readHygiene(source).tempPaths.map((built) => built.name)).toEqual([name])
+  })
+
+  it('accepts the rig once its homes go into a list its hook empties after closing the rigs', () => {
+    const fixedRig = OLD_RIG.replace(
+      "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))",
+      "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))\n  homes.push(home)"
+    )
+      .replace('const rigs: Rig[] = []', 'const rigs: Rig[] = []\nconst homes: string[] = []')
+      .replace(
+        '  for (const rig of rigs.splice(0)) await rig.close()',
+        '  for (const rig of rigs.splice(0)) await rig.close()\n  for (const home of homes.splice(0)) removeTempDir(home)'
+      )
+    expect(fixedRig).toContain('homes.push(home)')
+    expect(faultsAt('test/main/control-server.test.ts', fixedRig)).toEqual([])
+  })
+
+  it('refuses a cleanup closure even where the test runs it, and says why', () => {
+    // The price of not following objects: this test does call `r.cleanup()`,
+    // and the rule cannot see that it is the closure the rig returned.
+    // Recorded as a known false positive; the message names the shape that
+    // passes.
+    const runsItsCleanup = lines(
+      'function rig() {',
+      "  const home = fs.mkdtempSync('x')",
+      '  return { home, cleanup: () => removeTempDir(home) }',
+      '}',
+      "it('x', () => { const r = rig(); try { work(r.home) } finally { r.cleanup() } })"
+    )
+    expect(readHygiene(runsItsCleanup).made.map((dir) => dir.why)).toEqual([keptOnly('rig')])
+  })
+})
+
+describe('shapes review of #68 found the rule still accepting', () => {
+  // The rule above refused a removal inside a kept function, but asked of a
+  // NAMED function only whether some call of it sat in code that runs, and
+  // took a function handed to `push` as run: so the same removal, moved into
+  // a named function, passed. Each of these left every directory behind with
+  // the guard green.
+  const onlyRuns = (name: string): string =>
+    `only ${name} would remove it, and nothing in this file runs ${name}: remove it from a hook, or put it in a list a hook empties`
+  const never = (line: number, why: string): string =>
+    `makes a temp directory at line ${String(line)} and never removes it with removeTempDir or rmSync: ${why}`
+
+  it.each([
+    [
+      'a named cleanup pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        'const disposers: (() => void)[] = []',
+        'function cleanup(): void {',
+        '  for (const d of temps.splice(0)) removeTempDir(d)',
+        '}',
+        'disposers.push(cleanup)',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      ),
+      never(7, onlyRuns('cleanup'))
+    ],
+    [
+      'a closure calling a named cleanup, pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const temps: string[] = []',
+        'const disposers: (() => void)[] = []',
+        'function cleanup(): void {',
+        '  for (const d of temps.splice(0)) removeTempDir(d)',
+        '}',
+        'disposers.push(() => cleanup())',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      ),
+      never(7, onlyRuns('cleanup'))
+    ],
+    [
+      'a named closure over the directory, pushed onto a list nothing runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'const disposers: (() => void)[] = []',
+        "it('x', () => { const home = fs.mkdtempSync('x'); const drop = () => removeTempDir(home); disposers.push(drop) })"
+      ),
+      never(2, onlyRuns('drop'))
+    ],
+    [
+      'the rig with its push deleted, its close() calling a named drain',
+      'test/main/control-server.test.ts',
+      lines(
+        'const rigs: Rig[] = []',
+        'const homes: string[] = []',
+        'afterEach(async () => {',
+        '  for (const rig of rigs.splice(0)) await rig.close()',
+        '})',
+        'function dropHomes(): void {',
+        '  for (const home of homes.splice(0)) removeTempDir(home)',
+        '}',
+        'async function startRig(): Promise<Rig> {',
+        "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))",
+        '  homes.push(home)',
+        '  const server = new ControlServer({ deps })',
+        '  return {',
+        '    home,',
+        '    async close() {',
+        '      await server.stop()',
+        '      dropHomes()',
+        '    }',
+        '  }',
+        '}',
+        "it('x', async () => { await startRig() })"
+      ),
+      never(10, onlyRuns('dropHomes'))
+    ],
+    [
+      'the rig with its push deleted, its close() calling a named closure over the home',
+      'test/main/control-server.test.ts',
+      lines(
+        'const rigs: { close(): Promise<void> }[] = []',
+        'afterEach(async () => { for (const rig of rigs.splice(0)) await rig.close() })',
+        'async function startRig() {',
+        "  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-x-'))",
+        '  const dropHome = () => removeTempDir(home)',
+        '  const rig = { home, async close() { await stop(); dropHome() } }',
+        '  return rig',
+        '}',
+        "it('x', async () => { await startRig() })"
+      ),
+      never(4, onlyRuns('dropHome'))
+    ],
+    [
+      'a returned dispose closure calling a named cleanup the test never runs',
+      'test/main/fixture.test.ts',
+      lines(
+        'function rig() {',
+        "  const home = fs.mkdtempSync('x')",
+        '  const cleanup = () => removeTempDir(home)',
+        '  return { home, dispose: () => cleanup() }',
+        '}',
+        "it('x', () => { const r = rig(); work(r.home) })"
+      ),
+      never(2, onlyRuns('cleanup'))
+    ],
+    [
+      'a module-level object whose method calls the named cleanup',
+      'test/fakes/rig.ts',
+      lines(
+        'const homes: string[] = []',
+        'function cleanup(): void { for (const h of homes.splice(0)) removeTempDir(h) }',
+        'export const rigKit = { close() { cleanup() } }',
+        "export function startRig(): void { const home = fs.mkdtempSync('x'); homes.push(home) }"
+      ),
+      never(4, onlyRuns('cleanup'))
+    ],
+    [
+      'a hand-back called here and exported inside an object',
+      'test/main/fixture.test.ts',
+      lines(
+        'function makeTempDir(prefix: string): string {',
+        '  return fs.mkdtempSync(path.join(os.tmpdir(), prefix))',
+        '}',
+        'export const tmp = { makeTempDir }',
+        "it('x', () => { const d = makeTempDir('p'); removeTempDir(d) })"
+      ),
+      never(
+        2,
+        'makeTempDir hands it back, and line 4 passes makeTempDir itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook'
+      )
+    ],
+    [
+      'a hand-back called here and handed by reference to Array.from',
+      'test/main/fixture.test.ts',
+      lines(
+        "function freshHome(): string { return fs.mkdtempSync('x') }",
+        "it('x', () => { const one = freshHome(); removeTempDir(one); use(Array.from({ length: 3 }, freshHome)) })"
+      ),
+      never(
+        1,
+        'freshHome hands it back, and line 2 passes freshHome itself on, where this guard does not follow what it returns: remove it where it is made, or from a module-level hook'
+      )
+    ]
+  ])('fails %s', (_shape, file, source, fault) => {
+    expect(faultsAt(file, source)).toEqual([fault])
+  })
+
+  it.each([
+    [
+      'a named cleanup a hook calls from a closure',
+      lines(
+        'const temps: string[] = []',
+        'function cleanup(): void { for (const d of temps.splice(0)) removeTempDir(d) }',
+        'afterEach(() => { cleanup() })',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      )
+    ],
+    [
+      'a named cleanup a named function handed to the hook calls',
+      lines(
+        'const temps: string[] = []',
+        'function cleanup(): void { for (const d of temps.splice(0)) removeTempDir(d) }',
+        'function teardown(): void { cleanup() }',
+        'afterEach(teardown)',
+        "it('x', () => { temps.push(fs.mkdtempSync('x')) })"
+      )
+    ],
+    [
+      'a hand-back named in a type beside its calls',
+      lines(
+        "function fresh(): string { return fs.mkdtempSync('x') }",
+        'export type Fresh = typeof fresh',
+        "it('x', () => { const home = fresh(); removeTempDir(home) })"
+      )
+    ]
+  ])('still accepts %s', (_shape, source) => {
+    expect(faultsAt('test/main/fixture.test.ts', source)).toEqual([])
   })
 })
 

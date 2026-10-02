@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { afterAll } from 'vitest'
 import {
   composeMessage,
   makeMessageId,
@@ -211,6 +212,28 @@ const openHomes: string[] = []
 export function cleanupHomes(): void {
   for (const home of openHomes.splice(0)) removeTempDir(home)
 }
+
+/**
+ * And removes whatever a scenario's own teardown left, once its file is done,
+ * so a scenario that forgets `cleanupHomes()` leaks nothing. Until 2026-10-02
+ * every one of the twenty scenario files had to remember the call, and
+ * deleting it from any of them leaked every company home that file made with
+ * the suite still green.
+ *
+ * It cannot race a company still closing. This registers when the scenario
+ * imports the module, before the scenario registers a hook of its own;
+ * vitest runs a file's after-hooks last-registered first (its default
+ * `sequence.hooks: 'stack'`, which `vitest.config.mts` leaves alone, and
+ * `test/temp-hygiene.test.ts` fails if that changes), and a file's own
+ * `afterAll` after every `describe`'s and every `afterEach`. So this runs
+ * after every `afterEach` and `afterAll` in the file, the ones that close the
+ * companies included. Two kinds of teardown would run later still, and no
+ * scenario uses either: a cleanup a `beforeAll` returns, and a file-scoped
+ * fixture or `aroundAll`. It also relies on vitest isolating each file (its
+ * default), so that every scenario file evaluates this module, and registers
+ * the hook, afresh.
+ */
+afterAll(cleanupHomes)
 
 let seq = 0
 /** Distinguishes one company from the next; a restart is a new spawn. */

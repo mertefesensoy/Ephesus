@@ -47,9 +47,13 @@ interface Rig {
 }
 
 const rigs: Rig[] = []
+const homes: string[] = []
 
 afterEach(async () => {
   for (const rig of rigs.splice(0)) await rig.close()
+  // After every rig is closed, and whether or not a rig was ever registered:
+  // a home removed only by its rig's close() leaked if the rig was not pushed.
+  for (const home of homes.splice(0)) removeTempDir(home)
 })
 
 const SNAPSHOT: DiagnosisInput = {
@@ -167,6 +171,7 @@ function stubDeps(
 
 async function startRig(overrides: Partial<ControlDeps> = {}): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-ctl-'))
+  homes.push(home)
   const logged: Record<string, unknown>[] = []
   const degraded: string[] = []
   const calls: string[] = []
@@ -215,7 +220,6 @@ async function startRig(overrides: Partial<ControlDeps> = {}): Promise<Rig> {
     },
     async close() {
       await server.stop()
-      removeTempDir(home)
     }
   }
   rigs.push(rig)

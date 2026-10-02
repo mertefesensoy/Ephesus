@@ -76,6 +76,9 @@ const SNAPSHOT: DiagnosisInput = {
 
 async function startRig(): Promise<Rig> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-cli-'))
+  // Removed with the other temps, after every rig is closed, whether or not
+  // this rig is registered — not by its close(), which runs only if it is.
+  temps.push(home)
   const logged: Record<string, unknown>[] = []
   const deps = {
     consent: {
@@ -128,7 +131,6 @@ async function startRig(): Promise<Rig> {
     logged,
     async close() {
       await server.stop()
-      removeTempDir(home)
     }
   }
   rigs.push(rig)

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { GATE_SCHEMA_VERSION, type GatePolicy, type OpenGate } from '../../src/shared/gates'
 import {
   effectivePolicy,
@@ -389,10 +389,22 @@ describe('loadGatePolicy — a policy the harness cannot read never permits', ()
 })
 
 describe('the choke-point wiring (SDD §9), shared with production', () => {
-  const prompts = new PromptStore(
-    path.join(os.tmpdir(), `eph-prompts-${String(process.pid)}`),
-    path.join(process.cwd(), 'prompts')
-  )
+  // `read()` seeds an editable copy of every template it serves into this
+  // home (src/main/prompts.ts), so the home is a real directory and is made
+  // and removed like one. It was `eph-prompts-<pid>`, which nothing removed:
+  // every worker that ran this file left one behind (nine in %TEMP% on
+  // 2026-10-02), and a worker that drew a pid an earlier run had used would
+  // have read that run's copies instead of prompts/. Made in `beforeAll`, so a
+  // run that filters these tests out makes nothing.
+  let home = ''
+  let prompts: PromptStore
+  beforeAll(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-prompts-'))
+    prompts = new PromptStore(home, path.join(process.cwd(), 'prompts'))
+  })
+  afterAll(() => {
+    removeTempDir(home)
+  })
 
   function rig(): { gates: GateManager; wired: ReturnType<typeof wireGateChokePoints> } {
     const gates = manager(DENY_ALL)
