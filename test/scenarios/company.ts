@@ -664,7 +664,9 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       { name: 'budgets', run: () => budgets.stop() },
       { name: 'hermes', run: () => hermes.stop() },
       { name: 'hooks', run: () => hookServer.stop() },
-      { name: 'agora-drain', run: () => agora.drained().catch(() => undefined) }
+      // No catch, as in `index.ts`: the sequence itself reports a step that
+      // rejects, and S-CLOSING asserts that no stop failed.
+      { name: 'agora-drain', run: () => agora.drained() }
     ],
     onDegraded: (source, detail) => quitDegradations.push({ source, detail })
   })
@@ -823,9 +825,11 @@ export async function startCompany(options: CompanyOptions = {}): Promise<Compan
       // already running keeps going and calls `agora.commitSoon()`, so draining
       // first drains a queue that is about to be added to — and the git child
       // that commit starts is still alive when `cleanupHomes` deletes the
-      // directory it is running in.
+      // directory it is running in. The drain has no catch: a failed commit is
+      // reported to whoever queued it and `drained()` still resolves, so a
+      // rejection here is a failure of its own and must fail the teardown.
       await hermes.settled()
-      await agora.drained().catch(() => {})
+      await agora.drained()
     }
   }
 }

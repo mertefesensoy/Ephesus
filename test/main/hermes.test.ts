@@ -39,7 +39,7 @@ afterEach(async () => {
     hermes.stop()
     await hermes.settled()
   }
-  for (const agora of agoras.splice(0)) await agora.drained().catch(() => {})
+  for (const agora of agoras.splice(0)) await agora.drained()
   for (const dir of temps.splice(0)) removeTempDir(dir)
 })
 

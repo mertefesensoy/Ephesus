@@ -507,7 +507,16 @@ export class Agora {
     return this.failures
   }
 
-  /** Resolves when the queue is idle — for shutdown and for tests. */
+  /**
+   * Resolves when the queue is idle — for shutdown and for tests.
+   *
+   * Idle means no git process the committer started is still running, and
+   * with the default runner that includes the housekeeping `git commit` starts
+   * on its way out: `ExecGitRunner` keeps it in the foreground (`git.ts`). It
+   * did not until 2026-10-02, and this resolved with a detached `git repack`
+   * still writing the repository. The one exception is a commit the runner's
+   * timeout killed, whose housekeeping then finishes on its own.
+   */
   async drained(): Promise<void> {
     await this.chain
   }

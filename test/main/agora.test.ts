@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,6 +11,7 @@ import {
   type CommitFailure,
   type FaultPoint
 } from '../../src/main/agora'
+import { ROTATE_AT_BYTES } from '../../src/main/eventlog'
 import { ExecGitRunner, type GitResult, type GitRunner } from '../../src/main/git'
 import { PromptStore } from '../../src/main/prompts'
 import { removeTempDir } from '../tmpdir'
@@ -226,6 +228,76 @@ describe('Agora — the single committer queue', () => {
 
     breakIt = false
     await expect(agora.commit('succeeds')).resolves.toMatchObject({ attempts: 1 })
+  })
+})
+
+describe('Agora.drained() — the housekeeping a commit starts is part of the commit', () => {
+  /**
+   * The pacing-wakes ENOTEMPTY (CI run 36924116592, attempt 1, git 2.55.0): a
+   * teardown awaited `drained()`, deleted the directory, and lost to a
+   * `git repack` that was still writing `.git/objects/pack`.
+   *
+   * `git commit` ends by starting `git maintenance run --auto`, and on POSIX
+   * that daemonizes unless told not to: the commit exits, `drained()`
+   * resolves, and the housekeeping carries on with nothing left to await. git
+   * 2.55 repacks there when two loose objects share `objects/17`, which is
+   * chance, so the CI failure cannot be summoned on demand. This summons the
+   * same detached phase on purpose, on any git with the `loose-objects` task:
+   * the task is switched on with an always-true condition and handed one
+   * log-sized blob of incompressible bytes, which kept a detached repack busy
+   * for ~90 ms after a commit whose committer needed ~2 ms more to finish.
+   *
+   * The pack is the assertion, not `objects/maintenance.lock`: git 2.55 holds
+   * that lock through the detached phase and 2.53 does not, so its absence
+   * would pass on 2.53 with the defect in place. Measured on WSL with both:
+   * detached, the pack was missing at this point 10 times in 10; in the
+   * foreground, never.
+   *
+   * The blind spot, stated because a green run would otherwise hide it: Git
+   * for Windows cannot daemonize, so there the housekeeping always ran inside
+   * the commit and this passes with or without the fix. It has teeth where CI
+   * runs, which is where the failure happened.
+   */
+  it('does not resolve while git maintenance started by a commit is still writing', async () => {
+    const { agora, root } = rig()
+    await agora.ensureRepo()
+    // This repository's own config, so nothing outside the temp dir changes.
+    // `maintenance.auto` is pinned so a developer's global "off" cannot make
+    // this vacuous; `autoDetach=true` stands for a user who ASKED for detached
+    // housekeeping, so the runner's own flag has to win over it — which is
+    // also what lets this fail when that one flag goes missing.
+    const git = new ExecGitRunner()
+    for (const [key, value] of [
+      ['maintenance.auto', 'true'],
+      ['maintenance.autoDetach', 'true'],
+      ['maintenance.loose-objects.enabled', 'true'],
+      ['maintenance.loose-objects.auto', '-1']
+    ] as const) {
+      expect((await git.run(root, ['config', key, value])).ok).toBe(true)
+    }
+    fs.writeFileSync(path.join(root, 'segment.bin'), randomBytes(ROTATE_AT_BYTES))
+
+    agora.commitSoon('a log-sized blob for the housekeeping to pack')
+    await agora.drained()
+
+    expect(agora.commitFailures()).toEqual([])
+    // `.idx` is renamed into place last, so one existing means a pack is done.
+    const packDir = path.join(root, '.git', 'objects', 'pack')
+    const packed = (): boolean => fs.readdirSync(packDir).some((name) => name.endsWith('.idx'))
+    const packedAtDrained = packed()
+    // Only on the way to a red: wait, so the failure names WHICH red it is.
+    let packedEver = packedAtDrained
+    for (let i = 0; !packedEver && i < 100; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      packedEver = packed()
+    }
+    expect(packedEver, 'this git never ran the loose-objects task, so nothing was tested').toBe(
+      true
+    )
+    expect(
+      packedAtDrained,
+      'drained() resolved while the housekeeping the commit started was still packing'
+    ).toBe(true)
   })
 })
 
