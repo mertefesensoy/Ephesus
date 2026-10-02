@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   parseArgs,
@@ -16,8 +17,10 @@ import {
   writeAtomic
 } from '../../shims/eph-usage.mjs'
 import { removeTempDir } from '../tmpdir'
+import { importWithoutModulePath, importWithStdinOpen } from './importer'
 
 const SHIM_URL = new URL('../../shims/eph-usage.mjs', import.meta.url).href
+const SHIM = fileURLToPath(SHIM_URL)
 const temps: string[] = []
 
 afterEach(() => {
@@ -147,15 +150,16 @@ describe('eph-usage — atomic writes', () => {
 })
 
 describe('eph-usage — importing it', () => {
-  it('runs nothing: reads no stdin, prints nothing, writes no report', () => {
+  it.each(['importer.mjs', 'x-eph-usage.mjs'])('runs nothing when %s imports it', async (name) => {
     // The guard at the bottom of the shim is what lets this file import it at all.
     // A process imports it from a file that is not the shim, as this file does, and
     // is handed everything a run of `main()` would act on: a status document on
     // stdin, a `--dir` to write into and an agent to name the report after. Once
     // the import settles it records whether anything attached a reader to its
     // stdin, then reads stdin to the end itself, so nothing can have taken any.
+    // `x-eph-usage.mjs` merely ends in the shim's name.
     const dir = tempDir()
-    const importer = path.join(dir, 'importer.mjs')
+    const importer = path.join(dir, name)
     const flowing = path.join(dir, 'stdin-flowing.txt')
     const unread = path.join(dir, 'stdin-unread.txt')
     fs.writeFileSync(
@@ -186,6 +190,13 @@ describe('eph-usage — importing it', () => {
       env,
       timeout: 10_000
     })
+    const heldOpen = await importWithStdinOpen({
+      shim: new URL(SHIM_URL),
+      name,
+      args: ['--dir', reports],
+      env: { EPH_AGENT_ID: 'agent.importer' },
+      input: status
+    })
 
     expect(run.status).toBe(0)
     expect(run.stdout).toBe('')
@@ -194,6 +205,29 @@ describe('eph-usage — importing it', () => {
     expect(fs.readFileSync(flowing, 'utf8')).toBe('null')
     // And nothing took any of it: the importer still reads the whole document.
     expect(fs.readFileSync(unread, 'utf8')).toBe(status)
+    // Nor started a read that took nothing: with stdin never ended, a pending
+    // read would keep the importer alive, and it exits by itself instead.
+    expect(heldOpen).toBe(0)
     expect(fs.existsSync(reports)).toBe(false)
+
+    // The same inputs are live: run as the program, they write the report.
+    const direct = spawnSync(process.execPath, [SHIM, '--dir', reports], {
+      input: status,
+      encoding: 'utf8',
+      env,
+      timeout: 10_000
+    })
+    expect(direct.status).toBe(0)
+    expect(fs.existsSync(path.join(reports, 'agent.importer.json'))).toBe(true)
+  })
+
+  it('runs nothing when imported with no module path in argv[1]', async () => {
+    // `node -e` with no arguments leaves `process.argv[1]` undefined, as a REPL
+    // does, and `path.basename(undefined)` throws: the guard checks it first.
+    expect(await importWithoutModulePath(new URL(SHIM_URL))).toEqual({
+      status: 0,
+      stdout: '',
+      stderr: ''
+    })
   })
 })

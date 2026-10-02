@@ -208,8 +208,9 @@ async function main() {
 }
 
 // Only run when executed as a program; importing it for tests must not consume
-// stdin or write output.
-if (process.argv[1] && process.argv[1].endsWith('eph-usage.mjs')) {
+// stdin or write output. The whole file name is compared: a suffix also matches
+// `x-eph-usage.mjs`.
+if (process.argv[1] && path.basename(process.argv[1]) === 'eph-usage.mjs') {
   main().catch((err) => {
     process.stderr.write(`eph-usage: ${String(err)}\n`)
     process.exit(0)

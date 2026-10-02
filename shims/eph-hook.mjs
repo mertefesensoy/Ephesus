@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
+import path from 'node:path'
 import process from 'node:process'
 import { buildEnvelope, postHookEvent } from './hook-client.mjs'
 
@@ -248,7 +249,8 @@ async function main() {
 }
 
 // Only run when executed as a program; importing it for tests must not post.
-if (process.argv[1] && process.argv[1].endsWith('eph-hook.mjs')) {
+// The whole file name is compared: a suffix also matches `x-eph-hook.mjs`.
+if (process.argv[1] && path.basename(process.argv[1]) === 'eph-hook.mjs') {
   main().catch((err) => {
     process.stderr.write(`eph-hook: ${err instanceof Error ? err.message : String(err)}\n`)
   })
