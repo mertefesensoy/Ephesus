@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "package": "GYM-008",
+  "about": "the round refuses what it cannot score, restores what it changed, and stops on a survivor — the proposal's nine requirements",
+  "tests": ["test/scripts/mutate.test.ts"],
+  "mutants": [
+    {
+      "id": "control-comment",
+      "control": true,
+      "file": "scripts/mutate.cjs",
+      "find": "/** The round cannot be scored. Carries the reason a reader acts on. */",
+      "replace": "/** The round cannot be scored. It carries the reason a reader acts on. */",
+      "why": "a no-op: a doc comment reworded, nothing a test can see"
+    },
+    {
+      "id": "R1-no-control",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (!doc.mutants.some((mutant) => mutant && mutant.control === true)) {",
+      "replace": "  if (false) {",
+      "why": "requirement 1: a spec that declares no control is refused"
+    },
+    {
+      "id": "R1-misspelt-key",
+      "file": "scripts/mutate.cjs",
+      "find": "      if (!MUTANT_KEYS.has(key)) problems.push(`${at} has unknown key \"${key}\"`)",
+      "replace": "      if (false) problems.push(`${at} has unknown key \"${key}\"`)",
+      "why": "requirement 1: a misspelt control is refused by name, not read as absent"
+    },
+    {
+      "id": "R2-red-baseline",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (baseline.verdict.kind !== 'pass') {",
+      "replace": "  if (baseline.verdict.kind === 'invalid') {",
+      "why": "requirement 2: the round stops unless the baseline is green"
+    },
+    {
+      "id": "R3-zero-files-not-retried",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (report === null || ran.length === 0) {",
+      "replace": "  if (report === null) {",
+      "why": "requirement 3: a report holding no file (a global setup that throws) is a refusal to retry"
+    },
+    {
+      "id": "R3-refusal-scored-as-kill",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (report === null || ran.length === 0) {\n    return {\n      kind: 'invalid',",
+      "replace": "  if (report === null || ran.length === 0) {\n    return {\n      how: 'test',\n      failedFiles: [],\n      kind: 'fail',",
+      "why": "requirement 3: the scratch-harness bug itself — a suite that refused to start scored as a kill"
+    },
+    {
+      "id": "R3-missing-file-ignored",
+      "file": "scripts/mutate.cjs",
+      "find": "  const missing = listed.filter((file) => !ran.includes(file))",
+      "replace": "  const missing = []",
+      "why": "requirement 3: a run that skipped a listed file is INVALID"
+    },
+    {
+      "id": "R3-file-kill-dropped",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles }\n",
+      "replace": "",
+      "why": "a test file that cannot load is a kill, named as a file kill"
+    },
+    {
+      "id": "R3-invalid-run-scored",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (verdict.kind === 'invalid') {",
+      "replace": "    if (false) {",
+      "why": "requirement 3: an unanswered run never reaches a verdict"
+    },
+    {
+      "id": "R3-no-retry",
+      "file": "scripts/mutate.cjs",
+      "find": "attempt >= options.retries) return run",
+      "replace": "attempt >= 0) return run",
+      "why": "requirement 3: a refused run is retried after a wait"
+    },
+    {
+      "id": "R4-others-unwatched",
+      "file": "scripts/mutate.cjs",
+      "find": "      const during = drift(root, clean).filter((file) => file !== mutant.file)",
+      "replace": "      const during = []",
+      "why": "requirement 4: a round file written while the suite runs voids the verdict"
+    },
+    {
+      "id": "R4-target-unwatched",
+      "file": "scripts/mutate.cjs",
+      "find": "      if (sha256(fs.readFileSync(target)) !== sha256(mutated)) during.unshift(mutant.file)\n",
+      "replace": "",
+      "why": "requirement 4: the mutated file itself changing while the suite runs voids the verdict"
+    },
+    {
+      "id": "R4-baseline-unwatched",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (changed.length > 0) throw new Invalid(`the baseline run changed ${changed.join(', ')}`)\n",
+      "replace": "",
+      "why": "requirement 4: a baseline that writes a round file voids the round"
+    },
+    {
+      "id": "R4-second-fault-hidden",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (fault !== null && unrestored !== null) {",
+      "replace": "    if (false) {",
+      "why": "requirement 4: a run fault and a failed restore are both reported"
+    },
+    {
+      "id": "R5-text-mode",
+      "file": "scripts/mutate.cjs",
+      "find": "  return Buffer.concat([\n    bytes.subarray(0, at),\n    Buffer.from(replace, 'utf8'),\n    bytes.subarray(at + needle.length)\n  ])",
+      "replace": "  return Buffer.from(bytes.toString('utf8').replace(find, replace).replace(/\r\n/g, '\n'), 'utf8')",
+      "why": "requirement 5: the edit is byte-exact (the Python text-mode bug, CRLF rewritten)"
+    },
+    {
+      "id": "R6-dirty-allowed",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (untracked.length > 0 || dirty !== '') {",
+      "replace": "  if (untracked.length > 0) {",
+      "why": "requirement 6: a round's files must be committed — a modified one is refused"
+    },
+    {
+      "id": "R6-untracked-allowed",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (untracked.length > 0 || dirty !== '') {",
+      "replace": "  if (dirty !== '') {",
+      "why": "requirement 6: a round's files must be tracked — an untracked one is refused"
+    },
+    {
+      "id": "R6-restore-not-git",
+      "file": "scripts/mutate.cjs",
+      "find": "    git(root, ['checkout', '--', mutant.file])",
+      "replace": "    fs.writeFileSync(path.join(root, mutant.file), fs.readFileSync(path.join(root, mutant.file)))",
+      "why": "requirement 6: git restores the file, and the restore is proved"
+    },
+    {
+      "id": "R7-files-as-given",
+      "file": "scripts/mutate.cjs",
+      "find": "  console.log(`baseline: PASS — ${counted(baseline)}: ${baseline.ran.join(', ')}`)",
+      "replace": "  console.log(`baseline: PASS — ${counted(baseline)}: ${spec.tests.join(', ')}`)",
+      "why": "requirement 7: the round reports the files that ran, not the ones it was given"
+    },
+    {
+      "id": "R8-precheck-zero",
+      "file": "scripts/mutate.cjs",
+      "find": "    .filter(([, count]) => count !== 1)",
+      "replace": "    .filter(([, count]) => count > 1)",
+      "why": "requirement 8: an anchor matching nothing is refused before the baseline"
+    },
+    {
+      "id": "R8-mutate-zero",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (count !== 1)\n",
+      "replace": "  if (count > 1)\n",
+      "why": "requirement 8: mutate() itself refuses an anchor matching nothing"
+    },
+    {
+      "id": "R8-overlap",
+      "file": "scripts/mutate.cjs",
+      "find": "at = haystack.indexOf(needle, at + 1)) count++",
+      "replace": "at = haystack.indexOf(needle, at + needle.length)) count++",
+      "why": "requirement 8: overlapping occurrences count, so \"exactly once\" cannot hide a second"
+    },
+    {
+      "id": "R9-survivor-exit-ok",
+      "file": "scripts/mutate.cjs",
+      "find": "    return EXIT.survivors",
+      "replace": "    return EXIT.ok",
+      "why": "requirement 9: a survivor exits non-zero"
+    },
+    {
+      "id": "R9-no-triage",
+      "file": "scripts/mutate.cjs",
+      "find": "      for (const line of TRIAGE) console.log(`  ${line}`)\n",
+      "replace": "",
+      "why": "requirement 9: a survivor prints the triage question"
+    },
+    {
+      "id": "C-control-kill-ignored",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (mutant.control) {\n      if (verdict.kind === 'fail') {",
+      "replace": "    if (mutant.control) {\n      if (false) {",
+      "why": "requirement 1: a killed control voids the round"
+    },
+    {
+      "id": "C-crash-exits-1",
+      "file": "scripts/mutate.cjs",
+      "find": "  } catch (err) {\n    console.log(`ROUND INVALID — ${described(err)}`)",
+      "replace": "  } catch (err) {\n    if (!(err instanceof Invalid)) throw err\n    console.log(`ROUND INVALID — ${described(err)}`)",
+      "why": "a harness crash must read as INVALID, never exit 1, which means survivors"
+    }
+  ]
+}

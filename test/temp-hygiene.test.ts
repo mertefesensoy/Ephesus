@@ -156,6 +156,7 @@ function sourcesOf(files: readonly string[]): ReadonlyMap<string, string> {
 const GIT_DOORS: readonly string[] = [
   'scripts/arm-hooks.cjs',
   'scripts/check-attribution.cjs',
+  'scripts/mutate.cjs',
   'src/main/agora.ts',
   'src/main/git.ts',
   'src/main/index.ts'

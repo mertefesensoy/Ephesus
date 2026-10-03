@@ -43,14 +43,16 @@ const SELF = path.join('scripts', 'check-invariants.cjs')
 /**
  * Files allowed to invoke git, relative to the repo root. ADR-0004's rule is
  * about the Agora: the running app has exactly one committer, `src/main/git.ts`.
- * The two development-repo tools below run outside the app process against this
- * repository itself (arming hooks, scanning commit attribution) and can never
+ * The three development-repo tools below run outside the app process against
+ * this repository itself (arming hooks, scanning commit attribution, restoring
+ * a mutation round's files — GYM-008, DECISIONS-LOG 2026-10-03) and can never
  * touch a harness home — name new exceptions here explicitly or not at all.
  */
 const GIT_ALLOWLIST = new Set([
   path.join('src', 'main', 'git.ts'),
   path.join('scripts', 'arm-hooks.cjs'),
-  path.join('scripts', 'check-attribution.cjs')
+  path.join('scripts', 'check-attribution.cjs'),
+  path.join('scripts', 'mutate.cjs')
 ])
 
 const GIT_INVOCATION = /(execFile|execFileSync|exec|execSync|spawn|spawnSync)\s*\(\s*['"`]git['"`]/
