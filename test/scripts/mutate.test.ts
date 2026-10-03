@@ -31,7 +31,12 @@ const SCRIPT = fileURLToPath(new URL('../../scripts/mutate.cjs', import.meta.url
 
 type Verdict =
   | { kind: 'pass'; passed: ReadonlySet<string>; skipped: number }
-  | { kind: 'fail'; how: 'test' | 'file'; failedFiles: readonly unknown[] }
+  | {
+      kind: 'fail'
+      how: 'test' | 'file'
+      failedFiles: readonly unknown[]
+      failedTests: readonly string[]
+    }
   | { kind: 'invalid'; retry: boolean; reason: string }
 
 interface RunFile {
@@ -332,6 +337,56 @@ describe('a run is scored from its report and its tests, never from its exit cod
       kind: 'fail',
       how: 'file'
     })
+  })
+
+  it('names the tests that killed, and only those that passed at the baseline', () => {
+    const raw = report(
+      [file('add.test.mjs', 'failed', [test('adds', 'failed'), test('later', 'failed')])],
+      { failed: 2 }
+    )
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toMatchObject({
+      kind: 'fail',
+      how: 'test',
+      failedTests: ['add.test.mjs › adds #1']
+    })
+  })
+
+  it('refuses a mutant run whose only failure is a test that never passed at the baseline', () => {
+    // The mutant switched a test on, and that test fails whatever the line says.
+    const raw = report(
+      [file('add.test.mjs', 'failed', [test('adds', 'passed'), test('switched on', 'failed')])],
+      { failed: 1 }
+    )
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toEqual({
+      kind: 'invalid',
+      retry: false,
+      reason:
+        'add.test.mjs › switched on #1 failed, and no test that passed at the baseline did: a test the mutant switched on, or a hook that threw, is not a kill'
+    })
+  })
+
+  it('refuses a file that failed around passing tests — a hook that threw — as no kill', () => {
+    const raw = report(
+      [file('add.test.mjs', 'failed', [test('adds', 'passed')], 'afterAll threw')],
+      {
+        success: false
+      }
+    )
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toMatchObject({
+      kind: 'invalid',
+      reason: expect.stringMatching(
+        /^add\.test\.mjs failed, and no test that passed at the baseline did/
+      )
+    })
+  })
+
+  it('still reads any failure at the baseline as a red suite', () => {
+    const raw = report([file('add.test.mjs', 'failed', [test('adds', 'failed')])], { failed: 1 })
+    expect(tool.classify(run(raw, 1), listed, null)).toMatchObject({ kind: 'fail', how: 'test' })
+    const hook = report([file('add.test.mjs', 'failed', [test('adds', 'passed')])], {
+      success: false
+    })
+    expect(tool.classify(run(hook, 1), listed, null)).toMatchObject({ kind: 'fail', how: 'file' })
   })
 
   it('refuses a report with no failure from a vitest that exited non-zero — an unhandled error or a dead worker', () => {
@@ -991,6 +1046,31 @@ describe('a round over a real repository', () => {
         /ROUND INVALID — M1: 1 test\(s\) that passed at the baseline did not pass or fail here, first add\.test\.mjs › adds #1/
       )
       expect(result.out).not.toMatch(/M1 {2}SURVIVED/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a mutant that switches on a failing test INVALID, not a kill',
+    () => {
+      const switching = [
+        "import * as mod from './mod.mjs'",
+        "test('adds', () => { expect(mod.add(2, 3)).toBe(5) })",
+        "test.skipIf(mod.marker !== 'ON')('always fails', () => { expect(1).toBe(2) })",
+        ''
+      ].join('\n')
+      const repo = fixture(specWith(marking('ON', 'a test that never passed is switched on')), {
+        test: switching
+      })
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(/baseline: PASS — 1 file, 1 passed, 1 not run/)
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: add\.test\.mjs › always fails #1 failed, and no test that passed at the baseline did/
+      )
+      expect(result.out).not.toMatch(/M1 {2}killed/)
       expect(result.status).toBe(tool.EXIT.invalid)
     },
     ROUND_TIMEOUT

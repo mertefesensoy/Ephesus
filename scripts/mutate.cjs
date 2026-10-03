@@ -57,7 +57,14 @@
  * the repository by its real path, have one hard link, hold the bytes git
  * indexed and carry no flag that hides it from git; a timed-out run is
  * INVALID and not retried; and a spec cannot name a path vitest would read as
- * an option, or an anchor in malformed Unicode.
+ * an option, or an anchor in malformed Unicode. A second pass found eleven more
+ * ways in, recorded as the round's known limits in TEST-STRATEGY §10 rather
+ * than closed; of them only the kill rule changed: a kill needs a test that
+ * passed at the baseline to fail, or a listed file that cannot load.
+ *
+ * The round trusts the repository's own tests and configuration. Test code or
+ * config written to deceive it — a reporter-rewriting config, a detached
+ * writer — can forge any verdict (THREAT-MODEL.md).
  */
 const { Buffer } = require('node:buffer')
 const { spawnSync } = require('node:child_process')
@@ -349,10 +356,11 @@ function testsWith(files, status) {
  * (`null` when none was written), its files as `filesOf` reads them, vitest's
  * exit status and whether `--timeout` ended it; `listed` are the spec's test
  * files; `expected` is the set of tests that passed at the baseline, or `null`
- * when this run IS the baseline. `kind` is `pass`, `fail` or `invalid`. A
- * failure is a `test` failure (an assertion) or a `file` failure (a file that
- * could not load, or a hook that threw), and the second is still a kill, named
- * so it is triaged. A pass carries the tests that passed and the count skipped.
+ * when this run IS the baseline. `kind` is `pass`, `fail` or `invalid`. Under a
+ * mutant a failure is a kill only when a test that passed at the baseline failed
+ * (`test`) or a listed file could not load at all (`file`, named so it is
+ * triaged); any other failure is INVALID. A pass carries the tests that passed
+ * and the count skipped.
  */
 function classify(run, listed, expected) {
   const { report, files, exit, timedOut } = run
@@ -388,8 +396,30 @@ function classify(run, listed, expected) {
     }
   }
   const failedFiles = files.filter((file) => file.status === 'failed')
-  if ((report.numFailedTests ?? 0) > 0) return { kind: 'fail', how: 'test', failedFiles }
-  if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles }
+  const failedTests = testsWith(files, 'failed')
+  if (expected === null) {
+    if (failedTests.length > 0) return { kind: 'fail', how: 'test', failedFiles, failedTests }
+    if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles, failedTests }
+  } else {
+    // A kill is evidence only when what failed is something the baseline
+    // proved can pass: one of its passing tests, or a listed file that now
+    // cannot even load. A test the mutant switched on, or a hook that threw
+    // around passing tests, says nothing about the tests that defend the line.
+    const killers = failedTests.filter((test) => expected.has(test))
+    if (killers.length > 0) return { kind: 'fail', how: 'test', failedFiles, failedTests: killers }
+    const unloaded = failedFiles.filter((file) => file.tests.length === 0)
+    if (unloaded.length > 0) {
+      return { kind: 'fail', how: 'file', failedFiles: unloaded, failedTests: [] }
+    }
+    const unexplained = [...failedTests, ...failedFiles.map((file) => file.file)]
+    if (unexplained.length > 0) {
+      return {
+        kind: 'invalid',
+        retry: false,
+        reason: `${unexplained[0]} failed, and no test that passed at the baseline did: a test the mutant switched on, or a hook that threw, is not a kill`
+      }
+    }
+  }
   // The report says nothing failed. vitest's exit says otherwise when an
   // error escaped every test or a worker died: its report keeps
   // `success: true` through both. Neither is a pass, and neither is a kill.
@@ -654,7 +684,7 @@ function runRound(specArg, options) {
     } else if (verdict.kind === 'fail') {
       const how =
         verdict.how === 'test'
-          ? `${run.report.numFailedTests} tests failed`
+          ? `${verdict.failedTests.length} tests failed`
           : `a test file failed without a failing test: ${firstLine(verdict.failedFiles)}`
       console.log(`  ${mutant.id}  killed — ${how}  ${where}`)
     } else {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "GYM-008",
-  "about": "the round refuses what it cannot score, restores what it changed, and stops on a survivor — the proposal's nine requirements and the nine findings of its refutation pass",
+  "about": "the round refuses what it cannot score, restores what it changed, and stops on a survivor — the proposal's nine requirements, the nine findings of its first refutation pass, and the kill rule decided after its second",
   "tests": ["test/scripts/mutate.test.ts"],
   "mutants": [
     {
@@ -71,9 +71,37 @@
     {
       "id": "R3-file-kill-dropped",
       "file": "scripts/mutate.cjs",
-      "find": "  if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles }\n",
+      "find": "    if (unloaded.length > 0) {",
+      "replace": "    if (false) {",
+      "why": "a listed file that cannot load is a kill, named as a file kill"
+    },
+    {
+      "id": "R3-any-failure-kills",
+      "file": "scripts/mutate.cjs",
+      "find": "    const killers = failedTests.filter((test) => expected.has(test))",
+      "replace": "    const killers = failedTests",
+      "why": "decided after the second pass: a test that never passed at the baseline cannot kill"
+    },
+    {
+      "id": "R3-hook-failure-kills",
+      "file": "scripts/mutate.cjs",
+      "find": "    const unloaded = failedFiles.filter((file) => file.tests.length === 0)",
+      "replace": "    const unloaded = failedFiles",
+      "why": "decided after the second pass: a file failing around passing tests (a hook) is not a kill"
+    },
+    {
+      "id": "R3-unexplained-unnamed",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (unexplained.length > 0) {",
+      "replace": "    if (false) {",
+      "why": "decided after the second pass: an unexplained failure is INVALID, and says which"
+    },
+    {
+      "id": "R2-baseline-test-fail-dropped",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (failedTests.length > 0) return { kind: 'fail', how: 'test', failedFiles, failedTests }\n",
       "replace": "",
-      "why": "a test file that cannot load is a kill, named as a file kill"
+      "why": "requirement 2: a failing test at the baseline is a red suite, named as one"
     },
     {
       "id": "R3-exit-ignored",
