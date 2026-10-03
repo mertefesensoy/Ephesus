@@ -187,7 +187,7 @@ before anything was changed, and every fix was the Architect's choice (DECISIONS
 A second independent pass against `ed03256` found eleven more ways in. Nine were reproduced
 in this session against that commit (F1–F5, F7–F10); F6 and F11 need a repository written
 to deceive the round and were not. The Architect chose to **record all eleven as known
-limits** (TEST-STRATEGY §10) and track them as a follow-up rather than close them here,
+limits** (TEST-STRATEGY §10) and track them in issue #70 rather than close them here,
 to **state the trust boundary** in TEST-STRATEGY §10 and THREAT-MODEL §6.9, and to change
 one rule: **a kill needs a test that passed at the baseline to fail, or a listed file
 that cannot load** (`b20f83b`). Before it, any failing test counted, including one a
@@ -251,7 +251,10 @@ Asked through the questions workflow and recorded in DECISIONS-LOG on 2026-10-03
    in `src/shared/` behind a TypeScript runner, which is a new dependency.
 6. **The metric is measured 2026-10-17**, two weeks after landing as it states.
 7. **The session's `node_modules` is a junction** to a worktree whose 353 installed
-   packages match this lockfile exactly — the condition of every figure below.
+   packages match this lockfile exactly — the condition of every figure below. One
+   ordering slip, stated rather than left to be found: the junction was made and the
+   session's first baseline (typecheck, lint, invariants on `6f6164d`) ran on it before
+   this answer was written into DECISIONS-LOG in `0468b6a`.
 8. **Every refutation finding closed here**, before landing. Rejected: closing only the
    wrong-verdict findings now; landing as it stood.
 9. **Scored over the tests that passed at the baseline.** Rejected: refusing any skip,
@@ -267,8 +270,8 @@ Asked through the questions workflow and recorded in DECISIONS-LOG on 2026-10-03
 13. **A timeout is INVALID and not retried.** Rejected: a kill; retrying.
 14. **Dash-led path parts and malformed Unicode refused.**
 15. **Four limits documented, not changed** (§3.6).
-16. **The second pass's eleven findings recorded as known limits**, tracked as a GitHub issue
-    whose text the Architect sees first. Rejected: closing the cheap ones now; isolating
+16. **The second pass's eleven findings recorded as known limits**, tracked as issue #70,
+    opened with text the Architect approved. Rejected: closing the cheap ones now; isolating
     every mutant in its own worktree; a Gymnasium proposal; the session report only.
 17. **The trust boundary stated in TEST-STRATEGY §10 and THREAT-MODEL §6.9.**
 18. **A kill needs a test that passed at the baseline, or a file that cannot load**, made
@@ -367,9 +370,9 @@ memory fell to 0.40 GB (DECISIONS-LOG 2026-10-03).
 
 **Second refutation pass** at `ed03256`: eleven findings, nine reproduced in this session (§3.7).
 
-**The gate at `b20f83b`**: GATE4_RESULT
+**The gate at `d8e457d`** (the documentation commit; its `scripts/` and `test/` are byte-identical to `b20f83b`, checked with `git diff --quiet`), started once free memory had held 3 GB for a minute: exit 0 — invariants ok (189/199), **240 test files, 5006 passed, 8 skipped** (the five more are the kill-rule cases), coverage floors ok (17 subsystems, 19 untested modules, all recorded).
 
-**Round 4** at `b20f83b`: ROUND4_RESULT
+**Round 4** at `d8e457d` (code byte-identical to `b20f83b`), 43 mutants and a control, started once free memory had held 3 GB for 30 s, 57 min 55 s: baseline PASS (1 file, 87 passed); `control-comment` SURVIVED — certifies the round; **43 of 43 real mutants killed, each by at least one failing test, among them the four aimed at the kill rule** (`R3-any-failure-kills`, `R3-hook-failure-kills`, `R3-unexplained-unnamed`, `R2-baseline-test-fail-dropped`) and the moved `R3-file-kill-dropped`; **ROUND OK, exit 0**; no refusal to start and no retry; the worktree clean afterwards and no `eph-mutate-*` directory left.
 
 ## 7. Related docs
 

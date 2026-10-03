@@ -349,7 +349,7 @@ author's environment.
 
 **Known limits** — the second refutation pass (2026-10-03) found eleven more ways to make a
 round report what it had not earned; the Architect chose to record them here rather than
-close them in GYM-008, and they are tracked as a follow-up. Nine were reproduced; the
+close them in GYM-008, and they are tracked in issue #70. Nine were reproduced; the
 last two were not, and need a repository written to deceive the round.
 
 1. A snapshot written into an *ignored* directory becomes the oracle that "kills" the
@@ -363,9 +363,10 @@ last two were not, and need a repository written to deceive the round.
 5. A submodule marked `ignore = dirty` hides what a test writes inside it.
 6. A clean filter hides a working-copy edit from both `git status` and the index-blob
    check, and the restore then destroys it.
-7. `text=auto` under `core.autocrlf=true` does the same to line endings. In this
-   repository (`* text=auto eol=lf`) a working file saved with CRLF is this case: run
-   rounds on LF files.
+7. `text=auto` under `core.autocrlf=true` does the same to line endings. This
+   repository's `* text=auto eol=lf` is not affected: a working file saved with CRLF
+   shows as modified there, under either `core.autocrlf`, so the round refuses to start
+   (probed 2026-10-03).
 8. A per-repository `core.fsmonitor` hook can blind `git status`.
 9. A vitest `retry` setting turns a kill into a pass; the report keeps no retry count.
 10. State kept outside the repository, or a detached process that writes after the
