@@ -424,6 +424,7 @@ This repository is a complete, self-contained documentation suite. Read in this 
 | [`docs/gymnasium/LEDGER.md`](./docs/gymnasium/LEDGER.md) | The self-improvement ledger — every Gymnasium proposal from evidence to measured outcome. |
 | [`docs/stoa/WATCHLIST.md`](./docs/stoa/WATCHLIST.md) | The research watchlist — the external sources the Architect has registered for study, and the briefs they produce. |
 | [`docs/M9-PLAN.md`](./docs/M9-PLAN.md) | **The next milestone, planned and not yet started** — the harness as the product: Ephesus's own agent engine running local models behind the existing adapter seam, and a bench that measures the harness's own uplift. Approved for planning on 2026-10-02. |
+| [`docs/PHASE-9-PLAN.md`](./docs/PHASE-9-PLAN.md) | **What follows M9, planned and not yet started** — seven milestones (M9b–M9h) that give Ephesus the capabilities of an agentic harness in its own way: a workspace with the floor as a view mode, a local model service, contained execution and armed gates, web research, a messaging gateway with remote authorisation, schedules, mail and calendar, and a companion of its own on the phone. Planned on 2026-10-03. |
 
 ## Where the build stands
 
@@ -436,6 +437,20 @@ This repository is a complete, self-contained documentation suite. Read in this 
 > a headless-first core with the window as one client. The plan, its evidence and
 > the seven decisions it rests on are in [`docs/M9-PLAN.md`](./docs/M9-PLAN.md).
 > Nothing below this note has changed; M9 has no landed package.
+>
+> **What follows M9 is planned as well, and equally unstarted.** On 2026-10-03 the
+> Architect set the target: what a real agentic harness offers — conversations with
+> local and API models, a model service that fits a model to the machine, deep
+> research, blind comparison, documents, skills, a messaging gateway, schedules,
+> mail and calendar, sandboxed execution, the phone — built Ephesus's way, with
+> every capability granted by name, gated by the Watch and measured by the bench.
+> The city and its names stay; **the floor becomes a view mode and the window opens
+> on a workspace** ([ADR-0040](./docs/adr/ADR-0040-the-floor-is-a-view-mode.md)).
+> Seven milestones, M9b to M9h, in [`docs/PHASE-9-PLAN.md`](./docs/PHASE-9-PLAN.md):
+> five before the v1 boundary (M7b) and two — mail and calendar, and the companion —
+> after it.
+> Until M9b lands, everything this README shows and says about the floor is still
+> what the app does.
 
 **M8's thirteen packages have all landed — and M8 has not closed.** M6 and M7
 landed the spoken company and the two outward missions; M8 is the hardening

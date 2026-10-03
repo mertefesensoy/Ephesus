@@ -42,10 +42,27 @@ Ephesus SHALL:
   (ADR-0017); and expose an explicit, Architect-only **company mode** that turns
   standing autonomous self-improvement on only after a recorded proof gate
   (ADR-0018).
+- Offer the capabilities of an agentic harness through its own engine (FR-15):
+  a conversation-first workspace with the floor as a view mode (ADR-0040), a local
+  model service, contained tool execution, web reach and research, a messaging
+  gateway with remote authorisation, schedules, mail and calendar connectors, and a
+  phone surface — each granted by name, gated by the Watch and measured by the
+  bench (FR-16). *(Added 2026-10-03 by Architect direction; **planned and not yet
+  built**. The plan is [`docs/PHASE-9-PLAN.md`](../PHASE-9-PLAN.md); each
+  milestone's contract package writes its own requirement group here, and until it
+  does this bullet is a statement of scope, not a requirement to test against.)*
 
 Ephesus SHALL NOT (v1):
-- Replace the underlying agent CLIs (they remain the runtime).
-- Run agents on remote machines over SSH.
+- Replace the underlying agent CLIs for **wrapped** hires (they remain the runtime
+  there). *(Amended 2026-10-03. The line read "Replace the underlying agent CLIs
+  (they remain the runtime)" and had been stale since ADR-0036 of 2026-10-02, which
+  adds a native engine the harness itself owns — FR-15.)*
+- Run an agent's **loop** anywhere but the Architect's machine. *(Amended
+  2026-10-03 by Architect decision DD-M9-14. The line read "Run agents on remote
+  machines over SSH". An agent's loop, terminal, hooks and mail never leave the
+  machine; its **tool execution** may run in a backend its hire declares — a local
+  container, a remote host over SSH, a cloud sandbox. Planned as M9d and not yet
+  built.)*
 - Provide multi-user/team access; it is a single-operator system.
 - Train or fine-tune models.
 

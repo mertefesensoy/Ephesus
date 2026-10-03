@@ -19,7 +19,7 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0011](./ADR-0011-watch-breaker-budgets.md) | The Watch: circuit-breaker ladder and a durable cost ledger | accepted |
 | [ADR-0012](./ADR-0012-mission-profiles.md) | Mission profiles as declarative, versioned bundles | accepted |
 | [ADR-0013](./ADR-0013-stop-hook-autonomy.md) | Autonomy loop via the engine's Stop hook | accepted |
-| [ADR-0014](./ADR-0014-owned-spawn-and-floor.md) | Own the process lifecycle (spawn, not attach); the floor as observability | accepted |
+| [ADR-0014](./ADR-0014-owned-spawn-and-floor.md) | Own the process lifecycle (spawn, not attach); the floor as observability | accepted (extended by ADR-0040: the floor is a view mode; its standard is unchanged) |
 | [ADR-0015](./ADR-0015-gymnasium-self-improvement.md) | The Gymnasium: self-improvement as the company's primary standing mission, governed | accepted |
 | [ADR-0016](./ADR-0016-mempalace-archival.md) | MemPalace as the Library's recall index and the company archive | accepted |
 | [ADR-0017](./ADR-0017-stoa-research-department.md) | The Stoa: a research department that feeds the Gymnasium external evidence | accepted |
@@ -42,6 +42,12 @@ New ADRs append; accepted ADRs are never edited, only superseded.
 | [ADR-0034](./ADR-0034-one-harness-per-home.md) | One harness per home | accepted |
 | [ADR-0035](./ADR-0035-an-engine-prompt-is-declared-in-advance.md) | An engine's permission prompt is answered in advance, by name | accepted |
 | [ADR-0036](./ADR-0036-two-engine-kinds.md) | Two engine kinds: a wrapped CLI, and a native agent the harness owns (supersedes one sentence of ADR-0009; planned for M9, not yet built) | accepted |
+| [ADR-0040](./ADR-0040-the-floor-is-a-view-mode.md) | The floor is a view mode; the window opens on the workspace (extends ADR-0014; planned for M9b, not yet built) | accepted |
+
+**Numbers 0037–0039 are reserved, not missing.** ADR-0037 (the bench), ADR-0038
+(the provider seam) and ADR-0039 (the gate as a native agent's permission system)
+are owed by M9.0 and M9.3 and named in [`../M9-PLAN.md`](../M9-PLAN.md) §5.
+ADR-0040 was written first because its decision was taken first (2026-10-03).
 
 **Clause notes** (an accepted ADR is never edited; a clause overtaken by a
 recorded decision is listed here so its sentence is not read as current):

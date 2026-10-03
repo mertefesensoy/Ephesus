@@ -10,6 +10,15 @@ that needed it could not find it; this one is committed with the plan.
 The seven decisions below are settled and are **not** to be re-asked. What is still
 the Architect's is the single question of *when*.
 
+**Phase 9's later milestones do not change this prompt.** On 2026-10-03 the
+Architect planned M9b to M9h ([`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md)) to follow M9.
+M9 is built first and exactly as written here: all eight packages, the same exit,
+zero new runtime dependencies. The decisions recorded for those milestones
+(DD-M9-8 onward, DECISIONS-LOG 2026-10-03) are settled as well and are not
+re-asked; the questions each of their contract packages owes are listed in that
+plan's §11. A goal prompt for a later milestone is written when the Architect
+authorises it, not before.
+
 ---
 
 Build milestone **M9** of Ephesus — *"The harness is the product"*. All eight
