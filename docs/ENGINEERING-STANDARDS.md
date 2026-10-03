@@ -186,6 +186,13 @@ A change is done when:
    of them feeding it strings we had written ourselves. That is the third instance
    of the shape (`reproduce` matching `prod` in the M7.4 scorer; a spoken refusal
    confirming a gate in M6). *(Architect decision 2026-09-04.)*
+9. **A gate-shaped or rule-shaped change carries a mutation round with a certified
+   control.** It is run by `node scripts/mutate.cjs` from a spec checked in under
+   `test/mutation/`, its no-op control survives, and every survivor is triaged — a
+   test written, or the reason none can be, recorded — rather than counted
+   (TEST-STRATEGY §10). The bar is the control and the triage, never a percentage: a
+   tool that implied a score would replace the question a survivor asks.
+   *(GYM-008.)*
 
 ## 7. Agent-specific standards
 
