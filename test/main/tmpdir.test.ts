@@ -189,7 +189,7 @@ describe('removeTempDir on any platform', () => {
     // rethrown rather than retried for the full budget. Most obvious
     // candidates are not faults at all — `force: true` makes a missing path a
     // success, so a first draft of this case asserted a throw that never came.
-    expect(() => removeTempDir('a-path-with-a -nul')).toThrow()
+    expect(() => removeTempDir('a-path-with-a\u0000-nul')).toThrow()
 
     expect(Date.now() - startedAt).toBeLessThan(TEMP_REMOVE_BUDGET_MS / 2)
   })
