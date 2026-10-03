@@ -6871,6 +6871,14 @@ over `fetch` (DD-M9-3); headless-first, nothing deleted (DD-M9-4); a third TS bu
 target for `eph-agent` (DD-M9-5); Odysseus registered and Hermes Agent's tags amended
 on the watchlist (DD-M9-6); bench T1 subsumes the unattended hour (DD-M9-7).
 
+**Prerequisite landed 2026-10-03: GYM-008, the mutation round as a tool.** M9-PLAN §6
+says every package here owes a round from a checked-in `test/mutation/<package>.json`,
+and until today `test/mutation/` did not exist. `scripts/mutate.cjs` now runs one
+(TEST-STRATEGY §10, ENGINEERING-STANDARDS §6 item 9). It was chosen ahead of M9.0 by the
+Architect, and choosing it did not lift the hold: **whether the M9 build may start is
+still the Architect's question**, and no box below is ticked.
+[Record](implementations/2026-10-03-gym-008-mutation-harness.md).
+
 - [ ] **M9.0 The contract** — ADR-0037, ADR-0038; SRS FR-15/FR-16/§6.11 and SDD
       §13 were drafted at plan time and are refined here; TEST-STRATEGY S-NATIVE and
       S-BENCH; `/research` run against `src-odysseus` and `src-hermes-agent` at

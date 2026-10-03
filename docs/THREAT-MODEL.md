@@ -194,6 +194,17 @@ that a script did it.
 **If you do not want it**, stop the harness: the endpoint lives only as long as the app, and the
 address file is removed on a clean quit.
 
+### 6.9 The mutation round trusts the code it measures
+
+`scripts/mutate.cjs` (GYM-008) is a development tool, not part of the running app. It plants one
+change at a time in this repository's source and reads whether the repository's own tests notice.
+To do that it runs those tests and their configuration as code, so it trusts them. **A test or a
+vitest configuration written to deceive it can forge any verdict**: a configuration can rewrite the
+report the round reads, and a test can start a process that writes after the round has looked
+(both demonstrated by the second refutation pass, 2026-10-03). A round's verdict therefore means
+that this repository's tests, written honestly, catch the change. It is evidence about the tests,
+not a defence against them. Its other known limits are listed in TEST-STRATEGY §10.
+
 ## 7. Before you install
 
 1. **Start with `manual` or `supervised` autonomy.** Both are one click in the Watch panel. Move to

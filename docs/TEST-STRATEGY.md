@@ -43,6 +43,9 @@ distance from it. Overall line coverage is still *not* a gate (it incentivizes j
 tests); mutation testing on the message-rule and gate-policy modules quarterly.
 *(Amended at M8.0, GYM-006; the rule it enforces is ENGINEERING-STANDARDS §6.7.)*
 
+A mutation round — how one is run, what it refuses, and what a survivor obliges — is
+§10 *(GYM-008)*.
+
 ## 3. Scenario suites (the tests that matter)
 
 Named suites mirroring SRS acceptance criteria — each is an integration/E2E script:
@@ -255,3 +258,134 @@ It lives in its own file rather than here for the reason this document exists:
 §1–§8 say what tests are owed and which level owns them; that is an operator
 runbook for one human doing one run by hand. Folding it in would make this
 document answer two questions in one voice.
+
+## 10. The mutation round (GYM-008)
+
+A round plants one hand-aimed change at a time in the code a package claims to defend,
+runs that package's test files against each, and puts the file back. It is how this
+project tells a test that can fail from one that cannot — M6's close-out ran 22
+mutations against its recorded guarantees and 18 survived — and it has been the third
+leg of the verification bar since M8. It is evidence an author runs, not a CI job, and
+its mutants are aimed by hand at the sentence the package is about: a generator
+produces mostly equivalent mutants, which this project treats as a design smell rather
+than a score.
+
+**Running one.** Commit the package first, then:
+
+```bash
+node scripts/mutate.cjs test/mutation/<package>.json --check
+node scripts/mutate.cjs test/mutation/<package>.json
+```
+
+`--check` validates the spec and its anchors and runs nothing. The spec is checked in
+beside the tests it mutates, under `test/mutation/`, and it is part of the evidence: it
+says which sentences the package defends, and when a refactor moves the code an anchor
+that no longer matches is refused rather than skipped. Its shape (`schemaVersion: 1`) is
+`package`; `about`, the sentence the round defends; `tests`, the repository paths every
+run executes; and `mutants`, each with an `id`, a `file`, a `find` that must occur in
+that file exactly once, its `replace`, and a `why` naming the sentence it attacks. At
+least one mutant is a `"control": true` no-op — a comment reworded, nothing a test can
+see.
+
+**Exit status.** `0` ROUND OK: every real mutant killed and the control survived. `1`
+ROUND HAS SURVIVORS. `2` ROUND INVALID: the round could not be scored, and that includes
+a harness crash, which must never read as `1`.
+
+**What it refuses.** Each rule is a way a round once reported a score nobody had earned
+— a scratch harness's (DECISIONS-LOG 2026-09-09 and 2026-10-02), or this tool's own
+before an adversarial pass broke it (2026-10-03):
+
+1. A spec with no control is refused, and a killed control makes the round INVALID: the
+   control's survival is the round's certificate.
+2. The baseline runs first and must be green. A red baseline makes every mutant look
+   killed, the control included.
+3. Each run is scored from vitest's JSON report, never from its exit code alone. No
+   report, or a report holding no file — the shape the free-memory gate in
+   `test/global-setup.ts` leaves when it refuses — is INVALID, never a kill, and is
+   retried after a wait (`--retries`, `--retry-wait`). A run scores only over the
+   tests that **passed at the baseline**: every listed file must hold at least one, so a
+   file whose tests are all skipped defends nothing, and a run in which one of them
+   neither passed nor failed (a worker that died leaves it pending) is INVALID. A report
+   with no failure from a vitest that exited non-zero — an error outside any test, a
+   dead worker; the report says `success` through both — is INVALID too, and so is a
+   run that hit `--timeout`, which has its own reason and is not retried. Under a
+   mutant, a kill needs a test that passed at the baseline to fail, or a listed file
+   that cannot load at all; a test the mutant switched on, or a hook that threw around
+   passing tests, is INVALID, not a kill.
+4. Every round file — the mutated files, the test files and the spec — is hashed when
+   the round starts, after every run and after every restore, and each mutant is built
+   from the bytes the round started with. A file that changes while the suite runs
+   voids the verdict.
+5. Files are read and written as bytes, so the edit and the restore are exact.
+6. The whole working tree must be clean at the start, untracked files included, and
+   nothing outside the round's files may change during the baseline or any run — a
+   leftover test file would otherwise "kill" the next mutant, and a snapshot the
+   baseline writes would become its own oracle. Every round file must be what git
+   holds where git holds it: inside the repository by its real path (no link on the
+   way), one hard link, the bytes git indexed, and no `assume-unchanged` or
+   `skip-worktree` flag hiding it from `git status`. `git checkout --` restores each
+   mutant and `git status` checks the restore. An interrupted round leaves its mutant
+   in the file, and the next round refuses to start until it is restored.
+7. The files that ran must be exactly the files listed. vitest reads a file argument as
+   a filter, so a run that also picks up another file is INVALID and names it.
+8. Every anchor matches its file exactly once, checked before anything runs. A path
+   with a part beginning `-` (vitest would read it as an option) and `find` or
+   `replace` text in malformed Unicode are refused.
+9. A survivor exits `1` and prints the question it owes.
+
+**A survivor is a question, not a number.** *Is this state reachable from outside the
+module, and can any listed test file read the line you changed?* If yes, a test is
+missing: write it, commit, and run the round again. If no, the mutant is equivalent —
+two things that cannot disagree — so remove the duplicate or record why it stays. A
+survivor inside a `process.platform` branch is a third case: move the rule out of the
+branch. A file kill (the mutant stopped a test file loading) is reported as one,
+because it proves the file depends on the line, not that a test reads it.
+
+**What it does not check** (decided 2026-10-03, so an author knows the limit): `--check`
+exits `0` as a ROUND OK does, and only its CHECKED line tells them apart; nothing
+verifies that the control really is a no-op, which is its author's to make true; a
+listed test file may itself be a mutant's target; and the nested vitest inherits the
+author's environment.
+
+**Known limits** — the second refutation pass (2026-10-03) found eleven more ways to make a
+round report what it had not earned; the Architect chose to record them here rather than
+close them in GYM-008, and they are tracked in issue #70. Nine were reproduced; the
+last two were not, and need a repository written to deceive the round.
+
+1. A snapshot written into an *ignored* directory becomes the oracle that "kills" the
+   next mutant: `git status` does not show ignored files.
+2. A same-named test can stand in for the one that passed at the baseline, because a
+   test is keyed by its file, full name and place among same-named tests, not its
+   location.
+3. One file reported twice — vitest `projects` — shares one key per test.
+4. A test that commits moves `HEAD` while the tree stays clean; refs and the index are
+   not watched.
+5. A submodule marked `ignore = dirty` hides what a test writes inside it.
+6. A clean filter hides a working-copy edit from both `git status` and the index-blob
+   check, and the restore then destroys it.
+7. `text=auto` under `core.autocrlf=true` does the same to line endings. This
+   repository's `* text=auto eol=lf` is not affected: a working file saved with CRLF
+   shows as modified there, under either `core.autocrlf`, so the round refuses to start
+   (probed 2026-10-03).
+8. A per-repository `core.fsmonitor` hook can blind `git status`.
+9. A vitest `retry` setting turns a kill into a pass; the report keeps no retry count.
+10. State kept outside the repository, or a detached process that writes after the
+    round has looked (not reproduced).
+11. A vitest configuration that rewrites the report the round reads (not reproduced).
+
+**The trust boundary.** A round runs the repository's own tests and configuration as
+code, so it trusts them. A test or configuration written to deceive it can forge any
+verdict (10 and 11 are the shape); a round's verdict means that the repository's tests,
+written honestly, catch the change (THREAT-MODEL §6.9).
+
+**Where to run it.** Not in a folder a sync client watches: OneDrive has twice put a
+restored file back with a mutant in it. The hashes catch that and call the round
+INVALID; they cannot prevent it, and a write that lands after the round has ended is
+outside what any round can see. Run from a detached worktree outside the synced folder
+(`git worktree add --detach <a directory under %TEMP%> <commit>`, with `node_modules`
+linked), and never while a measurement such as a coverage ratchet is running, because a
+round rewrites source files.
+
+**What the record carries.** The spec path, the commit, the command, the ROUND line,
+the test files run, and the platform and Node version — a score without its condition
+is not evidence (§2).
