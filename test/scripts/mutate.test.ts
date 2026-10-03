@@ -606,8 +606,29 @@ describe('a round over a real repository', () => {
 
     const untracked = round(repo.dir)
 
-    expect(untracked.out).toMatch(/untracked extra\.test\.mjs/)
+    expect(untracked.out).toMatch(/not tracked by git: extra\.test\.mjs/)
     expect(untracked.status).toBe(tool.EXIT.invalid)
+  })
+
+  it('refuses a round file git ignores, which git status never shows', () => {
+    // Found by this tool's own first round (2026-10-03): with the tracked-file
+    // question deleted, every case stayed green, because `git status` prints an
+    // ordinary untracked file as `??` too. An ignored one it does not print at
+    // all, so `ls-files` is the only check that sees it, and `git checkout --`
+    // could not restore it.
+    const repo = fixture({ ...validSpec(), tests: ['add.test.mjs', 'ignored.test.mjs'] })
+    repo.write('.gitignore', 'node_modules/\nignored.test.mjs\n')
+    repo.write('ignored.test.mjs', "test('ignored', () => {})\n")
+    repo.commit()
+    expect(repo.git(['status', '--porcelain'])).toBe('')
+
+    const result = round(repo.dir)
+
+    expect(result.out).toMatch(
+      /ROUND INVALID — commit the round's files first[\s\S]*not tracked by git: ignored\.test\.mjs/
+    )
+    expect(result.out).not.toMatch(/baseline/)
+    expect(result.status).toBe(tool.EXIT.invalid)
   })
 
   it(

@@ -355,7 +355,9 @@ function runRound(specArg, options) {
       throw new Invalid(`${file} is not a file in ${root} (a link is refused too)`)
     }
   }
-  // Requirement 6: `git checkout --` can only restore what git holds.
+  // Requirement 6: `git checkout --` can only restore what git holds. Both
+  // questions are asked because each is blind where the other sees: `status`
+  // never shows a file `.gitignore` hides, and `ls-files` never shows an edit.
   const tracked = git(root, ['ls-files', '-z', '--', ...files])
     .split('\0')
     .filter(Boolean)
@@ -363,7 +365,7 @@ function runRound(specArg, options) {
   const dirty = git(root, ['status', '--porcelain', '--', ...files]).trim()
   if (untracked.length > 0 || dirty !== '') {
     throw new Invalid(
-      `commit the round's files first, so git can restore them and check the restore:\n  ${[...untracked.map((file) => `untracked ${file}`), ...dirty.split('\n').filter(Boolean)].join('\n  ')}`
+      `commit the round's files first, so git can restore them and check the restore:\n  ${[...untracked.map((file) => `not tracked by git: ${file}`), ...dirty.split('\n').filter(Boolean)].join('\n  ')}`
     )
   }
   // Requirement 8, before anything runs.

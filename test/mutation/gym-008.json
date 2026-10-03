@@ -107,7 +107,7 @@
       "id": "R5-text-mode",
       "file": "scripts/mutate.cjs",
       "find": "  return Buffer.concat([\n    bytes.subarray(0, at),\n    Buffer.from(replace, 'utf8'),\n    bytes.subarray(at + needle.length)\n  ])",
-      "replace": "  return Buffer.from(bytes.toString('utf8').replace(find, replace).replace(/\r\n/g, '\n'), 'utf8')",
+      "replace": "  return Buffer.from(bytes.toString('utf8').replace(find, replace).replace(/\\r\\n/g, '\\n'), 'utf8')",
       "why": "requirement 5: the edit is byte-exact (the Python text-mode bug, CRLF rewritten)"
     },
     {
