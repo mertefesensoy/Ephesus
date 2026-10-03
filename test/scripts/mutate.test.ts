@@ -30,9 +30,23 @@ const require_ = createRequire(import.meta.url)
 const SCRIPT = fileURLToPath(new URL('../../scripts/mutate.cjs', import.meta.url))
 
 type Verdict =
-  | { kind: 'pass' }
+  | { kind: 'pass'; passed: ReadonlySet<string>; skipped: number }
   | { kind: 'fail'; how: 'test' | 'file'; failedFiles: readonly unknown[] }
   | { kind: 'invalid'; retry: boolean; reason: string }
+
+interface RunFile {
+  readonly file: string
+  readonly status: string
+  readonly message: string
+  readonly tests: readonly { readonly name: string; readonly status: string }[]
+}
+
+interface Run {
+  readonly report: unknown
+  readonly files: readonly RunFile[] | null
+  readonly exit: number | string | null
+  readonly timedOut: boolean
+}
 
 const tool = require_(SCRIPT) as {
   EXIT: { ok: number; survivors: number; invalid: number }
@@ -41,7 +55,8 @@ const tool = require_(SCRIPT) as {
   specProblems: (doc: unknown) => string[]
   occurrences: (haystack: Buffer, needle: Buffer) => number
   mutate: (bytes: Buffer, find: string, replace: string) => Buffer
-  classify: (report: unknown, listed: readonly string[], ran: readonly string[]) => Verdict
+  filesOf: (report: unknown, root: string) => RunFile[] | null
+  classify: (run: Run, listed: readonly string[], expected: ReadonlySet<string> | null) => Verdict
   parseArgs: (argv: readonly string[]) => {
     spec: string | null
     check: boolean
@@ -141,7 +156,27 @@ describe('a spec is refused before anything runs', () => {
     ['a backslash', withMutants([control[0]!, mutant({ file: 'src\\x.ts' })]), /forward slashes/],
     ['a step out', withMutants([control[0]!, mutant({ file: '../x.mjs' })]), /"\.\."/],
     ['a "." step', { ...validSpec(), tests: ['./add.test.mjs'] }, /"\.\."/],
-    ['an empty step', { ...validSpec(), tests: ['test//a.test.mjs'] }, /"\.\."/]
+    ['an empty step', { ...validSpec(), tests: ['test//a.test.mjs'] }, /"\.\."/],
+    [
+      'a test path vitest would read as an option',
+      { ...validSpec(), tests: ['--testNamePattern=nomatch.test.mjs'] },
+      /tests\[0\] .* has a part beginning with "-", which vitest would read as an option/
+    ],
+    [
+      'a dash-led part deeper in a path',
+      withMutants([control[0]!, mutant({ file: 'src/-x.mjs' })]),
+      /beginning with "-"/
+    ],
+    [
+      'a find in malformed Unicode (a lone surrogate)',
+      withMutants([control[0]!, mutant({ find: "'\ud800'" })]),
+      /\.find is not well-formed Unicode, so it would match text nobody wrote/
+    ],
+    [
+      'a replace in malformed Unicode',
+      withMutants([control[0]!, mutant({ replace: "'\udfff'" })]),
+      /\.replace is not well-formed Unicode/
+    ]
   ])('refuses %s', (_label, spec, problem) => {
     expect(tool.specProblems(spec).join('\n')).toMatch(problem)
   })
@@ -173,90 +208,197 @@ describe('an anchor must match exactly once, and the edit is byte-exact', () => 
   })
 })
 
-describe('a run is scored from its report, never from its exit code', () => {
-  const file = (name: string, status: string, message = ''): Record<string, unknown> => ({
-    name,
+describe('a run is scored from its report and its tests, never from its exit code alone', () => {
+  /** Where the fixture reports below say the repository is. */
+  const ROOT = path.resolve('/fixture-repo')
+  const at = (file: string): string => path.join(ROOT, file).split(path.sep).join('/')
+  const test = (name: string, status: string): Record<string, unknown> => ({
+    fullName: name,
+    status
+  })
+  const file = (
+    name: string,
+    status: string,
+    tests: readonly Record<string, unknown>[],
+    message = ''
+  ): Record<string, unknown> => ({
+    name: at(name),
     status,
     message,
-    assertionResults: []
+    assertionResults: tests
+  })
+  const report = (
+    files: readonly Record<string, unknown>[],
+    counts: { failed?: number; success?: boolean } = {}
+  ): Record<string, unknown> => ({
+    success: counts.success ?? (counts.failed ?? 0) === 0,
+    numFailedTests: counts.failed ?? 0,
+    testResults: files
+  })
+  /** A run as `runSuite` hands it over: the raw report, read through `filesOf`. */
+  const run = (raw: unknown, exit: number | string | null = 0, timedOut = false): Run => ({
+    report: raw,
+    files: tool.filesOf(raw, ROOT),
+    exit,
+    timedOut
   })
   const listed = ['add.test.mjs']
+  const green = report([file('add.test.mjs', 'passed', [test('adds', 'passed')])])
+  const baselinePassed = new Set(['add.test.mjs › adds #1'])
+
+  it('reads each file by its repository path, sorted, with its tests', () => {
+    const raw = report([
+      file('z/b.test.mjs', 'passed', [test('b', 'passed')]),
+      file('a.test.mjs', 'failed', [], 'Parse failure: x')
+    ])
+    expect(tool.filesOf(raw, ROOT)).toEqual([
+      {
+        file: 'a.test.mjs',
+        status: 'failed',
+        message: 'Parse failure: x',
+        tests: []
+      },
+      {
+        file: 'z/b.test.mjs',
+        status: 'passed',
+        message: '',
+        tests: [{ name: 'b', status: 'passed' }]
+      }
+    ])
+    expect(tool.filesOf(null, ROOT)).toBeNull()
+  })
 
   it('reads a run that wrote no report as a refusal to retry (a global setup that exits)', () => {
-    expect(tool.classify(null, listed, [])).toMatchObject({ kind: 'invalid', retry: true })
+    expect(tool.classify(run(null, 1), listed, null)).toMatchObject({
+      kind: 'invalid',
+      retry: true
+    })
   })
 
   it('reads a report holding no file as a refusal to retry (a global setup that throws, as the free-memory gate does)', () => {
-    const refused = { success: false, numTotalTests: 0, numFailedTests: 0, testResults: [] }
-    expect(tool.classify(refused, listed, [])).toMatchObject({
+    expect(tool.classify(run(report([], { success: false }), 1), listed, null)).toMatchObject({
       kind: 'invalid',
       retry: true,
-      reason: expect.stringMatching(/no test file ran/)
+      reason: expect.stringMatching(
+        /^no test file ran: vitest wrote no report, or one holding no file/
+      )
+    })
+  })
+
+  it('reads a run that hit --timeout as INVALID with its own reason, and never retries it', () => {
+    expect(tool.classify(run(null, 'SIGTERM', true), listed, null)).toEqual({
+      kind: 'invalid',
+      retry: false,
+      reason: 'the run did not finish within --timeout'
     })
   })
 
   it('refuses a run that skipped a listed file, and does not retry it', () => {
-    const report = {
-      success: true,
-      numTotalTests: 1,
-      numFailedTests: 0,
-      testResults: [file('other.test.mjs', 'passed')]
-    }
-    expect(tool.classify(report, listed, ['other.test.mjs'])).toEqual({
+    const raw = report([file('other.test.mjs', 'passed', [test('o', 'passed')])])
+    expect(tool.classify(run(raw), listed, null)).toMatchObject({
       kind: 'invalid',
       retry: false,
       reason: 'listed test files did not run: add.test.mjs'
     })
   })
 
+  it('refuses a run in which vitest also ran a file the spec does not list', () => {
+    const raw = report([
+      file('add.test.mjs', 'passed', [test('adds', 'passed')]),
+      file('more/add.test.mjs', 'passed', [test('more', 'passed')])
+    ])
+    expect(tool.classify(run(raw), listed, null)).toMatchObject({
+      kind: 'invalid',
+      retry: false,
+      reason: expect.stringMatching(
+        /^vitest also ran files the spec does not list: more\/add\.test\.mjs/
+      )
+    })
+  })
+
   it('scores a failing assertion as a test kill', () => {
-    const report = {
-      success: false,
-      numTotalTests: 1,
-      numFailedTests: 1,
-      testResults: [file('add.test.mjs', 'failed')]
-    }
-    expect(tool.classify(report, listed, listed)).toMatchObject({ kind: 'fail', how: 'test' })
+    const raw = report([file('add.test.mjs', 'failed', [test('adds', 'failed')])], { failed: 1 })
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toMatchObject({
+      kind: 'fail',
+      how: 'test'
+    })
   })
 
   it('scores a file that failed to load as a file kill, named so it is triaged', () => {
-    const report = {
-      success: false,
-      numTotalTests: 0,
-      numFailedTests: 0,
-      testResults: [file('add.test.mjs', 'failed', 'Parse failure: Expression expected')]
-    }
-    expect(tool.classify(report, listed, listed)).toMatchObject({ kind: 'fail', how: 'file' })
+    const raw = report([file('add.test.mjs', 'failed', [], 'Parse failure: Expression expected')], {
+      success: false
+    })
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toMatchObject({
+      kind: 'fail',
+      how: 'file'
+    })
   })
 
-  it('refuses a run whose listed files hold no test', () => {
-    const report = {
-      success: true,
-      numTotalTests: 0,
-      numFailedTests: 0,
-      testResults: [file('add.test.mjs', 'passed')]
-    }
-    expect(tool.classify(report, listed, listed)).toMatchObject({ kind: 'invalid', retry: false })
+  it('refuses a report with no failure from a vitest that exited non-zero — an unhandled error or a dead worker', () => {
+    // Measured on vitest 4.1.11: a worker the code under test kills leaves its
+    // test `pending` in a report that says `success: true`, and vitest exits 1.
+    const raw = report([file('add.test.mjs', 'passed', [test('adds', 'pending')])])
+    expect(tool.classify(run(raw, 1), listed, baselinePassed)).toEqual({
+      kind: 'invalid',
+      retry: false,
+      reason:
+        'vitest exited 1 though its report holds no failure: an error outside any test, or a worker that died'
+    })
   })
 
   it('refuses a failure vitest reports without naming a failing test or file', () => {
-    const report = {
-      success: false,
-      numTotalTests: 1,
-      numFailedTests: 0,
-      testResults: [file('add.test.mjs', 'passed')]
-    }
-    expect(tool.classify(report, listed, listed)).toMatchObject({ kind: 'invalid', retry: false })
+    const raw = report([file('add.test.mjs', 'passed', [test('adds', 'passed')])], {
+      success: false
+    })
+    expect(tool.classify(run(raw), listed, null)).toMatchObject({
+      kind: 'invalid',
+      retry: false
+    })
   })
 
-  it('passes a run where every listed file ran and every test passed', () => {
-    const report = {
-      success: true,
-      numTotalTests: 1,
-      numFailedTests: 0,
-      testResults: [file('add.test.mjs', 'passed')]
-    }
-    expect(tool.classify(report, listed, listed)).toEqual({ kind: 'pass' })
+  it('refuses a baseline in which a listed file holds no test that passed', () => {
+    const raw = report([file('add.test.mjs', 'skipped', [test('adds', 'skipped')])])
+    expect(tool.classify(run(raw), listed, null)).toEqual({
+      kind: 'invalid',
+      retry: false,
+      reason:
+        'add.test.mjs holds no test that passed: a file whose tests are all skipped, todo or filtered defends nothing'
+    })
+  })
+
+  it('refuses a mutant run in which a test that passed at the baseline did not finish', () => {
+    const raw = report([file('add.test.mjs', 'passed', [test('adds', 'skipped')])])
+    expect(tool.classify(run(raw), listed, baselinePassed)).toMatchObject({
+      kind: 'invalid',
+      retry: false,
+      reason: expect.stringMatching(
+        /^1 test\(s\) that passed at the baseline did not pass or fail here, first add\.test\.mjs › adds #1/
+      )
+    })
+  })
+
+  it('passes a run in which every test that passed at the baseline passed again, and counts what did not run', () => {
+    const raw = report([
+      file('add.test.mjs', 'passed', [test('adds', 'passed'), test('later', 'todo')])
+    ])
+    const verdict = tool.classify(run(raw), listed, baselinePassed)
+    expect(verdict).toMatchObject({ kind: 'pass', skipped: 1 })
+    expect(verdict.kind === 'pass' && [...verdict.passed]).toEqual(['add.test.mjs › adds #1'])
+  })
+
+  it('tells same-named tests apart by their place, so one cannot stand in for another', () => {
+    const raw = report([
+      file('add.test.mjs', 'passed', [test('adds', 'passed'), test('adds', 'skipped')])
+    ])
+    const both = new Set(['add.test.mjs › adds #1', 'add.test.mjs › adds #2'])
+    expect(tool.classify(run(raw), listed, both)).toMatchObject({
+      kind: 'invalid',
+      reason: expect.stringMatching(/first add\.test\.mjs › adds #2/)
+    })
+    expect(tool.classify(run(green), listed, null)).toMatchObject({
+      kind: 'pass',
+      skipped: 0
+    })
   })
 })
 
@@ -326,11 +468,33 @@ const TEST = [
   "test('adds', () => {",
   "  if (mod.marker === 'TOUCH') fs.appendFileSync(new URL('./mutation/round.json', import.meta.url), ' ')",
   "  if (mod.marker === 'REWRITE') fs.appendFileSync(new URL('./mod.mjs', import.meta.url), '// rewritten\\n')",
+  "  if (mod.marker === 'LITTER') {",
+  "    fs.mkdirSync(new URL('./more/', import.meta.url), { recursive: true })",
+  "    fs.writeFileSync(new URL('./more/left.test.mjs', import.meta.url), \"test('left', () => { throw new Error('residue') })\\n\")",
+  '  }',
+  "  if (mod.marker === 'SPILL') fs.appendFileSync(new URL('./other.txt', import.meta.url), 'spilt\\n')",
   "  if (process.env['EPH_FIXTURE_TOUCH_SPEC']) fs.appendFileSync(new URL('./mutation/round.json', import.meta.url), ' ')",
+  "  if (process.env['EPH_FIXTURE_WRITE_NEW']) fs.writeFileSync(new URL('./new.txt', import.meta.url), 'x')",
   '  expect(mod.add(2, 3)).toBe(5)',
   '})',
   ''
 ].join('\n')
+
+/** M1 rewritten to export a `marker` the fixture's test acts on. */
+const marking = (marker: string, why: string): Record<string, unknown> => ({
+  id: 'M1',
+  file: 'mod.mjs',
+  find: "export const unused = 'nobody reads this'",
+  replace: `export const unused = 'nobody reads this'; export const marker = '${marker}'`,
+  why
+})
+
+/** The fixture's spec with M1 replaced. */
+const specWith = (m1: Record<string, unknown>): Record<string, unknown> => {
+  const spec = validSpec()
+  ;(spec['mutants'] as Record<string, unknown>[])[1] = m1
+  return spec
+}
 
 /**
  * A global setup that refuses the way `test/global-setup.ts` does — by
@@ -402,6 +566,7 @@ function fixture(
   write('vitest.config.mjs', CONFIG(options.setup === true))
   write('refuse.mjs', REFUSE)
   write('mod.mjs', MODULE)
+  write('other.txt', 'a tracked file outside the round\n')
   write('add.test.mjs', options.test ?? TEST)
   write('mutation/round.json', `${JSON.stringify(spec, null, 2)}\n`)
   commit()
@@ -450,7 +615,7 @@ describe('a round over a real repository', () => {
 
       const result = round(repo.dir)
 
-      expect(result.out).toMatch(/baseline: PASS — 1 file, 1 tests: add\.test\.mjs/)
+      expect(result.out).toMatch(/baseline: PASS — 1 file, 1 passed: add\.test\.mjs/)
       expect(result.out).toMatch(/control {2}control {2}SURVIVED — certifies the round/)
       expect(result.out).toMatch(/M1 {2}killed — 1 tests failed/)
       expect(result.out).toMatch(/M3 {2}killed — a test file failed without a failing test: \S/)
@@ -526,7 +691,9 @@ describe('a round over a real repository', () => {
       const result = round(repo.dir)
 
       expect(result.out).toMatch(/baseline: PASS/)
-      expect(result.out).toMatch(/ROUND INVALID — M1: no test file ran: the suite refused to start/)
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: no test file ran: vitest wrote no report, or one holding no file — the suite refused to start/
+      )
       expect(result.out).not.toMatch(/M1 {2}killed/)
       expect(result.status).toBe(tool.EXIT.invalid)
       expect(repo.git(['status', '--porcelain'])).toBe('')
@@ -544,7 +711,7 @@ describe('a round over a real repository', () => {
       const result = round(repo.dir, ['--retries', '1'], { EPH_FIXTURE_REFUSE_ONCE: flags })
 
       expect(result.out).toMatch(
-        /baseline: no test file ran: the suite refused to start[^\n]*retrying \(1 of 1\)/
+        /baseline: no test file ran: vitest wrote no report, or one holding no file — the suite refused to start[^\n]*retrying \(1 of 1\)/
       )
       expect(result.out).toMatch(/ROUND OK — 1 of 1 real mutants killed/)
       expect(result.status).toBe(tool.EXIT.ok)
@@ -588,13 +755,16 @@ describe('a round over a real repository', () => {
     ROUND_TIMEOUT
   )
 
-  it('refuses a round whose files are not committed, so git can restore them', () => {
+  it('refuses a round in a tree that is not exactly what was committed, untracked files included', () => {
+    const clean =
+      /ROUND INVALID — the working tree must be clean before a round, untracked files included/
     const repo = fixture(validSpec())
     repo.write('mod.mjs', `${MODULE}// an uncommitted edit\r\n`)
 
     const dirty = round(repo.dir)
 
-    expect(dirty.out).toMatch(/ROUND INVALID — commit the round's files first[\s\S]*M mod\.mjs/)
+    expect(dirty.out).toMatch(new RegExp(`${clean.source}[\\s\\S]* M mod\\.mjs`))
+    expect(dirty.out).not.toMatch(/baseline/)
     expect(dirty.status).toBe(tool.EXIT.invalid)
 
     repo.commit()
@@ -606,8 +776,20 @@ describe('a round over a real repository', () => {
 
     const untracked = round(repo.dir)
 
-    expect(untracked.out).toMatch(/not tracked by git: extra\.test\.mjs/)
+    expect(untracked.out).toMatch(new RegExp(`${clean.source}[\\s\\S]*\\?\\? extra\\.test\\.mjs`))
     expect(untracked.status).toBe(tool.EXIT.invalid)
+
+    // A file the round never names still blocks it: whatever the round later
+    // finds changed in the tree, it must be able to say the round changed it.
+    repo.write('mutation/round.json', `${JSON.stringify(validSpec(), null, 2)}\n`)
+    repo.git(['add', 'mutation/round.json'])
+    repo.git(['commit', '-q', '-m', 'spec back'])
+    repo.write('scratch.txt', 'notes\n')
+
+    const unrelated = round(repo.dir)
+
+    expect(unrelated.out).toMatch(new RegExp(`${clean.source}[\\s\\S]*\\?\\? scratch\\.txt`))
+    expect(unrelated.status).toBe(tool.EXIT.invalid)
   })
 
   it('refuses a round file git ignores, which git status never shows', () => {
@@ -625,7 +807,7 @@ describe('a round over a real repository', () => {
     const result = round(repo.dir)
 
     expect(result.out).toMatch(
-      /ROUND INVALID — commit the round's files first[\s\S]*not tracked by git: ignored\.test\.mjs/
+      /ROUND INVALID — every round file must be committed, plainly tracked and inside the repository[\s\S]*not tracked by git: ignored\.test\.mjs/
     )
     expect(result.out).not.toMatch(/baseline/)
     expect(result.status).toBe(tool.EXIT.invalid)
@@ -697,24 +879,268 @@ describe('a round over a real repository', () => {
   )
 
   it(
-    'reports the test files that actually ran, not the ones it was given',
+    'calls a baseline that writes anywhere in the tree INVALID — a snapshot it creates would become its own oracle',
+    () => {
+      const repo = fixture(validSpec())
+
+      const result = round(repo.dir, [], { EPH_FIXTURE_WRITE_NEW: '1' })
+
+      expect(result.out).toMatch(/ROUND INVALID — the baseline run changed \?\? new\.txt/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'refuses a run in which vitest also ran a file the spec does not list',
     () => {
       const repo = fixture(validSpec())
       // vitest reads a file argument as a filter, so `add.test.mjs` also
-      // selects `more/add.test.mjs`: the score covers both, and must say so.
+      // selects `more/add.test.mjs`; a score covers exactly what was listed.
       repo.write('more/add.test.mjs', "test('more', () => { expect(1).toBe(1) })\n")
       repo.commit()
 
       const result = round(repo.dir)
 
       expect(result.out).toMatch(
-        /baseline: PASS — 2 files, 2 tests: add\.test\.mjs, more\/add\.test\.mjs/
+        /ROUND INVALID — baseline: vitest also ran files the spec does not list: more\/add\.test\.mjs/
       )
-      expect(result.out).toMatch(/Tests run: add\.test\.mjs, more\/add\.test\.mjs/)
-      expect(result.status).toBe(tool.EXIT.ok)
+      expect(result.status).toBe(tool.EXIT.invalid)
     },
     ROUND_TIMEOUT
   )
+
+  it(
+    'calls a mutant that leaves a file behind INVALID, so the residue cannot kill the next mutant',
+    () => {
+      const spec = specWith(
+        marking('LITTER', 'the test leaves a failing test file when it sees this')
+      )
+      ;(spec['mutants'] as Record<string, unknown>[]).push({
+        id: 'M2',
+        file: 'mod.mjs',
+        find: "'nobody reads this'",
+        replace: "'still nobody'",
+        why: 'no test reads `unused`, so only a residue could kill this'
+      })
+      const repo = fixture(spec)
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: \?\? more\/left\.test\.mjs changed while the suite ran/
+      )
+      expect(result.out).not.toMatch(/M[12] {2}killed/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a mutant that writes a tracked file outside the round INVALID',
+    () => {
+      const repo = fixture(
+        specWith(marking('SPILL', 'the test writes other.txt when it sees this'))
+      )
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: {1,2}M other\.txt changed while the suite ran/
+      )
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'refuses a baseline that passes because every test in a listed file was skipped',
+    () => {
+      const skipped = [
+        "import { add } from './mod.mjs'",
+        "describe.skip('add', () => { test('adds', () => { expect(add(2, 3)).toBe(5) }) })",
+        ''
+      ].join('\n')
+      const repo = fixture(validSpec(), { test: skipped })
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — baseline: add\.test\.mjs holds no test that passed: a file whose tests are all skipped/
+      )
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a mutant that makes a defending test skip INVALID, not a survivor',
+    () => {
+      const skipping = [
+        "import * as mod from './mod.mjs'",
+        "test.skipIf(mod.marker === 'SKIP')('adds', () => { expect(mod.add(2, 3)).toBe(5) })",
+        ''
+      ].join('\n')
+      const repo = fixture(specWith(marking('SKIP', 'the defending test skips itself')), {
+        test: skipping
+      })
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: 1 test\(s\) that passed at the baseline did not pass or fail here, first add\.test\.mjs › adds #1/
+      )
+      expect(result.out).not.toMatch(/M1 {2}SURVIVED/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a mutant that kills the vitest worker INVALID, not a survivor',
+    () => {
+      const repo = fixture(
+        specWith({
+          id: 'M1',
+          file: 'mod.mjs',
+          find: 'a + b',
+          replace: '(process.kill(process.pid), a + b)',
+          why: 'the worker dies mid-test, leaving it pending in a report that says success'
+        })
+      )
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — M1: vitest exited \S+ though its report holds no failure/
+      )
+      expect(result.out).not.toMatch(/M1 {2}SURVIVED/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a baseline with an unhandled error red, though vitest reports every test passed',
+    () => {
+      const rejecting = [
+        "import { add } from './mod.mjs'",
+        "test('adds', () => {",
+        "  void Promise.reject(new Error('a rejection nobody awaits'))",
+        '  expect(add(2, 3)).toBe(5)',
+        '})',
+        ''
+      ].join('\n')
+      const repo = fixture(validSpec(), { test: rejecting })
+
+      const result = round(repo.dir)
+
+      expect(result.out).toMatch(
+        /ROUND INVALID — baseline: vitest exited 1 though its report holds no failure/
+      )
+      expect(result.status).toBe(tool.EXIT.invalid)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it(
+    'calls a run that hits --timeout INVALID with its own reason, and does not retry it',
+    () => {
+      const hanging = [
+        "import * as mod from './mod.mjs'",
+        "test('adds', async () => {",
+        "  if (mod.marker === 'HANG') await new Promise((resolve) => setTimeout(resolve, 60_000))",
+        '  expect(mod.add(2, 3)).toBe(5)',
+        '}, 120_000)',
+        ''
+      ].join('\n')
+      const repo = fixture(specWith(marking('HANG', 'the test hangs when it sees this')), {
+        test: hanging
+      })
+
+      const result = round(repo.dir, ['--timeout', '15', '--retries', '1'])
+
+      expect(result.out).toMatch(/ROUND INVALID — M1: the run did not finish within --timeout/)
+      expect(result.out).not.toMatch(/retrying/)
+      expect(result.status).toBe(tool.EXIT.invalid)
+      expect(fs.readFileSync(path.join(repo.dir, 'mod.mjs'), 'utf8')).toBe(MODULE)
+    },
+    ROUND_TIMEOUT
+  )
+
+  it('refuses a round file with a second hard link, which would carry the mutant out of the repository', () => {
+    const repo = fixture(validSpec())
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-mutate-outside-'))
+    temps.push(outside)
+    const shared = path.join(outside, 'shared.mjs')
+    fs.writeFileSync(shared, MODULE)
+    fs.unlinkSync(path.join(repo.dir, 'mod.mjs'))
+    fs.linkSync(shared, path.join(repo.dir, 'mod.mjs'))
+    expect(repo.git(['status', '--porcelain'])).toBe('')
+
+    const result = round(repo.dir)
+
+    expect(result.out).toMatch(
+      /ROUND INVALID — every round file must be committed[\s\S]*mod\.mjs has 2 hard links/
+    )
+    expect(result.out).not.toMatch(/baseline/)
+    expect(fs.readFileSync(shared, 'utf8')).toBe(MODULE)
+  })
+
+  it('refuses a round file reached through a link on its path, and writes nothing outside', () => {
+    const spec = validSpec()
+    ;(spec['mutants'] as Record<string, unknown>[])[0]!['file'] = 'lib/mod.mjs'
+    const repo = fixture(spec)
+    repo.write('lib/mod.mjs', MODULE)
+    repo.commit()
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-mutate-outside-'))
+    temps.push(outside)
+    fs.writeFileSync(path.join(outside, 'mod.mjs'), MODULE)
+    removeTempDir(path.join(repo.dir, 'lib'))
+    fs.symlinkSync(outside, path.join(repo.dir, 'lib'), 'junction')
+
+    const result = round(repo.dir)
+
+    // Git for Windows reads a junction as the directory it stands for, so the
+    // tree looks clean and the real-path check is what refuses; git elsewhere
+    // sees a link where a directory was, so the clean-tree check refuses first.
+    // Either way the round never starts and nothing outside is written.
+    expect(result.out).toMatch(/ROUND INVALID — /)
+    expect(result.out).not.toMatch(/baseline/)
+    if (repo.git(['status', '--porcelain']) === '') {
+      expect(result.out).toMatch(
+        /lib\/mod\.mjs resolves to .*, outside the repository: a link on its path/
+      )
+    }
+    expect(result.status).toBe(tool.EXIT.invalid)
+    expect(fs.readFileSync(path.join(outside, 'mod.mjs'), 'utf8')).toBe(MODULE)
+  })
+
+  it('refuses a file whose edit git status cannot see, and leaves the edit alone', () => {
+    const repo = fixture(validSpec())
+    repo.git(['update-index', '--assume-unchanged', 'mod.mjs'])
+    const edited = `${MODULE}export const uncommitted = 'work in progress'\r\n`
+    repo.write('mod.mjs', edited)
+    expect(repo.git(['status', '--porcelain'])).toBe('')
+
+    const result = round(repo.dir)
+
+    expect(result.out).toMatch(/mod\.mjs does not hold the bytes git has indexed/)
+    expect(result.out).not.toMatch(/baseline/)
+    expect(result.status).toBe(tool.EXIT.invalid)
+    expect(fs.readFileSync(path.join(repo.dir, 'mod.mjs'), 'utf8')).toBe(edited)
+  })
+
+  it('refuses a file git is told not to look at, even when its bytes are what git indexed', () => {
+    const repo = fixture(validSpec())
+    repo.git(['update-index', '--skip-worktree', 'mod.mjs'])
+
+    const result = round(repo.dir)
+
+    expect(result.out).toMatch(/git is told not to look at mod\.mjs \(ls-files -v "S"/)
+    expect(result.out).not.toMatch(/does not hold the bytes/)
+    expect(result.status).toBe(tool.EXIT.invalid)
+  })
 
   it('checks a spec and its anchors without running anything when asked', () => {
     const repo = fixture(validSpec())

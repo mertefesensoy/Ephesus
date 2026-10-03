@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "package": "GYM-008",
-  "about": "the round refuses what it cannot score, restores what it changed, and stops on a survivor — the proposal's nine requirements",
+  "about": "the round refuses what it cannot score, restores what it changed, and stops on a survivor — the proposal's nine requirements and the nine findings of its refutation pass",
   "tests": ["test/scripts/mutate.test.ts"],
   "mutants": [
     {
@@ -27,6 +27,13 @@
       "why": "requirement 1: a misspelt control is refused by name, not read as absent"
     },
     {
+      "id": "R1-control-kill-ignored",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (mutant.control) {\n      if (verdict.kind === 'fail') {",
+      "replace": "    if (mutant.control) {\n      if (false) {",
+      "why": "requirement 1: a killed control voids the round"
+    },
+    {
       "id": "R2-red-baseline",
       "file": "scripts/mutate.cjs",
       "find": "  if (baseline.verdict.kind !== 'pass') {",
@@ -36,15 +43,15 @@
     {
       "id": "R3-zero-files-not-retried",
       "file": "scripts/mutate.cjs",
-      "find": "  if (report === null || ran.length === 0) {",
+      "find": "  if (report === null || files.length === 0) {",
       "replace": "  if (report === null) {",
       "why": "requirement 3: a report holding no file (a global setup that throws) is a refusal to retry"
     },
     {
       "id": "R3-refusal-scored-as-kill",
       "file": "scripts/mutate.cjs",
-      "find": "  if (report === null || ran.length === 0) {\n    return {\n      kind: 'invalid',",
-      "replace": "  if (report === null || ran.length === 0) {\n    return {\n      how: 'test',\n      failedFiles: [],\n      kind: 'fail',",
+      "find": "  if (report === null || files.length === 0) {\n    return {\n      kind: 'invalid',",
+      "replace": "  if (report === null || files.length === 0) {\n    return {\n      how: 'test',\n      failedFiles: [],\n      kind: 'fail',",
       "why": "requirement 3: the scratch-harness bug itself — a suite that refused to start scored as a kill"
     },
     {
@@ -55,11 +62,39 @@
       "why": "requirement 3: a run that skipped a listed file is INVALID"
     },
     {
+      "id": "R3-extra-file-allowed",
+      "file": "scripts/mutate.cjs",
+      "find": "  const extra = ran.filter((file) => !listed.includes(file))",
+      "replace": "  const extra = []",
+      "why": "requirement 7 as decided: a run that also ran an unlisted file is INVALID"
+    },
+    {
       "id": "R3-file-kill-dropped",
       "file": "scripts/mutate.cjs",
       "find": "  if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles }\n",
       "replace": "",
       "why": "a test file that cannot load is a kill, named as a file kill"
+    },
+    {
+      "id": "R3-exit-ignored",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (exit !== 0) {",
+      "replace": "  if (false) {",
+      "why": "refutation: a report with no failure from a vitest that exited non-zero is INVALID"
+    },
+    {
+      "id": "R3-skipped-file-defends",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (idle.length > 0) {",
+      "replace": "    if (false) {",
+      "why": "refutation: a listed file with no test that passed at the baseline defends nothing"
+    },
+    {
+      "id": "R3-unfinished-ignored",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (unfinished.length > 0) {",
+      "replace": "    if (false) {",
+      "why": "refutation: a test that passed at the baseline and did not finish voids the run"
     },
     {
       "id": "R3-invalid-run-scored",
@@ -76,6 +111,20 @@
       "why": "requirement 3: a refused run is retried after a wait"
     },
     {
+      "id": "R3-timeout-unread",
+      "file": "scripts/mutate.cjs",
+      "find": "      timedOut: child.error?.code === 'ETIMEDOUT'",
+      "replace": "      timedOut: false",
+      "why": "refutation: a run --timeout ended is named as one"
+    },
+    {
+      "id": "R3-timeout-retried",
+      "file": "scripts/mutate.cjs",
+      "find": "    return { kind: 'invalid', retry: false, reason: 'the run did not finish within --timeout' }",
+      "replace": "    return { kind: 'invalid', retry: true, reason: 'the run did not finish within --timeout' }",
+      "why": "refutation: a timed-out run is not retried"
+    },
+    {
       "id": "R4-others-unwatched",
       "file": "scripts/mutate.cjs",
       "find": "      const during = drift(root, clean).filter((file) => file !== mutant.file)",
@@ -90,11 +139,25 @@
       "why": "requirement 4: the mutated file itself changing while the suite runs voids the verdict"
     },
     {
-      "id": "R4-baseline-unwatched",
+      "id": "R4-tree-unwatched",
       "file": "scripts/mutate.cjs",
-      "find": "  if (changed.length > 0) throw new Invalid(`the baseline run changed ${changed.join(', ')}`)\n",
-      "replace": "",
+      "find": "      const wrote = treeChanges(root, files)",
+      "replace": "      const wrote = []",
+      "why": "refutation: a run that writes anywhere else in the tree voids the verdict"
+    },
+    {
+      "id": "R4-baseline-hash-unwatched",
+      "file": "scripts/mutate.cjs",
+      "find": "  const changed = [...drift(root, clean), ...treeChanges(root, files)]",
+      "replace": "  const changed = [...treeChanges(root, files)]",
       "why": "requirement 4: a baseline that writes a round file voids the round"
+    },
+    {
+      "id": "R4-baseline-tree-unwatched",
+      "file": "scripts/mutate.cjs",
+      "find": "  const changed = [...drift(root, clean), ...treeChanges(root, files)]",
+      "replace": "  const changed = [...drift(root, clean)]",
+      "why": "refutation: a baseline that writes anywhere in the tree voids the round"
     },
     {
       "id": "R4-second-fault-hidden",
@@ -111,18 +174,46 @@
       "why": "requirement 5: the edit is byte-exact (the Python text-mode bug, CRLF rewritten)"
     },
     {
-      "id": "R6-dirty-allowed",
+      "id": "R6-tree-not-checked",
       "file": "scripts/mutate.cjs",
-      "find": "  if (untracked.length > 0 || dirty !== '') {",
-      "replace": "  if (untracked.length > 0) {",
-      "why": "requirement 6: a round's files must be committed — a modified one is refused"
+      "find": "  const unclean = treeChanges(root, [])",
+      "replace": "  const unclean = []",
+      "why": "requirement 6 as decided: the round starts from a tree that is exactly what was committed"
     },
     {
       "id": "R6-untracked-allowed",
       "file": "scripts/mutate.cjs",
-      "find": "  if (untracked.length > 0 || dirty !== '') {",
-      "replace": "  if (dirty !== '') {",
-      "why": "requirement 6: a round's files must be tracked — an untracked one is refused"
+      "find": "    if (!tags.has(file)) problems.push(`not tracked by git: ${file}`)",
+      "replace": "    if (false) problems.push(`not tracked by git: ${file}`)",
+      "why": "requirement 6: a round file git does not track (an ignored one) is refused"
+    },
+    {
+      "id": "R6-link-escape",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {",
+      "replace": "    if (false) {",
+      "why": "refutation: a round file reached through a link outside the repository is refused"
+    },
+    {
+      "id": "R6-hard-link",
+      "file": "scripts/mutate.cjs",
+      "find": "    } else if (stat.nlink > 1) {",
+      "replace": "    } else if (false) {",
+      "why": "refutation: a round file with a second hard link is refused"
+    },
+    {
+      "id": "R6-index-bytes",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (bytes[i] !== indexed.get(file)) {",
+      "replace": "    if (false) {",
+      "why": "refutation: a file whose bytes differ from its index blob is refused before its edit is destroyed"
+    },
+    {
+      "id": "R6-index-flags",
+      "file": "scripts/mutate.cjs",
+      "find": "    if (tags.get(file) !== 'H') {",
+      "replace": "    if (false) {",
+      "why": "refutation: a file git is told not to look at is refused"
     },
     {
       "id": "R6-restore-not-git",
@@ -130,13 +221,6 @@
       "find": "    git(root, ['checkout', '--', mutant.file])",
       "replace": "    fs.writeFileSync(path.join(root, mutant.file), fs.readFileSync(path.join(root, mutant.file)))",
       "why": "requirement 6: git restores the file, and the restore is proved"
-    },
-    {
-      "id": "R7-files-as-given",
-      "file": "scripts/mutate.cjs",
-      "find": "  console.log(`baseline: PASS — ${counted(baseline)}: ${baseline.ran.join(', ')}`)",
-      "replace": "  console.log(`baseline: PASS — ${counted(baseline)}: ${spec.tests.join(', ')}`)",
-      "why": "requirement 7: the round reports the files that ran, not the ones it was given"
     },
     {
       "id": "R8-precheck-zero",
@@ -160,6 +244,27 @@
       "why": "requirement 8: overlapping occurrences count, so \"exactly once\" cannot hide a second"
     },
     {
+      "id": "R8-dash-path",
+      "file": "scripts/mutate.cjs",
+      "find": "  if (parts.some((part) => part.startsWith('-'))) {",
+      "replace": "  if (false) {",
+      "why": "refutation: a path vitest would read as an option is refused"
+    },
+    {
+      "id": "R8-malformed-find",
+      "file": "scripts/mutate.cjs",
+      "find": "    } else if (!wellFormed(mutant.find)) {",
+      "replace": "    } else if (false) {",
+      "why": "refutation: a find in malformed Unicode is refused"
+    },
+    {
+      "id": "R8-malformed-replace",
+      "file": "scripts/mutate.cjs",
+      "find": "    } else if (!wellFormed(mutant.replace)) {",
+      "replace": "    } else if (false) {",
+      "why": "refutation: a replace in malformed Unicode is refused"
+    },
+    {
       "id": "R9-survivor-exit-ok",
       "file": "scripts/mutate.cjs",
       "find": "    return EXIT.survivors",
@@ -172,13 +277,6 @@
       "find": "      for (const line of TRIAGE) console.log(`  ${line}`)\n",
       "replace": "",
       "why": "requirement 9: a survivor prints the triage question"
-    },
-    {
-      "id": "C-control-kill-ignored",
-      "file": "scripts/mutate.cjs",
-      "find": "    if (mutant.control) {\n      if (verdict.kind === 'fail') {",
-      "replace": "    if (mutant.control) {\n      if (false) {",
-      "why": "requirement 1: a killed control voids the round"
     },
     {
       "id": "C-crash-exits-1",

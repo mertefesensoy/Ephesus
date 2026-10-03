@@ -21,12 +21,12 @@
  * 2. The suite runs once before the first mutant, and the round stops unless
  *    it is green — a red baseline makes every mutant, the control included,
  *    look killed (M8b.3).
- * 3. A run that wrote no report, ran no tests, or did not run every listed
- *    file is INVALID, never a kill. That is read from vitest's JSON report,
- *    not from the exit code or the console: the suite's free-memory gate
- *    refuses to start and exits 1 (`test/global-setup.ts`), and a harness
- *    scoring by exit code reported those refusals as clean sweeps
- *    (2026-09-09, 2026-10-02). A refused run is retried after a wait.
+ * 3. A run is read from vitest's JSON report, never from its exit code alone:
+ *    the suite's free-memory gate refuses to start and exits 1
+ *    (`test/global-setup.ts`), and a harness scoring by exit code reported
+ *    those refusals as clean sweeps (2026-09-09, 2026-10-02). A run in which no
+ *    file ran, or a listed file did not run, or an unlisted one did, is
+ *    INVALID; a refusal to start is retried after a wait.
  * 4. Every file in the round — the mutated files, the test files and the spec
  *    — is hashed when the round starts, after every run and after every
  *    restore, and every mutant is built from the bytes the round started with.
@@ -34,11 +34,11 @@
  *    after its check had passed (2026-09-09, 2026-10-02).
  * 5. Files are read and written as bytes, so a restore is exact and a CRLF
  *    never appears in an LF file.
- * 6. The round's files must be committed and clean: `git checkout --` is the
- *    restore and `git status` is a second check. That is why this file is in
- *    `GIT_ALLOWLIST` (`scripts/check-invariants.cjs`) and `GIT_DOORS`
- *    (`test/temp-hygiene.test.ts`): it runs git on the development repository
- *    and never on a harness home (DECISIONS-LOG 2026-10-03).
+ * 6. The round's files must be committed, clean and plainly tracked:
+ *    `git checkout --` is the restore and `git status` a second check. That is
+ *    why this file is in `GIT_ALLOWLIST` (`scripts/check-invariants.cjs`) and
+ *    `GIT_DOORS` (`test/temp-hygiene.test.ts`): it runs git on the development
+ *    repository and never on a harness home (DECISIONS-LOG 2026-10-03).
  * 7. Every run prints the test files it actually ran. A score is scoped to
  *    them, and M8b.3's 6 of 6 kills were followed by two scenario failures the
  *    round never loaded.
@@ -47,6 +47,17 @@
  *    matching twice is an edit nobody chose.
  * 9. A survivor exits 1 and prints the triage question, so it stops the round
  *    instead of decorating a table.
+ *
+ * And what an adversarial pass then broke, every case reproduced before it
+ * was closed (DECISIONS-LOG 2026-10-03): a run is scored over the tests that
+ * PASSED at the baseline, so a skipped file defends nothing and a worker that
+ * dies is not a survival; a report with no failure from a vitest that exited
+ * non-zero (an unhandled error, a dead worker) is INVALID; the whole working
+ * tree is guarded, not only the round's files; a round file must sit inside
+ * the repository by its real path, have one hard link, hold the bytes git
+ * indexed and carry no flag that hides it from git; a timed-out run is
+ * INVALID and not retried; and a spec cannot name a path vitest would read as
+ * an option, or an anchor in malformed Unicode.
  */
 const { Buffer } = require('node:buffer')
 const { spawnSync } = require('node:child_process')
@@ -70,6 +81,13 @@ const TRIAGE = [
 
 /** The round cannot be scored. Carries the reason a reader acts on. */
 class Invalid extends Error {}
+
+/**
+ * Contract: pure. Whether `text` survives UTF-8 unchanged. A lone surrogate
+ * does not: it is encoded as U+FFFD, so an anchor holding one would match text
+ * its author never wrote.
+ */
+const wellFormed = (text) => Buffer.from(text, 'utf8').toString('utf8') === text
 
 /**
  * Contract: pure. Every problem with a parsed spec, as sentences; empty when it
@@ -124,10 +142,14 @@ function specProblems(doc) {
     problems.push(...pathProblems(mutant.file, `${at}.file`))
     if (typeof mutant.find !== 'string' || mutant.find === '') {
       problems.push(`${at}.find must be a non-empty string`)
+    } else if (!wellFormed(mutant.find)) {
+      problems.push(`${at}.find is not well-formed Unicode, so it would match text nobody wrote`)
     }
     if (typeof mutant.replace !== 'string') problems.push(`${at}.replace must be a string`)
     else if (mutant.replace === mutant.find) {
       problems.push(`${at}.replace equals its find, so applying it changes nothing`)
+    } else if (!wellFormed(mutant.replace)) {
+      problems.push(`${at}.replace is not well-formed Unicode`)
     }
     if (typeof mutant.why !== 'string' || mutant.why.trim() === '') {
       problems.push(`${at}.why must say which sentence the mutant attacks`)
@@ -144,15 +166,22 @@ function specProblems(doc) {
   return problems
 }
 
-/** Contract: pure. A spec path is relative, forward-slashed and stays inside the repository. */
+/**
+ * Contract: pure. A spec path is relative, forward-slashed, stays inside the
+ * repository, and has no part vitest's command line would read as an option.
+ */
 function pathProblems(value, at) {
   if (typeof value !== 'string' || value === '') return [`${at} must be a non-empty path`]
   if (value.includes('\\')) return [`${at} "${value}" must use forward slashes`]
   if (path.posix.isAbsolute(value) || /^[A-Za-z]:/.test(value)) {
     return [`${at} "${value}" must be relative to the repository root`]
   }
-  if (value.split('/').some((part) => part === '..' || part === '.' || part === '')) {
+  const parts = value.split('/')
+  if (parts.some((part) => part === '..' || part === '.' || part === '')) {
     return [`${at} "${value}" must name a file inside the repository, without "." or ".." steps`]
+  }
+  if (parts.some((part) => part.startsWith('-'))) {
+    return [`${at} "${value}" has a part beginning with "-", which vitest would read as an option`]
   }
   return []
 }
@@ -201,25 +230,147 @@ function git(root, args) {
 }
 
 /**
- * Contract: pure. What one vitest run means for the round, from its JSON
- * report alone. `report` is the parsed report, or null when none was written;
- * `listed` are the spec's test files and `ran` the report's files, both as
- * repository paths. `kind` is `pass`, `fail` or `invalid`; a failure is a
- * `test` failure (an assertion) or a `file` failure (the file could not load,
- * or a hook threw), and the second is still a kill, named so it is triaged.
+ * The working tree's changes outside the round's own files, as `git status`
+ * prints them, untracked files one by one; ignored files are not shown. The
+ * round's files are left to their hashes, which see what `status` can miss —
+ * so each check guards ground the other does not, and neither can hide behind
+ * the other.
  */
-function classify(report, listed, ran) {
+function treeChanges(root, files) {
+  return git(root, ['status', '--porcelain', '-z', '--untracked-files=all'])
+    .split('\0')
+    .filter(Boolean)
+    .filter((entry) => !files.includes(entry.slice(3)))
+}
+
+/**
+ * Every reason a round file is not what git holds, where git holds it
+ * (requirement 6). Each refusal is a way the restore would have lied: a file
+ * reached through a link outside the repository is written there; a second
+ * hard link keeps the mutant after the restore replaces this one; bytes that
+ * differ from the index are an edit `git checkout --` would destroy; and a file
+ * git is told not to look at is one it will neither report nor restore.
+ */
+function fileProblems(root, files) {
+  const problems = []
+  const realRoot = fs.realpathSync.native(root)
+  const plain = []
+  for (const file of files) {
+    const full = path.join(root, file)
+    const stat = fs.lstatSync(full, { throwIfNoEntry: false })
+    if (stat === undefined || !stat.isFile()) {
+      problems.push(`${file} is not a regular file in ${root}`)
+      continue
+    }
+    const real = fs.realpathSync.native(full)
+    const inside = path.relative(realRoot, real)
+    if (inside === '' || inside.startsWith('..') || path.isAbsolute(inside)) {
+      problems.push(`${file} resolves to ${real}, outside the repository: a link on its path`)
+    } else if (stat.nlink > 1) {
+      problems.push(
+        `${file} has ${stat.nlink} hard links: a mutant written to it lands in every one, and the restore puts back only this one`
+      )
+    } else {
+      plain.push(file)
+    }
+  }
+  if (plain.length === 0) return problems
+  const tags = new Map(
+    git(root, ['ls-files', '-v', '-z', '--', ...plain])
+      .split('\0')
+      .filter(Boolean)
+      .map((entry) => [entry.slice(2), entry[0]])
+  )
+  const indexed = new Map(
+    git(root, ['ls-files', '-s', '-z', '--', ...plain])
+      .split('\0')
+      .filter(Boolean)
+      .map((entry) => [entry.split('\t')[1], entry.split(' ')[1]])
+  )
+  const tracked = plain.filter((file) => tags.has(file))
+  for (const file of plain) {
+    if (!tags.has(file)) problems.push(`not tracked by git: ${file}`)
+  }
+  if (tracked.length === 0) return problems
+  const bytes = git(root, ['hash-object', '--', ...tracked])
+    .trim()
+    .split('\n')
+  tracked.forEach((file, i) => {
+    if (bytes[i] !== indexed.get(file)) {
+      problems.push(
+        `${file} does not hold the bytes git has indexed: an edit \`git status\` is not showing, which the restore would destroy`
+      )
+    }
+    if (tags.get(file) !== 'H') {
+      problems.push(
+        `git is told not to look at ${file} (ls-files -v "${tags.get(file)}": assume-unchanged or skip-worktree), so it would neither report nor restore it`
+      )
+    }
+  })
+  return problems
+}
+
+/**
+ * Contract: pure. vitest's report as the round reads it: per file, its path in
+ * the repository, its status, its message and its tests, sorted by path.
+ * `null` when no report was written.
+ */
+function filesOf(report, root) {
+  if (report === null) return null
+  return (report.testResults ?? [])
+    .map((file) => ({
+      file: path.relative(root, file.name).split(path.sep).join('/'),
+      status: file.status,
+      message: file.message ?? '',
+      tests: (file.assertionResults ?? []).map((test) => ({
+        name: test.fullName,
+        status: test.status
+      }))
+    }))
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+}
+
+/** Contract: pure. The tests with `status`, each named by its file, its full name and its place among same-named tests. */
+function testsWith(files, status) {
+  const keys = []
+  for (const file of files) {
+    const seen = new Map()
+    for (const test of file.tests) {
+      const n = (seen.get(test.name) ?? 0) + 1
+      seen.set(test.name, n)
+      if (test.status === status) keys.push(`${file.file} › ${test.name} #${n}`)
+    }
+  }
+  return keys
+}
+
+/**
+ * Contract: pure. What one vitest run means for the round. `run` is the report
+ * (`null` when none was written), its files as `filesOf` reads them, vitest's
+ * exit status and whether `--timeout` ended it; `listed` are the spec's test
+ * files; `expected` is the set of tests that passed at the baseline, or `null`
+ * when this run IS the baseline. `kind` is `pass`, `fail` or `invalid`. A
+ * failure is a `test` failure (an assertion) or a `file` failure (a file that
+ * could not load, or a hook that threw), and the second is still a kill, named
+ * so it is triaged. A pass carries the tests that passed and the count skipped.
+ */
+function classify(run, listed, expected) {
+  const { report, files, exit, timedOut } = run
+  if (timedOut) {
+    return { kind: 'invalid', retry: false, reason: 'the run did not finish within --timeout' }
+  }
   // Measured on vitest 4.1.11: a global setup that THROWS — the suite's
   // free-memory gate does — writes a report holding no file at all, and one
   // that exits writes none. Either way nothing ran, and waiting may fix it.
-  if (report === null || ran.length === 0) {
+  if (report === null || files.length === 0) {
     return {
       kind: 'invalid',
       retry: true,
       reason:
-        'no test file ran: the suite refused to start (the free-memory gate), its setup failed, or it was killed'
+        'no test file ran: vitest wrote no report, or one holding no file — the suite refused to start (the free-memory gate does this), its setup failed, or it was killed'
     }
   }
+  const ran = files.map((file) => file.file)
   const missing = listed.filter((file) => !ran.includes(file))
   if (missing.length > 0) {
     return {
@@ -228,11 +379,26 @@ function classify(report, listed, ran) {
       reason: `listed test files did not run: ${missing.join(', ')}`
     }
   }
-  const failedFiles = (report.testResults ?? []).filter((file) => file.status === 'failed')
+  const extra = ran.filter((file) => !listed.includes(file))
+  if (extra.length > 0) {
+    return {
+      kind: 'invalid',
+      retry: false,
+      reason: `vitest also ran files the spec does not list: ${extra.join(', ')} — a file argument is a filter, so list them or name a narrower path`
+    }
+  }
+  const failedFiles = files.filter((file) => file.status === 'failed')
   if ((report.numFailedTests ?? 0) > 0) return { kind: 'fail', how: 'test', failedFiles }
   if (failedFiles.length > 0) return { kind: 'fail', how: 'file', failedFiles }
-  if ((report.numTotalTests ?? 0) === 0) {
-    return { kind: 'invalid', retry: false, reason: 'the listed test files hold no test that ran' }
+  // The report says nothing failed. vitest's exit says otherwise when an
+  // error escaped every test or a worker died: its report keeps
+  // `success: true` through both. Neither is a pass, and neither is a kill.
+  if (exit !== 0) {
+    return {
+      kind: 'invalid',
+      retry: false,
+      reason: `vitest exited ${String(exit)} though its report holds no failure: an error outside any test, or a worker that died`
+    }
   }
   if (report.success !== true) {
     return {
@@ -241,7 +407,33 @@ function classify(report, listed, ran) {
       reason: 'vitest reported failure without a failing test or file'
     }
   }
-  return { kind: 'pass' }
+  const passed = new Set(testsWith(files, 'passed'))
+  if (expected === null) {
+    const idle = files
+      .filter((file) => !file.tests.some((test) => test.status === 'passed'))
+      .map((file) => file.file)
+    if (idle.length > 0) {
+      return {
+        kind: 'invalid',
+        retry: false,
+        reason: `${idle.join(', ')} holds no test that passed: a file whose tests are all skipped, todo or filtered defends nothing`
+      }
+    }
+  } else {
+    const unfinished = [...expected].filter((test) => !passed.has(test))
+    if (unfinished.length > 0) {
+      return {
+        kind: 'invalid',
+        retry: false,
+        reason: `${unfinished.length} test(s) that passed at the baseline did not pass or fail here, first ${unfinished[0]}: a worker died, or the mutant made them skip`
+      }
+    }
+  }
+  const skipped = files.reduce(
+    (sum, file) => sum + file.tests.filter((test) => test.status !== 'passed').length,
+    0
+  )
+  return { kind: 'pass', passed, skipped }
 }
 
 /** The vitest this repository runs: the round's own first, then this tool's. */
@@ -250,8 +442,11 @@ function vitestBin(root) {
   return path.join(path.dirname(manifest), 'vitest.mjs')
 }
 
-/** One vitest run over the listed files, read back as a report. Blocks until it ends. */
-function runSuite(root, tests, options) {
+/**
+ * One vitest run over the listed files, read back as a report and scored
+ * against `expected` (see `classify`). Blocks until it ends or times out.
+ */
+function runSuite(root, tests, options, expected) {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'eph-mutate-'))
   try {
     // Absolute, because vitest resolves a relative `--outputFile` against its
@@ -275,20 +470,29 @@ function runSuite(root, tests, options) {
         report = null
       }
     }
-    const ran = (report?.testResults ?? [])
-      .map((file) => path.relative(root, file.name).split(path.sep).join('/'))
-      .sort()
+    const files = filesOf(report, root)
+    const run = {
+      report,
+      files,
+      exit: child.status ?? child.signal,
+      timedOut: child.error?.code === 'ETIMEDOUT'
+    }
     const log = `${child.stdout ?? ''}${child.stderr ?? ''}`.trim().split('\n').slice(-6)
-    return { verdict: classify(report, tests, ran), report, ran, log }
+    return {
+      verdict: classify(run, tests, expected),
+      report,
+      ran: (files ?? []).map((file) => file.file),
+      log
+    }
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true })
   }
 }
 
 /** A run, retried while its result is a refusal to start rather than an answer. */
-function runAnswered(root, tests, options, label) {
+function runAnswered(root, tests, options, label, expected) {
   for (let attempt = 0; ; attempt++) {
-    const run = runSuite(root, tests, options)
+    const run = runSuite(root, tests, options, expected)
     const { verdict } = run
     if (verdict.kind !== 'invalid' || !verdict.retry || attempt >= options.retries) return run
     console.log(
@@ -298,11 +502,15 @@ function runAnswered(root, tests, options, label) {
   }
 }
 
-const counted = (run) =>
-  `${run.ran.length} file${run.ran.length === 1 ? '' : 's'}, ${run.report?.numTotalTests ?? 0} tests`
+const counted = (run) => {
+  const files = `${run.ran.length} file${run.ran.length === 1 ? '' : 's'}`
+  if (run.verdict.kind !== 'pass') return files
+  const skipped = run.verdict.skipped > 0 ? `, ${run.verdict.skipped} not run` : ''
+  return `${files}, ${run.verdict.passed.size} passed${skipped}`
+}
 
 const firstLine = (failedFiles) =>
-  failedFiles.map((file) => (file.message ?? '').split('\n')[0]).find(Boolean) ?? 'no message'
+  failedFiles.map((file) => file.message.split('\n')[0]).find(Boolean) ?? 'no message'
 
 /** A fault as the sentence the reader gets: a refusal's own words, or a crash's stack. */
 const described = (err) =>
@@ -349,23 +557,18 @@ function runRound(specArg, options) {
   if (specFile.startsWith('..')) throw new Invalid(`the spec is outside the repository ${root}`)
   const files = [...new Set([specFile, ...spec.tests, ...spec.mutants.map((m) => m.file)])]
 
-  for (const file of files) {
-    const stat = fs.lstatSync(path.join(root, file), { throwIfNoEntry: false })
-    if (stat === undefined || !stat.isFile()) {
-      throw new Invalid(`${file} is not a file in ${root} (a link is refused too)`)
-    }
-  }
-  // Requirement 6: `git checkout --` can only restore what git holds. Both
-  // questions are asked because each is blind where the other sees: `status`
-  // never shows a file `.gitignore` hides, and `ls-files` never shows an edit.
-  const tracked = git(root, ['ls-files', '-z', '--', ...files])
-    .split('\0')
-    .filter(Boolean)
-  const untracked = files.filter((file) => !tracked.includes(file))
-  const dirty = git(root, ['status', '--porcelain', '--', ...files]).trim()
-  if (untracked.length > 0 || dirty !== '') {
+  // Requirement 6, and the tree around it: the round starts from a tree that is
+  // exactly what was committed, so anything it finds changed later, it changed.
+  const unclean = treeChanges(root, [])
+  if (unclean.length > 0) {
     throw new Invalid(
-      `commit the round's files first, so git can restore them and check the restore:\n  ${[...untracked.map((file) => `not tracked by git: ${file}`), ...dirty.split('\n').filter(Boolean)].join('\n  ')}`
+      `the working tree must be clean before a round, untracked files included — commit, stash or remove:\n  ${unclean.join('\n  ')}`
+    )
+  }
+  const refused = fileProblems(root, files)
+  if (refused.length > 0) {
+    throw new Invalid(
+      `every round file must be committed, plainly tracked and inside the repository, so git can restore it:\n  ${refused.join('\n  ')}`
     )
   }
   // Requirement 8, before anything runs.
@@ -390,7 +593,7 @@ function runRound(specArg, options) {
   // and one that lands after is caught when the run ends.
   const cleanBytes = new Map(files.map((file) => [file, fs.readFileSync(path.join(root, file))]))
   const clean = new Map([...cleanBytes].map(([file, bytes]) => [file, sha256(bytes)]))
-  const baseline = runAnswered(root, spec.tests, options, 'baseline')
+  const baseline = runAnswered(root, spec.tests, options, 'baseline', null)
   if (baseline.verdict.kind !== 'pass') {
     const why =
       baseline.verdict.kind === 'fail'
@@ -398,9 +601,10 @@ function runRound(specArg, options) {
         : baseline.verdict.reason
     throw new Invalid(`baseline: ${why}\n  ${baseline.log.join('\n  ')}`)
   }
-  const changed = drift(root, clean)
+  const changed = [...drift(root, clean), ...treeChanges(root, files)]
   if (changed.length > 0) throw new Invalid(`the baseline run changed ${changed.join(', ')}`)
   console.log(`baseline: PASS — ${counted(baseline)}: ${baseline.ran.join(', ')}`)
+  const expected = baseline.verdict.passed
 
   console.log(
     'an interrupted round leaves its mutant in the file: `git status` shows it, `git checkout -- <file>` restores it, and the next round refuses to start until then'
@@ -413,12 +617,13 @@ function runRound(specArg, options) {
     let run = null
     let fault = null
     try {
-      run = runAnswered(root, spec.tests, options, mutant.id)
+      run = runAnswered(root, spec.tests, options, mutant.id, expected)
       const during = drift(root, clean).filter((file) => file !== mutant.file)
       if (sha256(fs.readFileSync(target)) !== sha256(mutated)) during.unshift(mutant.file)
-      if (during.length > 0) {
+      const wrote = treeChanges(root, files)
+      if (during.length > 0 || wrote.length > 0) {
         throw new Invalid(
-          `${mutant.id}: ${during.join(', ')} changed while the suite ran — a sync client or the suite wrote it, so the verdict cannot be trusted`
+          `${mutant.id}: ${[...during, ...wrote].join(', ')} changed while the suite ran — the suite, the mutant or a sync client wrote it, so the verdict cannot be trusted`
         )
       }
     } catch (err) {
@@ -455,9 +660,6 @@ function runRound(specArg, options) {
     } else {
       survivors.push(mutant)
       console.log(`  ${mutant.id}  SURVIVED  ${where}`)
-    }
-    if (run.ran.join() !== baseline.ran.join()) {
-      console.log(`    ran a different file set from the baseline: ${run.ran.join(', ')}`)
     }
   }
 
@@ -527,6 +729,7 @@ module.exports = {
   SCHEMA_VERSION,
   Invalid,
   classify,
+  filesOf,
   main,
   mutate,
   occurrences,
