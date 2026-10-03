@@ -9,6 +9,15 @@ accepted, FR-15/FR-16/§6.11, SDD §13, S-NATIVE/S-BENCH, the watchlist rows,
 eight DECISIONS-LOG entries), and **no package may begin until the Architect says
 so.** A session resuming at PROGRESS's first unchecked box asks first.
 
+**What follows this milestone** is planned in [`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md)
+(2026-10-03): seven milestones, M9b to M9h — five between M9 and M7b, two after
+it. **Nothing in this file is changed by it.** §10's seven decisions stand, and
+their numbering is continued there as DD-M9-8 onward. Two passages below are now
+read together with that file: §9's *"M7b moves behind M9"* — M7b now follows M9f,
+whose gateway absorbs its chat bridge — and M9.7's *"nothing is deleted"*, which
+[ADR-0040](./adr/ADR-0040-the-floor-is-a-view-mode.md) keeps while making the floor
+a view mode.
+
 **Where this comes from.** The Architect's directive of 2026-10-02, restated in §2;
 the project's own record (§1); and a study of the three sources the Architect named
 (§3). The study was done by reading, from outside the Stoa, because none of the

@@ -6906,7 +6906,178 @@ on the watchlist (DD-M9-6); bench T1 subsumes the unattended hour (DD-M9-7).
       in the same session; a `docs/status/` snapshot.
 - [ ] **M9 exit** — the six criteria of M9-PLAN §7, each with tier A/B evidence.
 
+## Phase 9, continued — M9b to M9f: the agentic harness, to v1 (plan APPROVED FOR PLANNING 2026-10-03; build NOT started)
+
+Derived from the Architect's direction of 2026-10-03 — the feature sets of the two
+harnesses on the Stoa watchlist as Ephesus's target, the brand core kept, the floor
+an optional view mode — and recorded in full in
+[`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md): the sixteen features mapped to their
+subsystems, the rules every capability enters under, every package with its
+acceptance, tests and risk, the bench tasks, the dependency memos expected, and the
+decisions. Digest in IMPLEMENTATION. **M9 above is unchanged and comes first. Five
+milestones follow it and precede M7b — this section. Two more, M9g and M9h, follow
+M7b and are registered below it** (DD-M9-8, DD-M9-18).
+
+The Architect approved the plan *for planning* on 2026-10-03, in the same words he
+used for M9: the documentation stands as the project's plan, and nothing is built.
+
+**Every box below is unticked on purpose.** The standing instruction is to plan and
+not to build: a session resuming here asks the Architect whether the build may
+begin — M9's first — and does not start it. Each milestone opens with a contract
+package that writes its ADRs, SRS group, SDD, THREAT-MODEL and TEST-STRATEGY
+sections and runs one governed `/research` cycle at a pin; the questions each
+contract asks the Architect are listed in PHASE-9-PLAN §11 and are asked then, not
+assumed now.
+
+Decisions recorded 2026-10-03 (DECISIONS-LOG): follow-on milestones, M9 untouched
+(DD-M9-8); a zero-dependency core and a memo per package after it (DD-M9-9);
+features before M7b, M7b.4 absorbed (DD-M9-10); workspace by default, the floor a
+view mode — ADR-0040 (DD-M9-11); web reach as a per-hire grant, and outside content
+arms the gate (DD-M9-12); one company-wide MCP registry (DD-M9-13); the loop stays
+local and tools may run in a declared backend — SRS §1.2 amended (DD-M9-14); the
+phone served first the way Hermes Agent does it — the gateway to that standard
+and the workspace in a browser — and then by Ephesus's own companion, a milestone
+of its own, designed before it is built (DD-M9-15); speech as output only, the
+rest of M6.9 still deferred (DD-M9-16); both watchlist rows' tags amended
+(DD-M9-17); and, asked again once the estimate was known to be roughly double what
+he had been quoted, **M7b after M9f** — v1 is M9 through M9f, with M9g and M9h
+after it (DD-M9-18, amending DD-M9-10).
+
+### M9b — The workspace: a harness you talk to
+
+- [ ] **M9b.0 The contract** — the conversation and skills ADRs; the SRS group;
+      SDD; the UI-DESIGN §4 amendment; S-WORKSPACE, S-SKILL; T-SKILL and the
+      `skills` switch; one `/research` cycle per source at a pin. Asks: Artemis's
+      default engine.
+      *Evidence owed: the briefs validated; ADR append-only check green.*
+- [ ] **M9b.1 View modes** — ADR-0040 built: `view` in `config.json`, absent means
+      `workspace`; the floor not loaded unless chosen; nothing deleted.
+      *Evidence owed: the module-graph assertion; the floor suites green in CI; the
+      upgrade-path test on a home written before the field existed.*
+- [ ] **M9b.2 The conversation** — a pure projection of the transcript; input down
+      the existing command path; gates inline through the one handler; a wrapped
+      hire shows its terminal; `ephctl converse`.
+      *Evidence owed: the projection suite; one spy, two callers; model output
+      rendered inert; mutation round with a control.*
+- [ ] **M9b.3 Sessions, and choosing a model** — the `companion` template; the
+      model picker over capability records; resume; session search.
+- [ ] **M9b.4 Attachments** — validated in main; the vision refusal.
+- [ ] **M9b.5 Skills** — `SKILL.md`; inspect/install split; granted by name;
+      propose through the Gymnasium; no agent write path under `tools/`.
+      *Evidence owed: S-SKILL; the API-surface test; T-SKILL rows with `skills` on
+      and off; the adversarial pass recorded with what it tried.*
+- [ ] **M9b.6 The Architect's profile, and notes** — budgeted `architect.md`; the
+      over-budget error; quick capture into the knowledge shelf.
+- [ ] **M9b.7 Exit review** — PHASE-9-PLAN §6, M9b's exit, by `/milestone-review`.
+- [ ] **M9b exit** — the six criteria, each with tier A/B evidence.
+
+### M9c — The hearth: local models, first-class
+
+- [ ] **M9c.0 The contract** — the dependency-class ADR for weights and servers;
+      the judged-rows ADR; S-MODELS, S-ARENA. Asks: a city name for the service, or
+      none.
+- [ ] **M9c.1 What the machine is** — hardware facts with provenance; `unknown`
+      rather than a guess.
+      *Evidence owed: every parser over a recorded capture with its provenance.*
+- [ ] **M9c.2 The catalogue, and what fits** — the pure fit function; the formula
+      and its constants in the implementation doc.
+- [ ] **M9c.3 Downloads** — the Architect's act only; checksum before the final
+      name; the disk ceiling.
+      *Evidence owed: the API-surface test that no agent path pulls; the
+      adversarial pass.*
+- [ ] **M9c.4 Serving, and the verified capability** — `owned`, `declared`,
+      `attached`; the probed capability record; measured throughput in the bench
+      condition.
+      *Evidence owed: which kinds ran on which platform, and which are NOT
+      EXERCISED.*
+- [ ] **M9c.5 Compare** — the blind verdict as a judged row; the mapping in main
+      until the verdict.
+      *Evidence owed: S-ARENA; the scripted verdict refused by name.*
+- [ ] **M9c.6 The council** — the `consult` grant; the `council` switch measured.
+- [ ] **M9c.7 Exit review.**
+- [ ] **M9c exit** — the five criteria, each with tier A/B evidence.
+
+### M9d — The walls and the hands
+
+- [ ] **M9d.0 The contract** — the backends, armed-gate, MCP and delegation ADRs;
+      THREAT-MODEL §3/§5/§6.7 rewritten; the backend conformance table; S-TAINT,
+      S-MCP, S-DELEGATE; T-INJECT, T-FANOUT. Asks: NFR-17 against the MCP registry;
+      the company-wide backend floor.
+- [ ] **M9d.1 The backend seam, `local` and `docker`** — the loop never moves; a
+      declared isolation grade checked both ways.
+      *Evidence owed: the conformance table output per backend; the adversarial
+      pass.*
+- [ ] **M9d.2 `apptainer`, `ssh`, `modal`** — the same table; pinned host keys;
+      Modal's memo.
+- [ ] **M9d.3 Provenance arms the gate** — S-TAINT; T-INJECT with `armedGate` on
+      and off.
+      *Evidence owed: zero canary leaks armed; the count of gates opened; the
+      adversarial pass.*
+- [ ] **M9d.4 MCP** — the company-wide registry; the harness as the only client;
+      manifest drift refused; the outside-agent skill over `ephctl`.
+      *Evidence owed: S-MCP; the S-SECRETS extension.*
+- [ ] **M9d.5 Delegation** — ephemeral workers; teardown proven; T-FANOUT.
+- [ ] **M9d.6 Scripted tool calls** — the same gate path inside a script; the caps.
+- [ ] **M9d.7 Exit review.**
+- [ ] **M9d exit** — the five criteria, each with tier A/B evidence.
+
+### M9e — The open web and the research desk
+
+- [ ] **M9e.0 The contract** — the web-reach and inquiries ADRs; NFR-10 amended;
+      THREAT-MODEL §4; S-WEB, S-INQUIRY, S-DOCS, E-RESEARCH; T-RESEARCH. Asks: the
+      browser against the Electron pin; owned or attached search.
+- [ ] **M9e.1 Search and fetch** — the `web` grant; the address-refusal table; the
+      content-addressed archive.
+      *Evidence owed: S-WEB; the egress audit over a full scenario run.*
+- [ ] **M9e.2 The browser** — offscreen, per-hire profile; input on an unlisted
+      origin is a gate; inside its support window or NOT BUILT.
+- [ ] **M9e.3 Sight, images, voice** — `vision`, `image_generate`; `speak` and
+      spoken briefs — the Herald's output only (DD-M9-16); no input path of the
+      Herald gains a caller.
+      *Evidence owed: the reachability walk listing exactly what gained a caller.*
+- [ ] **M9e.4 Inquiries** — one report per question; uncited or unresolvable
+      findings rejected before a human; T-RESEARCH.
+- [ ] **M9e.5 Documents** — an AI edit is a patch; no agent write path; the
+      sandboxed HTML preview.
+- [ ] **M9e.6 Exit review.**
+- [ ] **M9e exit** — the five criteria, each with tier A/B evidence.
+
+### M9f — The harbor opens: every surface, one Artemis
+
+- [ ] **M9f.0 The contract** — the gateway, remote-authorisation and schedules
+      ADRs; FR-10.2 rewritten additively; the THREAT-MODEL section before the first
+      adapter; the platform conformance table; S-GATEWAY, S-REMOTE-APPROVE,
+      S-SCHEDULE. Asks: remote memo verdicts; a PIN; the platform order.
+- [ ] **M9f.1 The gateway, the terminal and Telegram** — `harbor/bridge.ts`;
+      pairing by a code issued at the machine — single-use, expiring,
+      attempt-limited, with a lockout; silence to the unpaired.
+- [ ] **M9f.2 More platforms** — Discord, Slack, Signal, WhatsApp; one adapter per
+      PR; an adapter not built is listed with its reason.
+- [ ] **M9f.3 Remote authorisation** — the same validated path a click takes;
+      nonce, digest, repeat-back; absent policy means off.
+      *Evidence owed: S-REMOTE-APPROVE; the adversarial pass recorded with what it
+      tried.*
+- [ ] **M9f.4 Schedules from language** — the confirmed plan armed verbatim; the
+      calendar-time trigger kind; fresh session per run; the pause; T-SCHEDULE.
+- [ ] **M9f.5 Push, reminders and the morning brief** — ntfy; redaction by server
+      kind.
+- [ ] **M9f.6 The workspace in a browser** — a third front door onto the same
+      handlers; loopback only; never without a session; a remote surface, not a
+      second window.
+      *Evidence owed: S-BROWSER-SURFACE; the machine-only acts refused by name
+      over this transport, both directions; the adversarial pass.*
+- [ ] **M9f.7 Exit review.**
+- [ ] **M9f exit** — the six criteria, each with tier A/B evidence. **Carries the
+      clause moved from M7b:** a truthful morning brief on the phone after an
+      unattended night.
+
 ## M7b — The recursive company + shipping (plan drafted 2026-08-29 at M6 close)
+
+> **Follows M9f (2026-10-03, DD-M9-18, amending DD-M9-10).** v1 is M9 through M9f;
+> M9g and M9h are registered below this milestone and built after it. M7b.4 is
+> absorbed by M9f.1–M9f.3 and is no longer a box of this milestone; the
+> morning-brief clause of M7b.6 and of the exit moves to M9f's exit. Everything else
+> below stands.
 
 Derived from IMPLEMENTATION M7's inward half + ADR-0018 + ADR-0019 + ADR-0020 +
 SRS FR-9.5/FR-10.2/FR-10.5 + UC-11/UC-16 + SDD §7.8 + TEST-STRATEGY §3
@@ -6964,7 +7135,10 @@ everything it composes must already work.
       watchlist→brief→proposal→PR→merge→measured is reconstructible from the
       ledger and log alone. Risk: "the Architect merges" must be true because
       no code CAN merge, not because no code currently does.*
-- [ ] **M7b.4 Chat bridge** — FR-10.2/UC-11: one Slack-compatible webhook/bot
+- **M7b.4 Chat bridge — MOVED to M9f.1–M9f.3 on 2026-10-03 (DD-M9-10); no longer
+      a box of this milestone, and not built here.** *Its original text is kept
+      for the record, and its tests and its risk note are inherited by M9f:*
+      FR-10.2/UC-11: one Slack-compatible webhook/bot
       through which the Architect converses with Artemis remotely, receives
       briefings, and approves gates; inbound webhooks may spawn ephemeral
       workers torn down after replying. Every remote directive is echoed in the
@@ -6988,17 +7162,66 @@ everything it composes must already work.
       test (SRS §6.10) landing one REAL chain** — a URL on the Stoa panel →
       watchlist entry → brief citing it → approved proposal descending from it
       → company-identity PR on an `agent/` branch citing both ids → Architect
-      merge; a real overnight run producing a truthful morning brief ON THE
-      PHONE; the Gymnasium and Stoa cadence triggers live under company-mode
+      merge; ~~a real overnight run producing a truthful morning brief ON THE
+      PHONE~~ *(moved to M9f's exit, 2026-10-03, DD-M9-10)*; the Gymnasium and
+      Stoa cadence triggers live under company-mode
       governance (ADR-0018 — autonomous only in `improving`); and the
       **two-week gymnasium acceptance test (SRS §6.7) BOOKED as the final v1
       acceptance gate**, its window recorded on the ledger the way the M6
       metric sweep was.
-- [ ] **M7b exit** — SRS §6.10's real chain landed; S-RECURSE pass; the
-      overnight remote brief demonstrated; cadences live under mode governance;
+- [ ] **M7b exit** — SRS §6.10's real chain landed; S-RECURSE pass; ~~the
+      overnight remote brief demonstrated~~ *(moved to M9f's exit, 2026-10-03)*;
+      cadences live under mode governance;
       SRS §6.7 booked with a date; signed builds on three OSes; PROGRESS + docs
       synced. **This is the v1 acceptance boundary** — after it the only gate
       left is §6.7's two-week run.
+
+## Phase 9, after v1 — M9g and M9h (planned 2026-10-03 with the rest of the phase; build NOT started)
+
+**These two follow M7b** (DD-M9-18): v1 is M9 through M9f, and no v1 requirement
+asks for mail, a calendar or a companion app. They sit below M7b on purpose — a
+session resuming at the first unchecked box reads this file top to bottom, and the
+order of the boxes is the order of the build. Packages, acceptance, tests and risk
+are in [`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md) §6. Every box is unticked on purpose.
+
+### M9g — The Architect's desk: mail, calendar, todos
+
+- [ ] **M9g.0 The contract** — the mail-and-calendar ADR; the THREAT-MODEL section
+      for mail; S-MAIL, S-CAL; E-TRIAGE. Asks: whether inbound mail may instruct;
+      the mail libraries.
+- [ ] **M9g.1 The mail connector** — IMAP/SMTP; mail is untrusted; no send tool —
+      the outbound gate sends.
+- [ ] **M9g.2 The inbox profile** — a triager that cannot draft, a drafter that
+      cannot send; E-TRIAGE, T-TRIAGE.
+- [ ] **M9g.3 Calendar and todos** — CalDAV; the recurrence table; todos as ledger
+      tasks.
+- [ ] **M9g.4 Exit review.**
+- [ ] **M9g exit** — the four criteria, each with tier A/B evidence.
+
+### M9h — The companion: Ephesus on the phone, as its own subsystem
+
+- [ ] **M9h.0 The design** — the companion ADR; the protocol in the SDD before any
+      code; the THREAT-MODEL section with its cases named; S-COMPANION; one
+      `/research` cycle. Asks: the client's form; reach away from home; the
+      device's own unlock on an approval; the push channel.
+      *Evidence owed: the adversarial review of the design AS A DOCUMENT, with
+      what it tried, before M9h.1 starts.*
+- [ ] **M9h.1 Device identity and pairing** — a key that never leaves the phone;
+      pairing only at the machine; a code with no long-lived secret; a device
+      list with no secret in it.
+      *Evidence owed: S-COMPANION pairing cases; the adversarial pass.*
+- [ ] **M9h.2 The channel** — device-authenticated, end to end at the application
+      layer; replay, tampering and downgrade each refused; no primitive written
+      by hand.
+      *Evidence owed: the wire capture carrying no plaintext; test vectors for
+      every primitive, with where they came from.*
+- [ ] **M9h.3 The companion itself** — an installable client of the same
+      handlers; nothing old shown as current; no secret, no mode, no registry.
+- [ ] **M9h.4 Push to the device** — encrypted to the device, or wake-and-fetch.
+- [ ] **M9h.5 Exit review** — and the phase's closing review.
+- [ ] **M9h exit** — the seven criteria of PHASE-9-PLAN §6, each with tier A/B
+      evidence; the last is the phase's closing review: every bench task with its
+      deterministic half in CI.
 
 ---
 

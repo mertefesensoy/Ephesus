@@ -563,32 +563,240 @@ runtime dependencies; no accepted ADR edited; docs synced. **The unattended hour
 of `EXIT-M8.md` is subsumed by T1 (DD-M9-7)**: the M7, M8b and M8c exit boxes stay
 open until T1's first live row exists, and they are the Architect's to tick on it.
 
+## Phase 9, continued: M9b–M9f — the agentic harness, to v1 (≈ 32–39 weeks at nominal package estimates) — *the capabilities*
+
+> **Planned and approved for planning 2026-10-03; the build has not started, and
+> neither has M9's.** The
+> Architect gave Ephesus the feature sets of the two harnesses on the Stoa
+> watchlist as its target and said: *"We will keep the initial Ephesus brand core
+> but the floor becomes an optional view mode and Ephesus upgrades itself towards a
+> real agentic harness."* **M9 above is unchanged and comes first** (DD-M9-8). What
+> follows it is seven lettered milestones, each with its own exit and its own bench
+> tasks: **five before M7b — this section — and two after it** (DD-M9-18, which
+> amended DD-M9-10 once the estimate was known). The full plan — the sixteen features mapped
+> to their subsystems, the rules every capability enters under, acceptance, tests
+> and risk per package, the decisions it rests on — is
+> [`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md); this section is the register's digest and
+> does not restate it.
+
+Three rules carry the whole phase (PHASE-9-PLAN §4). **The bench comes with the
+capability**: each one is a switch in the ablation protocol and lands with a task
+whose verifier no agent can reach, so a milestone exits on ledger rows. **Granted
+by name, gated by the Watch**: web reach, a backend, a skill, a connector and a
+schedule are declared in the hire template and shown before anything starts, and
+content from outside the company arms the gate. **A zero-dependency core and a memo
+for every addition** (DD-M9-9): M9 stays as approved; after it, `fetch`, `node:`
+builtins or an owned subprocess first, and a decision memo for anything else.
+
+Every milestone opens with a contract package (`.0`) that writes its ADRs, its SRS
+group, its SDD, THREAT-MODEL and TEST-STRATEGY sections and runs one governed
+`/research` cycle at a pin, as M9.0 does.
+
+**The estimate is the sum of the package estimates, not a rounded hope.** All seven
+milestones: about 48 weeks of packages, 51 with exit reviews, in series. That is
+roughly double what the Architect was quoted when the order was first decided, so
+the order was asked again on the full figure and **M7b moved to after M9f**
+(DD-M9-18). To v1 on that order: about 32 weeks on the main line — M9b, M9d, M9e,
+M9f — with M9c beside it, about 39 in series. After v1, M9g and M9h are about 12.
+PHASE-9-PLAN §8 says what cuts the other way.
+
+### M9b — The workspace: a harness you talk to (≈ 7 weeks)
+
+- **M9b.1 View modes** — ADR-0040: the window opens on a workspace; the Terraces
+  are a mode, not loaded unless chosen, not deleted; absent means `workspace` on
+  every install.
+- **M9b.2 The conversation** — a pure projection of the native engine's transcript;
+  input down the existing command path; gates approved inline through the one
+  handler; a wrapped hire shows its terminal.
+- **M9b.3 Sessions, and choosing a model** — a `companion` hire; models picked from
+  capability records; resume and search; Artemis stays the front door.
+- **M9b.4 Attachments** — validated in main; an image only to a model with vision.
+- **M9b.5 Skills** — `SKILL.md`; inspect and install by the Architect; granted by
+  name; an agent may only propose, through the Gymnasium.
+- **M9b.6 The Architect's profile, and notes** — a budgeted profile in the Library;
+  quick capture into the knowledge shelf.
+
+**Exit:** both a fresh and an upgraded home open on the workspace with the floor
+one switch away and its suites green; a native Artemis carries T1-shaped work from
+the conversation with a gate approved inline; the skills uplift measured (T-SKILL,
+N ≥ 3 per cell); an agent-proposed skill in the ledger that no path can install
+without a verdict.
+
+### M9c — The hearth: local models, first-class (≈ 7 weeks; may run beside M9b and M9d)
+
+- **M9c.1 What the machine is** — hardware facts with provenance, `unknown` rather
+  than a guess.
+- **M9c.2 The catalogue, and what fits** — a pure fit function with a named
+  limiting resource.
+- **M9c.3 Downloads** — the Architect's act, never an agent's; checksum before the
+  final name.
+- **M9c.4 Serving, and the verified capability** — `owned` (llama.cpp as an owned
+  subprocess), `declared` (the Architect's command line: vLLM, SGLang) and
+  `attached`; a capability record that is probed, not claimed.
+- **M9c.5 Compare** — the Architect's blind verdict as a judged row, the mapping
+  held in main until it is written; a script cannot give one.
+- **M9c.6 The council** — multi-model reasoning as a grant; measured against its
+  best member.
+
+**Exit:** on the Architect's machine, scan → fit → pull → serve → `verified` → a
+native hire runs T1 with the server in the row's condition; no agent path pulls or
+serves; one blind comparison recorded; the council measured, whatever the number.
+
+### M9d — The walls and the hands (≈ 8–9 weeks)
+
+- **M9d.1 The backend seam, `local` and `docker`** — the loop never moves; the
+  tools may (DD-M9-14); a declared isolation grade checked in both directions.
+- **M9d.2 `apptainer`, `ssh`, `modal`** — the same conformance table; pinned host
+  keys; a cloud sandbox named at consent.
+- **M9d.3 Provenance arms the gate** — once outside content is in context, a hire
+  may read more and may not write to the world without a human (DD-M9-12).
+- **M9d.4 MCP** — one company-wide registry (DD-M9-13); the harness is the only
+  client, so a server holds its credentials and no agent does; manifest drift
+  refuses.
+- **M9d.5 Delegation** — ephemeral workers with a subset of the parent's grants,
+  torn down on return.
+- **M9d.6 Scripted tool calls** — a program in the backend calling the hire's own
+  tools through the same gate path.
+
+**Exit:** the backend table green for `local` and `docker`, every other backend
+recorded with its platform or as not exercised; T-INJECT with zero canary leaks
+with the gate armed and the unarmed cell recorded; MCP end to end with no secret
+in an agent's reach; T-FANOUT with and without delegation.
+
+### M9e — The open web and the research desk (≈ 7–8 weeks)
+
+- **M9e.1 Search and fetch** — the `web` grant; a configured search backend;
+  private and loopback addresses refused at every redirect; an archive that keeps
+  citations resolvable.
+- **M9e.2 The browser** — Electron's own Chromium, offscreen, per-hire profile;
+  input on an unlisted origin is a gate; ships only inside its support window
+  (the Electron pin).
+- **M9e.3 Sight, images, voice** — `vision`, `image_generate`, and `speak`: the
+  Herald's **output** gets a caller and nothing else of M6.9 does (DD-M9-16).
+- **M9e.4 Inquiries** — the Stoa studies questions as well as repositories; a
+  report with an uncited finding is rejected before a human sees it.
+- **M9e.5 Documents** — an AI edit is a patch the Architect accepts; no agent path
+  writes the file.
+
+**Exit:** T-RESEARCH on a fixture web with every citation resolving and the
+planted instruction reported; one live inquiry recorded with its condition; the
+address-refusal table green; with no hire holding `web`, egress is unchanged.
+
+### M9f — The harbor opens: every surface, one Artemis (≈ 9 weeks)
+
+Absorbs M7b.4.
+
+- **M9f.1 The gateway, the terminal and Telegram** — one conversation behind every
+  surface; identity paired by a code issued at the machine — single-use, expiring,
+  attempt-limited, with a lockout; an unpaired sender receives nothing.
+- **M9f.2 More platforms** — Discord, Slack, Signal, WhatsApp; one adapter per PR
+  behind one conformance table.
+- **M9f.3 Remote authorisation** — a paired human on an authenticated surface may
+  approve, with repeat-back for what cannot be undone; absent policy means off; a
+  script still approves nothing.
+- **M9f.4 Schedules from language** — a plan the Architect confirms; armed
+  verbatim; fresh session per run; pauses itself on repeated failure.
+- **M9f.5 Push, reminders and the morning brief** — ntfy first; what a push carries
+  depends on where it goes.
+- **M9f.6 The workspace in a browser** — a third front door onto the same handlers,
+  bound to loopback only, never without a session; reached from a phone through a
+  tunnel the Architect runs; a remote surface, not a second window.
+
+**Exit:** a real chat identity paired and an unpaired one met with silence; a
+destructive gate approved from chat only with repeat-back, through the one
+validated path; a schedule made in language that survives a restart and runs
+headless; **a truthful morning brief on the phone after an unattended night**
+(moved here from M7b); the workspace open in a phone's browser, with nothing
+answering outside a session.
+
 ## M7b — The recursive company + shipping (≈ 2 weeks) — *differentiator*
 
 > **Follows M9 (2026-10-02, DD-M9-1).** Content unchanged; M7b.2's proposals about the
 > harness now cite bench rows as evidence and bench deltas as metrics (M9-PLAN §9).
+>
+> **Follows M9f (2026-10-03, DD-M9-18, amending DD-M9-10).** v1 is M9 through M9f;
+> M9g and M9h are built after this milestone. The chat bridge is absorbed by
+> M9f.1–M9f.3 and is not built here, and the exit clause about a morning brief on
+> the phone moves to M9f's exit with it. Everything else in this section stands,
+> and this is still the v1 acceptance boundary.
 
 **Recursive Improvement** built-in profile (FR-9.5, ADR-0019 — needs M5b's Stoa
 and modes): researcher + improver roles, mode-gated activation, delivery as PRs
 under the company identity (FR-10.5, ADR-0020 — machine account, broker-held
-token, the attribution carve-out in `check-attribution.cjs` lands here). Chat
-bridge (remote conversation, briefs, approvals; `remote` tagging). Packaging:
-signed builds for macOS/Windows/Linux, one-click update check.
+token, the attribution carve-out in `check-attribution.cjs` lands here). ~~Chat
+bridge (remote conversation, briefs, approvals; `remote` tagging).~~ *(moved to
+M9f, 2026-10-03)* Packaging: signed builds for macOS/Windows/Linux, one-click
+update check.
 
 **Exit:** S-RECURSE passes; the recursive test (SRS §6.10) lands one real chain —
 URL on the Stoa panel → brief → approved proposal → company-identity PR →
-Architect merge; a real overnight run produces a truthful morning brief on the
-phone. The Gymnasium and Stoa cadence triggers are live under company-mode
+Architect merge; ~~a real overnight run produces a truthful morning brief on the
+phone~~ *(moved to M9f's exit, 2026-10-03)*. The Gymnasium and Stoa cadence triggers are live under company-mode
 governance (ADR-0018 — they fire autonomously only in `improving`, which the
 proof gate §6.9 must first unlock), and the two-week gymnasium acceptance test
 (SRS §6.7) is booked as the final v1 acceptance gate. **This is the v1
 acceptance boundary.**
+
+## Phase 9, after v1: M9g and M9h (≈ 12 weeks at nominal package estimates) — *planned, post-v1*
+
+> **Planned 2026-10-03 with the rest of the phase; built after M7b** (DD-M9-18).
+> No v1 requirement asks for mail, a calendar or a companion app, and nothing in
+> M7b waits on them. With M7b.2 landed first, the company's own Recursive
+> Improvement profile can take part in building them. Packages, acceptance, tests
+> and risk are in [`PHASE-9-PLAN.md`](./PHASE-9-PLAN.md) §6.
+
+### M9g — The Architect's desk: mail, calendar, todos (≈ 4–5 weeks)
+
+- **M9g.1 The mail connector** — IMAP and SMTP; mail is untrusted input; no send
+  tool exists, because sending is what an approved outbound gate does (ADR-0030).
+- **M9g.2 The inbox profile** — a triager that cannot draft and a drafter that
+  cannot send.
+- **M9g.3 Calendar and todos** — CalDAV; an event is written only by an approved
+  gate; todos are ledger tasks assigned to `human`.
+
+**Exit:** triage on a real mailbox with nothing sent un-gated; the calendar in the
+brief and an event written only through a gate; a planted instruction in a mail
+reported and not obeyed; T-TRIAGE rows recorded.
+
+### M9h — The companion: Ephesus on the phone, as its own subsystem (≈ 7 weeks)
+
+DD-M9-15: *no shortcuts — a proper mobile system.* M9f already serves the phone
+the way Hermes Agent does, through paired chat accounts and the workspace in a
+browser. This milestone builds what neither source has.
+
+- **M9h.0 The design** — the protocol written down before it is written in code,
+  and reviewed adversarially as a document: pairing, handshake, replay protection,
+  rotation, revocation; the threat cases named by hand.
+- **M9h.1 Device identity and pairing** — a key that never leaves the phone;
+  pairing only at the machine, by a code that carries no long-lived secret; a
+  device list with no secret in it; one act ends a pairing.
+- **M9h.2 The channel** — authenticated by the device key and protected end to end
+  at the application layer, so whatever carries it sees ciphertext; a replay, a
+  tampered message and a downgrade are each refused.
+- **M9h.3 The companion itself** — an installable client of the same handlers the
+  window uses; nothing old shown as current; no secret, no mode, no registry.
+- **M9h.4 Push to the device** — the push service learns that something happened
+  and nothing about what.
+
+**Exit:** a real phone paired at the machine, and an unpaired or ended one
+receiving nothing; a destructive gate approved from the companion with repeat-back
+through the one validated path; on a captured session nothing readable, a replay
+and a tampered message refused; a lost-phone drill written down; **and the
+phase's closing review** — every bench task with its deterministic half in CI.
 
 ## Post-v1 horizon (recorded, not planned)
 
 Department-head middle tier (ADR-0005 consequence) · local voice adapters · SDK-based
 headless workers (ADR-0009) · read-only attach viewer (ADR-0014) · Telegram + more
 bridges · multi-machine crews.
+
+*Amended 2026-10-03 (PHASE-9-PLAN §9):* **Telegram + more bridges** is no longer
+horizon — it is M9f. **Local voice adapters** move into M9e.3, for speech output
+only (DD-M9-16). **Multi-machine
+crews** stays here: DD-M9-14 chose *loop local, tools remote*, so a hire's tools
+may run on another machine and its loop may not. **SDK-based headless workers**
+remains what ADR-0036 made it — a possible provider behind the native engine's
+seam, not a kind of its own.
 
 ---
 
@@ -617,18 +825,47 @@ bridges · multi-machine crews.
 | R19 | Local-model quality makes T1 unreachable at any harness setting, read as "the harness failed" | Medium | Medium | the exit asks for a measured uplift, not a positive one; the row names the model and its tool-use declaration; `claude` native is the second cell so a model limit and a harness limit can be told apart |
 | R20 | Owning tool execution moves THREAT-MODEL §6.7 one layer closer with no OS sandbox | Medium | High | containment at every path (`tool-grants.ts` rule), the gate as the shell's permission prompt, worktree isolation (M8.6); §6.7 amended to say what is bounded; a sandbox is a later ADR |
 | R21 | A provider key is a kind of money the consent screen does not yet name | Low | Medium | ADR-0032's consent names provider spend per hire before start; the key is broker-held and never read back |
+| R22 | Five milestones stand between M9 and v1, and two more follow it — R8 at ten times the scale | High | High | each milestone is useful alone and exits on its own bar; the Architect already moved M7b forward once (DD-M9-18) and may take it at any earlier boundary; a bench row that shows no uplift is a reason to stop (PHASE-9-PLAN §12) |
+| R23 | Injection at open-web and mail scale (R12 widened from one watched repository to everything an agent can now read) | High | High | the armed gate (M9d.3) lands before the first stranger's content; contained backends; researcher and triager roles that hold no powers; T-INJECT in CI; THREAT-MODEL §6.1 still says *mitigated, not solved* |
+| R24 | Approval fatigue: armed gates and a phone that can approve turn the Architect's verdict into a reflex (R15's shape) | Medium | High | the bench counts gates opened per task as a cost; taint-tolerant grants are explicit; repeat-back for what cannot be undone; `remoteApproval` absent means off |
+| R25 | Dependency creep under sixteen features' pressure | High | Medium | DD-M9-9: `fetch`, `node:` builtins or an owned subprocess first; PHASE-9-PLAN §10 lists every expected memo; `NOT BUILT`, with the reason, is an accepted package outcome |
+| R26 | Seven platform APIs, each drifting (R1 for the gateway) | High | Medium | adapters behind one conformance table; recorded captures; the live suite only for adapters the Architect has paired |
+| R27 | Supply chain: model weights, container images, MCP servers, skills | Medium | High | hashes and digests pinned; installed only by the Architect's act; manifest drift refuses; each registry is one review point |
+| R28 | An ageing Chromium reads the open web (Electron is pinned at 37) | Medium | High | the browser ships only inside the support window its ADR names, or in a container backend, or is recorded `NOT BUILT` |
+| R29 | Remote authorisation weakens the clause SRS §6.1 protects | Medium | High | a paired identity on an authenticated adapter, a nonce, a digest of the held action, repeat-back, first verdict wins, default off, the same validated path a click takes, an adversarial pass |
+| R30 | The product dissolves into a generic assistant — M9-PLAN's C1 from the other side | Medium | High | every capability enters through a city subsystem and carries its gate, its record and its bench row; what Ephesus offers is governance and measurement, not the feature list |
+| R31 | A local model cannot carry the feature (R19 widened) | Medium | Medium | every bench row names its model and its verified capabilities; `claude` native as the second cell tells a model limit from a harness limit |
+| R32 | The company-wide MCP registry puts one compromised server in reach of every hire (DD-M9-13) | Medium | High | the harness is the only MCP client and the server holds its own credentials; manifest snapshot and drift refusal; side-effect tools pass gate policy; results arm the gate; NFR-17's researcher rule stands unless amended |
+| R33 | Cost multipliers stack — council, fan-out, schedules, research | Medium | Medium | an estimate shown before each; the ceilings; the morning brief reports spend per schedule and per capability |
+| R34 | The phone and the browser are new ways into the machine (DD-M9-15): a listener ADR-0033 declined, and a security protocol of the project's own | Medium | High | loopback only and never without a session (M9f.6); pairing only at the machine; a device key that never leaves the phone; a channel unreadable and unreplayable by its carrier; machine-only acts refused by name on every remote surface; the design reviewed adversarially as a document before any code (M9h.0); no primitive implemented by hand |
+| R35 | The estimate: about 44–51 weeks of packages at their nominal sizes, against the "about six months" quoted when the order was decided (DD-M9-10) | High | Medium | the order was asked again on the full figure and M7b moved to after M9f (DD-M9-18), about 32 weeks on the main line; every milestone exits on its own bar; the pace is re-read from the record at each exit review instead of assumed |
 
 ## Dependency order (what blocks what)
 
 ```
-M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M8b ─► M8c ─► M9 ─► M7b
-            │          │      ▲ └► M5b ──┘                                  ▲
-            │          └──────┘     └────────────────────────────────┘
+M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5 ─► M6 ─► M7 ─► M8 ─► M8b ─► M8c ─► M9 ─► [M9b…M9f] ─► M7b ─► [M9g, M9h]
+            │          │      ▲ └► M5b ──┘                                               ▲
+            │          └──────┘     └─────────────────────────────────────────────┘
             │                       (Stoa + modes need only Gymnasium v1; M7b's
             │                        cadences and its Recursive Improvement
             │                        profile run under M5b's modes)
             └── fake-engine rig ─────────┘          (everything tests against it)
+
+Inside Phase 9 (PHASE-9-PLAN §8):
+
+M9 ─► M9b workspace ─► M9d walls & hands ─► M9e web & research ─► M9f harbor opens ─► M7b (v1) ─► M9g desk ─► M9h companion
+ │
+ └──► M9c hearth   (needs only M9; may run beside M9b and M9d)
 ```
+
+**Why M7b sits after M9f** (DD-M9-18). M9f carries the two things v1 already
+requires of a remote surface — the chat bridge (FR-10.2) and the morning brief on
+the phone — so it is the earliest boundary at which M7b's own exit can be met.
+
+**Why the walls come before the web.** M9e, M9f and M9g each feed agents content
+written by strangers — pages, chat messages, mail. M9d's armed gate and contained
+backends are what stand between that content and a credential, so they land first.
+It is the M8 insertion argument again: the order is the point.
 
 The only cross-cutting asset built early and maintained forever is the fake-engine
 rig — it is the test double for every milestone and the reason the differentiators
